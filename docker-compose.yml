@@ -1,0 +1,18 @@
+services:
+  vorratsdatenspeicher:
+    build: .
+    image: vorratsdatenspeicher:latest
+    container_name: vorratsdatenspeicher
+    restart: unless-stopped
+    ports:
+      - "8766:80"
+    environment:
+      # postgres://USER:PASSWORD@HOST:PORT/DATABASE
+      DATABASE_URL: ${DATABASE_URL}
+      # 32+ random bytes, e.g.: openssl rand -hex 32
+      JWT_SECRET: ${JWT_SECRET}
+      # shared secret for n8n -> /api/internal/* calls
+      INTERNAL_SECRET: ${INTERNAL_SECRET}
+      PORT: 80
+    volumes:
+      - /mnt/user/Aufnahmen/receipts:/app/public/receipts:ro

@@ -1,0 +1,151 @@
+{
+  "nav": {
+    "receipts": "Receipts",
+    "stats": "Statistics",
+    "shopping": "List",
+    "pantry": "Pantry",
+    "names": "Names",
+    "queue": "Review",
+    "admin": "Admin",
+    "profile": "Profile",
+    "more": "More",
+    "logout": "Log out"
+  },
+  "login": {
+    "title": "Vorratsdatenspeicher",
+    "username": "Username",
+    "password": "Password",
+    "submit": "Sign in",
+    "error": "Login failed"
+  },
+  "receipts": {
+    "search": "Search (store, item…)",
+    "items": "items",
+    "noImage": "No photo",
+    "empty": "No receipts found",
+    "loadMore": "Load more"
+  },
+  "article": {
+    "edit": "Edit item",
+    "originalText": "Original (receipt)",
+    "canonical": "Canonical name",
+    "category": "Category",
+    "amount": "Amount",
+    "unit": "Unit",
+    "price": "Price",
+    "consumers": "Who consumes this?",
+    "exclusive": "Exclusive",
+    "applyTo": "Apply change to",
+    "applyOne": "Only this item",
+    "applyAll": "All with this name",
+    "delete": "Delete",
+    "deleteConfirm": "Really delete this item?",
+    "save": "Save",
+    "cancel": "Cancel"
+  },
+  "stats": {
+    "title": "Statistics",
+    "total": "Total",
+    "spent": "Spent",
+    "goal": "Goal",
+    "projection": "Projection",
+    "avg3": "3-mo avg",
+    "overGoal": "over goal",
+    "onTrack": "on track",
+    "all": "All",
+    "day": "day",
+    "history": "History",
+    "items": "Items",
+    "noData": "No data for this month",
+    "setGoal": "Set goal",
+    "removeGoal": "Remove goal"
+  },
+  "pantry": {
+    "title": "Pantry",
+    "alerts": "Running low",
+    "daysLeft": "days left",
+    "remaining": "Remaining",
+    "lastBought": "Last bought",
+    "empty": "No pantry data"
+  },
+  "shopping": {
+    "title": "Shopping list",
+    "done": "Done",
+    "snooze": "Later",
+    "exclude": "Never",
+    "empty": "List is empty 🎉"
+  },
+  "names": {
+    "title": "Canonical names",
+    "search": "Search names…",
+    "count": "Purchases",
+    "rename": "Rename",
+    "translation": "English name",
+    "receipts": "Show receipts",
+    "lastBought": "Last"
+  },
+  "queue": {
+    "title": "Verification queue",
+    "approve": "Approve",
+    "reject": "Reject",
+    "remove": "Remove",
+    "confidence": "Confidence",
+    "proposed": "Proposal",
+    "ocr": "OCR text",
+    "empty": "Nothing to review 🎉",
+    "editHint": "Adjust name and approve"
+  },
+  "bell": {
+    "title": "Notifications",
+    "empty": "No notifications",
+    "markAll": "Mark all read",
+    "churnerApplied": "Churner: \"{{old}}\" → \"{{new}}\"",
+    "churnerQueued": "Churner proposal: \"{{name}}\" for review",
+    "churnerSummary": "Churner run: {{applied}} changed, {{queued}} queued",
+    "recategorized": "Categorization done: {{updated}} items"
+  },
+  "admin": {
+    "title": "Admin",
+    "users": "Users",
+    "addUser": "Add user",
+    "isAdmin": "Admin",
+    "resetPw": "New password",
+    "family": "Family members",
+    "addMember": "Add member",
+    "churner": "Churner & AI",
+    "churnerEnabled": "Nightly churner enabled",
+    "ollamaUrl": "Ollama URL",
+    "ollamaModel": "Model",
+    "cron": "Schedule (cron)",
+    "confidence": "Confidence threshold",
+    "searxngUrl": "SearXNG URL",
+    "churnNow": "Run now",
+    "recategorize": "Recategorize all items",
+    "recategorizeMissing": "Categorize missing only",
+    "running": "Running…",
+    "categories": "Categories",
+    "maintenance": "Maintenance log",
+    "defaultLang": "Default language",
+    "healthy": "reachable",
+    "unhealthy": "unreachable"
+  },
+  "profile": {
+    "title": "Profile",
+    "darkMode": "Dark mode",
+    "language": "Language",
+    "changePw": "Change password",
+    "oldPw": "Old password",
+    "newPw": "New password",
+    "saved": "Saved"
+  },
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "add": "Add",
+    "loading": "Loading…",
+    "error": "Error",
+    "confirm": "Are you sure?"
+  }
+}

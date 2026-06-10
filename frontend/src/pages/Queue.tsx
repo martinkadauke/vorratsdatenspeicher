@@ -1,0 +1,77 @@
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
+import { api } from '../api/client';
+import type { QueueItem } from '../api/types';
+import { Card, Spinner, EmptyState, Button, Input, Badge } from '../components/ui';
+
+export function Queue() {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const [edits, setEdits] = useState<Record<number, string>>({});
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['queue'],
+    queryFn: () => api<QueueItem[]>('/api/queue'),
+  });
+
+  const decide = useMutation({
+    mutationFn: ({ id, action, final }: { id: number; action: string; final?: string }) =>
+      api('/api/queue/decide', { method: 'POST', body: { id, action, final_canonical: final } }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['queue'] });
+      void qc.invalidateQueries({ queryKey: ['names'] });
+    },
+  });
+
+  if (isLoading) return <Spinner />;
+
+  return (
+    <div className="flex flex-col gap-3">
+      <h1 className="text-lg font-bold">{t('queue.title')}</h1>
+      {!data?.length && <EmptyState>{t('queue.empty')}</EmptyState>}
+      <div className="flex flex-col gap-2">
+        {data?.map(q => {
+          const value = edits[q.id] ?? q.proposed_canonical ?? '';
+          return (
+            <Card key={q.id} className="flex flex-col gap-2 p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs text-zinc-400">{t('queue.ocr')}</div>
+                  <div className="break-all font-mono text-xs text-zinc-600 dark:text-zinc-300">
+                    {q.raw_patterns ?? q.ai_examples ?? '–'}
+                  </div>
+                </div>
+                {q.confidence && (
+                  <Badge>{t('queue.confidence')}: {q.confidence}</Badge>
+                )}
+              </div>
+              <div>
+                <div className="mb-1 text-xs text-zinc-400">{t('queue.proposed')} — {t('queue.editHint')}</div>
+                <Input
+                  value={value}
+                  onChange={e => setEdits(prev => ({ ...prev, [q.id]: e.target.value }))}
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  className="flex-1"
+                  disabled={!value}
+                  onClick={() => decide.mutate({ id: q.id, action: 'approve', final: value })}
+                >
+                  {t('queue.approve')}
+                </Button>
+                <Button variant="secondary" onClick={() => decide.mutate({ id: q.id, action: 'reject' })}>
+                  {t('queue.reject')}
+                </Button>
+                <Button variant="ghost" onClick={() => decide.mutate({ id: q.id, action: 'remove' })}>
+                  {t('queue.remove')}
+                </Button>
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

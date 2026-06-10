@@ -1,0 +1,151 @@
+{
+  "nav": {
+    "receipts": "Belege",
+    "stats": "Statistik",
+    "shopping": "Liste",
+    "pantry": "Vorrat",
+    "names": "Namen",
+    "queue": "Prüfung",
+    "admin": "Admin",
+    "profile": "Profil",
+    "more": "Mehr",
+    "logout": "Abmelden"
+  },
+  "login": {
+    "title": "Vorratsdatenspeicher",
+    "username": "Benutzername",
+    "password": "Passwort",
+    "submit": "Anmelden",
+    "error": "Anmeldung fehlgeschlagen"
+  },
+  "receipts": {
+    "search": "Suchen (Laden, Artikel…)",
+    "items": "Artikel",
+    "noImage": "Kein Foto",
+    "empty": "Keine Belege gefunden",
+    "loadMore": "Mehr laden"
+  },
+  "article": {
+    "edit": "Artikel bearbeiten",
+    "originalText": "Original (Kassenbon)",
+    "canonical": "Kanonischer Name",
+    "category": "Kategorie",
+    "amount": "Menge",
+    "unit": "Einheit",
+    "price": "Preis",
+    "consumers": "Wer isst/braucht das?",
+    "exclusive": "Exklusiv",
+    "applyTo": "Änderung anwenden auf",
+    "applyOne": "Nur diesen Artikel",
+    "applyAll": "Alle mit diesem Namen",
+    "delete": "Löschen",
+    "deleteConfirm": "Diesen Artikel wirklich löschen?",
+    "save": "Speichern",
+    "cancel": "Abbrechen"
+  },
+  "stats": {
+    "title": "Statistik",
+    "total": "Gesamt",
+    "spent": "Ausgegeben",
+    "goal": "Ziel",
+    "projection": "Prognose",
+    "avg3": "Ø 3 Monate",
+    "overGoal": "über Ziel",
+    "onTrack": "im Rahmen",
+    "all": "Alle",
+    "day": "Tag",
+    "history": "Verlauf",
+    "items": "Artikel",
+    "noData": "Keine Daten für diesen Monat",
+    "setGoal": "Ziel setzen",
+    "removeGoal": "Ziel entfernen"
+  },
+  "pantry": {
+    "title": "Vorrat",
+    "alerts": "Bald leer",
+    "daysLeft": "Tage übrig",
+    "remaining": "Restmenge",
+    "lastBought": "Zuletzt gekauft",
+    "empty": "Keine Vorratsdaten"
+  },
+  "shopping": {
+    "title": "Einkaufsliste",
+    "done": "Erledigt",
+    "snooze": "Später",
+    "exclude": "Nie wieder",
+    "empty": "Liste ist leer 🎉"
+  },
+  "names": {
+    "title": "Kanonische Namen",
+    "search": "Namen suchen…",
+    "count": "Käufe",
+    "rename": "Umbenennen",
+    "translation": "Englischer Name",
+    "receipts": "Belege anzeigen",
+    "lastBought": "Zuletzt"
+  },
+  "queue": {
+    "title": "Verifikations-Queue",
+    "approve": "Übernehmen",
+    "reject": "Ablehnen",
+    "remove": "Entfernen",
+    "confidence": "Konfidenz",
+    "proposed": "Vorschlag",
+    "ocr": "OCR-Text",
+    "empty": "Nichts zu prüfen 🎉",
+    "editHint": "Name anpassen und übernehmen"
+  },
+  "bell": {
+    "title": "Benachrichtigungen",
+    "empty": "Keine Benachrichtigungen",
+    "markAll": "Alle gelesen",
+    "churnerApplied": "Churner: „{{old}}“ → „{{new}}“",
+    "churnerQueued": "Churner-Vorschlag: „{{name}}“ zur Prüfung",
+    "churnerSummary": "Churner-Lauf: {{applied}} geändert, {{queued}} zur Prüfung",
+    "recategorized": "Kategorisierung fertig: {{updated}} Artikel"
+  },
+  "admin": {
+    "title": "Admin",
+    "users": "Benutzer",
+    "addUser": "Benutzer anlegen",
+    "isAdmin": "Admin",
+    "resetPw": "Neues Passwort",
+    "family": "Familienmitglieder",
+    "addMember": "Mitglied hinzufügen",
+    "churner": "Churner & KI",
+    "churnerEnabled": "Nächtlicher Churner aktiv",
+    "ollamaUrl": "Ollama URL",
+    "ollamaModel": "Modell",
+    "cron": "Zeitplan (Cron)",
+    "confidence": "Konfidenz-Schwelle",
+    "searxngUrl": "SearXNG URL",
+    "churnNow": "Jetzt ausführen",
+    "recategorize": "Alle Artikel neu kategorisieren",
+    "recategorizeMissing": "Nur fehlende kategorisieren",
+    "running": "Läuft…",
+    "categories": "Kategorien",
+    "maintenance": "Wartungs-Log",
+    "defaultLang": "Standard-Sprache",
+    "healthy": "erreichbar",
+    "unhealthy": "nicht erreichbar"
+  },
+  "profile": {
+    "title": "Profil",
+    "darkMode": "Dunkles Design",
+    "language": "Sprache",
+    "changePw": "Passwort ändern",
+    "oldPw": "Altes Passwort",
+    "newPw": "Neues Passwort",
+    "saved": "Gespeichert"
+  },
+  "common": {
+    "save": "Speichern",
+    "cancel": "Abbrechen",
+    "delete": "Löschen",
+    "edit": "Bearbeiten",
+    "add": "Hinzufügen",
+    "loading": "Laden…",
+    "error": "Fehler",
+    "confirm": "Wirklich?"
+  }
+}
