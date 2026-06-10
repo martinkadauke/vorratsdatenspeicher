@@ -36,11 +36,33 @@ export async function migrate(): Promise<void> {
   }
 }
 
-/** Seed the initial admin user if the users table is empty. */
+/** Seed/repair the admin user.
+ *  - Creates "martin" if no admin user exists yet.
+ *  - ADMIN_RESET=true forces a password reset for "martin" (recovery switch).
+ *  - ADMIN_PASSWORD overrides the default initial password. */
 export async function ensureAdmin(): Promise<void> {
-  const [{ count }] = await sql`SELECT COUNT(*)::int AS count FROM users`;
-  if (count > 0) return;
   const password = process.env.ADMIN_PASSWORD ?? 'vorrat-start-2026';
+  const force = process.env.ADMIN_RESET === 'true';
+
+  const martin = await sql`SELECT id, is_admin FROM users WHERE username = 'martin'`;
+
+  if (martin.length) {
+    if (force) {
+      const hash = await bcrypt.hash(password, 12);
+      await sql`UPDATE users SET password_hash = ${hash}, is_admin = TRUE WHERE username = 'martin'`;
+      console.log('[seed] ADMIN_RESET: password for "martin" has been reset');
+    } else {
+      console.log('[seed] admin user "martin" exists');
+    }
+    return;
+  }
+
+  const [{ count }] = await sql`SELECT COUNT(*)::int AS count FROM users WHERE is_admin = TRUE`;
+  if (count > 0 && !force) {
+    console.log(`[seed] ${count} admin user(s) exist, not seeding "martin"`);
+    return;
+  }
+
   const hash = await bcrypt.hash(password, 12);
   await sql`INSERT INTO users (username, password_hash, is_admin) VALUES ('martin', ${hash}, TRUE)`;
   console.log('[seed] created admin user "martin"');
