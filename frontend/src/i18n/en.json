@@ -15,8 +15,24 @@
     "title": "Vorratsdatenspeicher",
     "username": "Username",
     "password": "Password",
+    "email": "Email",
     "submit": "Sign in",
-    "error": "Login failed"
+    "error": "Login failed",
+    "forgot": "Forgot password?",
+    "sendReset": "Request link",
+    "forgotSent": "If that email address exists, a reset link has been sent.",
+    "backToLogin": "Back to login"
+  },
+  "reset": {
+    "title": "Reset password",
+    "welcomeTitle": "Welcome!",
+    "welcomeText": "Hi {{name}}, set your password to get started.",
+    "newPassword": "New password",
+    "confirm": "Repeat password",
+    "submit": "Set password",
+    "mismatch": "Passwords don't match",
+    "tooShort": "At least 8 characters",
+    "invalid": "This link is invalid or expired. Please request a new one."
   },
   "receipts": {
     "search": "Search (store, item…)",
@@ -108,6 +124,11 @@
     "title": "Admin",
     "users": "Users",
     "addUser": "Add user",
+    "invite": "Invite",
+    "sendReset": "Send reset link",
+    "linkNotEmailed": "Email could not be sent — share this link manually:",
+    "testTo": "Test email to",
+    "sendTest": "Send test",
     "isAdmin": "Admin",
     "resetPw": "New password",
     "family": "Family members",

@@ -15,8 +15,24 @@
     "title": "Vorratsdatenspeicher",
     "username": "Benutzername",
     "password": "Passwort",
+    "email": "E-Mail",
     "submit": "Anmelden",
-    "error": "Anmeldung fehlgeschlagen"
+    "error": "Anmeldung fehlgeschlagen",
+    "forgot": "Passwort vergessen?",
+    "sendReset": "Link anfordern",
+    "forgotSent": "Wenn die E-Mail-Adresse existiert, wurde ein Link zum Zurücksetzen gesendet.",
+    "backToLogin": "Zurück zur Anmeldung"
+  },
+  "reset": {
+    "title": "Passwort zurücksetzen",
+    "welcomeTitle": "Willkommen!",
+    "welcomeText": "Hallo {{name}}, setze dein Passwort um loszulegen.",
+    "newPassword": "Neues Passwort",
+    "confirm": "Passwort wiederholen",
+    "submit": "Passwort setzen",
+    "mismatch": "Passwörter stimmen nicht überein",
+    "tooShort": "Mindestens 8 Zeichen",
+    "invalid": "Dieser Link ist ungültig oder abgelaufen. Bitte einen neuen anfordern."
   },
   "receipts": {
     "search": "Suchen (Laden, Artikel…)",
@@ -108,6 +124,11 @@
     "title": "Admin",
     "users": "Benutzer",
     "addUser": "Benutzer anlegen",
+    "invite": "Einladen",
+    "sendReset": "Reset-Link senden",
+    "linkNotEmailed": "E-Mail konnte nicht gesendet werden — Link manuell teilen:",
+    "testTo": "Test-E-Mail an",
+    "sendTest": "Test senden",
     "isAdmin": "Admin",
     "resetPw": "Neues Passwort",
     "family": "Familienmitglieder",

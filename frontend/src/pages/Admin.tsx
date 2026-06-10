@@ -23,6 +23,7 @@ export function Admin() {
       <h1 className="text-lg font-bold">{t('admin.title')}</h1>
       <ChurnerSection />
       <UsersSection />
+      <SmtpSection />
       <FamilySection />
       <MaintenanceSection />
     </div>
@@ -182,11 +183,12 @@ function ChurnerSection() {
   );
 }
 
-// ── Users ────────────────────────────────────────────────────────────────
+// ── Users (invite-only) ──────────────────────────────────────────────────
 function UsersSection() {
   const { t } = useTranslation();
   const qc = useQueryClient();
-  const [newUser, setNewUser] = useState({ username: '', password: '', is_admin: false });
+  const [invite, setInvite] = useState({ email: '', username: '', is_admin: false });
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
 
   const { data: users } = useQuery({
     queryKey: ['users'],
@@ -194,14 +196,22 @@ function UsersSection() {
   });
 
   const invalidate = () => void qc.invalidateQueries({ queryKey: ['users'] });
-  const create = useMutation({
-    mutationFn: () => api('/api/users', { method: 'POST', body: newUser }),
-    onSuccess: () => { invalidate(); setNewUser({ username: '', password: '', is_admin: false }); },
+  const sendInvite = useMutation({
+    mutationFn: () => api<{ emailed: boolean; invite_link: string }>('/api/users/invite', { method: 'POST', body: invite }),
+    onSuccess: (res) => {
+      invalidate();
+      setInvite({ email: '', username: '', is_admin: false });
+      setInviteLink(res.emailed ? null : res.invite_link);
+    },
   });
   const patch = useMutation({
     mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) =>
       api(`/api/users/${id}`, { method: 'PATCH', body }),
     onSuccess: invalidate,
+  });
+  const sendReset = useMutation({
+    mutationFn: (id: number) => api<{ emailed: boolean; reset_link: string }>(`/api/users/${id}/send-reset`, { method: 'POST' }),
+    onSuccess: (res) => setInviteLink(res.emailed ? null : res.reset_link),
   });
   const remove = useMutation({
     mutationFn: (id: number) => api(`/api/users/${id}`, { method: 'DELETE' }),
@@ -213,37 +223,115 @@ function UsersSection() {
       <div className="flex flex-col gap-2">
         {users?.map(u => (
           <div key={u.id} className="flex items-center gap-3 rounded-xl border border-zinc-100 px-3 py-2 dark:border-zinc-800">
-            <span className="flex-1 font-medium">{u.username}</span>
+            <div className="min-w-0 flex-1">
+              <div className="font-medium">{u.username}</div>
+              {u.email && <div className="truncate text-xs text-zinc-400">{u.email}</div>}
+            </div>
             <label className="flex items-center gap-1.5 text-xs text-zinc-500">
               {t('admin.isAdmin')}
               <Switch checked={u.is_admin} onChange={v => patch.mutate({ id: u.id, body: { is_admin: v } })} />
             </label>
-            <Button variant="ghost" className="px-2" onClick={() => {
-              const pw = prompt(t('admin.resetPw'));
-              if (pw) patch.mutate({ id: u.id, body: { password: pw } });
-            }}>🔑</Button>
+            <Button variant="ghost" className="px-2" title={t('admin.sendReset')}
+              onClick={() => sendReset.mutate(u.id)}>🔑</Button>
             <Button variant="ghost" className="px-2 text-red-500" onClick={() => {
               if (confirm(t('common.confirm'))) remove.mutate(u.id);
             }}><Trash2 size={15} /></Button>
           </div>
         ))}
+
+        {inviteLink && (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs dark:border-amber-700 dark:bg-amber-950/40">
+            <div className="mb-1 font-medium text-amber-700 dark:text-amber-400">{t('admin.linkNotEmailed')}</div>
+            <code className="break-all select-all">{inviteLink}</code>
+          </div>
+        )}
+
         <div className="mt-2 flex flex-wrap items-end gap-2">
           <div className="flex-1">
-            <Label>{t('login.username')}</Label>
-            <Input value={newUser.username} onChange={e => setNewUser(p => ({ ...p, username: e.target.value }))} />
+            <Label>{t('login.email')}</Label>
+            <Input type="email" value={invite.email} onChange={e => setInvite(p => ({ ...p, email: e.target.value }))} />
           </div>
           <div className="flex-1">
-            <Label>{t('login.password')}</Label>
-            <Input type="password" value={newUser.password} onChange={e => setNewUser(p => ({ ...p, password: e.target.value }))} />
+            <Label>{t('login.username')}</Label>
+            <Input value={invite.username} onChange={e => setInvite(p => ({ ...p, username: e.target.value }))} />
           </div>
           <label className="flex items-center gap-1.5 pb-2 text-xs text-zinc-500">
             {t('admin.isAdmin')}
-            <Switch checked={newUser.is_admin} onChange={v => setNewUser(p => ({ ...p, is_admin: v }))} />
+            <Switch checked={invite.is_admin} onChange={v => setInvite(p => ({ ...p, is_admin: v }))} />
           </label>
-          <Button onClick={() => create.mutate()} disabled={!newUser.username || !newUser.password}>
-            {t('admin.addUser')}
+          <Button onClick={() => sendInvite.mutate()} disabled={!invite.email || !invite.username || sendInvite.isPending}>
+            {t('admin.invite')}
           </Button>
         </div>
+        {sendInvite.isError && <p className="text-xs text-red-500">{(sendInvite.error as Error).message}</p>}
+      </div>
+    </Section>
+  );
+}
+
+// ── SMTP ─────────────────────────────────────────────────────────────────
+function SmtpSection() {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const [testTo, setTestTo] = useState('');
+  const [testResult, setTestResult] = useState<string | null>(null);
+
+  const { data: config } = useQuery({
+    queryKey: ['config'],
+    queryFn: () => api<Record<string, unknown>>('/api/config'),
+  });
+
+  const setCfg = useMutation({
+    mutationFn: ({ key, value }: { key: string; value: unknown }) =>
+      api(`/api/config/${key}`, { method: 'PUT', body: { value } }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['config'] }),
+  });
+
+  const test = useMutation({
+    mutationFn: () => api('/api/smtp/test', { method: 'POST', body: { to: testTo } }),
+    onSuccess: () => setTestResult('✅'),
+    onError: (e) => setTestResult(`❌ ${(e as Error).message}`),
+  });
+
+  if (!config) return null;
+
+  const textField = (key: string, label: string, type = 'text') => (
+    <div>
+      <Label>{label}</Label>
+      <Input
+        type={type}
+        defaultValue={String(config[key] ?? '')}
+        onBlur={e => e.target.value !== String(config[key] ?? '') && setCfg.mutate({ key, value: type === 'number' ? parseInt(e.target.value, 10) : e.target.value })}
+      />
+    </div>
+  );
+
+  return (
+    <Section title="SMTP / E-Mail">
+      <div className="grid gap-3 sm:grid-cols-2">
+        {textField('smtp.host', 'Host')}
+        {textField('smtp.port', 'Port', 'number')}
+        {textField('smtp.user', 'Benutzer')}
+        {textField('smtp.pass', 'Passwort', 'password')}
+        {textField('smtp.from', 'Absender (From)')}
+        {textField('app.base_url', 'App Base-URL (für Links)')}
+        <div className="flex items-center justify-between sm:col-span-2">
+          <span className="text-sm font-medium">TLS/SSL (secure)</span>
+          <Switch
+            checked={config['smtp.secure'] as boolean}
+            onChange={v => setCfg.mutate({ key: 'smtp.secure', value: v })}
+          />
+        </div>
+        <div className="flex items-end gap-2 sm:col-span-2">
+          <div className="flex-1">
+            <Label>{t('admin.testTo')}</Label>
+            <Input type="email" value={testTo} onChange={e => setTestTo(e.target.value)} />
+          </div>
+          <Button variant="secondary" onClick={() => { setTestResult(null); test.mutate(); }} disabled={!testTo || test.isPending}>
+            {t('admin.sendTest')}
+          </Button>
+        </div>
+        {testResult && <p className="text-sm sm:col-span-2">{testResult}</p>}
       </div>
     </Section>
   );

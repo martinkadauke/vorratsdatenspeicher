@@ -13,6 +13,13 @@ export interface AppConfig {
   'churner.batch_size': number;
   'searxng.url': string;
   'app.default_lang': string;
+  'app.base_url': string;
+  'smtp.host': string;
+  'smtp.port': number;
+  'smtp.secure': boolean;
+  'smtp.user': string;
+  'smtp.pass': string;
+  'smtp.from': string;
 }
 
 const DEFAULTS: AppConfig = {
@@ -24,6 +31,13 @@ const DEFAULTS: AppConfig = {
   'churner.batch_size': 30,
   'searxng.url': 'http://192.168.1.238:8089',
   'app.default_lang': 'de',
+  'app.base_url': 'http://192.168.1.238:8766',
+  'smtp.host': '',
+  'smtp.port': 587,
+  'smtp.secure': false,
+  'smtp.user': '',
+  'smtp.pass': '',
+  'smtp.from': 'Vorratsdatenspeicher <vds@localhost>',
 };
 
 export async function getConfig<K extends keyof AppConfig>(key: K): Promise<AppConfig[K]> {

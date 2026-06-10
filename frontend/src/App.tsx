@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/auth';
 import { Layout } from './components/Layout';
 import { Login } from './pages/Login';
+import { Reset } from './pages/Reset';
 import { Receipts } from './pages/Receipts';
 import { ReceiptDetailPage } from './pages/ReceiptDetailPage';
 import { Stats } from './pages/Stats';
@@ -26,6 +27,7 @@ export function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/reset" element={<Reset />} />
         <Route element={<Protected><Layout /></Protected>}>
           <Route path="/" element={<Navigate to="/receipts" replace />} />
           <Route path="/receipts" element={<Receipts />} />
