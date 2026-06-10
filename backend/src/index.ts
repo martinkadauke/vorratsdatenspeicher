@@ -1,3 +1,4 @@
+import './env.js';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import path from 'node:path';

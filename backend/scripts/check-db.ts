@@ -1,5 +1,6 @@
 /** Read-only database inspection — verifies what exists, changes nothing.
- *  Run from backend/ with DATABASE_URL set:  npx tsx scripts/check-db.ts */
+ *  Run from backend/:  npx tsx scripts/check-db.ts  (uses .env) */
+import '../src/env.js';
 import postgres from 'postgres';
 
 const sql = postgres(process.env.DATABASE_URL!, { onnotice: () => {} });

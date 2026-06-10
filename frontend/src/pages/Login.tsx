@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../context/auth';
-import { api } from '../api/client';
+import { api, ApiError } from '../api/client';
 import { Button, Input, Label, Card } from '../components/ui';
 
 export function Login() {
@@ -11,7 +11,7 @@ export function Login() {
   const { t } = useTranslation();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<'' | 'credentials' | 'network'>('');
   const [busy, setBusy] = useState(false);
   const [forgotMode, setForgotMode] = useState(false);
   const [email, setEmail] = useState('');
@@ -20,12 +20,12 @@ export function Login() {
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
-    setError(false);
+    setError('');
     try {
       await login(username, password);
       navigate('/receipts');
-    } catch {
-      setError(true);
+    } catch (err) {
+      setError(err instanceof ApiError && err.status === 401 ? 'credentials' : 'network');
     } finally {
       setBusy(false);
     }
@@ -80,7 +80,11 @@ export function Login() {
               <Label>{t('login.password')}</Label>
               <Input type="password" value={password} onChange={e => setPassword(e.target.value)} />
             </div>
-            {error && <p className="text-sm text-red-500">{t('login.error')}</p>}
+            {error && (
+              <p className="text-sm text-red-500">
+                {error === 'credentials' ? t('login.error') : t('login.errorNetwork')}
+              </p>
+            )}
             <Button type="submit" disabled={busy || !username || !password}>
               {t('login.submit')}
             </Button>
