@@ -4,23 +4,20 @@ import { runChurn, isChurnRunning } from './index.js';
 
 let task: cron.ScheduledTask | null = null;
 
-/** (Re)start the nightly churner from app_config. Call again after config changes.
- *  Only the prod environment runs the cron — stage/dev never auto-churn so we
- *  don't 3× the load on Ollama/DeepSeek. Manual "Run now" works everywhere. */
+/** (Re)start the nightly churner from app_config. Per-env activation is now
+ *  controlled by the in-app churner.enabled toggle alone — flip it in
+ *  Admin → Churner per environment. (The old VDS_ENV gate was too strict
+ *  for env-switching scenarios.) */
 export async function rescheduleChurner(): Promise<void> {
   if (task) {
     task.stop();
     task = null;
   }
-  const env = process.env.VDS_ENV ?? 'prod';
-  if (env !== 'prod') {
-    console.log(`[churner] cron disabled in ${env} environment — manual runs still work`);
-    return;
-  }
   const enabled = await getConfig('churner.enabled');
   const schedule = await getConfig('churner.cron');
+  const env = process.env.VDS_ENV ?? 'prod';
   if (!enabled) {
-    console.log('[churner] disabled');
+    console.log(`[churner] disabled in ${env}`);
     return;
   }
   if (!cron.validate(schedule)) {
@@ -31,5 +28,5 @@ export async function rescheduleChurner(): Promise<void> {
     if (isChurnRunning()) return;
     runChurn('cron').catch(err => console.error('[churner] cron run failed:', err));
   });
-  console.log(`[churner] scheduled: ${schedule} (env=${env})`);
+  console.log(`[churner] scheduled in ${env}: ${schedule}`);
 }
