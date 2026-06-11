@@ -1,0 +1,33 @@
+# Docker Swarm stack — deployed by GitHub Actions (deploy/cicd.yml).
+# Env vars are injected by the workflow from GitHub secrets.
+services:
+  app:
+    image: ${IMAGE}
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      INTERNAL_SECRET: ${INTERNAL_SECRET}
+      PORT: "80"
+    ports:
+      - "8766:80"          # Swarm routing mesh: erreichbar über JEDE Node-IP
+    volumes:
+      - /mnt/receipts:/app/public/receipts:ro   # NFS-Mount von Unraid (siehe setup-vm.sh)
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:80/api/health"]
+      interval: 15s
+      timeout: 4s
+      retries: 3
+      start_period: 20s
+    deploy:
+      replicas: 2
+      update_config:
+        order: start-first       # neue Instanz hochfahren BEVOR alte stoppt → zero downtime
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+        monitor: 30s
+      rollback_config:
+        order: start-first
+      restart_policy:
+        condition: any
+        delay: 5s

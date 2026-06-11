@@ -4,7 +4,7 @@ import fastifyStatic from '@fastify/static';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 import './types.js';
-import { migrate, ensureAdmin } from './db.js';
+import sql, { migrate, ensureAdmin } from './db.js';
 import { PORT } from './config.js';
 import { registerAuth } from './auth/plugin.js';
 import { authRoutes } from './auth/routes.js';
@@ -31,6 +31,11 @@ async function main(): Promise<void> {
   const app = Fastify({ logger: { level: 'info' } });
 
   registerAuth(app);
+
+  app.get('/api/health', async () => {
+    const [row] = await sql`SELECT 1 AS ok`;
+    return { ok: row.ok === 1 };
+  });
 
   authRoutes(app);
   receiptRoutes(app);
