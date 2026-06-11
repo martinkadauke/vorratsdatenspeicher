@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Pencil } from 'lucide-react';
 import { api } from '../api/client';
 import type { Artikel, ReceiptDetail } from '../api/types';
-import { Card, Spinner, Badge } from '../components/ui';
+import { Card, Spinner, Badge, Modal, Input, Label, Button } from '../components/ui';
 import { ArticleEditModal } from '../components/ArticleEditModal';
 import { ConsumerDots } from '../components/ConsumerChips';
 import { CanonicalIcon } from '../components/IconPicker';
@@ -15,6 +15,7 @@ export function ReceiptDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { t, i18n } = useTranslation();
   const [editing, setEditing] = useState<Artikel | null>(null);
+  const [editReceipt, setEditReceipt] = useState(false);
   const [imageOpen, setImageOpen] = useState(false);
 
   const { data, isLoading } = useQuery({
@@ -32,13 +33,22 @@ export function ReceiptDetailPage() {
         <Link to="/receipts" className="shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
           <ArrowLeft size={20} />
         </Link>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <h1 className="truncate text-lg font-bold">{data.roh_ladenname ?? '?'}</h1>
           <div className="text-sm text-zinc-500">
             {fmtDate(data.datum, i18n.language)} · <span className="tabular font-semibold text-emerald-600 dark:text-emerald-500">{eur(data.gesamt_betrag)}</span>
           </div>
         </div>
+        <button
+          onClick={() => setEditReceipt(true)}
+          className="shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+          title={t('receiptEdit.title')}
+        >
+          <Pencil size={18} />
+        </button>
       </div>
+
+      <ReceiptEditModal receipt={data} open={editReceipt} onClose={() => setEditReceipt(false)} />
 
       <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
         {/* Receipt image */}
@@ -95,5 +105,58 @@ export function ReceiptDetailPage() {
         invalidateKeys={[['receipt', id], ['receipts']]}
       />
     </div>
+  );
+}
+
+function ReceiptEditModal({ receipt, open, onClose }: { receipt: ReceiptDetail; open: boolean; onClose: () => void }) {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const [datum, setDatum] = useState((receipt.datum ?? '').slice(0, 10));
+  const [laden, setLaden] = useState(receipt.roh_ladenname ?? '');
+  const [gesamt, setGesamt] = useState(receipt.gesamt_betrag !== null ? String(receipt.gesamt_betrag) : '');
+
+  useEffect(() => {
+    if (open) {
+      setDatum((receipt.datum ?? '').slice(0, 10));
+      setLaden(receipt.roh_ladenname ?? '');
+      setGesamt(receipt.gesamt_betrag !== null ? String(receipt.gesamt_betrag) : '');
+    }
+  }, [open, receipt]);
+
+  const save = useMutation({
+    mutationFn: () => api(`/api/receipts/${receipt.id}`, {
+      method: 'PATCH',
+      body: { datum, roh_ladenname: laden, gesamt_betrag: gesamt || null },
+    }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['receipt', String(receipt.id)] });
+      void qc.invalidateQueries({ queryKey: ['receipts'] });
+      void qc.invalidateQueries({ queryKey: ['stores'] });
+      onClose();
+    },
+  });
+
+  return (
+    <Modal open={open} onClose={onClose} title={t('receiptEdit.title')}>
+      <div className="flex flex-col gap-4">
+        <div>
+          <Label>{t('receiptEdit.date')}</Label>
+          <Input type="date" value={datum} onChange={e => setDatum(e.target.value)} />
+        </div>
+        <div>
+          <Label>{t('receiptEdit.store')}</Label>
+          <Input value={laden} onChange={e => setLaden(e.target.value)} />
+        </div>
+        <div>
+          <Label>{t('receiptEdit.total')} (€)</Label>
+          <Input inputMode="decimal" value={gesamt} onChange={e => setGesamt(e.target.value)} />
+        </div>
+        {save.isError && <p className="text-sm text-red-500">{(save.error as Error).message}</p>}
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose}>{t('common.cancel')}</Button>
+          <Button onClick={() => save.mutate()} disabled={!datum || save.isPending}>{t('common.save')}</Button>
+        </div>
+      </div>
+    </Modal>
   );
 }

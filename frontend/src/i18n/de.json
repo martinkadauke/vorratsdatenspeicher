@@ -44,6 +44,12 @@
     "loadMore": "Mehr laden",
     "allStores": "Alle Läden"
   },
+  "receiptEdit": {
+    "title": "Beleg bearbeiten",
+    "date": "Datum",
+    "store": "Laden",
+    "total": "Gesamtbetrag"
+  },
   "article": {
     "edit": "Artikel bearbeiten",
     "originalText": "Original (Kassenbon)",

@@ -44,6 +44,12 @@
     "loadMore": "Load more",
     "allStores": "All stores"
   },
+  "receiptEdit": {
+    "title": "Edit receipt",
+    "date": "Date",
+    "store": "Store",
+    "total": "Total"
+  },
   "article": {
     "edit": "Edit item",
     "originalText": "Original (receipt)",

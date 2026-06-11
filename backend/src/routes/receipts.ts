@@ -30,6 +30,29 @@ export function receiptRoutes(app: FastifyInstance): void {
     return rows;
   });
 
+  /** Patch receipt-level fields (date, store, total). */
+  app.patch('/api/receipts/:id', async (req, reply) => {
+    const id = parseInt((req.params as { id: string }).id, 10);
+    if (!id) return reply.code(400).send({ error: 'invalid id' });
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const updates: Record<string, unknown> = {};
+    if ('datum' in body && typeof body.datum === 'string') updates.datum = body.datum;
+    if ('roh_ladenname' in body) updates.roh_ladenname = body.roh_ladenname;
+    if ('gesamt_betrag' in body) {
+      const v = body.gesamt_betrag;
+      if (v === null || v === '') updates.gesamt_betrag = null;
+      else {
+        const n = parseFloat(String(v).replace(',', '.'));
+        if (!Number.isFinite(n)) return reply.code(400).send({ error: 'invalid gesamt_betrag' });
+        updates.gesamt_betrag = n;
+      }
+    }
+    if (!Object.keys(updates).length) return reply.code(400).send({ error: 'no patchable fields' });
+    const rows = await sql`UPDATE einkauf SET ${sql(updates)} WHERE id = ${id} RETURNING id`;
+    if (!rows.length) return reply.code(404).send({ error: 'not found' });
+    return { ok: true };
+  });
+
   app.get('/api/receipts/:id', async (req, reply) => {
     const id = parseInt((req.params as { id: string }).id, 10);
     if (!id) return reply.code(400).send({ error: 'invalid id' });
