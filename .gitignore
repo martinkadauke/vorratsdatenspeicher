@@ -3,6 +3,8 @@ dist/
 *.log
 .env
 .env.local
+**/.env
 .DS_Store
 backend/public/
 *.tsbuildinfo
+tools/reimport-state.json

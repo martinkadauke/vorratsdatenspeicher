@@ -5,6 +5,7 @@
     "shopping": "List",
     "pantry": "Pantry",
     "names": "Names",
+    "stores": "Stores",
     "queue": "Review",
     "admin": "Admin",
     "profile": "Profile",
@@ -92,6 +93,21 @@
     "snooze": "Later",
     "exclude": "Never",
     "empty": "List is empty 🎉"
+  },
+  "stores": {
+    "title": "Stores",
+    "search": "Search store…",
+    "empty": "No stores",
+    "receipts": "receipts",
+    "variants": "variants",
+    "modeRename": "Rename",
+    "modeMerge": "Merge",
+    "newName": "New name",
+    "applyToVariants": "Apply to these OCR variants",
+    "mergeHint": "All receipts of this store will move to the target store. This store will disappear.",
+    "mergeTarget": "Target store",
+    "pickTarget": "Pick",
+    "merge": "Merge"
   },
   "names": {
     "title": "Canonical names",

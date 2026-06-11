@@ -9,6 +9,7 @@ import { Stats } from './pages/Stats';
 import { Pantry } from './pages/Pantry';
 import { Shopping } from './pages/Shopping';
 import { Names } from './pages/Names';
+import { Stores } from './pages/Stores';
 import { Queue } from './pages/Queue';
 import { Admin } from './pages/Admin';
 import { Profile } from './pages/Profile';
@@ -42,6 +43,7 @@ export function App() {
           <Route path="/shopping" element={<Shopping />} />
           <Route path="/pantry" element={<Pantry />} />
           <Route path="/names" element={<Names />} />
+          <Route path="/stores" element={<Stores />} />
           <Route path="/queue" element={<Queue />} />
           <Route path="/admin" element={<AdminOnly><Admin /></AdminOnly>} />
           <Route path="/profile" element={<Profile />} />

@@ -5,6 +5,7 @@
     "shopping": "Liste",
     "pantry": "Vorrat",
     "names": "Namen",
+    "stores": "Läden",
     "queue": "Prüfung",
     "admin": "Admin",
     "profile": "Profil",
@@ -92,6 +93,21 @@
     "snooze": "Später",
     "exclude": "Nie wieder",
     "empty": "Liste ist leer 🎉"
+  },
+  "stores": {
+    "title": "Läden",
+    "search": "Laden suchen…",
+    "empty": "Keine Läden",
+    "receipts": "Belege",
+    "variants": "Varianten",
+    "modeRename": "Umbenennen",
+    "modeMerge": "Zusammenführen",
+    "newName": "Neuer Name",
+    "applyToVariants": "Anwenden auf diese OCR-Varianten",
+    "mergeHint": "Alle Belege dieses Ladens werden dem Zielladen zugeordnet. Dieser Laden verschwindet danach.",
+    "mergeTarget": "Ziel-Laden",
+    "pickTarget": "Wählen",
+    "merge": "Zusammenführen"
   },
   "names": {
     "title": "Kanonische Namen",

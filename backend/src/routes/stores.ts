@@ -39,6 +39,29 @@ export function storeRoutes(app: FastifyInstance): void {
       .sort((a, b) => b.receipts - a.receipts);
   });
 
+  /** Rename a store — cascades to every einkauf.roh_ladenname that matches. */
+  app.put('/api/stores/:rawname/rename', async (req, reply) => {
+    const oldName = decodeURIComponent((req.params as { rawname: string }).rawname);
+    const { new_name } = (req.body ?? {}) as { new_name?: string };
+    if (!new_name) return reply.code(400).send({ error: 'new_name required' });
+    const result = await sql`
+      UPDATE einkauf SET roh_ladenname = ${new_name} WHERE roh_ladenname = ${oldName}
+      RETURNING id
+    `;
+    return { ok: true, updated: result.length };
+  });
+
+  /** Merge: move every einkauf from `from` to `to` (target name). */
+  app.post('/api/stores/merge', async (req, reply) => {
+    const { from, to } = (req.body ?? {}) as { from?: string[]; to?: string };
+    if (!Array.isArray(from) || !from.length || !to) return reply.code(400).send({ error: 'from[] and to required' });
+    const result = await sql`
+      UPDATE einkauf SET roh_ladenname = ${to} WHERE roh_ladenname IN ${sql(from)}
+      RETURNING id
+    `;
+    return { ok: true, updated: result.length };
+  });
+
   /** Price history of a canonical_name per store.
    *  Returns avg price per (store, month) plus the cheapest store overall. */
   app.get('/api/stores/price-history', async (req, reply) => {

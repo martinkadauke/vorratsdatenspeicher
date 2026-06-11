@@ -8,6 +8,8 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       INTERNAL_SECRET: ${INTERNAL_SECRET}
       PORT: "80"
+      # Only the prod env runs the nightly churner cron (saves Ollama/DeepSeek load)
+      VDS_ENV: ${VDS_ENV:-prod}
     ports:
       - "${PORT:-8766}:80"   # 8766 = prod, 8767 = staging — gesetzt von cicd.yml
     # Belege-Fotos: NPM auf Unraid serviert /receipts/* direkt aus dem Filesystem.
