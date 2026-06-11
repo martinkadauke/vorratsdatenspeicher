@@ -205,6 +205,7 @@ export function spendingRoutes(app: FastifyInstance): void {
              e.id AS einkauf_id, e.datum::text AS datum, e.roh_ladenname
       FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
       WHERE e.datum >= ${rangeStart} AND e.datum < ${rangeEnd}
+        AND (a.category_path IS NULL OR a.category_path NOT LIKE 'Meta/%')
         ${path ? sql`AND (a.category_path = ${path} OR a.category_path LIKE ${path + '/%'})` : sql``}
       ORDER BY a.preis DESC NULLS LAST
     `;
