@@ -53,6 +53,15 @@ export function receiptRoutes(app: FastifyInstance): void {
     return { ok: true };
   });
 
+  /** Delete a receipt (cascades to its artikel). */
+  app.delete('/api/receipts/:id', async (req, reply) => {
+    const id = parseInt((req.params as { id: string }).id, 10);
+    if (!id) return reply.code(400).send({ error: 'invalid id' });
+    const rows = await sql`DELETE FROM einkauf WHERE id = ${id} RETURNING id, bild_pfad`;
+    if (!rows.length) return reply.code(404).send({ error: 'not found' });
+    return { ok: true, bild_pfad: rows[0].bild_pfad };
+  });
+
   app.get('/api/receipts/:id', async (req, reply) => {
     const id = parseInt((req.params as { id: string }).id, 10);
     if (!id) return reply.code(400).send({ error: 'invalid id' });

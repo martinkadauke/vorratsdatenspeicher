@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, Pencil } from 'lucide-react';
+import { ArrowLeft, Pencil, Trash2 } from 'lucide-react';
 import { api } from '../api/client';
 import type { Artikel, ReceiptDetail } from '../api/types';
 import { Card, Spinner, Badge, Modal, Input, Label, Button } from '../components/ui';
@@ -14,9 +14,20 @@ import { eur, fmtDate } from '../lib/utils';
 export function ReceiptDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { t, i18n } = useTranslation();
+  const navigate = useNavigate();
+  const qc = useQueryClient();
   const [editing, setEditing] = useState<Artikel | null>(null);
   const [editReceipt, setEditReceipt] = useState(false);
   const [imageOpen, setImageOpen] = useState(false);
+
+  const deleteReceipt = useMutation({
+    mutationFn: () => api(`/api/receipts/${id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['receipts'] });
+      void qc.invalidateQueries({ queryKey: ['stores'] });
+      navigate('/receipts');
+    },
+  });
 
   const { data, isLoading } = useQuery({
     queryKey: ['receipt', id],
@@ -45,6 +56,14 @@ export function ReceiptDetailPage() {
           title={t('receiptEdit.title')}
         >
           <Pencil size={18} />
+        </button>
+        <button
+          onClick={() => { if (confirm(t('receiptEdit.deleteConfirm'))) deleteReceipt.mutate(); }}
+          disabled={deleteReceipt.isPending}
+          className="shrink-0 rounded-xl p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30"
+          title={t('receiptEdit.delete')}
+        >
+          <Trash2 size={18} />
         </button>
       </div>
 

@@ -48,7 +48,9 @@
     "title": "Beleg bearbeiten",
     "date": "Datum",
     "store": "Laden",
-    "total": "Gesamtbetrag"
+    "total": "Gesamtbetrag",
+    "delete": "Beleg löschen",
+    "deleteConfirm": "Diesen Beleg mit allen Artikeln wirklich löschen?"
   },
   "article": {
     "edit": "Artikel bearbeiten",

@@ -48,7 +48,9 @@
     "title": "Edit receipt",
     "date": "Date",
     "store": "Store",
-    "total": "Total"
+    "total": "Total",
+    "delete": "Delete receipt",
+    "deleteConfirm": "Really delete this receipt and all its items?"
   },
   "article": {
     "edit": "Edit item",
