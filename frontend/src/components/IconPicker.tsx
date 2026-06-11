@@ -13,22 +13,39 @@ interface IconHit {
   source: string;
 }
 
-export function IconPicker({ canonicalName, open, onClose }: {
+export type IconEntity = 'canonical' | 'store';
+
+function endpointFor(entity: IconEntity, identifier: string): string {
+  if (entity === 'store') return `/api/stores/${encodeURIComponent(identifier.toLowerCase())}/icon`;
+  return `/api/canonical/${encodeURIComponent(identifier)}/icon`;
+}
+
+function invalidateKeysFor(entity: IconEntity): string[] {
+  return entity === 'store' ? ['store-icon', 'store-icons'] : ['canonical-icon', 'canonical-icons'];
+}
+
+export function IconPicker({ canonicalName, entity = 'canonical', searchSeed, open, onClose }: {
   canonicalName: string;
+  entity?: IconEntity;
+  searchSeed?: string;  // initial search query if different from name
   open: boolean;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
-  const [query, setQuery] = useState(canonicalName);
+  const seed = searchSeed ?? canonicalName;
+  const [query, setQuery] = useState(seed);
 
   useEffect(() => {
-    if (open) setQuery(canonicalName);
-  }, [open, canonicalName]);
+    if (open) setQuery(seed);
+  }, [open, seed]);
+
+  const iconEndpoint = endpointFor(entity, canonicalName);
+  const invKeys = invalidateKeysFor(entity);
 
   const { data: current } = useQuery({
-    queryKey: ['canonical-icon', canonicalName],
-    queryFn: () => api<{ icon_url: string | null; source: string | null }>(`/api/canonical/${encodeURIComponent(canonicalName)}/icon`),
+    queryKey: [invKeys[0], canonicalName],
+    queryFn: () => api<{ icon_url: string | null; source: string | null }>(iconEndpoint),
     enabled: open,
   });
 
@@ -40,13 +57,13 @@ export function IconPicker({ canonicalName, open, onClose }: {
 
   const setIcon = useMutation({
     mutationFn: (icon_url: string | null) =>
-      api(`/api/canonical/${encodeURIComponent(canonicalName)}/icon`, {
+      api(iconEndpoint, {
         method: 'PUT',
         body: { icon_url, source: icon_url ? 'searxng' : null },
       }),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['canonical-icon', canonicalName] });
-      void qc.invalidateQueries({ queryKey: ['canonical-icons'] });
+      void qc.invalidateQueries({ queryKey: [invKeys[0], canonicalName] });
+      void qc.invalidateQueries({ queryKey: [invKeys[1]] });
       onClose();
     },
   });
@@ -124,7 +141,7 @@ export function IconPicker({ canonicalName, open, onClose }: {
   );
 }
 
-/** Small displayer used inline next to canonical names. Falls back to emoji or a placeholder dot. */
+/** Inline icon next to a canonical name. */
 export function CanonicalIcon({ name, size = 28, fallback }: { name: string; size?: number; fallback?: string }) {
   const { data: icons } = useQuery({
     queryKey: ['canonical-icons', name],
@@ -132,7 +149,22 @@ export function CanonicalIcon({ name, size = 28, fallback }: { name: string; siz
     staleTime: 60_000,
     enabled: !!name,
   });
-  const url = icons?.[name];
+  return <IconDisplay url={icons?.[name]} size={size} fallback={fallback} />;
+}
+
+/** Inline icon next to a store name/key. */
+export function StoreIcon({ storeKey, size = 28, fallback }: { storeKey: string; size?: number; fallback?: string }) {
+  const k = storeKey.toLowerCase();
+  const { data: icons } = useQuery({
+    queryKey: ['store-icons', k],
+    queryFn: () => api<Record<string, string>>(`/api/stores/icons?keys=${encodeURIComponent(k)}`),
+    staleTime: 60_000,
+    enabled: !!k,
+  });
+  return <IconDisplay url={icons?.[k]} size={size} fallback={fallback} />;
+}
+
+function IconDisplay({ url, size, fallback }: { url?: string; size: number; fallback?: string }) {
   if (!url) {
     return (
       <span
@@ -147,7 +179,7 @@ export function CanonicalIcon({ name, size = 28, fallback }: { name: string; siz
     <img
       src={url}
       alt=""
-      className="shrink-0 rounded-md border border-zinc-200 bg-white object-cover dark:border-zinc-700 dark:bg-zinc-900"
+      className="shrink-0 rounded-md border border-zinc-200 bg-white object-contain dark:border-zinc-700 dark:bg-zinc-900"
       style={{ width: size, height: size }}
     />
   );

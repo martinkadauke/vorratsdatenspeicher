@@ -39,6 +39,47 @@ export function storeRoutes(app: FastifyInstance): void {
       .sort((a, b) => b.receipts - a.receipts);
   });
 
+  /** Store icon: get one. */
+  app.get('/api/stores/:key/icon', async (req) => {
+    const key = decodeURIComponent((req.params as { key: string }).key).toLowerCase();
+    const rows = await sql`SELECT icon_url, source FROM store_meta WHERE store_key = ${key}`;
+    return rows[0] ?? { icon_url: null, source: null };
+  });
+
+  /** Store icon: set or clear. */
+  app.put('/api/stores/:key/icon', async (req, reply) => {
+    const key = decodeURIComponent((req.params as { key: string }).key).toLowerCase();
+    const { icon_url, source } = (req.body ?? {}) as { icon_url?: string | null; source?: string };
+    if (icon_url === undefined) return reply.code(400).send({ error: 'icon_url required (or null to clear)' });
+    if (!icon_url) {
+      await sql`DELETE FROM store_meta WHERE store_key = ${key}`;
+      return { ok: true, cleared: true };
+    }
+    await sql`
+      INSERT INTO store_meta (store_key, icon_url, source, updated_at, updated_by)
+      VALUES (${key}, ${icon_url}, ${source ?? 'manual'}, NOW(), ${req.user?.id ?? null})
+      ON CONFLICT (store_key) DO UPDATE
+        SET icon_url = EXCLUDED.icon_url, source = EXCLUDED.source,
+            updated_at = NOW(), updated_by = EXCLUDED.updated_by
+    `;
+    return { ok: true };
+  });
+
+  /** Bulk read of store icons for a list of normalized keys. */
+  app.get('/api/stores/icons', async (req) => {
+    const keysParam = (req.query as { keys?: string }).keys ?? '';
+    if (!keysParam) return {};
+    const keys = keysParam.split(',').filter(Boolean).map(k => k.toLowerCase());
+    if (!keys.length) return {};
+    const rows = await sql`
+      SELECT store_key, icon_url FROM store_meta
+      WHERE store_key IN ${sql(keys)} AND icon_url IS NOT NULL
+    `;
+    const out: Record<string, string> = {};
+    for (const r of rows) out[r.store_key as string] = r.icon_url as string;
+    return out;
+  });
+
   /** Rename a store — cascades to every einkauf.roh_ladenname that matches. */
   app.put('/api/stores/:rawname/rename', async (req, reply) => {
     const oldName = decodeURIComponent((req.params as { rawname: string }).rawname);

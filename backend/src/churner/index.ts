@@ -2,7 +2,7 @@ import sql from '../db.js';
 import { getConfig } from '../config.js';
 import { parseLlmJson } from '../llm/ollama.js';
 import { providerForTask } from '../llm/provider.js';
-import { searxngSearch } from '../llm/searxng.js';
+import { searxngSearch, searxngImageSearch } from '../llm/searxng.js';
 import { STAGE1_PROMPT, STAGE2_PROMPT } from '../llm/prompts.js';
 import { mostSimilar } from '../llm/similarity.js';
 import { notify } from '../notify.js';
@@ -166,9 +166,45 @@ async function churnWork(eventId: number): Promise<void> {
     }
   }
 
-  const summary = { candidates: candidates.length, auto_applied: autoApplied, queued, skipped, garbage: dropped };
+  // Also fetch store icons for any stores that don't have one yet
+  const storeIconsAdded = await churnStoreIcons();
+
+  const summary = { candidates: candidates.length, auto_applied: autoApplied, queued, skipped, garbage: dropped, store_icons: storeIconsAdded };
   await sql`UPDATE maintenance_event SET ended_at = NOW(), status = 'success',
             summary = ${sql.json(summary)} WHERE id = ${eventId}`;
   await notify('churner.run.summary', summary);
   console.log('[churner] done:', JSON.stringify(summary));
+}
+
+/** Fetches a logo image for every store that's been seen but has no icon yet.
+ *  Picks first SearXNG image hit, logs source URL. Bounded to 20 per run. */
+async function churnStoreIcons(): Promise<number> {
+  const rows = await sql`
+    SELECT DISTINCT
+      LOWER(SPLIT_PART(REGEXP_REPLACE(roh_ladenname, '[^A-Za-zäöüÄÖÜß0-9]+', ' ', 'g'), ' ', 1)) AS key,
+      MIN(roh_ladenname) AS display
+    FROM einkauf
+    WHERE roh_ladenname IS NOT NULL
+    GROUP BY key
+  `;
+  const existing = new Set((await sql`SELECT store_key FROM store_meta WHERE icon_url IS NOT NULL`).map(r => r.store_key as string));
+  const candidates = rows.filter(r => r.key && !existing.has(r.key as string)).slice(0, 20);
+
+  let added = 0;
+  for (const c of candidates) {
+    try {
+      const hits = await searxngImageSearch(`${c.display} logo`);
+      if (!hits.length) continue;
+      const url = hits[0].src;
+      await sql`
+        INSERT INTO store_meta (store_key, icon_url, source, updated_at)
+        VALUES (${c.key}, ${url}, 'churner', NOW())
+        ON CONFLICT (store_key) DO UPDATE SET icon_url = EXCLUDED.icon_url, source = 'churner', updated_at = NOW()
+      `;
+      added++;
+    } catch (err) {
+      console.warn(`[churner] store-icon ${c.key} failed:`, (err as Error).message);
+    }
+  }
+  return added;
 }

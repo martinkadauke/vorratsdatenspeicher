@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Search, Store, ArrowRightLeft } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Search, ArrowRightLeft, Image as ImageIcon, ChevronRight } from 'lucide-react';
 import { api } from '../api/client';
 import { Card, Input, Button, Label, Modal, Spinner, EmptyState, Badge, Select } from '../components/ui';
+import { IconPicker, StoreIcon } from '../components/IconPicker';
 import { eur } from '../lib/utils';
 
 interface StoreRow {
@@ -16,8 +18,10 @@ interface StoreRow {
 
 export function Stores() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<StoreRow | null>(null);
+  const [iconPickerFor, setIconPickerFor] = useState<StoreRow | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['stores'],
@@ -49,9 +53,16 @@ export function Stores() {
 
       <div className="flex flex-col gap-2">
         {filtered.map(s => (
-          <Card key={s.key} onClick={() => setEditing(s)} className="flex min-w-0 items-center gap-3 px-3 py-2.5">
-            <Store size={18} className="shrink-0 text-zinc-400" />
-            <div className="min-w-0 flex-1">
+          <Card key={s.key} className="flex min-w-0 items-stretch gap-3 px-3 py-2.5">
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setIconPickerFor(s); }}
+              className="group shrink-0 self-center"
+              title={t('stores.changeIcon')}
+            >
+              <StoreIcon storeKey={s.key} size={36} fallback={s.display[0]?.toUpperCase()} />
+            </button>
+            <div className="min-w-0 flex-1 cursor-pointer" onClick={() => setEditing(s)}>
               <div className="flex min-w-0 items-center gap-1.5">
                 <span className="truncate font-medium">{s.display}</span>
                 {s.raw.length > 1 && (
@@ -60,15 +71,34 @@ export function Stores() {
                   </Badge>
                 )}
               </div>
-              <div className="mt-0.5 truncate text-xs text-zinc-400">
-                {s.receipts} {t('stores.receipts')} · {eur(s.total)}
-              </div>
             </div>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); navigate(`/receipts?store=${encodeURIComponent(s.key)}`); }}
+              className="group flex shrink-0 items-center gap-1 self-stretch rounded-lg px-2 text-right hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+              title={t('stores.viewReceipts')}
+            >
+              <div className="flex flex-col items-end">
+                <span className="tabular text-sm font-semibold text-emerald-600 dark:text-emerald-500">{eur(s.total)}</span>
+                <span className="text-xs text-zinc-400">{s.receipts} {t('stores.receipts')}</span>
+              </div>
+              <ChevronRight size={14} className="text-zinc-300 group-hover:text-emerald-500" />
+            </button>
           </Card>
         ))}
       </div>
 
       <StoreEditModal store={editing} allStores={data ?? []} onClose={() => setEditing(null)} />
+
+      {iconPickerFor && (
+        <IconPicker
+          entity="store"
+          canonicalName={iconPickerFor.key}
+          searchSeed={`${iconPickerFor.display} logo`}
+          open={!!iconPickerFor}
+          onClose={() => setIconPickerFor(null)}
+        />
+      )}
     </div>
   );
 }
