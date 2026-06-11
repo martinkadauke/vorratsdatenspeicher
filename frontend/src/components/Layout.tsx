@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
-  ReceiptText, ChartPie, ShoppingCart, Package, Tags, ListChecks,
+  ReceiptText, ChartPie, ShoppingCart, Package, Tags, ListChecks, Store,
   Settings, UserCircle, LogOut, MoreHorizontal,
 } from 'lucide-react';
 import { useAuth } from '../context/auth';
@@ -16,6 +16,7 @@ const NAV = [
   { to: '/shopping', icon: ShoppingCart, key: 'nav.shopping' },
   { to: '/pantry', icon: Package, key: 'nav.pantry' },
   { to: '/names', icon: Tags, key: 'nav.names' },
+  { to: '/stores', icon: Store, key: 'nav.stores' },
   { to: '/queue', icon: ListChecks, key: 'nav.queue' },
 ] as const;
 
