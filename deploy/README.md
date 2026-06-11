@@ -37,7 +37,8 @@ git push → GitHub Actions baut Image → ghcr.io → self-hosted Runner (vds-1
    ```
 
 4. **GitHub-Secrets setzen** (Repo → Settings → Secrets and variables → Actions):
-   - `DATABASE_URL` — postgres://…@192.168.1.238:5432/…
+   - `DATABASE_URL` — Prod, postgres://…@192.168.1.238:5432/Einkaufszettelpuppe
+   - `DATABASE_URL_STAGING` — Staging, …/Einkaufszettelpuppe_staging
    - `JWT_SECRET` — `openssl rand -hex 32`
    - `INTERNAL_SECRET` — `openssl rand -hex 16`
 
