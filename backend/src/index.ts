@@ -25,6 +25,7 @@ import { i18nRoutes } from './routes/i18n.js';
 import { exportRoutes } from './routes/exports.js';
 import { storeRoutes } from './routes/stores.js';
 import { trendsRoutes } from './routes/trends.js';
+import { iconRoutes } from './routes/icons.js';
 import { rescheduleChurner } from './churner/scheduler.js';
 
 async function main(): Promise<void> {
@@ -67,6 +68,7 @@ async function main(): Promise<void> {
   exportRoutes(app);
   storeRoutes(app);
   trendsRoutes(app);
+  iconRoutes(app);
 
   // Static SPA + receipt images
   const publicDir = path.join(process.cwd(), 'public');

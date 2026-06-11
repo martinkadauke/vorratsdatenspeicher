@@ -102,7 +102,17 @@
     "receipts": "Belege anzeigen",
     "lastBought": "Zuletzt",
     "byStore": "Preis pro Laden",
-    "cheapest": "günstigster"
+    "cheapest": "günstigster",
+    "changeIcon": "Icon ändern",
+    "changeIconHint": "Klick um aus Bildersuche zu wählen"
+  },
+  "iconPicker": {
+    "title": "Icon wählen",
+    "current": "Aktuell",
+    "search": "Suchen",
+    "searchPlaceholder": "Produkt-Suche…",
+    "hint": "Suchbegriff eingeben und Enter drücken, dann auf ein Bild klicken.",
+    "noResults": "Keine Treffer"
   },
   "queue": {
     "title": "Verifikations-Queue",

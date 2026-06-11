@@ -102,7 +102,17 @@
     "receipts": "Show receipts",
     "lastBought": "Last",
     "byStore": "Price per store",
-    "cheapest": "cheapest"
+    "cheapest": "cheapest",
+    "changeIcon": "Change icon",
+    "changeIconHint": "Tap to pick from image search"
+  },
+  "iconPicker": {
+    "title": "Pick icon",
+    "current": "Current",
+    "search": "Search",
+    "searchPlaceholder": "Product search…",
+    "hint": "Type a query and press enter, then tap an image.",
+    "noResults": "No results"
   },
   "queue": {
     "title": "Verification queue",

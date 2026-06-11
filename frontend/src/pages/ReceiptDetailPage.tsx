@@ -8,6 +8,7 @@ import type { Artikel, ReceiptDetail } from '../api/types';
 import { Card, Spinner, Badge } from '../components/ui';
 import { ArticleEditModal } from '../components/ArticleEditModal';
 import { ConsumerDots } from '../components/ConsumerChips';
+import { CanonicalIcon } from '../components/IconPicker';
 import { eur, fmtDate } from '../lib/utils';
 
 export function ReceiptDetailPage() {
@@ -60,6 +61,7 @@ export function ReceiptDetailPage() {
         <div className="flex min-w-0 flex-col gap-1.5">
           {data.artikel.map(a => (
             <Card key={a.id} onClick={() => setEditing(a)} className="flex min-w-0 items-center gap-2 px-2.5 py-2.5 sm:gap-3 sm:px-3">
+              {a.canonical_name && <CanonicalIcon name={a.canonical_name} size={32} />}
               <div className="min-w-0 flex-1">
                 <div className="flex min-w-0 items-center gap-1.5">
                   <span className="truncate font-medium">{a.canonical_name ?? a.ai_guess ?? a.name}</span>

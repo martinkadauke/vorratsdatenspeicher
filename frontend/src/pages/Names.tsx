@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
-import { Search, ReceiptText, Store } from 'lucide-react';
+import { Search, ReceiptText, Store, Image as ImageIcon } from 'lucide-react';
 import { api } from '../api/client';
 import type { CanonicalName, Receipt } from '../api/types';
 import { Card, Input, Spinner, EmptyState, Badge, Modal, Button, Label } from '../components/ui';
 import { CategoryPicker } from '../components/CategoryPicker';
 import { ConsumerChips, ConsumerDots } from '../components/ConsumerChips';
+import { CanonicalIcon, IconPicker } from '../components/IconPicker';
 import { fmtDate, eur } from '../lib/utils';
 
 interface PriceHistory {
@@ -40,6 +41,7 @@ export function Names() {
       <div className="grid gap-1.5 sm:grid-cols-2">
         {data?.map(n => (
           <Card key={n.canonical_name} onClick={() => setSelected(n)} className="flex min-w-0 items-center gap-2 px-3 py-2">
+            <CanonicalIcon name={n.canonical_name} size={32} />
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 items-center gap-1.5">
                 <span className="truncate font-medium">{n.canonical_name}</span>
@@ -68,6 +70,7 @@ function NameEditModal({ name, onClose }: { name: CanonicalName | null; onClose:
   const [translation, setTranslation] = useState('');
   const [consumers, setConsumers] = useState<number[]>([]);
   const [exclusive, setExclusive] = useState(false);
+  const [iconPickerOpen, setIconPickerOpen] = useState(false);
 
   // Reset local form state whenever a different name is opened
   useEffect(() => {
@@ -125,6 +128,27 @@ function NameEditModal({ name, onClose }: { name: CanonicalName | null; onClose:
   return (
     <Modal open={!!name} onClose={onClose} title={name.canonical_name}>
       <div className="flex flex-col gap-4">
+        <button
+          type="button"
+          onClick={() => setIconPickerOpen(true)}
+          className="group flex items-center gap-3 rounded-xl border border-dashed border-zinc-300 p-3 hover:border-emerald-500 dark:border-zinc-700"
+        >
+          <CanonicalIcon name={name.canonical_name} size={48} />
+          <div className="min-w-0 flex-1 text-left">
+            <div className="flex items-center gap-1.5 text-sm font-medium">
+              <ImageIcon size={14} className="text-zinc-400 group-hover:text-emerald-500" />
+              {t('names.changeIcon')}
+            </div>
+            <div className="text-xs text-zinc-400">{t('names.changeIconHint')}</div>
+          </div>
+        </button>
+
+        <IconPicker
+          canonicalName={name.canonical_name}
+          open={iconPickerOpen}
+          onClose={() => setIconPickerOpen(false)}
+        />
+
         <div>
           <Label>{t('names.rename')}</Label>
           <Input value={newName} onChange={e => setNewName(e.target.value)} />
