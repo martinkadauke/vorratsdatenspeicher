@@ -13,11 +13,12 @@ services:
     # Belege-Fotos: NPM auf Unraid serviert /receipts/* direkt aus dem Filesystem.
     # Der Container braucht die Fotos nicht — daher kein Volume-Mount.
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:80/api/health"]
+      # Node statt wget — garantiert im Image vorhanden, deutlich robuster
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:80/api/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
       interval: 15s
-      timeout: 4s
-      retries: 3
-      start_period: 20s
+      timeout: 5s
+      retries: 4
+      start_period: 45s
     deploy:
       replicas: 2
       update_config:

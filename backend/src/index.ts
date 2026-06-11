@@ -32,7 +32,10 @@ async function main(): Promise<void> {
 
   registerAuth(app);
 
-  app.get('/api/health', async () => {
+  // Liveness only — process responds. DB-Verbindung wird beim Start migrate() validiert,
+  // wenn die DB später langsam ist sollen NICHT alle Replicas gleichzeitig sterben.
+  app.get('/api/health', async () => ({ ok: true }));
+  app.get('/api/ready', async () => {
     const [row] = await sql`SELECT 1 AS ok`;
     return { ok: row.ok === 1 };
   });
