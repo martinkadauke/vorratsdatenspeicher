@@ -3,6 +3,10 @@ name: CI/CD
 on:
   push:
     branches: [main, stage, dev]
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+      - '.gitattributes'
   workflow_dispatch:
 
 permissions:
