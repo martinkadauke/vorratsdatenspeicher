@@ -9,6 +9,10 @@ import { listOllamaModels, ollamaHealth } from '../llm/ollama.js';
 import { searxngHealth } from '../llm/searxng.js';
 import { sendMail } from '../mailer.js';
 import { createAuthToken } from '../auth/routes.js';
+import { listModelsForProvider, healthForProvider, setTaskAi, type ProviderName, type AiTask } from '../llm/provider.js';
+
+const VALID_PROVIDERS: ProviderName[] = ['ollama', 'deepseek'];
+const VALID_TASKS: AiTask[] = ['recategorize', 'churner_stage1', 'churner_stage2'];
 
 export function adminRoutes(app: FastifyInstance): void {
   // ── app config ──────────────────────────────────────────────────────────
@@ -28,47 +32,55 @@ export function adminRoutes(app: FastifyInstance): void {
     return sql`SELECT id, username, email, is_admin, prefers_dark, preferred_lang, created_at FROM users ORDER BY id`;
   });
 
-  /** Invite a new user by email. Creates the account with a random password
-   *  and sends an invite link; if SMTP is unavailable the link is returned
-   *  so the admin can share it manually. */
+  /** Invite a new user by email. Username is derived from the email's
+   *  local-part (collision-suffixed if necessary). Random password is
+   *  set under the hood; the invite link lets them choose their own. */
   app.post('/api/users/invite', { preHandler: requireAdmin }, async (req, reply) => {
-    const { email, username, is_admin } = (req.body ?? {}) as {
-      email?: string; username?: string; is_admin?: boolean;
-    };
-    if (!email || !username) return reply.code(400).send({ error: 'email and username required' });
+    const { email, is_admin } = (req.body ?? {}) as { email?: string; is_admin?: boolean };
+    if (!email || !email.includes('@')) return reply.code(400).send({ error: 'valid email required' });
+
+    const cleaned = email.trim().toLowerCase();
+    const base = cleaned.split('@')[0].replace(/[^a-z0-9._-]/gi, '') || 'user';
+    let username = base;
+    for (let n = 2; n < 100; n++) {
+      const [{ count }] = await sql`SELECT COUNT(*)::int AS count FROM users WHERE LOWER(username) = ${username}`;
+      if (count === 0) break;
+      username = `${base}${n}`;
+    }
 
     const randomHash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12);
     let userId: number;
     try {
       const [row] = await sql`
         INSERT INTO users (username, email, password_hash, is_admin)
-        VALUES (${username}, ${email}, ${randomHash}, ${is_admin ?? false})
+        VALUES (${username}, ${cleaned}, ${randomHash}, ${is_admin ?? false})
         RETURNING id
       `;
       userId = row.id;
     } catch {
-      return reply.code(409).send({ error: 'username or email already exists' });
+      return reply.code(409).send({ error: 'email already exists' });
     }
 
     const token = await createAuthToken(userId, 'invite', 7 * 24);
-    const base = await getConfig('app.base_url');
-    const link = `${base}/reset?token=${token}`;
+    const baseUrl = await getConfig('app.base_url');
+    const link = `${baseUrl}/reset?token=${token}`;
 
     let emailed = false;
     try {
       await sendMail(
-        email,
+        cleaned,
         'Einladung zu Vorratsdatenspeicher',
-        `Hallo ${username},\n\n` +
+        `Hallo,\n\n` +
         `du wurdest zu Vorratsdatenspeicher eingeladen. ` +
-        `Setze über diesen Link dein Passwort (7 Tage gültig):\n\n${link}\n`,
+        `Setze über diesen Link dein Passwort (7 Tage gültig):\n\n${link}\n\n` +
+        `Dein Benutzername ist: ${username}\n`,
       );
       emailed = true;
     } catch (e) {
       req.log.warn(`invite mail failed: ${(e as Error).message}`);
     }
 
-    return { ok: true, id: userId, emailed, invite_link: link };
+    return { ok: true, id: userId, username, emailed, invite_link: link };
   });
 
   app.patch('/api/users/:id', { preHandler: requireAdmin }, async (req, reply) => {
@@ -128,6 +140,14 @@ export function adminRoutes(app: FastifyInstance): void {
   app.delete('/api/users/:id', { preHandler: requireAdmin }, async (req, reply) => {
     const id = parseInt((req.params as { id: string }).id, 10);
     if (id === req.user!.id) return reply.code(400).send({ error: 'cannot delete yourself' });
+    // Last-admin protection: don't allow deleting the last admin
+    if (req.user!.is_admin) {
+      const [{ count }] = await sql`SELECT COUNT(*)::int AS count FROM users WHERE is_admin = TRUE`;
+      const [target] = await sql`SELECT is_admin FROM users WHERE id = ${id}`;
+      if (count <= 1 && target?.is_admin) {
+        return reply.code(400).send({ error: 'cannot delete the last admin' });
+      }
+    }
     await sql`DELETE FROM users WHERE id = ${id}`;
     return { ok: true };
   });
@@ -143,4 +163,42 @@ export function adminRoutes(app: FastifyInstance): void {
 
   app.get('/api/ollama/health', { preHandler: requireAdmin }, async () => ollamaHealth());
   app.get('/api/searxng/health', { preHandler: requireAdmin }, async () => searxngHealth());
+
+  // ── AI providers (Ollama + DeepSeek) ────────────────────────────────────
+  app.get('/api/ai/providers', { preHandler: requireAdmin }, async () => ({
+    providers: VALID_PROVIDERS,
+    tasks: VALID_TASKS,
+  }));
+
+  app.get('/api/ai/models', { preHandler: requireAdmin }, async (req, reply) => {
+    const provider = (req.query as { provider?: string }).provider as ProviderName | undefined;
+    if (!provider || !VALID_PROVIDERS.includes(provider)) {
+      return reply.code(400).send({ error: 'invalid provider' });
+    }
+    try {
+      return { models: await listModelsForProvider(provider) };
+    } catch (e) {
+      return reply.code(502).send({ error: (e as Error).message });
+    }
+  });
+
+  app.get('/api/ai/health', { preHandler: requireAdmin }, async (req, reply) => {
+    const provider = (req.query as { provider?: string }).provider as ProviderName | undefined;
+    if (!provider || !VALID_PROVIDERS.includes(provider)) {
+      return reply.code(400).send({ error: 'invalid provider' });
+    }
+    return healthForProvider(provider);
+  });
+
+  /** Set provider+model for one task atomically. */
+  app.put('/api/ai/tasks/:task', { preHandler: requireAdmin }, async (req, reply) => {
+    const task = (req.params as { task: string }).task as AiTask;
+    if (!VALID_TASKS.includes(task)) return reply.code(400).send({ error: 'invalid task' });
+    const { provider, model } = (req.body ?? {}) as { provider?: ProviderName; model?: string };
+    if (!provider || !VALID_PROVIDERS.includes(provider) || !model) {
+      return reply.code(400).send({ error: 'provider and model required' });
+    }
+    await setTaskAi(task, provider, model, req.user!.id);
+    return { ok: true };
+  });
 }

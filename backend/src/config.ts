@@ -7,6 +7,14 @@ export const PORT = parseInt(process.env.PORT ?? '3000', 10);
 export interface AppConfig {
   'ollama.url': string;
   'ollama.model': string;
+  'deepseek.url': string;
+  'deepseek.api_key': string;
+  'ai.recategorize.provider': string;
+  'ai.recategorize.model': string;
+  'ai.churner_stage1.provider': string;
+  'ai.churner_stage1.model': string;
+  'ai.churner_stage2.provider': string;
+  'ai.churner_stage2.model': string;
   'churner.enabled': boolean;
   'churner.cron': string;
   'churner.confidence': number;
@@ -25,6 +33,14 @@ export interface AppConfig {
 const DEFAULTS: AppConfig = {
   'ollama.url': 'http://192.168.1.238:11434',
   'ollama.model': 'qwen2.5:14b',
+  'deepseek.url': 'https://api.deepseek.com',
+  'deepseek.api_key': '',
+  'ai.recategorize.provider': 'ollama',
+  'ai.recategorize.model': 'qwen2.5:14b',
+  'ai.churner_stage1.provider': 'ollama',
+  'ai.churner_stage1.model': 'qwen2.5:14b',
+  'ai.churner_stage2.provider': 'ollama',
+  'ai.churner_stage2.model': 'qwen2.5:14b',
   'churner.enabled': true,
   'churner.cron': '0 3 * * *',
   'churner.confidence': 0.85,

@@ -6,6 +6,7 @@ import { api } from '../api/client';
 import type { FamilyMember, MaintenanceEvent, User } from '../api/types';
 import { Card, Button, Input, Label, Select, Switch, Spinner, Badge } from '../components/ui';
 import { useFamily } from '../components/ConsumerChips';
+import { useAuth } from '../context/auth';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -21,6 +22,8 @@ export function Admin() {
   return (
     <div className="flex flex-col gap-4">
       <h1 className="text-lg font-bold">{t('admin.title')}</h1>
+      <AiProvidersSection />
+      <AiTasksSection />
       <ChurnerSection />
       <UsersSection />
       <SmtpSection />
@@ -30,7 +33,188 @@ export function Admin() {
   );
 }
 
-// ── Churner & AI settings ────────────────────────────────────────────────
+// ── AI Providers (Ollama + DeepSeek connection settings) ─────────────────
+type Provider = 'ollama' | 'deepseek';
+
+function HealthBadge({ provider, label }: { provider: Provider | 'searxng'; label: string }) {
+  const { t } = useTranslation();
+  const { data } = useQuery({
+    queryKey: [`${provider}-health`],
+    queryFn: () => provider === 'searxng'
+      ? api<{ ok: boolean; error?: string }>('/api/searxng/health')
+      : api<{ ok: boolean; error?: string }>(`/api/ai/health?provider=${provider}`),
+    retry: false,
+    refetchInterval: 60_000,
+  });
+  const ok = data?.ok;
+  return (
+    <Badge
+      title={data?.error ?? ''}
+      className={ok ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400'
+                    : 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400'}
+    >
+      {label}: {ok ? t('admin.healthy') : t('admin.unhealthy')}
+    </Badge>
+  );
+}
+
+function AiProvidersSection() {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+
+  const { data: config } = useQuery({
+    queryKey: ['config'],
+    queryFn: () => api<Record<string, unknown>>('/api/config'),
+  });
+
+  const setCfg = useMutation({
+    mutationFn: ({ key, value }: { key: string; value: unknown }) =>
+      api(`/api/config/${key}`, { method: 'PUT', body: { value } }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['config'] });
+      void qc.invalidateQueries({ queryKey: ['ollama-health'] });
+      void qc.invalidateQueries({ queryKey: ['deepseek-health'] });
+      void qc.invalidateQueries({ queryKey: ['ai-models'] });
+    },
+  });
+
+  if (!config) return <Section title={t('admin.aiProviders')}><Spinner /></Section>;
+
+  return (
+    <Section title={t('admin.aiProviders')}>
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-wrap gap-2">
+          <HealthBadge provider="ollama" label="Ollama" />
+          <HealthBadge provider="deepseek" label="DeepSeek" />
+          <HealthBadge provider="searxng" label="SearXNG" />
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <Label>{t('admin.ollamaUrl')}</Label>
+            <Input
+              defaultValue={config['ollama.url'] as string}
+              onBlur={e => e.target.value !== config['ollama.url'] && setCfg.mutate({ key: 'ollama.url', value: e.target.value })}
+            />
+          </div>
+          <div>
+            <Label>{t('admin.searxngUrl')}</Label>
+            <Input
+              defaultValue={config['searxng.url'] as string}
+              onBlur={e => e.target.value !== config['searxng.url'] && setCfg.mutate({ key: 'searxng.url', value: e.target.value })}
+            />
+          </div>
+          <div>
+            <Label>{t('admin.deepseekUrl')}</Label>
+            <Input
+              defaultValue={config['deepseek.url'] as string}
+              onBlur={e => e.target.value !== config['deepseek.url'] && setCfg.mutate({ key: 'deepseek.url', value: e.target.value })}
+            />
+          </div>
+          <div>
+            <Label>{t('admin.deepseekApiKey')}</Label>
+            <Input
+              type="password"
+              autoComplete="off"
+              defaultValue={config['deepseek.api_key'] as string}
+              placeholder={(config['deepseek.api_key'] as string) ? '••••••••' : 'sk-…'}
+              onBlur={e => e.target.value && e.target.value !== config['deepseek.api_key'] && setCfg.mutate({ key: 'deepseek.api_key', value: e.target.value })}
+            />
+          </div>
+        </div>
+      </div>
+    </Section>
+  );
+}
+
+// ── AI Tasks (per-task provider+model dropdowns) ─────────────────────────
+const AI_TASKS = [
+  { key: 'recategorize',     i18n: 'admin.taskRecategorize' },
+  { key: 'churner_stage1',   i18n: 'admin.taskChurnerStage1' },
+  { key: 'churner_stage2',   i18n: 'admin.taskChurnerStage2' },
+] as const;
+
+function TaskRow({ task, taskLabel, config }: {
+  task: typeof AI_TASKS[number]['key'];
+  taskLabel: string;
+  config: Record<string, unknown>;
+}) {
+  const qc = useQueryClient();
+  const provider = (config[`ai.${task}.provider`] ?? 'ollama') as Provider;
+  const model = (config[`ai.${task}.model`] ?? '') as string;
+
+  const { data: modelsData, isLoading: modelsLoading } = useQuery({
+    queryKey: ['ai-models', provider],
+    queryFn: () => api<{ models: string[] }>(`/api/ai/models?provider=${provider}`),
+    retry: false,
+    staleTime: 60_000,
+  });
+
+  const setTask = useMutation({
+    mutationFn: (body: { provider: Provider; model: string }) =>
+      api(`/api/ai/tasks/${task}`, { method: 'PUT', body }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['config'] }),
+  });
+
+  const onProviderChange = (next: Provider) => {
+    setTask.mutate({ provider: next, model });
+  };
+  const onModelChange = (next: string) => {
+    setTask.mutate({ provider, model: next });
+  };
+
+  const models = modelsData?.models ?? [];
+  const modelOptions = !models.includes(model) && model ? [model, ...models] : models;
+
+  return (
+    <div className="rounded-xl border border-zinc-200 p-3 dark:border-zinc-800">
+      <div className="mb-2 text-sm font-medium">{taskLabel}</div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <Select value={provider} onChange={e => onProviderChange(e.target.value as Provider)}>
+          <option value="ollama">Ollama</option>
+          <option value="deepseek">DeepSeek</option>
+        </Select>
+        {modelsLoading ? (
+          <Input value="…" disabled />
+        ) : modelOptions.length ? (
+          <Select value={model} onChange={e => onModelChange(e.target.value)}>
+            {!model && <option value="">– Modell wählen –</option>}
+            {modelOptions.map(m => <option key={m} value={m}>{m}</option>)}
+          </Select>
+        ) : (
+          <Input
+            defaultValue={model}
+            placeholder="Modell-Name"
+            onBlur={e => e.target.value !== model && onModelChange(e.target.value)}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AiTasksSection() {
+  const { t } = useTranslation();
+  const { data: config } = useQuery({
+    queryKey: ['config'],
+    queryFn: () => api<Record<string, unknown>>('/api/config'),
+  });
+
+  if (!config) return <Section title={t('admin.aiTasks')}><Spinner /></Section>;
+
+  return (
+    <Section title={t('admin.aiTasks')}>
+      <div className="flex flex-col gap-3">
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('admin.aiTasksHint')}</p>
+        {AI_TASKS.map(({ key, i18n }) => (
+          <TaskRow key={key} task={key} taskLabel={t(i18n)} config={config} />
+        ))}
+      </div>
+    </Section>
+  );
+}
+
+// ── Churner runtime settings ─────────────────────────────────────────────
 function ChurnerSection() {
   const { t } = useTranslation();
   const qc = useQueryClient();
@@ -38,21 +222,6 @@ function ChurnerSection() {
   const { data: config, isLoading } = useQuery({
     queryKey: ['config'],
     queryFn: () => api<Record<string, unknown>>('/api/config'),
-  });
-  const { data: models } = useQuery({
-    queryKey: ['ollama-models'],
-    queryFn: () => api<{ models: string[] }>('/api/ollama/models'),
-    retry: false,
-  });
-  const { data: ollamaHealth } = useQuery({
-    queryKey: ['ollama-health'],
-    queryFn: () => api<{ ok: boolean }>('/api/ollama/health'),
-    retry: false,
-  });
-  const { data: searxHealth } = useQuery({
-    queryKey: ['searxng-health'],
-    queryFn: () => api<{ ok: boolean; error?: string }>('/api/searxng/health'),
-    retry: false,
   });
   const { data: status } = useQuery({
     queryKey: ['maintenance-status'],
@@ -65,7 +234,6 @@ function ChurnerSection() {
       api(`/api/config/${key}`, { method: 'PUT', body: { value } }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['config'] }),
   });
-
   const churnNow = useMutation({
     mutationFn: () => api('/api/maintenance/churn', { method: 'POST' }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['maintenance-status'] }),
@@ -77,22 +245,12 @@ function ChurnerSection() {
   });
 
   if (isLoading || !config) return <Section title={t('admin.churner')}><Spinner /></Section>;
-
   const churnRunning = status?.churner.running ?? false;
   const recatRunning = status?.recategorize.running ?? false;
 
   return (
     <Section title={t('admin.churner')}>
       <div className="flex flex-col gap-4">
-        <div className="flex flex-wrap gap-2">
-          <Badge className={ollamaHealth?.ok ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400' : 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400'}>
-            Ollama: {ollamaHealth?.ok ? t('admin.healthy') : t('admin.unhealthy')}
-          </Badge>
-          <Badge className={searxHealth?.ok ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400' : 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400'}>
-            SearXNG: {searxHealth?.ok ? t('admin.healthy') : t('admin.unhealthy')}
-          </Badge>
-        </div>
-
         <div className="flex items-center justify-between">
           <span className="text-sm font-medium">{t('admin.churnerEnabled')}</span>
           <Switch
@@ -103,56 +261,10 @@ function ChurnerSection() {
 
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
-            <Label>{t('admin.ollamaUrl')}</Label>
-            <Input
-              defaultValue={config['ollama.url'] as string}
-              onBlur={e => e.target.value !== config['ollama.url'] && setCfg.mutate({ key: 'ollama.url', value: e.target.value })}
-            />
-          </div>
-          <div>
-            <Label>{t('admin.ollamaModel')}</Label>
-            {models?.models.length ? (
-              <Select
-                value={config['ollama.model'] as string}
-                onChange={e => setCfg.mutate({ key: 'ollama.model', value: e.target.value })}
-              >
-                {!models.models.includes(config['ollama.model'] as string) && (
-                  <option value={config['ollama.model'] as string}>{config['ollama.model'] as string}</option>
-                )}
-                {models.models.map(m => <option key={m} value={m}>{m}</option>)}
-              </Select>
-            ) : (
-              <Input
-                defaultValue={config['ollama.model'] as string}
-                onBlur={e => e.target.value !== config['ollama.model'] && setCfg.mutate({ key: 'ollama.model', value: e.target.value })}
-              />
-            )}
-          </div>
-          <div>
             <Label>{t('admin.cron')}</Label>
             <Input
               defaultValue={config['churner.cron'] as string}
               onBlur={e => e.target.value !== config['churner.cron'] && setCfg.mutate({ key: 'churner.cron', value: e.target.value })}
-            />
-          </div>
-          <div>
-            <Label>{t('admin.searxngUrl')}</Label>
-            <Input
-              defaultValue={config['searxng.url'] as string}
-              onBlur={e => e.target.value !== config['searxng.url'] && setCfg.mutate({ key: 'searxng.url', value: e.target.value })}
-            />
-          </div>
-          <div>
-            <Label>{t('admin.confidence')}: {String(config['churner.confidence'])}</Label>
-            <input
-              type="range"
-              min={0.5}
-              max={0.95}
-              step={0.05}
-              defaultValue={config['churner.confidence'] as number}
-              onMouseUp={e => setCfg.mutate({ key: 'churner.confidence', value: parseFloat((e.target as HTMLInputElement).value) })}
-              onTouchEnd={e => setCfg.mutate({ key: 'churner.confidence', value: parseFloat((e.target as HTMLInputElement).value) })}
-              className="w-full accent-emerald-600"
             />
           </div>
           <div>
@@ -164,6 +276,19 @@ function ChurnerSection() {
               <option value="de">Deutsch</option>
               <option value="en">English</option>
             </Select>
+          </div>
+          <div className="sm:col-span-2">
+            <Label>{t('admin.confidence')}: {String(config['churner.confidence'])}</Label>
+            <input
+              type="range"
+              min={0.5}
+              max={0.95}
+              step={0.05}
+              defaultValue={config['churner.confidence'] as number}
+              onMouseUp={e => setCfg.mutate({ key: 'churner.confidence', value: parseFloat((e.target as HTMLInputElement).value) })}
+              onTouchEnd={e => setCfg.mutate({ key: 'churner.confidence', value: parseFloat((e.target as HTMLInputElement).value) })}
+              className="w-full accent-emerald-600"
+            />
           </div>
         </div>
 
@@ -187,8 +312,10 @@ function ChurnerSection() {
 function UsersSection() {
   const { t } = useTranslation();
   const qc = useQueryClient();
-  const [invite, setInvite] = useState({ email: '', username: '', is_admin: false });
+  const { user: me } = useAuth();
+  const [invite, setInvite] = useState({ email: '', is_admin: false });
   const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [createdUsername, setCreatedUsername] = useState<string | null>(null);
 
   const { data: users } = useQuery({
     queryKey: ['users'],
@@ -197,10 +324,11 @@ function UsersSection() {
 
   const invalidate = () => void qc.invalidateQueries({ queryKey: ['users'] });
   const sendInvite = useMutation({
-    mutationFn: () => api<{ emailed: boolean; invite_link: string }>('/api/users/invite', { method: 'POST', body: invite }),
+    mutationFn: () => api<{ emailed: boolean; invite_link: string; username: string }>('/api/users/invite', { method: 'POST', body: invite }),
     onSuccess: (res) => {
       invalidate();
-      setInvite({ email: '', username: '', is_admin: false });
+      setInvite({ email: '', is_admin: false });
+      setCreatedUsername(res.username);
       setInviteLink(res.emailed ? null : res.invite_link);
     },
   });
@@ -211,7 +339,7 @@ function UsersSection() {
   });
   const sendReset = useMutation({
     mutationFn: (id: number) => api<{ emailed: boolean; reset_link: string }>(`/api/users/${id}/send-reset`, { method: 'POST' }),
-    onSuccess: (res) => setInviteLink(res.emailed ? null : res.reset_link),
+    onSuccess: (res) => { setCreatedUsername(null); setInviteLink(res.emailed ? null : res.reset_link); },
   });
   const remove = useMutation({
     mutationFn: (id: number) => api(`/api/users/${id}`, { method: 'DELETE' }),
@@ -221,48 +349,94 @@ function UsersSection() {
   return (
     <Section title={t('admin.users')}>
       <div className="flex flex-col gap-2">
-        {users?.map(u => (
-          <div key={u.id} className="flex items-center gap-3 rounded-xl border border-zinc-100 px-3 py-2 dark:border-zinc-800">
-            <div className="min-w-0 flex-1">
-              <div className="font-medium">{u.username}</div>
-              {u.email && <div className="truncate text-xs text-zinc-400">{u.email}</div>}
+        {users?.map(u => {
+          const isSelf = u.id === me?.id;
+          return (
+            <div key={u.id} className="flex items-center gap-3 rounded-xl border border-zinc-100 px-3 py-2 dark:border-zinc-800">
+              <div className="min-w-0 flex-1">
+                <div className="font-medium">
+                  {u.username}
+                  {isSelf && <span className="ml-1.5 text-xs font-normal text-zinc-400">({t('admin.you')})</span>}
+                </div>
+                {u.email && <div className="truncate text-xs text-zinc-400">{u.email}</div>}
+              </div>
+              <label className="flex items-center gap-1.5 text-xs text-zinc-500">
+                {t('admin.isAdmin')}
+                <Switch
+                  checked={u.is_admin}
+                  disabled={isSelf}
+                  onChange={v => patch.mutate({ id: u.id, body: { is_admin: v } })}
+                />
+              </label>
+              <Button
+                variant="ghost"
+                className="px-2"
+                disabled={isSelf}
+                title={isSelf ? t('admin.youUseProfileForReset') : t('admin.sendReset')}
+                onClick={() => sendReset.mutate(u.id)}
+              >🔑</Button>
+              <Button
+                variant="ghost"
+                className="px-2 text-red-500"
+                disabled={isSelf}
+                title={isSelf ? t('admin.cannotDeleteSelf') : t('common.delete')}
+                onClick={() => {
+                  if (confirm(t('common.confirm'))) remove.mutate(u.id);
+                }}
+              ><Trash2 size={15} /></Button>
             </div>
-            <label className="flex items-center gap-1.5 text-xs text-zinc-500">
-              {t('admin.isAdmin')}
-              <Switch checked={u.is_admin} onChange={v => patch.mutate({ id: u.id, body: { is_admin: v } })} />
-            </label>
-            <Button variant="ghost" className="px-2" title={t('admin.sendReset')}
-              onClick={() => sendReset.mutate(u.id)}>🔑</Button>
-            <Button variant="ghost" className="px-2 text-red-500" onClick={() => {
-              if (confirm(t('common.confirm'))) remove.mutate(u.id);
-            }}><Trash2 size={15} /></Button>
-          </div>
-        ))}
+          );
+        })}
 
         {inviteLink && (
           <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs dark:border-amber-700 dark:bg-amber-950/40">
             <div className="mb-1 font-medium text-amber-700 dark:text-amber-400">{t('admin.linkNotEmailed')}</div>
+            {createdUsername && (
+              <div className="mb-1 text-amber-700 dark:text-amber-400">
+                {t('admin.usernameSetTo')} <strong>{createdUsername}</strong>
+              </div>
+            )}
             <code className="break-all select-all">{inviteLink}</code>
           </div>
         )}
 
-        <div className="mt-2 flex flex-wrap items-end gap-2">
+        <form
+          autoComplete="off"
+          onSubmit={e => { e.preventDefault(); if (invite.email) sendInvite.mutate(); }}
+          className="mt-2 flex flex-wrap items-end gap-2"
+        >
+          {/* Honeypot decoy: some password managers fill the first email field
+              they see; this off-screen one absorbs the autofill so the real
+              email input below stays empty. */}
+          <input
+            type="email"
+            tabIndex={-1}
+            autoComplete="username"
+            aria-hidden
+            className="absolute left-[-9999px] h-0 w-0 opacity-0"
+            name="vds-decoy"
+          />
           <div className="flex-1">
-            <Label>{t('login.email')}</Label>
-            <Input type="email" value={invite.email} onChange={e => setInvite(p => ({ ...p, email: e.target.value }))} />
-          </div>
-          <div className="flex-1">
-            <Label>{t('login.username')}</Label>
-            <Input value={invite.username} onChange={e => setInvite(p => ({ ...p, username: e.target.value }))} />
+            <Label>{t('admin.inviteEmail')}</Label>
+            <Input
+              type="email"
+              name="vds-invite-email"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="anja@familie.de"
+              value={invite.email}
+              onChange={e => setInvite(p => ({ ...p, email: e.target.value }))}
+            />
           </div>
           <label className="flex items-center gap-1.5 pb-2 text-xs text-zinc-500">
             {t('admin.isAdmin')}
             <Switch checked={invite.is_admin} onChange={v => setInvite(p => ({ ...p, is_admin: v }))} />
           </label>
-          <Button onClick={() => sendInvite.mutate()} disabled={!invite.email || !invite.username || sendInvite.isPending}>
+          <Button type="submit" disabled={!invite.email || sendInvite.isPending}>
             {t('admin.invite')}
           </Button>
-        </div>
+        </form>
+        <p className="text-xs text-zinc-400">{t('admin.usernameDerivedHint')}</p>
         {sendInvite.isError && <p className="text-xs text-red-500">{(sendInvite.error as Error).message}</p>}
       </div>
     </Section>

@@ -1,5 +1,6 @@
 import sql from '../db.js';
-import { ollamaChat, parseLlmJson } from '../llm/ollama.js';
+import { parseLlmJson } from '../llm/ollama.js';
+import { providerForTask } from '../llm/provider.js';
 import { RECATEGORIZE_PROMPT } from '../llm/prompts.js';
 import { notify } from '../notify.js';
 
@@ -35,6 +36,7 @@ export async function runRecategorize(onlyMissing: boolean): Promise<number> {
 }
 
 async function recategorizeWork(eventId: number, onlyMissing: boolean): Promise<void> {
+  const llm = await providerForTask('recategorize');
   const validPaths = (await sql`SELECT path FROM category ORDER BY path`).map(r => r.path as string);
   const items = onlyMissing
     ? await sql`SELECT id, name, ai_guess, canonical_name FROM artikel WHERE category_path IS NULL ORDER BY id`
@@ -47,7 +49,7 @@ async function recategorizeWork(eventId: number, onlyMissing: boolean): Promise<
     const batch = items.slice(i, i + 20);
     let assignments: CatAssignment[] = [];
     try {
-      assignments = parseLlmJson<CatAssignment[]>(await ollamaChat({
+      assignments = parseLlmJson<CatAssignment[]>(await llm.chat({
         system: RECATEGORIZE_PROMPT,
         user: JSON.stringify({
           artikel: batch.map(b => ({ id: b.id, name: b.name, canonical_name: b.canonical_name ?? b.ai_guess })),
@@ -82,8 +84,9 @@ export async function recategorizeOne(artikelId: number): Promise<string | null>
   if (!rows.length) return null;
   const a = rows[0];
   const validPaths = (await sql`SELECT path FROM category ORDER BY path`).map(r => r.path as string);
+  const llm = await providerForTask('recategorize');
 
-  const assignments = parseLlmJson<CatAssignment[]>(await ollamaChat({
+  const assignments = parseLlmJson<CatAssignment[]>(await llm.chat({
     system: RECATEGORIZE_PROMPT,
     user: JSON.stringify({
       artikel: [{ id: a.id, name: a.name, canonical_name: a.canonical_name ?? a.ai_guess }],

@@ -1,6 +1,7 @@
 import sql from '../db.js';
 import { getConfig } from '../config.js';
-import { ollamaChat, parseLlmJson } from '../llm/ollama.js';
+import { parseLlmJson } from '../llm/ollama.js';
+import { providerForTask } from '../llm/provider.js';
 import { searxngSearch } from '../llm/searxng.js';
 import { STAGE1_PROMPT, STAGE2_PROMPT } from '../llm/prompts.js';
 import { mostSimilar } from '../llm/similarity.js';
@@ -72,9 +73,12 @@ async function churnWork(eventId: number): Promise<void> {
   let skipped = 0;
   let dropped = 0;
 
+  const stage1Llm = await providerForTask('churner_stage1');
+  const stage2Llm = await providerForTask('churner_stage2');
+
   for (const a of candidates) {
     try {
-      const stage1 = parseLlmJson<Stage1Result>(await ollamaChat({
+      const stage1 = parseLlmJson<Stage1Result>(await stage1Llm.chat({
         system: STAGE1_PROMPT,
         user: JSON.stringify({
           original_text: a.original_text,
@@ -97,7 +101,7 @@ async function churnWork(eventId: number): Promise<void> {
       } else if (stage1.action === 'lookup' && stage1.query) {
         const hits = await searxngSearch(stage1.query);
         if (hits.length) {
-          const stage2 = parseLlmJson<Stage2Result>(await ollamaChat({
+          const stage2 = parseLlmJson<Stage2Result>(await stage2Llm.chat({
             system: STAGE2_PROMPT,
             user: JSON.stringify({
               original_text: a.original_text,
