@@ -1,9 +1,11 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../context/auth';
 import { api, ApiError } from '../api/client';
 import { Button, Input, Label, Card } from '../components/ui';
+
+interface VersionInfo { sha: string; ref: string }
 
 export function Login() {
   const { login } = useAuth();
@@ -16,6 +18,11 @@ export function Login() {
   const [forgotMode, setForgotMode] = useState(false);
   const [email, setEmail] = useState('');
   const [forgotSent, setForgotSent] = useState(false);
+  const [version, setVersion] = useState<VersionInfo | null>(null);
+
+  useEffect(() => {
+    api<VersionInfo>('/api/version').then(setVersion).catch(() => {});
+  }, []);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -44,7 +51,12 @@ export function Login() {
 
   return (
     <div className="flex min-h-dvh items-center justify-center p-4">
-      <Card className="w-full max-w-sm p-6">
+      <Card className="relative w-full max-w-sm p-6">
+        {version && version.sha !== 'unknown' && (
+          <div className="absolute bottom-1.5 right-3 text-[10px] text-zinc-300 dark:text-zinc-600 tabular">
+            {version.ref}@{version.sha.slice(0, 7)}
+          </div>
+        )}
         <div className="mb-6 text-center">
           <div className="text-4xl">🗄️</div>
           <h1 className="mt-2 text-xl font-bold tracking-tight">{t('login.title')}</h1>

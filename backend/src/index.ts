@@ -39,6 +39,12 @@ async function main(): Promise<void> {
     const [row] = await sql`SELECT 1 AS ok`;
     return { ok: row.ok === 1 };
   });
+  app.get('/api/version', async () => ({
+    sha: process.env.GIT_SHA ?? 'unknown',
+    ref: process.env.GIT_REF ?? 'unknown',
+    node: process.version,
+    started_at: new Date(Date.now() - process.uptime() * 1000).toISOString(),
+  }));
 
   authRoutes(app);
   receiptRoutes(app);

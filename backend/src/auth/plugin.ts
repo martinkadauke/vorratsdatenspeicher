@@ -9,7 +9,7 @@ export function registerAuth(app: FastifyInstance): void {
   app.addHook('onRequest', async (req, reply) => {
     const url = req.url.split('?')[0];
     if (!url.startsWith('/api/')) return;
-    if (['/api/health', '/api/ready', '/api/auth/login', '/api/auth/forgot', '/api/auth/reset', '/api/auth/token-info'].includes(url)) return;
+    if (['/api/health', '/api/ready', '/api/version', '/api/auth/login', '/api/auth/forgot', '/api/auth/reset', '/api/auth/token-info'].includes(url)) return;
 
     if (url.startsWith('/api/internal/')) {
       if (req.headers['x-internal-secret'] !== INTERNAL_SECRET) {

@@ -63,6 +63,9 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository }}:${{ needs.meta.outputs.tag }}
             ghcr.io/${{ github.repository }}:${{ github.sha }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+            GIT_REF=${{ github.ref_name }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

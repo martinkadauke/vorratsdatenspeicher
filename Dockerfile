@@ -18,6 +18,10 @@ RUN npm run build
 FROM node:20-alpine
 WORKDIR /app
 ENV NODE_ENV=production
+ARG GIT_SHA=unknown
+ARG GIT_REF=unknown
+ENV GIT_SHA=${GIT_SHA}
+ENV GIT_REF=${GIT_REF}
 COPY backend/package*.json ./
 RUN npm ci --omit=dev
 COPY --from=backend-build /app/backend/dist ./dist
