@@ -13,7 +13,11 @@ export function nameRoutes(app: FastifyInstance): void {
       FROM artikel a
       LEFT JOIN einkauf e ON e.id = a.einkauf_id
       WHERE a.canonical_name IS NOT NULL
-        ${q ? sql`AND a.canonical_name ILIKE ${like}` : sql``}
+        ${q ? sql`AND (
+          a.canonical_name ILIKE ${like}
+          OR EXISTS (SELECT 1 FROM canonical_translation ct
+                     WHERE ct.canonical_name = a.canonical_name AND ct.translated ILIKE ${like})
+        )` : sql``}
       GROUP BY a.canonical_name
       ORDER BY a.canonical_name ASC
     `;

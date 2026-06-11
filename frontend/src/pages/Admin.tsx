@@ -408,6 +408,30 @@ function FamilySection() {
 }
 
 // ── Maintenance log ──────────────────────────────────────────────────────
+function summaryText(summary: Record<string, unknown> | null): string {
+  if (!summary) return '';
+  if (typeof summary.error === 'string') return `error: ${summary.error}`;
+  const parts: string[] = [];
+  if (typeof summary.candidates === 'number') parts.push(`${summary.candidates} candidates`);
+  if (typeof summary.auto_applied === 'number') parts.push(`${summary.auto_applied} auto-applied`);
+  if (typeof summary.queued === 'number') parts.push(`${summary.queued} queued`);
+  if (typeof summary.skipped === 'number') parts.push(`${summary.skipped} skipped`);
+  if (typeof summary.garbage === 'number' && (summary.garbage as number) > 0) parts.push(`${summary.garbage} garbage`);
+  if (typeof summary.total === 'number') parts.push(`${summary.total} total`);
+  if (typeof summary.updated === 'number') parts.push(`${summary.updated} updated`);
+  if (typeof summary.fallback === 'number' && (summary.fallback as number) > 0) parts.push(`${summary.fallback} fallback`);
+  if (typeof summary.trigger === 'string') parts.push(`(${summary.trigger})`);
+  return parts.length ? parts.join(' · ') : JSON.stringify(summary);
+}
+
+function durationText(start: string, end: string | null): string {
+  if (!end) return '…';
+  const ms = new Date(end).getTime() - new Date(start).getTime();
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${(ms / 60_000).toFixed(1)}m`;
+}
+
 function MaintenanceSection() {
   const { t, i18n } = useTranslation();
   const { data: events } = useQuery({
@@ -419,8 +443,9 @@ function MaintenanceSection() {
   return (
     <Section title={t('admin.maintenance')}>
       <div className="flex flex-col gap-1 text-xs">
+        {!events?.length && <div className="py-2 text-center text-zinc-400">–</div>}
         {events?.map(e => (
-          <div key={e.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5 odd:bg-zinc-50 dark:odd:bg-zinc-900/60">
+          <div key={e.id} className="flex flex-wrap items-center gap-2 rounded-lg px-2 py-1.5 odd:bg-zinc-50 dark:odd:bg-zinc-900/60">
             <Badge className={
               e.status === 'success' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400'
               : e.status === 'error' ? 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400'
@@ -430,7 +455,8 @@ function MaintenanceSection() {
             </Badge>
             <span className="font-medium">{e.kind}</span>
             <span className="text-zinc-400">{new Date(e.started_at).toLocaleString(i18n.language === 'en' ? 'en-GB' : 'de-DE')}</span>
-            <span className="min-w-0 flex-1 truncate text-zinc-400">{e.summary ? JSON.stringify(e.summary) : ''}</span>
+            <span className="text-zinc-400">· {durationText(e.started_at, e.ended_at)}</span>
+            <span className="min-w-0 flex-1 truncate text-zinc-500 dark:text-zinc-400">{summaryText(e.summary)}</span>
           </div>
         ))}
       </div>
