@@ -40,7 +40,8 @@
     "items": "Artikel",
     "noImage": "Kein Foto",
     "empty": "Keine Belege gefunden",
-    "loadMore": "Mehr laden"
+    "loadMore": "Mehr laden",
+    "allStores": "Alle Läden"
   },
   "article": {
     "edit": "Artikel bearbeiten",

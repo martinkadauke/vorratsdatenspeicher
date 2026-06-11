@@ -6,17 +6,27 @@ import { Search } from 'lucide-react';
 import { api } from '../api/client';
 import type { Receipt } from '../api/types';
 import { Card, Input, Spinner, EmptyState, Button } from '../components/ui';
-import { eur, fmtDate } from '../lib/utils';
+import { cn, eur, fmtDate } from '../lib/utils';
+
+interface Store { key: string; display: string; receipts: number; total: number; raw: string[] }
 
 export function Receipts() {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
+  const [storeFilter, setStoreFilter] = useState<string | null>(null);
   const [limit, setLimit] = useState(50);
 
+  const { data: stores } = useQuery({
+    queryKey: ['stores'],
+    queryFn: () => api<Store[]>('/api/stores'),
+    staleTime: 60_000,
+  });
+
+  const storeParam = storeFilter ? `&store=${encodeURIComponent(storeFilter)}` : '';
   const { data, isLoading } = useQuery({
-    queryKey: ['receipts', search, limit],
-    queryFn: () => api<Receipt[]>(`/api/receipts?limit=${limit}&q=${encodeURIComponent(search)}`),
+    queryKey: ['receipts', search, storeFilter, limit],
+    queryFn: () => api<Receipt[]>(`/api/receipts?limit=${limit}&q=${encodeURIComponent(search)}${storeParam}`),
     placeholderData: keepPreviousData,
   });
 
@@ -31,6 +41,36 @@ export function Receipts() {
           onChange={e => setSearch(e.target.value)}
         />
       </div>
+
+      {stores && stores.length > 1 && (
+        <div className="scrollbar-none -mx-1 flex gap-1.5 overflow-x-auto px-1">
+          <button
+            onClick={() => setStoreFilter(null)}
+            className={cn(
+              'shrink-0 rounded-full border px-3 py-1 text-xs font-medium',
+              storeFilter === null
+                ? 'border-transparent bg-emerald-600 text-white'
+                : 'border-zinc-300 text-zinc-500 dark:border-zinc-700',
+            )}
+          >
+            {t('receipts.allStores')}
+          </button>
+          {stores.slice(0, 12).map(s => (
+            <button
+              key={s.key}
+              onClick={() => setStoreFilter(storeFilter === s.key ? null : s.key)}
+              className={cn(
+                'shrink-0 rounded-full border px-3 py-1 text-xs font-medium',
+                storeFilter === s.key
+                  ? 'border-transparent bg-emerald-600 text-white'
+                  : 'border-zinc-300 text-zinc-500 dark:border-zinc-700',
+              )}
+            >
+              {s.display} <span className="opacity-60">·{s.receipts}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {isLoading && <Spinner />}
       {!isLoading && !data?.length && <EmptyState>{t('receipts.empty')}</EmptyState>}

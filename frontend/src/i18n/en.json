@@ -40,7 +40,8 @@
     "items": "items",
     "noImage": "No photo",
     "empty": "No receipts found",
-    "loadMore": "Load more"
+    "loadMore": "Load more",
+    "allStores": "All stores"
   },
   "article": {
     "edit": "Edit item",

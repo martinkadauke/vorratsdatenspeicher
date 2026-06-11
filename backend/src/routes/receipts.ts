@@ -3,11 +3,12 @@ import sql from '../db.js';
 
 export function receiptRoutes(app: FastifyInstance): void {
   app.get('/api/receipts', async (req) => {
-    const q = req.query as { limit?: string; offset?: string; q?: string; from?: string; to?: string };
+    const q = req.query as { limit?: string; offset?: string; q?: string; from?: string; to?: string; store?: string };
     const limit = Math.min(parseInt(q.limit ?? '50', 10) || 50, 200);
     const offset = parseInt(q.offset ?? '0', 10) || 0;
     const search = (q.q ?? '').trim();
     const like = `%${search}%`;
+    const storeLike = q.store ? `%${q.store}%` : null;
 
     const rows = await sql`
       SELECT e.id, e.datum, e.roh_ladenname, e.bild_pfad, e.gesamt_betrag,
@@ -19,6 +20,7 @@ export function receiptRoutes(app: FastifyInstance): void {
           SELECT 1 FROM artikel ax WHERE ax.einkauf_id = e.id
           AND (ax.name ILIKE ${like} OR ax.canonical_name ILIKE ${like} OR ax.ai_guess ILIKE ${like})
         ))` : sql``}
+        ${storeLike ? sql`AND e.roh_ladenname ILIKE ${storeLike}` : sql``}
         ${q.from ? sql`AND e.datum >= ${q.from}` : sql``}
         ${q.to ? sql`AND e.datum <= ${q.to}` : sql``}
       GROUP BY e.id

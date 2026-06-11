@@ -1,4 +1,93 @@
-# Nachtlauf 2026-06-11
+# Nachtlauf 2026-06-11 — Update 2
+
+Zweite Welle: User kam kurz zurück mit großem Auftrag (DeepSeek + Admin-Invite-Bugs
++ Feature-Research + Feature-Implementierung) und ist dann wieder weg.
+
+## Was in dieser Welle ging
+
+### 🔑 DeepSeek-Integration (neuer LLM-Provider neben Ollama)
+
+Backend hat jetzt eine echte Provider-Abstraktion: `LlmProvider`-Interface
+mit `OllamaProvider` und `DeepSeekProvider` (OpenAI-kompatibel via
+`/v1/chat/completions` und `/v1/models`).
+
+**Pro AI-Aufgabe** kann Provider+Modell unabhängig gewählt werden:
+- `recategorize` — Kategorisierung von Artikeln
+- `churner_stage1` — Klassifikation Vorschlag/Lookup/Garbage
+- `churner_stage2` — Web-Recherche-Auswertung
+
+Admin-Tab hat jetzt:
+- **AI Providers** — Ollama URL, DeepSeek URL+API-Key, SearXNG URL, Health-Badges
+- **AI Tasks** — drei Karten mit zwei Dropdowns (Provider + Modell, Modelle pro Provider live geladen)
+- **Churner** — runtime-only Settings (enabled, cron, confidence, defaultLang)
+
+API:
+- `GET /api/ai/providers`
+- `GET /api/ai/models?provider=...`
+- `GET /api/ai/health?provider=...`
+- `PUT /api/ai/tasks/:task` mit `{provider, model}`
+
+Migration 003 seedt DeepSeek-Defaults (leerer API-Key, ollama+qwen2.5:14b
+für alle drei Tasks). Du musst nur API-Key in Admin eintragen, dann
+DeepSeek im Dropdown wählbar.
+
+### 🛡 Admin-Invite-Bugs gefixt
+
+- **"martin" im E-Mail-Feld** war Browser-Autofill. Honeypot-Decoy-Input +
+  `autoComplete="off"` + `name="vds-invite-email"` (kein "email") blockt's jetzt.
+- **Benutzername-Feld weg.** Wird automatisch aus E-Mail-Local-Part
+  abgeleitet (`anja@familie.de` → `anja`). Bei Kollision Suffix
+  (`anja2`, `anja3`, …).
+- **Eigener Admin-Status** kann nicht mehr per Toggle in der User-Liste
+  abgeschaltet werden (Switch ist `disabled`, Backend gibt zusätzlich 400).
+- **Eigenen Account löschen** auch deaktiviert (Button greyed out + 400).
+- **🔑-Reset-Button auf sich selbst** auch deaktiviert — Tooltip verweist
+  auf Profil-Tab.
+- **Letzten Admin löschen** unmöglich (400 mit klarer Meldung).
+
+### 🆕 Features aus dem Research-Bericht
+
+Ich hab in einem Sub-Agent recherchiert was Grocy/AnyList/Bring!/YNAB/Mealie
+können was VDS noch nicht hat, und die Quick-Wins aus dem Bericht heute
+Nacht implementiert:
+
+#### 📊 Trend-Bar auf Stats-Seite
+Oberster Card auf der Statistik-Seite: aktuelle Woche, vs. letzte Woche
+in Prozent, Sparkline der letzten 8 Wochen. Wenn aktuelle Woche
+35%+ über dem 4-Wochen-Schnitt liegt → Anomaly-Banner mit ⚠️.
+Plus: Bis zu 5 "Overspend-Chips" der Kategorien, die diesen Monat
+weit über ihren 3-Monats-Schnitt sind (`{Lebensmittel +47%}`).
+
+Endpoints: `GET /api/trends/weekly?member=…` und `GET /api/trends/overspend`.
+
+#### 💰 Per-Store-Preisvergleich
+Im Namen-Tab > Detail-Modal eines kanonischen Namens: Liste aller Läden
+in denen du das Produkt gekauft hast, mit Durchschnittspreis,
+**günstigster Laden grün hervorgehoben**.
+
+Z.B. Klick auf "Hafermilch" → "Lidl: Ø 0,79 € · Aldi: Ø 0,89 € · DM: Ø 1,29 €".
+
+Endpoint: `GET /api/stores/price-history?canonical=...`
+
+#### 🏪 Store-Filter-Chips auf Belege-Seite
+Filter-Pills oben in der Belege-Liste: "Alle Läden · Lidl ·12 · Edeka ·8 · …".
+Klick filtert die Liste live. Maximum 12 Chips, sortiert nach Anzahl.
+
+Endpoint: `GET /api/stores` (gruppiert ähnliche Namen wie "LIDL", "Lidl GmbH" auf einen Key).
+
+#### 📥 CSV-Export im Profil
+Drei Download-Buttons im Profil:
+- `vds-artikel.csv` — jeder Artikel mit Datum, Laden, Kategorie, Preis, OCR-Text
+- `vds-belege.csv` — eine Zeile pro Beleg
+- `vds-monatlich.csv` — Monatsspend pro Kategorie (Pivot-ready)
+
+UTF-8 BOM damit Excel die Umlaute richtig zeigt.
+
+Endpoints: `GET /api/exports/{artikel,receipts,monthly}.csv`
+
+---
+
+## Was in der ersten Welle (heute Mittag) gefixt wurde
 
 > Autonomes Code-Audit + Hotfix-Session während du weg warst.
 > Alle Änderungen über `main` deployt via CI/CD — kein Eingriff auf Postgres,
@@ -231,24 +320,34 @@ rückgerollt werden.
 
 ## Empfehlungen für die nächste Session
 
-Priorisiert:
+Aus dem Research-Bericht (S=1 Tag, M=1 Woche, L=2-4 Wochen):
 
-1. **NPM-`/receipts/`-Fix** (siehe Sektion 5 oben) — solange das nicht
-   geht, sieht man im Belege-Detail keine Fotos.
-2. **Recategorize laufen lassen + Verifikations-Queue durcharbeiten** —
-   damit die Statistik überhaupt sinnvoll wird.
-3. **Bell-Notifications-Verhalten testen** — Churner sollte zu Bell-Items
-   führen, nicht zu Telegram (wie früher in v1).
-4. **Mobile-UX-Pass** — die App ist Mobile-first gebaut, aber ich hab sie
-   nur am Desktop gestest. Touch-Targets, Keyboard auf iOS, etc.
-5. **Familie zuende konfigurieren** — wenn alle 4 Mitglieder eingerichtet
-   sind, die "Wer isst was"-Tags an die 50-100 häufigsten canonicals
-   verteilen.
-6. **Belege-Suche** — die Suche im Belege-Tab macht jetzt nur Substring.
-   Falls träge bei >500 Belegen: PG-Trigram-Index legen.
-7. **Auswerten + Aufräumen alter Foto-Migration-Workflows in n8n** — die
-   alten "Foto Migration (einmalig)" und "Vorratskammer API"-Workflows
-   sind nicht mehr nötig.
+**Foundational (lohnt sich richtig):**
+1. **Barcode-Scanning + OpenFoodFacts-Lookup** (M) — `barcode`-Spalte auf
+   `canonical_name`, mobile Kamera-UI, Auto-Befüllung von Kategorie/Kalorien.
+   Killer-Feature für "Aldi-Bon kaputt aus dem Scanner, schnell selber einscannen".
+2. **BBD-Tracking + Verfallsbenachrichtigungen** (M) — neue `stock_entry`-Tabelle
+   mit MHD pro Stock-Einheit, FIFO-Verbrauch. Bell für "läuft in 3 Tagen ab".
+   Der Hauptgrund warum Familien Grocy nutzen.
+3. **Rezepte mit Pantry-aware Einkaufsliste** (L) — strategisches Projekt.
+   Rezept→Einkaufsliste dedupliziert, "was kann ich heute Abend kochen", Mealplan.
+
+**Quick-Wins (machst du mal an einem Abend):**
+4. **Recurring Charges** (M) — Strom, Versicherung, Netflix als virtuelle
+   Receipts im Spending-Dashboard. Macht VDS zum Haushalts-Ledger.
+5. **Envelope-Budgets mit Rollover** (S) — übrige Ziele in nächsten Monat
+   übertragen, Urlaubskasse als Sinking Fund.
+6. **Telegram-Wochen-Digest** (S) — n8n cron + bestehende API, "Spent
+   142 € diese Woche, 18 € unter Projektion, Milch bald leer".
+
+**Anderes:**
+- NPM-`/receipts/`-Fix (s. unten Sektion 5) — Fotos in Belege-Detail
+- Recategorize laufen lassen (Ollama oder jetzt auch DeepSeek)
+- Familie umbenennen + Consumer-Tags an Top-50 Canonicals
+- Mobile-UX-Pass (Touch-Targets auf iOS)
+- Auswerten + Aufräumen alter n8n-Workflows ("Foto Migration einmalig",
+  "Vorratskammer API")
+- SSH-Keys auf vds-1/2/3 für mich (siehe Sektion 5)
 
 ---
 
@@ -273,5 +372,13 @@ Fünf Commits, alle auf `main`. Stage und Dev sind synchron.
 
 - `/api/spending/items` filtert jetzt `Meta/Pfand` und `Meta/Rabatt`
   raus (war Inkonsistenz mit `/api/spending/tree`, der das schon machte).
+
+### Welle 2 zusätzlich
+
+- DeepSeek + per-Task AI-Config (`056aea5`)
+- CSV-Export + Per-Store-Preise + Trends (`8382835`)
+- Store-Filter-Chips auf Belege
+
+Insgesamt diese Nacht: **9 Commits**.
 
 Schlaf gut. — Fable
