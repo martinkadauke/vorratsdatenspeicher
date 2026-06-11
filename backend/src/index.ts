@@ -22,6 +22,9 @@ import { adminRoutes } from './routes/admin.js';
 import { meRoutes } from './routes/me.js';
 import { maintenanceRoutes } from './routes/maintenance.js';
 import { i18nRoutes } from './routes/i18n.js';
+import { exportRoutes } from './routes/exports.js';
+import { storeRoutes } from './routes/stores.js';
+import { trendsRoutes } from './routes/trends.js';
 import { rescheduleChurner } from './churner/scheduler.js';
 
 async function main(): Promise<void> {
@@ -61,6 +64,9 @@ async function main(): Promise<void> {
   meRoutes(app);
   maintenanceRoutes(app);
   i18nRoutes(app);
+  exportRoutes(app);
+  storeRoutes(app);
+  trendsRoutes(app);
 
   // Static SPA + receipt images
   const publicDir = path.join(process.cwd(), 'public');

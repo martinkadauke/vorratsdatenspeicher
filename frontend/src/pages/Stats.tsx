@@ -8,6 +8,7 @@ import { api } from '../api/client';
 import type { SpendingNode, SpendingTree } from '../api/types';
 import { Card, Spinner, Modal, Input, Button, EmptyState } from '../components/ui';
 import { useFamily } from '../components/ConsumerChips';
+import { TrendBar } from '../components/TrendBar';
 import { cn, eur, monthLabel, fmtDate } from '../lib/utils';
 
 interface HistoryPoint { ym: string; spend: number }
@@ -192,6 +193,8 @@ export function Stats() {
           </button>
         ))}
       </div>
+
+      <TrendBar member={member} />
 
       {isLoading && <Spinner />}
 

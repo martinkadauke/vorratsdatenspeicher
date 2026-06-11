@@ -99,7 +99,9 @@
     "rename": "Rename",
     "translation": "English name",
     "receipts": "Show receipts",
-    "lastBought": "Last"
+    "lastBought": "Last",
+    "byStore": "Price per store",
+    "cheapest": "cheapest"
   },
   "queue": {
     "title": "Verification queue",
@@ -172,7 +174,14 @@
     "changePw": "Change password",
     "oldPw": "Old password",
     "newPw": "New password",
-    "saved": "Saved"
+    "saved": "Saved",
+    "export": "Data export",
+    "exportHint": "CSV downloads for spreadsheets, taxes, or backup."
+  },
+  "trends": {
+    "thisWeek": "This week",
+    "vsLastWeek": "vs. last week",
+    "anomaly": "This week is well above the {{avg}} average"
   },
   "common": {
     "save": "Save",

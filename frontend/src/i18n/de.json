@@ -99,7 +99,9 @@
     "rename": "Umbenennen",
     "translation": "Englischer Name",
     "receipts": "Belege anzeigen",
-    "lastBought": "Zuletzt"
+    "lastBought": "Zuletzt",
+    "byStore": "Preis pro Laden",
+    "cheapest": "günstigster"
   },
   "queue": {
     "title": "Verifikations-Queue",
@@ -172,7 +174,14 @@
     "changePw": "Passwort ändern",
     "oldPw": "Altes Passwort",
     "newPw": "Neues Passwort",
-    "saved": "Gespeichert"
+    "saved": "Gespeichert",
+    "export": "Daten-Export",
+    "exportHint": "CSV-Downloads für Tabellenkalkulation, Steuererklärung oder Backup."
+  },
+  "trends": {
+    "thisWeek": "Diese Woche",
+    "vsLastWeek": "vs. letzte Woche",
+    "anomaly": "Diese Woche deutlich über Schnitt ({{avg}})"
   },
   "common": {
     "save": "Speichern",

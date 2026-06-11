@@ -2,11 +2,25 @@ import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { LogOut } from 'lucide-react';
+import { LogOut, Download } from 'lucide-react';
 import { api } from '../api/client';
+import { getToken } from '../api/client';
 import { useAuth } from '../context/auth';
 import { setLanguage } from '../i18n';
 import { Card, Button, Input, Label, Select, Switch } from '../components/ui';
+
+async function downloadCsv(path: string, filename: string): Promise<void> {
+  const token = getToken();
+  const res = await fetch(path, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 export function Profile() {
   const { t } = useTranslation();
@@ -84,6 +98,22 @@ export function Profile() {
         <Button onClick={() => changePw.mutate()} disabled={!oldPw || !newPw || changePw.isPending}>
           {t('common.save')}
         </Button>
+      </Card>
+
+      <Card className="flex flex-col gap-3 p-4">
+        <h2 className="text-base font-semibold">{t('profile.export')}</h2>
+        <p className="text-xs text-zinc-400 dark:text-zinc-500">{t('profile.exportHint')}</p>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" onClick={() => downloadCsv('/api/exports/artikel.csv', 'vds-artikel.csv')}>
+            <Download size={14} /> Artikel CSV
+          </Button>
+          <Button variant="secondary" onClick={() => downloadCsv('/api/exports/receipts.csv', 'vds-belege.csv')}>
+            <Download size={14} /> Belege CSV
+          </Button>
+          <Button variant="secondary" onClick={() => downloadCsv('/api/exports/monthly.csv', 'vds-monatlich.csv')}>
+            <Download size={14} /> Monatlich CSV
+          </Button>
+        </div>
       </Card>
 
       <Button variant="secondary" onClick={() => { logout(); navigate('/login'); }}>

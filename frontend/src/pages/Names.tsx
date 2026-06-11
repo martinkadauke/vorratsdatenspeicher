@@ -2,13 +2,19 @@ import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
-import { Search, ReceiptText } from 'lucide-react';
+import { Search, ReceiptText, Store } from 'lucide-react';
 import { api } from '../api/client';
 import type { CanonicalName, Receipt } from '../api/types';
 import { Card, Input, Spinner, EmptyState, Badge, Modal, Button, Label } from '../components/ui';
 import { CategoryPicker } from '../components/CategoryPicker';
 import { ConsumerChips, ConsumerDots } from '../components/ConsumerChips';
-import { fmtDate } from '../lib/utils';
+import { fmtDate, eur } from '../lib/utils';
+
+interface PriceHistory {
+  canonical: string;
+  stores: { key: string; display: string; avg_eur: number; points: unknown[] }[];
+  cheapest: { display: string; avg_eur: number } | null;
+}
 
 export function Names() {
   const { t, i18n } = useTranslation();
@@ -79,6 +85,12 @@ function NameEditModal({ name, onClose }: { name: CanonicalName | null; onClose:
     enabled: !!name,
   });
 
+  const { data: prices } = useQuery({
+    queryKey: ['name-prices', name?.canonical_name],
+    queryFn: () => api<PriceHistory>(`/api/stores/price-history?canonical=${encodeURIComponent(name!.canonical_name)}`),
+    enabled: !!name,
+  });
+
   const save = useMutation({
     mutationFn: async () => {
       if (!name) return;
@@ -129,6 +141,32 @@ function NameEditModal({ name, onClose }: { name: CanonicalName | null; onClose:
           <Label>{t('article.consumers')}</Label>
           <ConsumerChips selected={consumers} onChange={setConsumers} exclusive={exclusive} onExclusiveChange={setExclusive} />
         </div>
+
+        {prices && prices.stores.length > 1 && (
+          <div>
+            <Label>{t('names.byStore')}</Label>
+            <div className="flex flex-col gap-1">
+              {prices.stores.sort((a, b) => a.avg_eur - b.avg_eur).map(s => {
+                const isCheapest = prices.cheapest?.key === s.key;
+                return (
+                  <div
+                    key={s.key}
+                    className={`flex items-center justify-between rounded-lg border px-2.5 py-1.5 text-sm ${isCheapest
+                      ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-700 dark:bg-emerald-950/40'
+                      : 'border-zinc-200 dark:border-zinc-800'}`}
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <Store size={13} className="text-zinc-400" />
+                      {s.display}
+                      {isCheapest && <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400">{t('names.cheapest')}</Badge>}
+                    </span>
+                    <span className="tabular font-medium">Ø {eur(s.avg_eur)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {!!receipts?.length && (
           <div>
