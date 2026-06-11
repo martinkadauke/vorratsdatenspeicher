@@ -35,7 +35,8 @@ export async function runRecategorize(onlyMissing: boolean): Promise<number> {
   return eventId;
 }
 
-async function recategorizeWork(eventId: number, onlyMissing: boolean): Promise<void> {
+/** Categorize-batch work without event tracking — callable from other jobs. */
+export async function processRecategorizeBatch(onlyMissing: boolean): Promise<{ total: number; updated: number; fallback: number }> {
   const llm = await providerForTask('recategorize');
   const validPaths = (await sql`SELECT path FROM category ORDER BY path`).map(r => r.path as string);
   const items = onlyMissing
@@ -71,7 +72,11 @@ async function recategorizeWork(eventId: number, onlyMissing: boolean): Promise<
     }
   }
 
-  const summary = { total: items.length, updated, fallback };
+  return { total: items.length, updated, fallback };
+}
+
+async function recategorizeWork(eventId: number, onlyMissing: boolean): Promise<void> {
+  const summary = await processRecategorizeBatch(onlyMissing);
   await sql`UPDATE maintenance_event SET ended_at = NOW(), status = 'success',
             summary = ${sql.json(summary)} WHERE id = ${eventId}`;
   await notify('recategorize.done', summary);

@@ -6,6 +6,7 @@ import { searxngSearch, searxngImageSearch } from '../llm/searxng.js';
 import { STAGE1_PROMPT, STAGE2_PROMPT } from '../llm/prompts.js';
 import { mostSimilar } from '../llm/similarity.js';
 import { notify } from '../notify.js';
+import { processRecategorizeBatch } from '../maintenance/recategorize.js';
 
 interface Stage1Result {
   action: 'match' | 'new' | 'lookup' | 'garbage';
@@ -49,6 +50,18 @@ export async function runChurn(trigger: 'cron' | 'manual'): Promise<number> {
 }
 
 async function churnWork(eventId: number): Promise<void> {
+  // Step 1: assign categories to any artikel with NULL category_path.
+  // This makes the nightly churn self-healing for freshly-imported data.
+  let recategorize = { total: 0, updated: 0, fallback: 0 };
+  try {
+    recategorize = await processRecategorizeBatch(true);
+    if (recategorize.updated > 0) {
+      console.log(`[churner] recategorize: ${recategorize.updated}/${recategorize.total} artikel got a category_path`);
+    }
+  } catch (err) {
+    console.warn('[churner] recategorize step failed:', (err as Error).message);
+  }
+
   const batchSize = await getConfig('churner.batch_size');
   const confidenceGate = await getConfig('churner.confidence');
 
@@ -169,7 +182,15 @@ async function churnWork(eventId: number): Promise<void> {
   // Also fetch store icons for any stores that don't have one yet
   const storeIconsAdded = await churnStoreIcons();
 
-  const summary = { candidates: candidates.length, auto_applied: autoApplied, queued, skipped, garbage: dropped, store_icons: storeIconsAdded };
+  const summary = {
+    recategorize,
+    candidates: candidates.length,
+    auto_applied: autoApplied,
+    queued,
+    skipped,
+    garbage: dropped,
+    store_icons: storeIconsAdded,
+  };
   await sql`UPDATE maintenance_event SET ended_at = NOW(), status = 'success',
             summary = ${sql.json(summary)} WHERE id = ${eventId}`;
   await notify('churner.run.summary', summary);
