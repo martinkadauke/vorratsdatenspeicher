@@ -537,14 +537,18 @@ function FamilySection() {
     <Section title={t('admin.family')}>
       <div className="flex flex-col gap-2">
         {members?.map((m: FamilyMember) => (
-          <div key={m.id} className="flex items-center gap-1.5 rounded-xl border border-zinc-100 px-2 py-2 dark:border-zinc-800 sm:gap-2 sm:px-3">
+          <div
+            key={m.id}
+            className="grid items-center gap-1.5 rounded-xl border border-zinc-100 px-1.5 py-2 dark:border-zinc-800 sm:gap-2 sm:px-3"
+            style={{ gridTemplateColumns: '40px minmax(0,1fr) 32px 28px' }}
+          >
             <Input
-              className="w-11 shrink-0 px-1 text-center sm:w-14"
+              className="h-9 w-full px-0 text-center"
               defaultValue={m.emoji ?? ''}
               onBlur={e => e.target.value !== (m.emoji ?? '') && patch.mutate({ id: m.id, body: { emoji: e.target.value } })}
             />
             <Input
-              className="min-w-0 flex-1"
+              className="min-w-0"
               defaultValue={m.name}
               onBlur={e => e.target.value !== m.name && e.target.value && patch.mutate({ id: m.id, body: { name: e.target.value } })}
             />
@@ -552,19 +556,25 @@ function FamilySection() {
               type="color"
               defaultValue={m.color ?? '#10b981'}
               onBlur={e => e.target.value !== m.color && patch.mutate({ id: m.id, body: { color: e.target.value } })}
-              className="h-9 w-9 shrink-0 cursor-pointer rounded-lg border border-zinc-200 bg-transparent dark:border-zinc-700"
+              className="h-9 w-full cursor-pointer rounded-lg border border-zinc-200 bg-transparent p-0 dark:border-zinc-700"
             />
-            <Button variant="ghost" className="shrink-0 px-2 text-red-500" onClick={() => {
-              if (confirm(t('common.confirm'))) remove.mutate(m.id);
-            }}><Trash2 size={15} /></Button>
+            <button
+              type="button"
+              onClick={() => { if (confirm(t('common.confirm'))) remove.mutate(m.id); }}
+              className="flex h-9 items-center justify-center rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30"
+              aria-label={t('common.delete')}
+            ><Trash2 size={15} /></button>
           </div>
         ))}
-        <div className="mt-2 flex items-end gap-1.5 sm:gap-2">
-          <div className="w-12 shrink-0 sm:w-16">
+        <div
+          className="mt-2 grid items-end gap-1.5 sm:gap-2"
+          style={{ gridTemplateColumns: '40px minmax(0,1fr) 32px auto' }}
+        >
+          <div>
             <Label>Emoji</Label>
-            <Input className="px-1 text-center" value={newMember.emoji} onChange={e => setNewMember(p => ({ ...p, emoji: e.target.value }))} />
+            <Input className="h-9 px-0 text-center" value={newMember.emoji} onChange={e => setNewMember(p => ({ ...p, emoji: e.target.value }))} />
           </div>
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0">
             <Label>Name</Label>
             <Input value={newMember.name} onChange={e => setNewMember(p => ({ ...p, name: e.target.value }))} />
           </div>
@@ -572,9 +582,12 @@ function FamilySection() {
             type="color"
             value={newMember.color}
             onChange={e => setNewMember(p => ({ ...p, color: e.target.value }))}
-            className="h-9 w-9 shrink-0 cursor-pointer rounded-lg border border-zinc-200 bg-transparent dark:border-zinc-700"
+            className="h-9 w-full cursor-pointer rounded-lg border border-zinc-200 bg-transparent p-0 dark:border-zinc-700"
           />
-          <Button className="shrink-0" onClick={() => create.mutate()} disabled={!newMember.name}>{t('admin.addMember')}</Button>
+          <Button className="h-9 px-2 sm:px-3" onClick={() => create.mutate()} disabled={!newMember.name}>
+            <span className="hidden sm:inline">{t('admin.addMember')}</span>
+            <span className="sm:hidden">+</span>
+          </Button>
         </div>
       </div>
     </Section>
