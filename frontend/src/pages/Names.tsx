@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
@@ -62,16 +62,16 @@ function NameEditModal({ name, onClose }: { name: CanonicalName | null; onClose:
   const [translation, setTranslation] = useState('');
   const [consumers, setConsumers] = useState<number[]>([]);
   const [exclusive, setExclusive] = useState(false);
-  const [initialized, setInitialized] = useState<string | null>(null);
 
-  if (name && initialized !== name.canonical_name) {
+  // Reset local form state whenever a different name is opened
+  useEffect(() => {
+    if (!name) return;
     setNewName(name.canonical_name);
     setCategory(name.category_path);
     setTranslation(name.translation_en ?? '');
     setConsumers(name.consumers);
     setExclusive(name.consumers_exclusive);
-    setInitialized(name.canonical_name);
-  }
+  }, [name?.canonical_name]);
 
   const { data: receipts } = useQuery({
     queryKey: ['name-receipts', name?.canonical_name],
@@ -104,7 +104,6 @@ function NameEditModal({ name, onClose }: { name: CanonicalName | null; onClose:
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['names'] });
-      setInitialized(null);
       onClose();
     },
   });
@@ -112,7 +111,7 @@ function NameEditModal({ name, onClose }: { name: CanonicalName | null; onClose:
   if (!name) return null;
 
   return (
-    <Modal open={!!name} onClose={() => { setInitialized(null); onClose(); }} title={name.canonical_name}>
+    <Modal open={!!name} onClose={onClose} title={name.canonical_name}>
       <div className="flex flex-col gap-4">
         <div>
           <Label>{t('names.rename')}</Label>
@@ -139,7 +138,7 @@ function NameEditModal({ name, onClose }: { name: CanonicalName | null; onClose:
                 <Link
                   key={r.id}
                   to={`/receipts/${r.id}`}
-                  onClick={() => { setInitialized(null); onClose(); }}
+                  onClick={onClose}
                   className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
                 >
                   <ReceiptText size={14} className="shrink-0 text-zinc-400" />
@@ -152,7 +151,7 @@ function NameEditModal({ name, onClose }: { name: CanonicalName | null; onClose:
         )}
 
         <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={() => { setInitialized(null); onClose(); }}>{t('common.cancel')}</Button>
+          <Button variant="secondary" onClick={onClose}>{t('common.cancel')}</Button>
           <Button onClick={() => save.mutate()} disabled={save.isPending || !newName}>{t('common.save')}</Button>
         </div>
       </div>

@@ -76,7 +76,7 @@ function ChurnerSection() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['maintenance-status'] }),
   });
 
-  if (isLoading || !config) return <Section title={useTranslation().t('admin.churner')}><Spinner /></Section>;
+  if (isLoading || !config) return <Section title={t('admin.churner')}><Spinner /></Section>;
 
   const churnRunning = status?.churner.running ?? false;
   const recatRunning = status?.recategorize.running ?? false;
