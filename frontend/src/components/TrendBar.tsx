@@ -49,7 +49,7 @@ export function TrendBar({ member }: { member: number | null }) {
         <div className="min-w-0 flex-1">
           <div className="text-xs font-medium text-zinc-500">{t('trends.thisWeek')}</div>
           <div className="tabular text-2xl font-bold">{eur(weekly.current.spend)}</div>
-          <div className="mt-0.5 flex items-center gap-1 text-xs">
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-1 gap-y-0.5 text-xs">
             {delta !== null && (
               <span className={cn('inline-flex items-center gap-0.5 font-medium',
                 up ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-500')}>
@@ -62,7 +62,7 @@ export function TrendBar({ member }: { member: number | null }) {
             </span>
           </div>
         </div>
-        <div className="h-12 w-32 shrink-0">
+        <div className="h-12 w-24 shrink-0 sm:w-32">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={weekly.weeks}>
               <Line

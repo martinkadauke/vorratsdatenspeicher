@@ -125,7 +125,7 @@ export function ArticleEditModal({ artikel, open, onClose, invalidateKeys }: {
           <CategoryPicker value={category} onChange={setCategory} />
         </div>
 
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           <div>
             <Label>{t('article.amount')}</Label>
             <Input inputMode="decimal" value={menge} onChange={e => setMenge(e.target.value)} />
@@ -134,7 +134,7 @@ export function ArticleEditModal({ artikel, open, onClose, invalidateKeys }: {
             <Label>{t('article.unit')}</Label>
             <Input value={einheit} onChange={e => setEinheit(e.target.value)} />
           </div>
-          <div>
+          <div className="col-span-2 sm:col-span-1">
             <Label>{t('article.price')} (€)</Label>
             <Input inputMode="decimal" value={preis} onChange={e => setPreis(e.target.value)} />
           </div>

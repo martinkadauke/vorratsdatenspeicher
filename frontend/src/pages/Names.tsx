@@ -39,15 +39,15 @@ export function Names() {
 
       <div className="grid gap-1.5 sm:grid-cols-2">
         {data?.map(n => (
-          <Card key={n.canonical_name} onClick={() => setSelected(n)} className="flex items-center gap-2 px-3 py-2">
+          <Card key={n.canonical_name} onClick={() => setSelected(n)} className="flex min-w-0 items-center gap-2 px-3 py-2">
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5">
+              <div className="flex min-w-0 items-center gap-1.5">
                 <span className="truncate font-medium">{n.canonical_name}</span>
                 <ConsumerDots ids={n.consumers} />
               </div>
               <div className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-zinc-400">
                 <Badge>{n.artikel_count}× </Badge>
-                {n.category_path && <Badge>{n.category_path.split('/').pop()}</Badge>}
+                {n.category_path && <Badge className="truncate max-w-[60vw] sm:max-w-none">{n.category_path.split('/').pop()}</Badge>}
                 {n.last_bought && <span>{t('names.lastBought')}: {fmtDate(n.last_bought, i18n.language)}</span>}
               </div>
             </div>

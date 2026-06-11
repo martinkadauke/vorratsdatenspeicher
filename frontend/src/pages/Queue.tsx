@@ -53,18 +53,18 @@ export function Queue() {
                   onChange={e => setEdits(prev => ({ ...prev, [q.id]: e.target.value }))}
                 />
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Button
-                  className="flex-1"
+                  className="flex-1 min-w-[6rem]"
                   disabled={!value}
                   onClick={() => decide.mutate({ id: q.id, action: 'approve', final: value })}
                 >
                   {t('queue.approve')}
                 </Button>
-                <Button variant="secondary" onClick={() => decide.mutate({ id: q.id, action: 'reject' })}>
+                <Button variant="secondary" className="min-w-[5rem]" onClick={() => decide.mutate({ id: q.id, action: 'reject' })}>
                   {t('queue.reject')}
                 </Button>
-                <Button variant="ghost" onClick={() => decide.mutate({ id: q.id, action: 'remove' })}>
+                <Button variant="ghost" className="min-w-[5rem]" onClick={() => decide.mutate({ id: q.id, action: 'remove' })}>
                   {t('queue.remove')}
                 </Button>
               </div>

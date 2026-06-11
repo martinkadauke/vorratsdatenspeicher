@@ -10,9 +10,9 @@ import { useAuth } from '../context/auth';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <Card className="p-4">
+    <Card className="min-w-0 p-3 sm:p-4">
       <h2 className="mb-3 text-base font-semibold">{title}</h2>
-      {children}
+      <div className="min-w-0">{children}</div>
     </Card>
   );
 }
@@ -352,16 +352,16 @@ function UsersSection() {
         {users?.map(u => {
           const isSelf = u.id === me?.id;
           return (
-            <div key={u.id} className="flex items-center gap-3 rounded-xl border border-zinc-100 px-3 py-2 dark:border-zinc-800">
+            <div key={u.id} className="flex items-center gap-2 rounded-xl border border-zinc-100 px-2.5 py-2 dark:border-zinc-800">
               <div className="min-w-0 flex-1">
-                <div className="font-medium">
+                <div className="truncate font-medium">
                   {u.username}
                   {isSelf && <span className="ml-1.5 text-xs font-normal text-zinc-400">({t('admin.you')})</span>}
                 </div>
                 {u.email && <div className="truncate text-xs text-zinc-400">{u.email}</div>}
               </div>
-              <label className="flex items-center gap-1.5 text-xs text-zinc-500">
-                {t('admin.isAdmin')}
+              <label className="flex shrink-0 items-center gap-1 text-xs text-zinc-500" title={t('admin.isAdmin')}>
+                <span className="hidden sm:inline">{t('admin.isAdmin')}</span>
                 <Switch
                   checked={u.is_admin}
                   disabled={isSelf}
@@ -370,14 +370,14 @@ function UsersSection() {
               </label>
               <Button
                 variant="ghost"
-                className="px-2"
+                className="shrink-0 px-2"
                 disabled={isSelf}
                 title={isSelf ? t('admin.youUseProfileForReset') : t('admin.sendReset')}
                 onClick={() => sendReset.mutate(u.id)}
               >🔑</Button>
               <Button
                 variant="ghost"
-                className="px-2 text-red-500"
+                className="shrink-0 px-2 text-red-500"
                 disabled={isSelf}
                 title={isSelf ? t('admin.cannotDeleteSelf') : t('common.delete')}
                 onClick={() => {
@@ -416,7 +416,7 @@ function UsersSection() {
             className="absolute left-[-9999px] h-0 w-0 opacity-0"
             name="vds-decoy"
           />
-          <div className="flex-1">
+          <div className="min-w-0 flex-1 basis-full sm:basis-auto">
             <Label>{t('admin.inviteEmail')}</Label>
             <Input
               type="email"
@@ -428,11 +428,11 @@ function UsersSection() {
               onChange={e => setInvite(p => ({ ...p, email: e.target.value }))}
             />
           </div>
-          <label className="flex items-center gap-1.5 pb-2 text-xs text-zinc-500">
+          <label className="flex shrink-0 items-center gap-1.5 pb-2 text-xs text-zinc-500">
             {t('admin.isAdmin')}
             <Switch checked={invite.is_admin} onChange={v => setInvite(p => ({ ...p, is_admin: v }))} />
           </label>
-          <Button type="submit" disabled={!invite.email || sendInvite.isPending}>
+          <Button type="submit" className="shrink-0" disabled={!invite.email || sendInvite.isPending}>
             {t('admin.invite')}
           </Button>
         </form>
@@ -537,14 +537,14 @@ function FamilySection() {
     <Section title={t('admin.family')}>
       <div className="flex flex-col gap-2">
         {members?.map((m: FamilyMember) => (
-          <div key={m.id} className="flex items-center gap-2 rounded-xl border border-zinc-100 px-3 py-2 dark:border-zinc-800">
+          <div key={m.id} className="flex items-center gap-1.5 rounded-xl border border-zinc-100 px-2 py-2 dark:border-zinc-800 sm:gap-2 sm:px-3">
             <Input
-              className="w-14 text-center"
+              className="w-11 shrink-0 px-1 text-center sm:w-14"
               defaultValue={m.emoji ?? ''}
               onBlur={e => e.target.value !== (m.emoji ?? '') && patch.mutate({ id: m.id, body: { emoji: e.target.value } })}
             />
             <Input
-              className="flex-1"
+              className="min-w-0 flex-1"
               defaultValue={m.name}
               onBlur={e => e.target.value !== m.name && e.target.value && patch.mutate({ id: m.id, body: { name: e.target.value } })}
             />
@@ -552,19 +552,19 @@ function FamilySection() {
               type="color"
               defaultValue={m.color ?? '#10b981'}
               onBlur={e => e.target.value !== m.color && patch.mutate({ id: m.id, body: { color: e.target.value } })}
-              className="h-9 w-9 cursor-pointer rounded-lg border border-zinc-200 bg-transparent dark:border-zinc-700"
+              className="h-9 w-9 shrink-0 cursor-pointer rounded-lg border border-zinc-200 bg-transparent dark:border-zinc-700"
             />
-            <Button variant="ghost" className="px-2 text-red-500" onClick={() => {
+            <Button variant="ghost" className="shrink-0 px-2 text-red-500" onClick={() => {
               if (confirm(t('common.confirm'))) remove.mutate(m.id);
             }}><Trash2 size={15} /></Button>
           </div>
         ))}
-        <div className="mt-2 flex items-end gap-2">
-          <div className="w-16">
+        <div className="mt-2 flex items-end gap-1.5 sm:gap-2">
+          <div className="w-12 shrink-0 sm:w-16">
             <Label>Emoji</Label>
-            <Input value={newMember.emoji} onChange={e => setNewMember(p => ({ ...p, emoji: e.target.value }))} />
+            <Input className="px-1 text-center" value={newMember.emoji} onChange={e => setNewMember(p => ({ ...p, emoji: e.target.value }))} />
           </div>
-          <div className="flex-1">
+          <div className="min-w-0 flex-1">
             <Label>Name</Label>
             <Input value={newMember.name} onChange={e => setNewMember(p => ({ ...p, name: e.target.value }))} />
           </div>
@@ -572,9 +572,9 @@ function FamilySection() {
             type="color"
             value={newMember.color}
             onChange={e => setNewMember(p => ({ ...p, color: e.target.value }))}
-            className="h-9 w-9 cursor-pointer rounded-lg border border-zinc-200 bg-transparent dark:border-zinc-700"
+            className="h-9 w-9 shrink-0 cursor-pointer rounded-lg border border-zinc-200 bg-transparent dark:border-zinc-700"
           />
-          <Button onClick={() => create.mutate()} disabled={!newMember.name}>{t('admin.addMember')}</Button>
+          <Button className="shrink-0" onClick={() => create.mutate()} disabled={!newMember.name}>{t('admin.addMember')}</Button>
         </div>
       </div>
     </Section>
@@ -619,7 +619,7 @@ function MaintenanceSection() {
       <div className="flex flex-col gap-1 text-xs">
         {!events?.length && <div className="py-2 text-center text-zinc-400">–</div>}
         {events?.map(e => (
-          <div key={e.id} className="flex flex-wrap items-center gap-2 rounded-lg px-2 py-1.5 odd:bg-zinc-50 dark:odd:bg-zinc-900/60">
+          <div key={e.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg px-2 py-1.5 odd:bg-zinc-50 dark:odd:bg-zinc-900/60">
             <Badge className={
               e.status === 'success' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400'
               : e.status === 'error' ? 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400'
@@ -630,7 +630,7 @@ function MaintenanceSection() {
             <span className="font-medium">{e.kind}</span>
             <span className="text-zinc-400">{new Date(e.started_at).toLocaleString(i18n.language === 'en' ? 'en-GB' : 'de-DE')}</span>
             <span className="text-zinc-400">· {durationText(e.started_at, e.ended_at)}</span>
-            <span className="min-w-0 flex-1 truncate text-zinc-500 dark:text-zinc-400">{summaryText(e.summary)}</span>
+            <span className="min-w-0 basis-full break-words text-zinc-500 dark:text-zinc-400 sm:basis-0 sm:flex-1 sm:truncate">{summaryText(e.summary)}</span>
           </div>
         ))}
       </div>

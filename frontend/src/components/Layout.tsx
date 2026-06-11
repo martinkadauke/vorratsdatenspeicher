@@ -44,9 +44,9 @@ export function Layout() {
   );
 
   return (
-    <div className="min-h-dvh">
+    <div className="min-h-dvh overflow-x-clip">
       {/* Header */}
-      <header className="sticky top-0 z-30 flex items-center justify-between border-b border-zinc-200 bg-white/80 px-4 py-2.5 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/80">
+      <header className="sticky top-0 z-30 flex items-center justify-between border-b border-zinc-200 bg-white/80 px-3 py-2.5 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/80 sm:px-4">
         <NavLink to="/receipts" className="flex items-center gap-2 text-base font-bold tracking-tight">
           <span className="text-xl">🗄️</span>
           <span className="hidden sm:inline">Vorratsdatenspeicher</span>
@@ -77,7 +77,7 @@ export function Layout() {
         </aside>
 
         {/* Content */}
-        <main className="min-w-0 flex-1 p-4 pb-24 md:pb-8">
+        <main className="min-w-0 flex-1 p-3 pb-24 sm:p-4 md:pb-8">
           <Outlet />
         </main>
       </div>

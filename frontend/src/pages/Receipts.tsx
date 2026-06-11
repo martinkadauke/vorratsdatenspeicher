@@ -77,7 +77,7 @@ export function Receipts() {
 
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {data?.map(r => (
-          <Card key={r.id} onClick={() => navigate(`/receipts/${r.id}`)} className="flex items-center gap-3 p-3">
+          <Card key={r.id} onClick={() => navigate(`/receipts/${r.id}`)} className="flex min-w-0 items-center gap-3 p-3">
             {r.bild_pfad ? (
               <img
                 src={r.bild_pfad}
@@ -92,7 +92,7 @@ export function Receipts() {
             )}
             <div className="min-w-0 flex-1">
               <div className="truncate font-semibold">{r.roh_ladenname ?? '?'}</div>
-              <div className="text-xs text-zinc-500 dark:text-zinc-400">
+              <div className="truncate text-xs text-zinc-500 dark:text-zinc-400">
                 {fmtDate(r.datum, i18n.language)} · {r.item_count} {t('receipts.items')}
               </div>
               <div className="tabular mt-0.5 font-semibold text-emerald-600 dark:text-emerald-500">

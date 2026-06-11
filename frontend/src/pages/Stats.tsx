@@ -133,10 +133,10 @@ export function Stats() {
       <div key={n.path}>
         <div
           className={cn(
-            'flex items-center gap-2 rounded-xl px-2 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-900',
+            'flex items-center gap-1.5 rounded-xl px-1.5 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-900 sm:gap-2 sm:px-2',
             n.level === 1 && 'font-semibold',
           )}
-          style={{ paddingLeft: `${(n.level - 1) * 20 + 8}px` }}
+          style={{ paddingLeft: `${(n.level - 1) * 14 + 6}px` }}
         >
           <button
             onClick={() => children.length ? toggle(n.path) : setDrill(n)}
@@ -209,7 +209,7 @@ export function Stats() {
             {total.goal !== null && <span className="text-sm text-zinc-400">/ {eur(total.goal)}</span>}
           </div>
           <ProgressBar spent={total.mtd} goal={total.goal} projection={total.projection} />
-          <div className="flex items-center justify-between text-xs text-zinc-500">
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-zinc-500">
             <span>
               {t('stats.projection')}: <span className={cn('tabular font-semibold', total.goal !== null && total.projection > total.goal ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-500')}>{eur(total.projection)}</span>
               {total.goal !== null && (

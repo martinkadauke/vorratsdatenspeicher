@@ -27,12 +27,12 @@ export function ReceiptDetailPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-3">
-        <Link to="/receipts" className="rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
+      <div className="flex items-center gap-2 sm:gap-3">
+        <Link to="/receipts" className="shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
           <ArrowLeft size={20} />
         </Link>
-        <div>
-          <h1 className="text-lg font-bold">{data.roh_ladenname ?? '?'}</h1>
+        <div className="min-w-0">
+          <h1 className="truncate text-lg font-bold">{data.roh_ladenname ?? '?'}</h1>
           <div className="text-sm text-zinc-500">
             {fmtDate(data.datum, i18n.language)} · <span className="tabular font-semibold text-emerald-600 dark:text-emerald-500">{eur(data.gesamt_betrag)}</span>
           </div>
@@ -57,11 +57,11 @@ export function ReceiptDetailPage() {
         </div>
 
         {/* Line items */}
-        <div className="flex flex-col gap-1.5">
+        <div className="flex min-w-0 flex-col gap-1.5">
           {data.artikel.map(a => (
-            <Card key={a.id} onClick={() => setEditing(a)} className="flex items-center gap-3 px-3 py-2.5">
+            <Card key={a.id} onClick={() => setEditing(a)} className="flex min-w-0 items-center gap-2 px-2.5 py-2.5 sm:gap-3 sm:px-3">
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5">
+                <div className="flex min-w-0 items-center gap-1.5">
                   <span className="truncate font-medium">{a.canonical_name ?? a.ai_guess ?? a.name}</span>
                   <ConsumerDots ids={a.consumers} />
                 </div>
