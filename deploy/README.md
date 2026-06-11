@@ -37,10 +37,17 @@ git push → GitHub Actions baut Image → ghcr.io → self-hosted Runner (vds-1
    ```
 
 4. **GitHub-Secrets setzen** (Repo → Settings → Secrets and variables → Actions):
-   - `DATABASE_URL` — Prod, postgres://…@192.168.1.238:5432/Einkaufszettelpuppe
-   - `DATABASE_URL_STAGING` — Staging, …/Einkaufszettelpuppe_staging
+   - `DATABASE_URL` — Prod (`main`), …/Einkaufszettelpuppe
+   - `DATABASE_URL_STAGING` — Stage (`stage`), …/Einkaufszettelpuppe_staging
+   - `DATABASE_URL_DEV` — Dev (`dev`), …/Einkaufszettelpuppe_dev
    - `JWT_SECRET` — `openssl rand -hex 32`
    - `INTERNAL_SECRET` — `openssl rand -hex 16`
+
+   | Branch | Env       | Port | Stack       | URL (NPM)                      |
+   |--------|-----------|------|-------------|--------------------------------|
+   | main   | production| 8766 | vds         | vds.giziko.online              |
+   | stage  | staging   | 8767 | vds-stage   | vds-stage.giziko.online        |
+   | dev    | development| 8768| vds-dev     | vds-dev.giziko.online          |
 
 5. **Runner installieren** (auf vds-1, Token vorher per `gh api` holen — siehe Script):
    ```bash

@@ -2,7 +2,7 @@ name: CI/CD
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main, stage, dev]
   workflow_dispatch:
 
 permissions:
@@ -21,19 +21,29 @@ jobs:
     steps:
       - id: x
         run: |
-          if [ "${{ github.ref_name }}" = "main" ]; then
-            echo "tag=latest"        >> $GITHUB_OUTPUT
-            echo "env=production"    >> $GITHUB_OUTPUT
-            echo "port=8766"         >> $GITHUB_OUTPUT
-            echo "stack=vds"         >> $GITHUB_OUTPUT
-            echo "db_secret=DATABASE_URL" >> $GITHUB_OUTPUT
-          else
-            echo "tag=dev"               >> $GITHUB_OUTPUT
-            echo "env=staging"           >> $GITHUB_OUTPUT
-            echo "port=8767"             >> $GITHUB_OUTPUT
-            echo "stack=vds-staging"     >> $GITHUB_OUTPUT
-            echo "db_secret=DATABASE_URL_STAGING" >> $GITHUB_OUTPUT
-          fi
+          case "${{ github.ref_name }}" in
+            main)
+              echo "tag=latest"        >> $GITHUB_OUTPUT
+              echo "env=production"    >> $GITHUB_OUTPUT
+              echo "port=8766"         >> $GITHUB_OUTPUT
+              echo "stack=vds"         >> $GITHUB_OUTPUT
+              echo "db_secret=DATABASE_URL" >> $GITHUB_OUTPUT
+              ;;
+            stage)
+              echo "tag=stage"               >> $GITHUB_OUTPUT
+              echo "env=staging"             >> $GITHUB_OUTPUT
+              echo "port=8767"               >> $GITHUB_OUTPUT
+              echo "stack=vds-stage"         >> $GITHUB_OUTPUT
+              echo "db_secret=DATABASE_URL_STAGING" >> $GITHUB_OUTPUT
+              ;;
+            dev)
+              echo "tag=dev"             >> $GITHUB_OUTPUT
+              echo "env=development"     >> $GITHUB_OUTPUT
+              echo "port=8768"           >> $GITHUB_OUTPUT
+              echo "stack=vds-dev"       >> $GITHUB_OUTPUT
+              echo "db_secret=DATABASE_URL_DEV" >> $GITHUB_OUTPUT
+              ;;
+          esac
 
   build:
     needs: meta
