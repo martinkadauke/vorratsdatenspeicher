@@ -255,11 +255,23 @@ Priorisiert:
 ## Git-Log dieser Session
 
 ```
+bca0e30  Exclude Meta/* (Pfand, Rabatt) from /api/spending/items too
+3e9dabe  Expose GIT_SHA and deploy ref via /api/version, show on login page
 104b31d  Maintenance log readability + names search includes EN translation
 775fa84  Harden auth, admin route + decimal-comma normalization
 2249113  Fix admin page crash + Names modal anti-patterns
 ```
 
-Drei Commits, alle auf `main`. Stage und Dev sind synchron.
+Fünf Commits, alle auf `main`. Stage und Dev sind synchron.
+
+### Zusätzlich
+
+- `/api/version` zeigt jetzt Git-SHA + Branch — auf Login-Page rechts unten
+  in feinem Grau sichtbar. Wenn du nach `git push` nicht sicher bist ob
+  der Deploy schon durch ist: F5 auf Login-Page, im Eck steht
+  `main@abc1234`. Wenn da der neueste SHA steht → deployed.
+
+- `/api/spending/items` filtert jetzt `Meta/Pfand` und `Meta/Rabatt`
+  raus (war Inkonsistenz mit `/api/spending/tree`, der das schon machte).
 
 Schlaf gut. — Fable
