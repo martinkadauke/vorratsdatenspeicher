@@ -13,7 +13,7 @@ import { fmtDate, eur } from '../lib/utils';
 interface PriceHistory {
   canonical: string;
   stores: { key: string; display: string; avg_eur: number; points: unknown[] }[];
-  cheapest: { display: string; avg_eur: number } | null;
+  cheapest: { key: string; display: string; avg_eur: number } | null;
 }
 
 export function Names() {

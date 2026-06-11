@@ -76,9 +76,9 @@ export function Label({ children, className }: { children: ReactNode; className?
 }
 
 // ── Badge ──────────────────────────────────────────────────────────────────
-export function Badge({ children, className }: { children: ReactNode; className?: string }) {
+export function Badge({ children, className, title }: { children: ReactNode; className?: string; title?: string }) {
   return (
-    <span className={cn('inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300', className)}>
+    <span title={title} className={cn('inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300', className)}>
       {children}
     </span>
   );
