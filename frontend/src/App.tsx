@@ -22,6 +22,12 @@ function Protected({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function AdminOnly({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (!user?.is_admin) return <Navigate to="/receipts" replace />;
+  return <>{children}</>;
+}
+
 export function App() {
   return (
     <BrowserRouter>
@@ -37,7 +43,7 @@ export function App() {
           <Route path="/pantry" element={<Pantry />} />
           <Route path="/names" element={<Names />} />
           <Route path="/queue" element={<Queue />} />
-          <Route path="/admin" element={<Admin />} />
+          <Route path="/admin" element={<AdminOnly><Admin /></AdminOnly>} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/more" element={<More />} />
           <Route path="*" element={<Navigate to="/receipts" replace />} />

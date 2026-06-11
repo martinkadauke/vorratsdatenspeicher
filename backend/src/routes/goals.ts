@@ -15,18 +15,23 @@ export function goalRoutes(app: FastifyInstance): void {
 
   app.put('/api/goals', async (req, reply) => {
     const { category_path, year, month, goal_eur } = (req.body ?? {}) as {
-      category_path?: string; year?: number; month?: number; goal_eur?: number | null;
+      category_path?: string; year?: number; month?: number; goal_eur?: number | string | null;
     };
     if (category_path === undefined || !year || !month) {
       return reply.code(400).send({ error: 'category_path, year, month required' });
     }
-    if (goal_eur === null || goal_eur === undefined) {
+    if (goal_eur === null || goal_eur === undefined || goal_eur === '') {
       await sql`DELETE FROM spending_goal WHERE category_path = ${category_path} AND year = ${year} AND month = ${month}`;
       return { ok: true, deleted: true };
     }
+    // Accept comma-decimal from German input
+    const normalized = parseFloat(String(goal_eur).replace(',', '.'));
+    if (!Number.isFinite(normalized) || normalized < 0) {
+      return reply.code(400).send({ error: 'invalid goal_eur' });
+    }
     await sql`
       INSERT INTO spending_goal (category_path, year, month, goal_eur, set_by)
-      VALUES (${category_path}, ${year}, ${month}, ${goal_eur}, ${req.user?.id ?? null})
+      VALUES (${category_path}, ${year}, ${month}, ${normalized}, ${req.user?.id ?? null})
       ON CONFLICT (category_path, year, month)
       DO UPDATE SET goal_eur = EXCLUDED.goal_eur, set_at = NOW(), set_by = EXCLUDED.set_by
     `;

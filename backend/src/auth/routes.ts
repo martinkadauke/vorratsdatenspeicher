@@ -15,8 +15,35 @@ export async function createAuthToken(userId: number, kind: 'invite' | 'reset', 
   return token;
 }
 
+// Simple in-memory login throttle to slow down brute-force attempts.
+// Per-IP: 8 failed attempts in 10 minutes → 401 with "too many attempts" until window resets.
+const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+const MAX_ATTEMPTS = 8;
+const WINDOW_MS = 10 * 60_000;
+
+function trackFailure(ip: string): boolean {
+  const now = Date.now();
+  const entry = loginAttempts.get(ip);
+  if (!entry || entry.resetAt < now) {
+    loginAttempts.set(ip, { count: 1, resetAt: now + WINDOW_MS });
+    return false;
+  }
+  entry.count++;
+  return entry.count > MAX_ATTEMPTS;
+}
+
+function clearFailures(ip: string): void {
+  loginAttempts.delete(ip);
+}
+
 export function authRoutes(app: FastifyInstance): void {
   app.post('/api/auth/login', async (req, reply) => {
+    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip;
+    const existing = loginAttempts.get(ip);
+    if (existing && existing.count > MAX_ATTEMPTS && existing.resetAt > Date.now()) {
+      return reply.code(429).send({ error: 'too many attempts — please wait a few minutes' });
+    }
+
     const { username, password } = (req.body ?? {}) as { username?: string; password?: string };
     if (!username || !password) return reply.code(400).send({ error: 'missing credentials' });
 
@@ -26,8 +53,11 @@ export function authRoutes(app: FastifyInstance): void {
       WHERE LOWER(username) = LOWER(${username}) OR LOWER(email) = LOWER(${username})
     `;
     if (!rows.length || !(await bcrypt.compare(password, rows[0].password_hash))) {
+      const blocked = trackFailure(ip);
+      if (blocked) return reply.code(429).send({ error: 'too many attempts — please wait a few minutes' });
       return reply.code(401).send({ error: 'invalid credentials' });
     }
+    clearFailures(ip);
     const u = rows[0];
     return {
       token: signToken(u.id),

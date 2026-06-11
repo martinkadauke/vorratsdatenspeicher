@@ -2,6 +2,14 @@ import type { FastifyInstance } from 'fastify';
 import sql from '../db.js';
 
 const PATCHABLE = ['name', 'canonical_name', 'category_path', 'menge', 'einheit', 'preis'] as const;
+const DECIMAL_FIELDS = new Set(['menge', 'preis']);
+
+/** Accept German "1,99" alongside "1.99" — normalize for Postgres NUMERIC. */
+function coerceDecimal(v: unknown): string | null {
+  if (v === null || v === undefined || v === '') return null;
+  const s = String(v).replace(',', '.').trim();
+  return Number.isFinite(parseFloat(s)) ? s : null;
+}
 
 export function articleRoutes(app: FastifyInstance): void {
   app.patch('/api/articles/:id', async (req, reply) => {
@@ -11,7 +19,8 @@ export function articleRoutes(app: FastifyInstance): void {
 
     const updates: Record<string, unknown> = {};
     for (const key of PATCHABLE) {
-      if (key in body) updates[key] = body[key];
+      if (!(key in body)) continue;
+      updates[key] = DECIMAL_FIELDS.has(key) ? coerceDecimal(body[key]) : body[key];
     }
     if (!Object.keys(updates).length) return reply.code(400).send({ error: 'no patchable fields' });
 
