@@ -12,14 +12,14 @@ git push → GitHub Actions baut Image → ghcr.io → self-hosted Runner (vds-1
 | vds-1 (Swarm-Manager, CI-Runner) | VM 241 auf **kadaukevox** (USV!) — 192.168.1.241 |
 | vds-2 (Swarm-Manager) | VM 242 auf **kadaukeprox** — 192.168.1.242 |
 | vds-3 (Swarm-Manager) | VM 243 auf **kadaukemox** — 192.168.1.243 |
-| Virtuelle IP (keepalived) | **192.168.1.240** → darauf zeigt NPM |
+| Virtuelle IP (keepalived) | **192.168.1.250** → darauf zeigt NPM |
 | App | 2 Replicas, Port 8766 via Routing Mesh auf allen Nodes |
 | Postgres, Ollama, SearXNG, Belege-Fotos | bleiben auf Unraid (192.168.1.238) |
 
 ## Einmaliges Setup
 
-1. **Unraid: NFS-Export aktivieren** — Shares → `Aufnahmen` → NFS Export: Yes,
-   Rule: `192.168.1.0/24(ro)` (Belege-Fotos für die App).
+1. **NPM auf Unraid** serviert `/receipts/*` direkt aus dem Filesystem
+   (Custom location im Proxy-Host; Container braucht die Fotos nicht).
 
 2. **VMs erstellen** — auf jedem Proxmox-Node (Web-UI → Shell), Script aus
    `deploy/proxmox/create-vm.sh` einfügen und ausführen:
@@ -46,7 +46,7 @@ git push → GitHub Actions baut Image → ghcr.io → self-hosted Runner (vds-1
    RUNNER_TOKEN=... bash install-runner.sh
    ```
 
-6. **NPM**: neuer Proxy Host → `vds.giziko.online` → `192.168.1.240:8766`.
+6. **NPM**: neuer Proxy Host → `vds.giziko.online` → `192.168.1.250:8766`.
 
 ## Ab dann
 

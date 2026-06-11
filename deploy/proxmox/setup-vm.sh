@@ -7,21 +7,14 @@
 set -euo pipefail
 
 ROLE="${ROLE:?ROLE=manager-1 oder ROLE=manager}"
-VIP="${VIP:-192.168.1.240}"
-UNRAID="${UNRAID:-192.168.1.238}"
-RECEIPTS_EXPORT="${RECEIPTS_EXPORT:-/mnt/user/Aufnahmen/receipts}"
+VIP="${VIP:-192.168.1.250}"
 
 echo ">> Docker installieren..."
 curl -fsSL https://get.docker.com | sudo sh
 sudo usermod -aG docker "$USER"
 
-echo ">> NFS-Mount für Belege einrichten..."
-sudo apt-get install -y -qq nfs-common keepalived
-sudo mkdir -p /mnt/receipts
-if ! grep -q '/mnt/receipts' /etc/fstab; then
-  echo "${UNRAID}:${RECEIPTS_EXPORT} /mnt/receipts nfs ro,soft,nofail,_netdev 0 0" | sudo tee -a /etc/fstab
-fi
-sudo mount -a || echo "WARNUNG: NFS-Mount fehlgeschlagen — ist der NFS-Export auf Unraid aktiviert? (Shares → Aufnahmen → NFS: Ja, Rule: 192.168.1.0/24 RO)"
+echo ">> Pakete für VIP-Failover..."
+sudo apt-get install -y -qq keepalived
 
 echo ">> keepalived konfigurieren (VIP ${VIP})..."
 PRIORITY=100

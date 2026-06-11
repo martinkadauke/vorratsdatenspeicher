@@ -10,8 +10,8 @@ services:
       PORT: "80"
     ports:
       - "8766:80"          # Swarm routing mesh: erreichbar über JEDE Node-IP
-    volumes:
-      - /mnt/receipts:/app/public/receipts:ro   # NFS-Mount von Unraid (siehe setup-vm.sh)
+    # Belege-Fotos: NPM auf Unraid serviert /receipts/* direkt aus dem Filesystem.
+    # Der Container braucht die Fotos nicht — daher kein Volume-Mount.
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:80/api/health"]
       interval: 15s
