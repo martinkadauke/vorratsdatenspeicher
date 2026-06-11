@@ -176,8 +176,49 @@
     "oldPw": "Old password",
     "newPw": "New password",
     "saved": "Saved",
+    "helpHeading": "Help & introduction",
+    "replayTour": "Replay tour",
     "export": "Data export",
     "exportHint": "CSV downloads for spreadsheets, taxes, or backup."
+  },
+  "tour": {
+    "next": "Next",
+    "prev": "Back",
+    "skip": "Skip",
+    "finish": "Let's go",
+    "gotoStep": "Step",
+    "welcome": {
+      "title": "Welcome to Vorratsdatenspeicher!",
+      "body": "Let me walk you through the main features. It takes less than a minute. You can skip the tour any time and replay it later from your profile."
+    },
+    "receipts": {
+      "title": "Receipts — every shopping trip",
+      "body": "When a receipt is scanned via the Telegram bot it lands here with photo, items, and total. Tap an item to fix the name, category, or price — changes at the canonical-name level cascade to all purchases."
+    },
+    "stats": {
+      "title": "Statistics — where the money goes",
+      "body": "Monthly spending per category with end-of-month projection. Set a goal per category (pencil icon) and the app warns you when you're over. The top card shows this-week-vs-last-week trends."
+    },
+    "shopping": {
+      "title": "Shopping list — what's running low",
+      "body": "Suggestions based on how fast things get used up. \"Done\" removes it, \"Later\" snoozes 7 days, \"Never\" excludes the item for good."
+    },
+    "pantry": {
+      "title": "Pantry — what you still have",
+      "body": "Estimated remaining quantity and days-until-empty for items you buy regularly. Computed from purchase history + typical consumption."
+    },
+    "names": {
+      "title": "Names — canonical labels",
+      "body": "Manage the product names the system has learned. Tap a name → see all receipts, rename (cascades everywhere), and see which store sells it cheapest."
+    },
+    "family": {
+      "title": "Family — who eats what",
+      "body": "In Admin you can add family members and tag items (\"only Martin eats tuna\"). Statistics then lets you filter per person to see who's spending on what."
+    },
+    "done": {
+      "title": "You're all set 🎉",
+      "body": "Enjoy Vorratsdatenspeicher! Need a refresher? Replay this tour any time from Profile → Help."
+    }
   },
   "trends": {
     "thisWeek": "This week",

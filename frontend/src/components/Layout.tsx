@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -6,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/auth';
 import { NotificationBell } from './NotificationBell';
+import { Tour } from './Tour';
 import { cn } from '../lib/utils';
 
 const NAV = [
@@ -21,6 +23,22 @@ export function Layout() {
   const { t } = useTranslation();
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const [tourOpen, setTourOpen] = useState(false);
+
+  // Auto-open tour on first login (after a tiny delay so the UI has settled)
+  useEffect(() => {
+    if (user && user.has_seen_tour === false) {
+      const id = window.setTimeout(() => setTourOpen(true), 400);
+      return () => window.clearTimeout(id);
+    }
+  }, [user?.has_seen_tour]);
+
+  // Allow Profile page to re-open the tour via custom event
+  useEffect(() => {
+    const open = () => setTourOpen(true);
+    window.addEventListener('vds:open-tour', open);
+    return () => window.removeEventListener('vds:open-tour', open);
+  }, []);
 
   const navItem = (to: string, Icon: typeof ReceiptText, label: string, mobile = false) => (
     <NavLink
@@ -87,6 +105,8 @@ export function Layout() {
         {NAV.slice(0, 4).map(n => navItem(n.to, n.icon, t(n.key), true))}
         {navItem('/more', MoreHorizontal, t('nav.more'), true)}
       </nav>
+
+      <Tour open={tourOpen} onClose={() => setTourOpen(false)} />
     </div>
   );
 }

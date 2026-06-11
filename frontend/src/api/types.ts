@@ -5,6 +5,7 @@ export interface User {
   is_admin: boolean;
   prefers_dark: boolean;
   preferred_lang: string;
+  has_seen_tour?: boolean;
   created_at?: string;
 }
 

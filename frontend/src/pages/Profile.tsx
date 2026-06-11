@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Download } from 'lucide-react';
+import { LogOut, Download, Sparkles } from 'lucide-react';
 import { api } from '../api/client';
 import { getToken } from '../api/client';
 import { useAuth } from '../context/auth';
@@ -97,6 +97,16 @@ export function Profile() {
         {pwSaved && <p className="text-sm text-emerald-600">{t('profile.saved')}</p>}
         <Button onClick={() => changePw.mutate()} disabled={!oldPw || !newPw || changePw.isPending}>
           {t('common.save')}
+        </Button>
+      </Card>
+
+      <Card className="flex flex-col gap-3 p-4">
+        <h2 className="text-base font-semibold">{t('profile.helpHeading')}</h2>
+        <Button
+          variant="secondary"
+          onClick={() => window.dispatchEvent(new Event('vds:open-tour'))}
+        >
+          <Sparkles size={14} /> {t('profile.replayTour')}
         </Button>
       </Card>
 

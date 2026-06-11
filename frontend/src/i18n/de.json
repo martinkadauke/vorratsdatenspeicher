@@ -176,8 +176,49 @@
     "oldPw": "Altes Passwort",
     "newPw": "Neues Passwort",
     "saved": "Gespeichert",
+    "helpHeading": "Hilfe & Einführung",
+    "replayTour": "Tour erneut starten",
     "export": "Daten-Export",
     "exportHint": "CSV-Downloads für Tabellenkalkulation, Steuererklärung oder Backup."
+  },
+  "tour": {
+    "next": "Weiter",
+    "prev": "Zurück",
+    "skip": "Überspringen",
+    "finish": "Los geht's",
+    "gotoStep": "Schritt",
+    "welcome": {
+      "title": "Willkommen beim Vorratsdatenspeicher!",
+      "body": "Ich begleite dich kurz durch die wichtigsten Funktionen. Das dauert weniger als eine Minute. Den Rundgang kannst du jederzeit überspringen und später im Profil neu starten."
+    },
+    "receipts": {
+      "title": "Belege — alle deine Einkäufe",
+      "body": "Wenn ein Bon per Telegram-Bot eingescannt wird, landet er hier mit Foto, Artikeln und Gesamtbetrag. Tippe auf einen Artikel um Namen, Kategorie oder Preis zu korrigieren — Änderungen am kanonischen Namen werden auf alle Einkäufe übertragen."
+    },
+    "stats": {
+      "title": "Statistik — wohin geht das Geld",
+      "body": "Pro Monat siehst du Ausgaben nach Kategorie, mit Hochrechnung bis Monatsende. Setze ein Ziel pro Kategorie (Bleistift-Symbol), die App warnt wenn du drüberliegst. Diese-Woche-vs-letzte-Woche zeigt Trends oben."
+    },
+    "shopping": {
+      "title": "Einkaufsliste — was bald aus geht",
+      "body": "Hier landen Vorschläge basierend darauf, wie schnell etwas verbraucht wird. „Erledigt“ entfernt es, „Später“ schiebt es 7 Tage, „Nie wieder“ schließt den Artikel dauerhaft aus."
+    },
+    "pantry": {
+      "title": "Vorrat — was du noch hast",
+      "body": "Geschätzte Restmenge und Tage-bis-leer für jeden Artikel den du regelmäßig kaufst. Berechnet aus Kaufhistorie + typischem Verbrauch."
+    },
+    "names": {
+      "title": "Namen — kanonische Bezeichnungen",
+      "body": "Hier verwaltest du die Produktnamen die das System gelernt hat. Tippe einen Namen → siehst alle Belege, kannst umbenennen (Änderung wirkt sich überall aus), und siehst in welchem Laden du es am günstigsten kaufst."
+    },
+    "family": {
+      "title": "Familie — wer isst was",
+      "body": "Im Admin kannst du Familienmitglieder anlegen und an Artikel taggen („nur Martin isst Thunfisch“). In der Statistik kannst du dann nach Person filtern und sehen wer wofür Geld ausgibt."
+    },
+    "done": {
+      "title": "Du bist startklar 🎉",
+      "body": "Viel Spaß mit Vorratsdatenspeicher! Wenn du Hilfe brauchst, findest du diese Tour jederzeit unter Profil → Hilfe."
+    }
   },
   "trends": {
     "thisWeek": "Diese Woche",
