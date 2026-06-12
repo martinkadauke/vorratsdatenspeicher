@@ -143,9 +143,17 @@ export function ArticleEditModal({ artikel, open, onClose, invalidateKeys }: {
 
   if (!artikel) return null;
 
+  // Enter (not in a textarea) saves.
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && (e.target as HTMLElement).tagName !== 'TEXTAREA' && !save.isPending) {
+      e.preventDefault();
+      save.mutate();
+    }
+  };
+
   return (
     <Modal open={open} onClose={onClose} title={t('article.edit')}>
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-4" onKeyDown={onKeyDown}>
         {artikel.original_text && (
           <div>
             <Label>{t('article.originalText')}</Label>

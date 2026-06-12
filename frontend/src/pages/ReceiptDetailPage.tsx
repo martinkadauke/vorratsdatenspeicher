@@ -87,7 +87,8 @@ export function ReceiptDetailPage() {
   const goPrev = () => neighbors?.prev_id && navigate(`/receipts/${neighbors.prev_id}${filterQs}`);
   const goNext = () => neighbors?.next_id && navigate(`/receipts/${neighbors.next_id}${filterQs}`);
 
-  // Keyboard: ← / → arrow navigation, ignored when typing in a field or a modal is open
+  // Keyboard: ← / → navigate, E opens the receipt edit window. Ignored while
+  // typing in a field or a modal is open.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (editing || editReceipt || adding) return;
@@ -95,6 +96,7 @@ export function ReceiptDetailPage() {
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if (e.key === 'ArrowLeft') { e.preventDefault(); goPrev(); }
       if (e.key === 'ArrowRight') { e.preventDefault(); goNext(); }
+      if (e.key === 'e' || e.key === 'E') { e.preventDefault(); setEditReceipt(true); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -357,9 +359,14 @@ function ReceiptEditModal({ receipt, open, onClose }: { receipt: ReceiptDetail; 
     },
   });
 
+  // Enter anywhere in the form saves (unless still loading / invalid).
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && datum && !save.isPending) { e.preventDefault(); save.mutate(); }
+  };
+
   return (
     <Modal open={open} onClose={onClose} title={t('receiptEdit.title')}>
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-4" onKeyDown={onKeyDown}>
         <div>
           <Label>{t('receiptEdit.date')}</Label>
           <Input type="date" value={datum} onChange={e => setDatum(e.target.value)} />

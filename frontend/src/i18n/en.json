@@ -212,6 +212,7 @@
     "resetPw": "New password",
     "family": "Family members",
     "addMember": "Add member",
+    "memberUser": "Linked to user",
     "maintenance": "Nightly maintenance",
     "maintenanceHint": "Background AI jobs: categorize new items, clean up canonical names, fetch store logos.",
     "maintenanceEnabled": "Maintenance runs nightly",

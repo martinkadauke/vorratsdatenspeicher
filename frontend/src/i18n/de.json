@@ -212,6 +212,7 @@
     "resetPw": "Neues Passwort",
     "family": "Familienmitglieder",
     "addMember": "Mitglied hinzufügen",
+    "memberUser": "Verknüpft mit User",
     "maintenance": "Nächtliche Wartung",
     "maintenanceHint": "Im Hintergrund laufende KI-Aufgaben: Kategorisierung neuer Artikel, Bereinigung kanonischer Namen, automatisches Holen von Laden-Logos.",
     "maintenanceEnabled": "Wartung nachts aktiv",

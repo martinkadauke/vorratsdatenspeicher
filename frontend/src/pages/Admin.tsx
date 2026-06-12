@@ -628,33 +628,38 @@ function KontenSection() {
       <div className="flex flex-col gap-2">
         <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('admin.kontenHint')}</p>
         {konten?.map(k => (
-          <div key={k.id} className="flex items-center gap-2 rounded-xl border border-zinc-100 px-2.5 py-2 dark:border-zinc-800">
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5">
+          <div key={k.id} className="flex flex-col gap-2 rounded-xl border border-zinc-100 p-2.5 dark:border-zinc-800">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-1.5">
                 <span className="truncate font-medium">{k.name}</span>
-                {k.is_shared && <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400">{t('admin.kontoShared')}</span>}
+                {k.is_shared && <span className="shrink-0 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400">{t('admin.kontoShared')}</span>}
               </div>
-              <div className="text-xs text-zinc-400">{k.receipts} {t('stores.receipts')}{k.owner ? ` · ${k.owner}` : ''}</div>
+              {!k.is_shared && (
+                <Button
+                  variant="ghost"
+                  className="shrink-0 px-2 text-red-500"
+                  disabled={k.receipts > 0}
+                  title={k.receipts > 0 ? t('admin.kontoHasReceipts') : t('common.delete')}
+                  onClick={async () => { if (await confirm({ message: t('common.confirm'), confirmLabel: t('common.delete'), cancelLabel: t('common.cancel'), danger: true })) remove.mutate(k.id); }}
+                ><Trash2 size={15} /></Button>
+              )}
             </div>
-            {!k.is_shared && (
-              <Select
-                value={k.user_id ?? ''}
-                onChange={e => patch.mutate({ id: k.id, body: { user_id: e.target.value ? parseInt(e.target.value, 10) : null } })}
-                className="w-32 shrink-0 text-xs"
-              >
-                <option value="">{t('admin.kontoNoOwner')}</option>
-                {users?.map(u => <option key={u.id} value={u.id}>{u.username}</option>)}
-              </Select>
-            )}
-            {!k.is_shared && (
-              <Button
-                variant="ghost"
-                className="shrink-0 px-2 text-red-500"
-                disabled={k.receipts > 0}
-                title={k.receipts > 0 ? t('admin.kontoHasReceipts') : t('common.delete')}
-                onClick={async () => { if (await confirm({ message: t('common.confirm'), confirmLabel: t('common.delete'), cancelLabel: t('common.cancel'), danger: true })) remove.mutate(k.id); }}
-              ><Trash2 size={15} /></Button>
-            )}
+            <div className="flex items-center justify-between gap-2">
+              <span className="shrink-0 text-xs text-zinc-400">{k.receipts} {t('stores.receipts')}</span>
+              {!k.is_shared && (
+                <label className="flex min-w-0 items-center gap-1.5 text-xs text-zinc-500">
+                  <span className="shrink-0">{t('admin.kontoOwner')}</span>
+                  <Select
+                    value={k.user_id ?? ''}
+                    onChange={e => patch.mutate({ id: k.id, body: { user_id: e.target.value ? parseInt(e.target.value, 10) : null } })}
+                    className="min-w-0 flex-1"
+                  >
+                    <option value="">{t('admin.kontoNoOwner')}</option>
+                    {users?.map(u => <option key={u.id} value={u.id}>{u.username}</option>)}
+                  </Select>
+                </label>
+              )}
+            </div>
           </div>
         ))}
 
@@ -750,6 +755,7 @@ function FamilySection() {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const { data: members } = useFamily();
+  const { data: users } = useQuery({ queryKey: ['users'], queryFn: () => api<User[]>('/api/users') });
   const [newMember, setNewMember] = useState({ name: '', emoji: '', color: '#10b981' });
 
   const invalidate = () => void qc.invalidateQueries({ queryKey: ['family'] });
@@ -771,33 +777,42 @@ function FamilySection() {
     <Section title={t('admin.family')}>
       <div className="flex flex-col gap-2">
         {members?.map((m: FamilyMember) => (
-          <div
-            key={m.id}
-            className="grid items-center gap-1.5 rounded-xl border border-zinc-100 px-1.5 py-2 dark:border-zinc-800 sm:gap-2 sm:px-3"
-            style={{ gridTemplateColumns: '40px minmax(0,1fr) 32px 28px' }}
-          >
-            <Input
-              className="h-9 w-full px-0 text-center"
-              defaultValue={m.emoji ?? ''}
-              onBlur={e => e.target.value !== (m.emoji ?? '') && patch.mutate({ id: m.id, body: { emoji: e.target.value } })}
-            />
-            <Input
-              className="min-w-0"
-              defaultValue={m.name}
-              onBlur={e => e.target.value !== m.name && e.target.value && patch.mutate({ id: m.id, body: { name: e.target.value } })}
-            />
-            <input
-              type="color"
-              defaultValue={m.color ?? '#10b981'}
-              onBlur={e => e.target.value !== m.color && patch.mutate({ id: m.id, body: { color: e.target.value } })}
-              className="h-9 w-full cursor-pointer rounded-lg border border-zinc-200 bg-transparent p-0 dark:border-zinc-700"
-            />
-            <button
-              type="button"
-              onClick={async () => { if (await confirm({ message: t('common.confirm'), confirmLabel: t('common.delete'), cancelLabel: t('common.cancel'), danger: true })) remove.mutate(m.id); }}
-              className="flex h-9 items-center justify-center rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30"
-              aria-label={t('common.delete')}
-            ><Trash2 size={15} /></button>
+          <div key={m.id} className="flex flex-col gap-1.5 rounded-xl border border-zinc-100 px-1.5 py-2 dark:border-zinc-800 sm:px-3">
+            <div className="grid items-center gap-1.5 sm:gap-2" style={{ gridTemplateColumns: '40px minmax(0,1fr) 32px 28px' }}>
+              <Input
+                className="h-9 w-full px-0 text-center"
+                defaultValue={m.emoji ?? ''}
+                onBlur={e => e.target.value !== (m.emoji ?? '') && patch.mutate({ id: m.id, body: { emoji: e.target.value } })}
+              />
+              <Input
+                className="min-w-0"
+                defaultValue={m.name}
+                onBlur={e => e.target.value !== m.name && e.target.value && patch.mutate({ id: m.id, body: { name: e.target.value } })}
+              />
+              <input
+                type="color"
+                defaultValue={m.color ?? '#10b981'}
+                onBlur={e => e.target.value !== m.color && patch.mutate({ id: m.id, body: { color: e.target.value } })}
+                className="h-9 w-full cursor-pointer rounded-lg border border-zinc-200 bg-transparent p-0 dark:border-zinc-700"
+              />
+              <button
+                type="button"
+                onClick={async () => { if (await confirm({ message: t('common.confirm'), confirmLabel: t('common.delete'), cancelLabel: t('common.cancel'), danger: true })) remove.mutate(m.id); }}
+                className="flex h-9 items-center justify-center rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30"
+                aria-label={t('common.delete')}
+              ><Trash2 size={15} /></button>
+            </div>
+            <label className="flex items-center gap-1.5 pl-0.5 text-xs text-zinc-500">
+              <span className="shrink-0">{t('admin.memberUser')}</span>
+              <Select
+                value={m.user_id ?? ''}
+                onChange={e => patch.mutate({ id: m.id, body: { user_id: e.target.value ? parseInt(e.target.value, 10) : null } })}
+                className="min-w-0 flex-1"
+              >
+                <option value="">{t('admin.kontoNoOwner')}</option>
+                {users?.map(u => <option key={u.id} value={u.id}>{u.username}</option>)}
+              </Select>
+            </label>
           </div>
         ))}
         <div
