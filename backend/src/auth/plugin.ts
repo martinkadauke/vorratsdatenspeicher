@@ -10,6 +10,8 @@ export function registerAuth(app: FastifyInstance): void {
     const url = req.url.split('?')[0];
     if (!url.startsWith('/api/')) return;
     if (['/api/health', '/api/ready', '/api/version', '/api/auth/login', '/api/auth/forgot', '/api/auth/reset', '/api/auth/token-info'].includes(url)) return;
+    // public, token-protected email link (model-review approve/reject from the mail)
+    if (req.method === 'GET' && /^\/api\/model-review\/\d+\/decide$/.test(url)) return;
 
     if (url.startsWith('/api/internal/')) {
       if (req.headers['x-internal-secret'] !== INTERNAL_SECRET) {
