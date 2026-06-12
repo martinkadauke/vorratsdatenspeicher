@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import sql from '../db.js';
+import { kontoScope } from '../auth/konto.js';
 
 /** Normalize free-text store name into a stable key for grouping.
  *  "LIDL", "Lidl", "Lidl GmbH" → "lidl". */
@@ -14,11 +15,12 @@ function normalizeStore(raw: string): string {
 
 export function storeRoutes(app: FastifyInstance): void {
   /** List all stores ever seen with receipt count + total spend. */
-  app.get('/api/stores', async () => {
+  app.get('/api/stores', async (req) => {
     const rows = await sql`
       SELECT roh_ladenname, COUNT(*)::int AS receipts, SUM(gesamt_betrag)::numeric(10,2) AS total
-      FROM einkauf
+      FROM einkauf e
       WHERE roh_ladenname IS NOT NULL
+        ${kontoScope(req.user, sql`e.konto_id`)}
       GROUP BY roh_ladenname
       ORDER BY receipts DESC
     `;
@@ -120,6 +122,7 @@ export function storeRoutes(app: FastifyInstance): void {
       WHERE a.canonical_name = ${name}
         AND a.preis IS NOT NULL
         AND a.preis > 0
+        ${kontoScope(req.user, sql`e.konto_id`)}
       GROUP BY e.roh_ladenname, ym
       ORDER BY ym DESC, store
     `;

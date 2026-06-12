@@ -198,6 +198,15 @@
     "testTo": "Test-E-Mail an",
     "sendTest": "Test senden",
     "isAdmin": "Admin",
+    "seesAll": "Sieht alles",
+    "seesAllKonten": "Sieht alle Konten (Super-Admin) — kann alle Belege sehen, nicht nur GKK + eigene",
+    "konten": "Konten",
+    "kontenHint": "Zahlkonten. GKK ist geteilt (alle sehen es). Private Konten gehören einem User und sind nur für ihn (+ Super-Admins) sichtbar. Jeder Beleg gehört genau einem Konto.",
+    "kontoShared": "geteilt",
+    "kontoName": "Konto-Name",
+    "kontoOwner": "Gehört zu",
+    "kontoNoOwner": "— niemand —",
+    "kontoHasReceipts": "Konto hat noch Belege — erst verschieben",
     "resetPw": "Neues Passwort",
     "family": "Familienmitglieder",
     "addMember": "Mitglied hinzufügen",
@@ -320,6 +329,11 @@
     "thisWeek": "Diese Woche",
     "vsLastWeek": "vs. letzte Woche",
     "anomaly": "Diese Woche deutlich über Schnitt ({{avg}})"
+  },
+  "quelle": {
+    "zettel": "Kassenbon",
+    "email": "E-Mail",
+    "bar": "Bar"
   },
   "common": {
     "save": "Speichern",

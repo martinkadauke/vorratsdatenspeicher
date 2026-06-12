@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import sql from '../db.js';
+import { kontoScope } from '../auth/konto.js';
 
 function csvEscape(v: unknown): string {
   if (v === null || v === undefined) return '';
@@ -26,6 +27,7 @@ export function exportRoutes(app: FastifyInstance): void {
       WHERE TRUE
         ${q.from ? sql`AND e.datum >= ${q.from}` : sql``}
         ${q.to ? sql`AND e.datum <= ${q.to}` : sql``}
+        ${kontoScope(req.user, sql`e.konto_id`)}
       ORDER BY e.datum DESC, e.id DESC, a.id ASC
     `;
 
@@ -61,6 +63,7 @@ export function exportRoutes(app: FastifyInstance): void {
       WHERE TRUE
         ${q.from ? sql`AND e.datum >= ${q.from}` : sql``}
         ${q.to ? sql`AND e.datum <= ${q.to}` : sql``}
+        ${kontoScope(req.user, sql`e.konto_id`)}
       GROUP BY e.id
       ORDER BY e.datum DESC, e.id DESC
     `;
@@ -78,7 +81,7 @@ export function exportRoutes(app: FastifyInstance): void {
   });
 
   /** Monthly category spend as CSV — pivot-ready for Excel. */
-  app.get('/api/exports/monthly.csv', async (_req, reply) => {
+  app.get('/api/exports/monthly.csv', async (req, reply) => {
     const rows = await sql`
       SELECT
         to_char(e.datum, 'YYYY-MM') AS ym,
@@ -88,6 +91,7 @@ export function exportRoutes(app: FastifyInstance): void {
       FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
       WHERE a.preis IS NOT NULL
         AND (a.category_path IS NULL OR a.category_path NOT LIKE 'Meta/%')
+        ${kontoScope(req.user, sql`e.konto_id`)}
       GROUP BY ym, category_path
       ORDER BY ym DESC, category_path
     `;

@@ -3,6 +3,7 @@ export interface User {
   username: string;
   email?: string | null;
   is_admin: boolean;
+  sees_all_konten?: boolean;
   prefers_dark: boolean;
   preferred_lang: string;
   has_seen_tour?: boolean;
@@ -16,7 +17,20 @@ export interface Receipt {
   bild_pfad: string | null;
   gesamt_betrag: string | null;
   geprueft?: boolean;
+  konto_id?: number | null;
+  konto_name?: string | null;
+  quelle?: string;
   item_count?: number;
+}
+
+export interface Konto {
+  id: number;
+  name: string;
+  is_shared: boolean;
+  user_id: number | null;
+  owner?: string | null;
+  receipts?: number;
+  sort_order?: number;
 }
 
 export interface Artikel {

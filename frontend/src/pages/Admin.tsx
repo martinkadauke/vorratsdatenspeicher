@@ -30,6 +30,7 @@ export function Admin() {
       <ChurnerSection />
       <CategoriesLinkSection />
       <UsersSection />
+      <KontenSection />
       <SmtpSection />
       <FamilySection />
       <MaintenanceSection />
@@ -490,6 +491,13 @@ function UsersSection() {
                 </div>
                 {u.email && <div className="truncate text-xs text-zinc-400">{u.email}</div>}
               </div>
+              <label className="flex shrink-0 items-center gap-1 text-xs text-zinc-500" title={t('admin.seesAllKonten')}>
+                <span className="hidden sm:inline">{t('admin.seesAll')}</span>
+                <Switch
+                  checked={u.sees_all_konten ?? false}
+                  onChange={v => patch.mutate({ id: u.id, body: { sees_all_konten: v } })}
+                />
+              </label>
               <label className="flex shrink-0 items-center gap-1 text-xs text-zinc-500" title={t('admin.isAdmin')}>
                 <span className="hidden sm:inline">{t('admin.isAdmin')}</span>
                 <Switch
@@ -568,6 +576,94 @@ function UsersSection() {
         </form>
         <p className="text-xs text-zinc-400">{t('admin.usernameDerivedHint')}</p>
         {sendInvite.isError && <p className="text-xs text-red-500">{(sendInvite.error as Error).message}</p>}
+      </div>
+    </Section>
+  );
+}
+
+// ── Konten (payment accounts) ────────────────────────────────────────────
+interface KontoRow { id: number; name: string; is_shared: boolean; user_id: number | null; owner: string | null; receipts: number }
+
+function KontenSection() {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const [newName, setNewName] = useState('');
+  const [newUser, setNewUser] = useState<number | ''>('');
+
+  const { data: konten } = useQuery({
+    queryKey: ['admin-konten'],
+    queryFn: () => api<KontoRow[]>('/api/admin/konten'),
+  });
+  const { data: users } = useQuery({
+    queryKey: ['users'],
+    queryFn: () => api<User[]>('/api/users'),
+  });
+
+  const invalidate = () => void qc.invalidateQueries({ queryKey: ['admin-konten'] });
+  const create = useMutation({
+    mutationFn: () => api('/api/admin/konten', { method: 'POST', body: { name: newName, user_id: newUser || null } }),
+    onSuccess: () => { setNewName(''); setNewUser(''); invalidate(); },
+  });
+  const patch = useMutation({
+    mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) =>
+      api(`/api/admin/konten/${id}`, { method: 'PATCH', body }),
+    onSuccess: invalidate,
+  });
+  const remove = useMutation({
+    mutationFn: (id: number) => api(`/api/admin/konten/${id}`, { method: 'DELETE' }),
+    onSuccess: invalidate,
+    onError: (e: Error) => alert(e.message),
+  });
+
+  return (
+    <Section title={t('admin.konten')}>
+      <div className="flex flex-col gap-2">
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('admin.kontenHint')}</p>
+        {konten?.map(k => (
+          <div key={k.id} className="flex items-center gap-2 rounded-xl border border-zinc-100 px-2.5 py-2 dark:border-zinc-800">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5">
+                <span className="truncate font-medium">{k.name}</span>
+                {k.is_shared && <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400">{t('admin.kontoShared')}</span>}
+              </div>
+              <div className="text-xs text-zinc-400">{k.receipts} {t('stores.receipts')}{k.owner ? ` · ${k.owner}` : ''}</div>
+            </div>
+            {!k.is_shared && (
+              <Select
+                value={k.user_id ?? ''}
+                onChange={e => patch.mutate({ id: k.id, body: { user_id: e.target.value ? parseInt(e.target.value, 10) : null } })}
+                className="w-32 shrink-0 text-xs"
+              >
+                <option value="">{t('admin.kontoNoOwner')}</option>
+                {users?.map(u => <option key={u.id} value={u.id}>{u.username}</option>)}
+              </Select>
+            )}
+            {!k.is_shared && (
+              <Button
+                variant="ghost"
+                className="shrink-0 px-2 text-red-500"
+                disabled={k.receipts > 0}
+                title={k.receipts > 0 ? t('admin.kontoHasReceipts') : t('common.delete')}
+                onClick={async () => { if (await confirm({ message: t('common.confirm'), confirmLabel: t('common.delete'), cancelLabel: t('common.cancel'), danger: true })) remove.mutate(k.id); }}
+              ><Trash2 size={15} /></Button>
+            )}
+          </div>
+        ))}
+
+        <form onSubmit={e => { e.preventDefault(); if (newName.trim()) create.mutate(); }} className="mt-1 flex flex-wrap items-end gap-2">
+          <div className="min-w-0 flex-1 basis-full sm:basis-auto">
+            <Label>{t('admin.kontoName')}</Label>
+            <Input value={newName} onChange={e => setNewName(e.target.value)} placeholder="z.B. Lena" />
+          </div>
+          <div>
+            <Label>{t('admin.kontoOwner')}</Label>
+            <Select value={newUser} onChange={e => setNewUser(e.target.value ? parseInt(e.target.value, 10) : '')} className="w-36">
+              <option value="">{t('admin.kontoNoOwner')}</option>
+              {users?.map(u => <option key={u.id} value={u.id}>{u.username}</option>)}
+            </Select>
+          </div>
+          <Button type="submit" className="shrink-0" disabled={!newName.trim() || create.isPending}>{t('common.add')}</Button>
+        </form>
       </div>
     </Section>
   );

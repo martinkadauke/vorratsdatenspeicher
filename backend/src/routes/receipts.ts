@@ -3,6 +3,7 @@ import path from 'node:path';
 import Jimp from 'jimp';
 import sql from '../db.js';
 import { requireAdmin } from '../auth/plugin.js';
+import { kontoScope, canSeeKonto } from '../auth/konto.js';
 import { ocrFromImage } from '../llm/ocr.js';
 
 /** Local mount where receipt photos are persisted on disk. Host path is
@@ -10,6 +11,15 @@ import { ocrFromImage } from '../llm/ocr.js';
 const RECEIPTS_LOCAL_PATH = process.env.RECEIPTS_LOCAL_PATH ?? '/receipts';
 
 export function receiptRoutes(app: FastifyInstance): void {
+  /** Ensure the receipt exists AND the caller may see its account.
+   *  Returns false (and sends the response) when not. */
+  async function guardReceipt(req: import('fastify').FastifyRequest, reply: import('fastify').FastifyReply, id: number): Promise<boolean> {
+    const [row] = await sql`SELECT konto_id FROM einkauf WHERE id = ${id}`;
+    if (!row) { void reply.code(404).send({ error: 'not found' }); return false; }
+    if (!canSeeKonto(req.user, row.konto_id as number | null)) { void reply.code(403).send({ error: 'forbidden' }); return false; }
+    return true;
+  }
+
   app.get('/api/receipts', async (req) => {
     const q = req.query as { limit?: string; offset?: string; q?: string; from?: string; to?: string; store?: string };
     const limit = Math.min(parseInt(q.limit ?? '50', 10) || 50, 200);
@@ -20,9 +30,11 @@ export function receiptRoutes(app: FastifyInstance): void {
 
     const rows = await sql`
       SELECT e.id, e.datum, e.roh_ladenname, e.bild_pfad, e.gesamt_betrag, e.geprueft,
+             e.konto_id, e.quelle, k.name AS konto_name,
              COUNT(a.id)::int AS item_count
       FROM einkauf e
       LEFT JOIN artikel a ON a.einkauf_id = e.id
+      LEFT JOIN konto k ON k.id = e.konto_id
       WHERE TRUE
         ${search ? sql`AND (e.roh_ladenname ILIKE ${like} OR EXISTS (
           SELECT 1 FROM artikel ax WHERE ax.einkauf_id = e.id
@@ -31,19 +43,21 @@ export function receiptRoutes(app: FastifyInstance): void {
         ${storeLike ? sql`AND e.roh_ladenname ILIKE ${storeLike}` : sql``}
         ${q.from ? sql`AND e.datum >= ${q.from}` : sql``}
         ${q.to ? sql`AND e.datum <= ${q.to}` : sql``}
-      GROUP BY e.id
+        ${kontoScope(req.user, sql`e.konto_id`)}
+      GROUP BY e.id, k.name
       ORDER BY e.datum DESC, e.id DESC
       LIMIT ${limit} OFFSET ${offset}
     `;
     return rows;
   });
 
-  /** Review-progress across all receipts (for the overview progress bar). */
-  app.get('/api/receipts/review-progress', async () => {
+  /** Review-progress across visible receipts (for the overview progress bar). */
+  app.get('/api/receipts/review-progress', async (req) => {
     const [row] = await sql`
       SELECT COUNT(*)::int AS total,
              COUNT(*) FILTER (WHERE geprueft)::int AS reviewed
-      FROM einkauf
+      FROM einkauf e
+      WHERE TRUE ${kontoScope(req.user, sql`e.konto_id`)}
     `;
     return { total: row.total, reviewed: row.reviewed };
   });
@@ -52,6 +66,7 @@ export function receiptRoutes(app: FastifyInstance): void {
   app.patch('/api/receipts/:id', async (req, reply) => {
     const id = parseInt((req.params as { id: string }).id, 10);
     if (!id) return reply.code(400).send({ error: 'invalid id' });
+    if (!await guardReceipt(req, reply, id)) return;
     const body = (req.body ?? {}) as Record<string, unknown>;
     const updates: Record<string, unknown> = {};
     if ('datum' in body && typeof body.datum === 'string') updates.datum = body.datum;
@@ -79,6 +94,7 @@ export function receiptRoutes(app: FastifyInstance): void {
   app.post('/api/receipts/:id/rotate', { preHandler: requireAdmin }, async (req, reply) => {
     const id = parseInt((req.params as { id: string }).id, 10);
     if (!id) return reply.code(400).send({ error: 'invalid id' });
+    if (!await guardReceipt(req, reply, id)) return;
     const rows = await sql`SELECT bild_pfad FROM einkauf WHERE id = ${id}`;
     if (!rows.length) return reply.code(404).send({ error: 'not found' });
     const bildPfad = rows[0].bild_pfad as string | null;
@@ -111,6 +127,7 @@ export function receiptRoutes(app: FastifyInstance): void {
   app.post('/api/receipts/:id/reocr', { preHandler: requireAdmin }, async (req, reply) => {
     const id = parseInt((req.params as { id: string }).id, 10);
     if (!id) return reply.code(400).send({ error: 'invalid id' });
+    if (!await guardReceipt(req, reply, id)) return;
 
     const rows = await sql`SELECT id, bild_pfad FROM einkauf WHERE id = ${id}`;
     if (!rows.length) return reply.code(404).send({ error: 'not found' });
@@ -162,6 +179,7 @@ export function receiptRoutes(app: FastifyInstance): void {
   app.delete('/api/receipts/:id', async (req, reply) => {
     const id = parseInt((req.params as { id: string }).id, 10);
     if (!id) return reply.code(400).send({ error: 'invalid id' });
+    if (!await guardReceipt(req, reply, id)) return;
     const rows = await sql`DELETE FROM einkauf WHERE id = ${id} RETURNING id, bild_pfad`;
     if (!rows.length) return reply.code(404).send({ error: 'not found' });
     return { ok: true, bild_pfad: rows[0].bild_pfad };
@@ -192,6 +210,7 @@ export function receiptRoutes(app: FastifyInstance): void {
         AND (ax.name ILIKE ${like} OR ax.canonical_name ILIKE ${like} OR ax.ai_guess ILIKE ${like})
       ))` : sql``}
       ${storeLike ? sql`AND roh_ladenname ILIKE ${storeLike}` : sql``}
+      ${kontoScope(req.user, sql`einkauf.konto_id`)}
     `;
 
     // prev = newer (one position earlier in the (datum DESC, id DESC) list)
@@ -213,6 +232,7 @@ export function receiptRoutes(app: FastifyInstance): void {
   app.put('/api/receipts/:id/artikel-order', async (req, reply) => {
     const id = parseInt((req.params as { id: string }).id, 10);
     if (!id) return reply.code(400).send({ error: 'invalid id' });
+    if (!await guardReceipt(req, reply, id)) return;
     const { order } = (req.body ?? {}) as { order?: number[] };
     if (!Array.isArray(order) || !order.length) return reply.code(400).send({ error: 'order array required' });
 
@@ -233,10 +253,15 @@ export function receiptRoutes(app: FastifyInstance): void {
     if (!id) return reply.code(400).send({ error: 'invalid id' });
 
     const receipts = await sql`
-      SELECT id, datum, roh_ladenname, bild_pfad, gesamt_betrag, geprueft
-      FROM einkauf WHERE id = ${id}
+      SELECT e.id, e.datum, e.roh_ladenname, e.bild_pfad, e.gesamt_betrag, e.geprueft,
+             e.konto_id, e.quelle, k.name AS konto_name
+      FROM einkauf e LEFT JOIN konto k ON k.id = e.konto_id
+      WHERE e.id = ${id}
     `;
     if (!receipts.length) return reply.code(404).send({ error: 'not found' });
+    if (!canSeeKonto(req.user, receipts[0].konto_id as number | null)) {
+      return reply.code(403).send({ error: 'forbidden' });
+    }
 
     const artikel = await sql`
       SELECT a.id, a.name, a.menge, a.einheit, a.preis, a.original_text,

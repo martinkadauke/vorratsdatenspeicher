@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import sql from '../db.js';
+import { kontoScope } from '../auth/konto.js';
 
 export function nameRoutes(app: FastifyInstance): void {
   app.get('/api/names', async (req) => {
@@ -18,6 +19,7 @@ export function nameRoutes(app: FastifyInstance): void {
           OR EXISTS (SELECT 1 FROM canonical_translation ct
                      WHERE ct.canonical_name = a.canonical_name AND ct.translated ILIKE ${like})
         )` : sql``}
+        ${kontoScope(req.user, sql`e.konto_id`)}
       GROUP BY a.canonical_name
       ORDER BY a.canonical_name ASC
     `;

@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import sql from '../db.js';
+import { kontoScope } from '../auth/konto.js';
 
 interface WeekRow {
   ym_week: string;
@@ -37,6 +38,7 @@ export function trendsRoutes(app: FastifyInstance): void {
       FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
       WHERE e.datum >= ${sinceStr}
         AND (a.category_path IS NULL OR a.category_path NOT LIKE 'Meta/%')
+        ${kontoScope(req.user, sql`e.konto_id`)}
     `) as unknown as { id: number; preis: string | null; canonical_name: string | null; datum: string }[];
 
     // Optional member filter using consumer maps
@@ -112,6 +114,7 @@ export function trendsRoutes(app: FastifyInstance): void {
         WHERE EXTRACT(YEAR FROM e.datum)::int = ${year}
           AND EXTRACT(MONTH FROM e.datum)::int = ${month}
           AND (a.category_path IS NULL OR a.category_path NOT LIKE 'Meta/%')
+          ${kontoScope(req.user, sql`e.konto_id`)}
         GROUP BY path
       ),
       prev AS (
@@ -123,6 +126,7 @@ export function trendsRoutes(app: FastifyInstance): void {
         WHERE e.datum < date_trunc('month', CURRENT_DATE)
           AND e.datum >= date_trunc('month', CURRENT_DATE) - INTERVAL '3 months'
           AND (a.category_path IS NULL OR a.category_path NOT LIKE 'Meta/%')
+          ${kontoScope(req.user, sql`e.konto_id`)}
         GROUP BY path, ym
       ),
       avg3 AS (

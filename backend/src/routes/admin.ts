@@ -29,7 +29,7 @@ export function adminRoutes(app: FastifyInstance): void {
 
   // ── users (invite-only) ─────────────────────────────────────────────────
   app.get('/api/users', { preHandler: requireAdmin }, async () => {
-    return sql`SELECT id, username, email, is_admin, prefers_dark, preferred_lang, created_at FROM users ORDER BY id`;
+    return sql`SELECT id, username, email, is_admin, sees_all_konten, prefers_dark, preferred_lang, created_at FROM users ORDER BY id`;
   });
 
   /** Invite a new user by email. Username is derived from the email's
@@ -85,8 +85,8 @@ export function adminRoutes(app: FastifyInstance): void {
 
   app.patch('/api/users/:id', { preHandler: requireAdmin }, async (req, reply) => {
     const id = parseInt((req.params as { id: string }).id, 10);
-    const { is_admin, password, email } = (req.body ?? {}) as {
-      is_admin?: boolean; password?: string; email?: string;
+    const { is_admin, password, email, sees_all_konten } = (req.body ?? {}) as {
+      is_admin?: boolean; password?: string; email?: string; sees_all_konten?: boolean;
     };
 
     if (is_admin === false && id === req.user!.id) {
@@ -94,6 +94,7 @@ export function adminRoutes(app: FastifyInstance): void {
     }
     const updates: Record<string, unknown> = {};
     if (is_admin !== undefined) updates.is_admin = is_admin;
+    if (sees_all_konten !== undefined) updates.sees_all_konten = sees_all_konten;
     if (password) updates.password_hash = await bcrypt.hash(password, 12);
     if (email !== undefined) updates.email = email || null;
     if (!Object.keys(updates).length) return reply.code(400).send({ error: 'nothing to update' });

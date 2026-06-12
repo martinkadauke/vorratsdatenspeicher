@@ -198,6 +198,15 @@
     "testTo": "Test email to",
     "sendTest": "Send test",
     "isAdmin": "Admin",
+    "seesAll": "Sees all",
+    "seesAllKonten": "Sees all accounts (super-admin) — can view every receipt, not just GKK + own",
+    "konten": "Accounts",
+    "kontenHint": "Payment accounts. GKK is shared (everyone sees it). Personal accounts belong to a user and are only visible to them (+ super-admins). Every receipt belongs to exactly one account.",
+    "kontoShared": "shared",
+    "kontoName": "Account name",
+    "kontoOwner": "Belongs to",
+    "kontoNoOwner": "— nobody —",
+    "kontoHasReceipts": "Account still has receipts — move them first",
     "resetPw": "New password",
     "family": "Family members",
     "addMember": "Add member",
@@ -320,6 +329,11 @@
     "thisWeek": "This week",
     "vsLastWeek": "vs. last week",
     "anomaly": "This week is well above the {{avg}} average"
+  },
+  "quelle": {
+    "zettel": "Receipt",
+    "email": "Email",
+    "bar": "Cash"
   },
   "common": {
     "save": "Save",

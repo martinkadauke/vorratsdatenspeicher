@@ -26,6 +26,7 @@ import { exportRoutes } from './routes/exports.js';
 import { storeRoutes } from './routes/stores.js';
 import { trendsRoutes } from './routes/trends.js';
 import { iconRoutes } from './routes/icons.js';
+import { kontoRoutes } from './routes/konten.js';
 import { rescheduleChurner } from './churner/scheduler.js';
 
 async function main(): Promise<void> {
@@ -79,6 +80,7 @@ async function main(): Promise<void> {
   storeRoutes(app);
   trendsRoutes(app);
   iconRoutes(app);
+  kontoRoutes(app);
 
   // Receipt photos under /receipts/* — served directly by the app so a
   // single-container install (Unraid CA, docker-compose) doesn't need a

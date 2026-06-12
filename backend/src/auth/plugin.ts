@@ -23,11 +23,18 @@ export function registerAuth(app: FastifyInstance): void {
     try {
       const payload = jwt.verify(token, JWT_SECRET) as unknown as { sub: number };
       const rows = await sql`
-        SELECT id, username, email, is_admin, prefers_dark, preferred_lang, has_seen_tour
+        SELECT id, username, email, is_admin, sees_all_konten, prefers_dark, preferred_lang, has_seen_tour
         FROM users WHERE id = ${payload.sub}
       `;
       if (!rows.length) return reply.code(401).send({ error: 'unauthorized' });
-      req.user = rows[0] as unknown as User;
+      const user = rows[0] as unknown as User;
+      // Accounts this user may see: shared (GKK) + their own personal accounts.
+      // Super-admins (sees_all_konten) skip filtering entirely.
+      if (!user.sees_all_konten) {
+        const ks = await sql`SELECT id FROM konto WHERE is_shared = TRUE OR user_id = ${user.id}`;
+        user.konto_ids = ks.map(r => r.id as number);
+      }
+      req.user = user;
     } catch {
       return reply.code(401).send({ error: 'unauthorized' });
     }
