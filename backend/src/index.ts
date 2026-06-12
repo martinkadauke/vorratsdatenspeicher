@@ -110,12 +110,14 @@ async function main(): Promise<void> {
     await app.register(fastifyStatic, {
       root: publicDir,
       wildcard: false,
-      maxAge: '1y',
-      immutable: true,
+      cacheControl: false, // we set Cache-Control ourselves below so index.html can opt out
       setHeaders(res, filePath) {
-        if (filePath.endsWith('index.html')) {
-          res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-        }
+        res.setHeader(
+          'Cache-Control',
+          filePath.endsWith('index.html')
+            ? 'no-cache, must-revalidate'         // always revalidate the entry point
+            : 'public, max-age=31536000, immutable', // content-hashed assets never change
+        );
       },
     });
     app.setNotFoundHandler((req, reply) => {
