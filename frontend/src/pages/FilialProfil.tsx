@@ -4,7 +4,8 @@ import { useTranslation } from 'react-i18next';
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, MapPin, Clock, FileText, Bell, BellRing } from 'lucide-react';
 import { api } from '../api/client';
-import { Card, Button, Input, Label, Select, Spinner, Badge } from '../components/ui';
+import { Card, Button, Input, Label, Spinner, Badge } from '../components/ui';
+import { CategoryPicker, useCategories } from '../components/CategoryPicker';
 import { eur, fmtDate } from '../lib/utils';
 import { toast } from '../components/Toast';
 
@@ -17,7 +18,6 @@ interface Branch {
   subscribed: boolean;
   receipts: number; total: string | number; last_visit: string | null;
 }
-interface Category { path: string; label: string; level: number; emoji: string | null; is_meta: boolean }
 
 export function FilialProfil() {
   const { t, i18n } = useTranslation();
@@ -28,10 +28,6 @@ export function FilialProfil() {
     queryKey: ['filiale', id],
     queryFn: () => api<Branch>(`/api/filialen/${id}`),
     enabled: !!id,
-  });
-  const { data: categories } = useQuery({
-    queryKey: ['categories', i18n.language],
-    queryFn: () => api<Category[]>(`/api/categories?lang=${i18n.language}`),
   });
   const { data: subs } = useQuery({
     queryKey: ['subscriptions'],
@@ -123,11 +119,7 @@ export function FilialProfil() {
           <h2 className="text-base font-semibold">{t('filiale.warengruppen')}</h2>
           <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('filiale.warengruppenHint')}</p>
         </div>
-        <TierEditor
-          tiers={tiers}
-          categories={categories ?? []}
-          onChange={mark(setTiers)}
-        />
+        <TierEditor tiers={tiers} onChange={mark(setTiers)} />
       </Card>
 
       {/* offer subscription — active; the notification itself is still WIP */}
@@ -182,22 +174,24 @@ function WipChip({ icon, label }: { icon: React.ReactNode; label: string }) {
 
 /** Ordered tiers; each tier holds 1+ categories treated as parallel/equal.
  *  Reorder tiers with the arrows, add/remove categories via the dropdown/chips. */
-function TierEditor({ tiers, categories, onChange }: {
+function TierEditor({ tiers, onChange }: {
   tiers: string[][];
-  categories: Category[];
   onChange: (next: string[][]) => void;
 }) {
   const { t } = useTranslation();
+  // Single source of truth: the live category catalog (the same one the NL
+  // category generator edits) — removed categories disappear here automatically.
+  const { data: categories = [] } = useCategories();
   const byPath = useMemo(() => new Map(categories.map(c => [c.path, c])), [categories]);
   const placed = useMemo(() => new Set(tiers.flat()), [tiers]);
-  const unplaced = useMemo(
-    () => categories.filter(c => !placed.has(c.path)).sort((a, b) => a.level - b.level || a.label.localeCompare(b.label)),
-    [categories, placed],
-  );
+
+  // which tier we're adding to ('new' = a fresh tier) + the cascading pick
+  const [target, setTarget] = useState<number | 'new' | null>(null);
+  const [pickPath, setPickPath] = useState<string | null>(null);
 
   const label = (path: string) => {
     const c = byPath.get(path);
-    if (!c) return path.split('/').pop() ?? path; // category may have been deleted
+    if (!c) return path.split('/').pop() ?? path; // category may have been removed
     return `${c.emoji ? c.emoji + ' ' : ''}${c.label}`;
   };
 
@@ -210,11 +204,16 @@ function TierEditor({ tiers, categories, onChange }: {
   };
   const removeFromTier = (i: number, path: string) =>
     onChange(tiers.map((tier, k) => (k === i ? tier.filter(p => p !== path) : tier)).filter(tier => tier.length));
-  const addToTier = (i: number, path: string) => {
-    if (!path) return;
-    onChange(tiers.map((tier, k) => (k === i ? [...tier, path] : tier)));
+
+  const startAdd = (tgt: number | 'new') => { setTarget(tgt); setPickPath(null); };
+  const cancelAdd = () => { setTarget(null); setPickPath(null); };
+  const confirmAdd = () => {
+    const p = pickPath;
+    if (!p || placed.has(p)) { cancelAdd(); return; } // ignore empty / duplicate
+    if (target === 'new') onChange([...tiers, [p]]);
+    else if (typeof target === 'number') onChange(tiers.map((tier, k) => (k === target ? [...tier, p] : tier)));
+    cancelAdd();
   };
-  const addTier = (path: string) => { if (path) onChange([...tiers, [path]]); };
 
   return (
     <div className="flex flex-col gap-2">
@@ -235,43 +234,41 @@ function TierEditor({ tiers, categories, onChange }: {
               </span>
             ))}
             {tier.length > 1 && <span className="text-[10px] uppercase tracking-wide text-zinc-400">{t('filiale.parallel')}</span>}
-            <AddCategory unplaced={unplaced} onPick={p => addToTier(i, p)} placeholder={t('filiale.addCategory')} />
+            <button
+              type="button"
+              onClick={() => startAdd(i)}
+              className="rounded-lg border border-dashed border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700"
+            >
+              + {t('filiale.addCategory')}
+            </button>
           </div>
         </div>
       ))}
 
       {/* add a new tier */}
-      <div className="flex items-center gap-2 rounded-xl border border-dashed border-zinc-300 p-2 dark:border-zinc-700">
-        <span className="shrink-0 text-xs font-medium text-zinc-400">{t('filiale.newTier')}</span>
-        <AddCategory unplaced={unplaced} onPick={addTier} placeholder={t('filiale.addCategory')} />
-      </div>
+      <button
+        type="button"
+        onClick={() => startAdd('new')}
+        className="self-start rounded-lg border border-dashed border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700"
+      >
+        + {t('filiale.newTier')}
+      </button>
 
-      {!tiers.length && <p className="text-xs text-zinc-400">{t('filiale.warengruppenEmpty')}</p>}
-      {unplaced.length > 0 && (
-        <p className="text-[11px] text-zinc-400">{t('filiale.unplacedCount', { count: unplaced.length })}</p>
+      {/* cascading 3-level picker, shown while adding */}
+      {target !== null && (
+        <div className="flex flex-col gap-2 rounded-xl border border-emerald-300 bg-emerald-50/40 p-3 dark:border-emerald-800/60 dark:bg-emerald-950/20">
+          <div className="text-xs font-medium text-zinc-500">
+            {target === 'new' ? t('filiale.addToNewTier') : t('filiale.addToTier', { n: target + 1 })}
+          </div>
+          <CategoryPicker value={pickPath} onChange={setPickPath} />
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={cancelAdd}>{t('common.cancel')}</Button>
+            <Button onClick={confirmAdd} disabled={!pickPath || placed.has(pickPath)}>{t('common.add')}</Button>
+          </div>
+        </div>
       )}
-    </div>
-  );
-}
 
-/** A reset-on-pick dropdown of the still-unplaced categories. */
-function AddCategory({ unplaced, onPick, placeholder }: {
-  unplaced: Category[]; onPick: (path: string) => void; placeholder: string;
-}) {
-  const [val, setVal] = useState('');
-  if (!unplaced.length) return null;
-  return (
-    <Select
-      className="h-7 w-auto min-w-[8rem] py-0 text-xs"
-      value={val}
-      onChange={e => { onPick(e.target.value); setVal(''); }}
-    >
-      <option value="">+ {placeholder}</option>
-      {unplaced.map(c => (
-        <option key={c.path} value={c.path}>
-          {' '.repeat((c.level - 1) * 2)}{c.emoji ? c.emoji + ' ' : ''}{c.label}
-        </option>
-      ))}
-    </Select>
+      {!tiers.length && target === null && <p className="text-xs text-zinc-400">{t('filiale.warengruppenEmpty')}</p>}
+    </div>
   );
 }
