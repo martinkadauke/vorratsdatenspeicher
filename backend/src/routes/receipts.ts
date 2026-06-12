@@ -76,13 +76,16 @@ export function receiptRoutes(app: FastifyInstance): void {
   /** Review-progress across visible receipts (for the overview progress bar).
    *  Respects the active account filter so the bar matches what's shown. */
   app.get('/api/receipts/review-progress', async (req) => {
-    const kontoId = (req.query as { konto?: string }).konto ? parseInt((req.query as { konto?: string }).konto!, 10) : null;
+    const q = req.query as { konto?: string; quelle?: string };
+    const kontoId = q.konto ? parseInt(q.konto, 10) : null;
+    const quellen = q.quelle ? q.quelle.split(',').filter(Boolean) : null;
     const [row] = await sql`
       SELECT COUNT(*)::int AS total,
              COUNT(*) FILTER (WHERE geprueft)::int AS reviewed
       FROM einkauf e
       WHERE TRUE
         ${kontoId ? sql`AND e.konto_id = ${kontoId}` : sql``}
+        ${quellen ? sql`AND e.quelle IN ${sql(quellen)}` : sql``}
         ${kontoScope(req.user, sql`e.konto_id`)}
     `;
     return { total: row.total, reviewed: row.reviewed };

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, Plus, ChevronLeft, ChevronRight, RotateCw, CheckCircle2, Circle, Hand, Wallet, X, Search } from 'lucide-react';
+import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, Plus, ChevronLeft, ChevronRight, RotateCw, CheckCircle2, Circle, Hand, Wallet, X, Search, Ban } from 'lucide-react';
 import { TransformWrapper, TransformComponent, useControls } from 'react-zoom-pan-pinch';
 import { api } from '../api/client';
 import type { Artikel, Receipt, ReceiptDetail } from '../api/types';
@@ -89,6 +89,11 @@ export function ReceiptDetailPage() {
     queryFn: () => api<ReceiptDetail>(`/api/receipts/${id}`),
     enabled: !!id,
   });
+  const { data: avoidedList } = useQuery({
+    queryKey: ['avoided'],
+    queryFn: () => api<string[]>('/api/avoided'),
+    staleTime: 60_000,
+  });
 
   const { data: neighbors } = useQuery({
     queryKey: ['receipt-neighbors', id, filterQs],
@@ -165,6 +170,12 @@ export function ReceiptDetailPage() {
     }
   }
   const scrollToId = highlightId ?? (q ? [...matchIds][0] ?? null : null);
+
+  // Warn if this receipt contains items the household decided to avoid.
+  const avoidedSet = new Set(avoidedList ?? []);
+  const avoidedHere = [...new Set(
+    data.artikel.map(a => a.canonical_name).filter((c): c is string => !!c && avoidedSet.has(c)),
+  )];
 
   return (
     <div className="flex flex-col gap-4" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
@@ -257,6 +268,16 @@ export function ReceiptDetailPage() {
             <span className="tabular">{t('receiptDetail.sumLabel')} {eur(itemSum)} </span>
             <span className="tabular">{t('receiptDetail.printedLabel')} {eur(printedTotal)} </span>
             <span className="tabular font-semibold">({diff > 0 ? '+' : ''}{eur(diff)})</span>
+          </div>
+        </div>
+      )}
+
+      {avoidedHere.length > 0 && (
+        <div className="flex items-center gap-2 rounded-xl border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-700/50 dark:bg-red-950/40 dark:text-red-300">
+          <Ban size={16} className="shrink-0" />
+          <div className="min-w-0 flex-1">
+            <span className="font-medium">{t('receiptDetail.avoidedWarning')}: </span>
+            <span>{avoidedHere.join(', ')}</span>
           </div>
         </div>
       )}

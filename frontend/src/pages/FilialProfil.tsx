@@ -2,7 +2,14 @@ import { useMemo, useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, MapPin, Clock, FileText, Bell, BellRing } from 'lucide-react';
+import { ArrowLeft, MapPin, Clock, FileText, Bell, BellRing, GripVertical } from 'lucide-react';
+import {
+  DndContext, closestCenter, PointerSensor, KeyboardSensor, useSensor, useSensors, type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext, arrayMove, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { api } from '../api/client';
 import { Card, Button, Input, Label, Spinner, Badge } from '../components/ui';
 import { CategoryPicker, useCategories } from '../components/CategoryPicker';
@@ -12,7 +19,7 @@ import { toast } from '../components/Toast';
 interface Branch {
   id: number; chain_key: string; name: string; kind: string;
   address: string | null;
-  opening_hours: unknown | null;
+  opening_hours: { text?: string } | null;
   prospectus_url: string | null;
   warengruppen: string[][] | null;
   subscribed: boolean;
@@ -44,6 +51,7 @@ export function FilialProfil() {
   });
 
   const [address, setAddress] = useState('');
+  const [hours, setHours] = useState('');
   const [tiers, setTiers] = useState<string[][]>([]);
   const [dirty, setDirty] = useState(false);
 
@@ -51,13 +59,14 @@ export function FilialProfil() {
   useEffect(() => {
     if (branch) {
       setAddress(branch.address ?? '');
+      setHours(branch.opening_hours?.text ?? '');
       setTiers(Array.isArray(branch.warengruppen) ? branch.warengruppen.map(t2 => [...t2]) : []);
       setDirty(false);
     }
   }, [branch]);
 
   const save = useMutation({
-    mutationFn: () => api(`/api/filialen/${id}`, { method: 'PATCH', body: { address, warengruppen: tiers } }),
+    mutationFn: () => api(`/api/filialen/${id}`, { method: 'PATCH', body: { address, opening_hours: hours, warengruppen: tiers } }),
     onSuccess: () => {
       toast(t('common.saved'), 'success');
       setDirty(false);
@@ -141,11 +150,22 @@ export function FilialProfil() {
         </div>
       </Card>
 
+      {/* opening hours — manual entry now; a weekly cron can auto-fill later */}
+      <Card className="flex flex-col gap-2 p-4">
+        <Label className="flex items-center gap-1.5"><Clock size={14} /> {t('filiale.openingHours')}</Label>
+        <textarea
+          value={hours}
+          placeholder={t('filiale.openingHoursPlaceholder')}
+          onChange={e => mark(setHours)(e.target.value)}
+          rows={3}
+          className="w-full rounded-xl border border-zinc-300 bg-transparent px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none dark:border-zinc-700"
+        />
+      </Card>
+
       {/* still-WIP profile features */}
       <Card className="flex flex-col gap-2 p-4 opacity-70">
         <h2 className="text-sm font-semibold text-zinc-500">{t('filiale.comingSoon')}</h2>
         <div className="flex flex-wrap gap-2">
-          <WipChip icon={<Clock size={13} />} label={t('filiale.openingHours')} />
           <WipChip icon={<FileText size={13} />} label={t('filiale.prospectus')} />
         </div>
       </Card>
@@ -195,12 +215,14 @@ function TierEditor({ tiers, onChange }: {
     return `${c.emoji ? c.emoji + ' ' : ''}${c.label}`;
   };
 
-  const moveTier = (i: number, dir: -1 | 1) => {
-    const j = i + dir;
-    if (j < 0 || j >= tiers.length) return;
-    const next = tiers.map(t2 => [...t2]);
-    [next[i], next[j]] = [next[j], next[i]];
-    onChange(next);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const onDragEnd = (e: DragEndEvent) => {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    onChange(arrayMove(tiers, Number(active.id), Number(over.id)));
   };
   const removeFromTier = (i: number, path: string) =>
     onChange(tiers.map((tier, k) => (k === i ? tier.filter(p => p !== path) : tier)).filter(tier => tier.length));
@@ -217,33 +239,25 @@ function TierEditor({ tiers, onChange }: {
 
   return (
     <div className="flex flex-col gap-2">
-      {tiers.map((tier, i) => (
-        <div key={i} className="flex items-start gap-2 rounded-xl border border-zinc-200 p-2 dark:border-zinc-800">
-          <div className="flex shrink-0 flex-col items-center gap-0.5 pt-0.5">
-            <span className="text-xs font-semibold text-zinc-400">{i + 1}</span>
-            <button type="button" onClick={() => moveTier(i, -1)} disabled={i === 0}
-              className="rounded p-0.5 text-zinc-400 hover:bg-zinc-100 disabled:opacity-30 dark:hover:bg-zinc-800">▲</button>
-            <button type="button" onClick={() => moveTier(i, 1)} disabled={i === tiers.length - 1}
-              className="rounded p-0.5 text-zinc-400 hover:bg-zinc-100 disabled:opacity-30 dark:hover:bg-zinc-800">▼</button>
-          </div>
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
-            {tier.map(path => (
-              <span key={path} className="inline-flex items-center gap-1 rounded-lg bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
-                {label(path)}
-                <button type="button" onClick={() => removeFromTier(i, path)} className="text-emerald-400 hover:text-red-500">✕</button>
-              </span>
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+        <SortableContext items={tiers.map((_, i) => i)} strategy={verticalListSortingStrategy}>
+          <div className="flex flex-col gap-2">
+            {tiers.map((tier, i) => (
+              <SortableTier
+                key={i}
+                id={i}
+                index={i}
+                tier={tier}
+                label={label}
+                parallelLabel={t('filiale.parallel')}
+                addLabel={t('filiale.addCategory')}
+                onRemove={(p) => removeFromTier(i, p)}
+                onAdd={() => startAdd(i)}
+              />
             ))}
-            {tier.length > 1 && <span className="text-[10px] uppercase tracking-wide text-zinc-400">{t('filiale.parallel')}</span>}
-            <button
-              type="button"
-              onClick={() => startAdd(i)}
-              className="rounded-lg border border-dashed border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700"
-            >
-              + {t('filiale.addCategory')}
-            </button>
           </div>
-        </div>
-      ))}
+        </SortableContext>
+      </DndContext>
 
       {/* add a new tier */}
       <button
@@ -269,6 +283,41 @@ function TierEditor({ tiers, onChange }: {
       )}
 
       {!tiers.length && target === null && <p className="text-xs text-zinc-400">{t('filiale.warengruppenEmpty')}</p>}
+    </div>
+  );
+}
+
+/** One draggable tier row (drag the handle to reorder). */
+function SortableTier({ id, index, tier, label, parallelLabel, addLabel, onRemove, onAdd }: {
+  id: number; index: number; tier: string[];
+  label: (p: string) => string; parallelLabel: string; addLabel: string;
+  onRemove: (p: string) => void; onAdd: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.6 : 1 };
+  return (
+    <div ref={setNodeRef} style={style}
+      className="flex items-start gap-2 rounded-xl border border-zinc-200 bg-white p-2 dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="flex shrink-0 flex-col items-center gap-0.5 pt-0.5">
+        <span className="text-xs font-semibold text-zinc-400">{index + 1}</span>
+        <button type="button" {...attributes} {...listeners}
+          className="cursor-grab touch-none rounded p-0.5 text-zinc-400 hover:bg-zinc-100 active:cursor-grabbing dark:hover:bg-zinc-800">
+          <GripVertical size={14} />
+        </button>
+      </div>
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+        {tier.map(path => (
+          <span key={path} className="inline-flex items-center gap-1 rounded-lg bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+            {label(path)}
+            <button type="button" onClick={() => onRemove(path)} className="text-emerald-400 hover:text-red-500">&times;</button>
+          </span>
+        ))}
+        {tier.length > 1 && <span className="text-[10px] uppercase tracking-wide text-zinc-400">{parallelLabel}</span>}
+        <button type="button" onClick={onAdd}
+          className="rounded-lg border border-dashed border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700">
+          + {addLabel}
+        </button>
+      </div>
     </div>
   );
 }

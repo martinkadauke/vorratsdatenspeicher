@@ -38,6 +38,10 @@
   },
   "receipts": {
     "search": "Search (store, item…)",
+    "quelle_zettel": "Receipt",
+    "quelle_bar": "Cash",
+    "quelle_email": "Email",
+    "quelle_alle": "All",
     "items": "items",
     "noImage": "No photo",
     "empty": "No receipts found",
@@ -58,6 +62,7 @@
     "deleteConfirm": "Really delete this receipt and all its items?"
   },
   "receiptDetail": {
+    "avoidedWarning": "Contains items from the avoid list",
     "mismatch": "Sum of items doesn't match receipt total",
     "mismatchHint": "A line is missing, duplicated, or has the wrong price",
     "sumLabel": "Σ items:",
@@ -173,6 +178,7 @@
     "unplacedCount": "{{count}} more aisles available",
     "comingSoon": "Coming soon",
     "openingHours": "Opening hours",
+    "openingHoursPlaceholder": "e.g. Mon–Sat 7am–8pm, Sun closed",
     "prospectus": "Offer leaflet",
     "subscribe": "Subscribe to offers",
     "wipHint": "Work in progress — coming in a later update."
@@ -425,7 +431,11 @@
     "setCanonicalTitle": "Set canonical name for {{count}} selection(s)",
     "setCanonicalHint": "Sets the canonical name on every article in the selection. Identical names then collapse into one group.",
     "canonicalSet": "Name set ✓",
-    "avoid": "Avoid – WIP",
+    "avoid": "Avoid",
+    "unavoid": "Stop avoiding",
+    "avoided": "{{count}} items on the avoid list",
+    "unavoided": "Removed from the avoid list",
+    "avoidNeedsCanonical": "Only items with a canonical name can be avoided.",
     "avoidWip": "\"Avoid\" is coming soon: flagged items will warn you when bought.",
     "subscribeOffers": "Subscribe to offers",
     "subscribed": "Subscribed {{count}} items to offers"

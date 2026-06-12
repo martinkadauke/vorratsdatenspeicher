@@ -81,10 +81,15 @@ export function storeRoutes(app: FastifyInstance): void {
   app.patch('/api/filialen/:id', async (req, reply) => {
     const id = parseInt((req.params as { id: string }).id, 10);
     if (!id) return reply.code(400).send({ error: 'invalid id' });
-    const body = (req.body ?? {}) as { address?: string | null; warengruppen?: unknown };
+    const body = (req.body ?? {}) as { address?: string | null; warengruppen?: unknown; opening_hours?: string | null };
 
     const updates: Record<string, unknown> = {};
     if ('address' in body) updates.address = (body.address ?? '').toString().trim() || null;
+    if ('opening_hours' in body) {
+      const txt = (body.opening_hours ?? '').toString().trim();
+      // free-text for now (manual entry); a weekly cron can fill structured data later
+      updates.opening_hours = txt ? JSON.stringify({ text: txt }) : null;
+    }
     if ('warengruppen' in body) {
       const wg = body.warengruppen;
       // must be an array of arrays of strings (tiers of category paths)
@@ -102,7 +107,7 @@ export function storeRoutes(app: FastifyInstance): void {
 
     const [row] = await sql`
       UPDATE store_branch SET ${sql(updates)} WHERE id = ${id}
-      RETURNING id, address, warengruppen
+      RETURNING id, address, warengruppen, opening_hours
     `;
     if (!row) return reply.code(404).send({ error: 'not found' });
     return { ok: true, ...row };

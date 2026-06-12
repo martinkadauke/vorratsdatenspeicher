@@ -38,6 +38,10 @@
   },
   "receipts": {
     "search": "Suchen (Laden, Artikel…)",
+    "quelle_zettel": "Kassenbon",
+    "quelle_bar": "Bar",
+    "quelle_email": "Email",
+    "quelle_alle": "Alle",
     "items": "Artikel",
     "noImage": "Kein Foto",
     "empty": "Keine Belege gefunden",
@@ -58,6 +62,7 @@
     "deleteConfirm": "Diesen Beleg mit allen Artikeln wirklich löschen?"
   },
   "receiptDetail": {
+    "avoidedWarning": "Enthält Artikel von der Vermeiden-Liste",
     "mismatch": "Summe der Positionen weicht vom Bon-Gesamtbetrag ab",
     "mismatchHint": "Eine Position fehlt, ist doppelt oder hat falschen Preis",
     "sumLabel": "Σ Positionen:",
@@ -173,6 +178,7 @@
     "unplacedCount": "{{count}} weitere Warengruppen verfügbar",
     "comingSoon": "Demnächst",
     "openingHours": "Öffnungszeiten",
+    "openingHoursPlaceholder": "z.B. Mo–Sa 7–20 Uhr, So geschlossen",
     "prospectus": "Angebotsprospekt",
     "subscribe": "Angebote abonnieren",
     "wipHint": "In Arbeit — kommt in einem späteren Update."
@@ -425,7 +431,11 @@
     "setCanonicalTitle": "Kanonischen Namen für {{count}} Auswahl(en) setzen",
     "setCanonicalHint": "Setzt den kanonischen Namen auf alle Artikel der Auswahl. Gleiche Namen collapsen danach zu einer Gruppe.",
     "canonicalSet": "Name gesetzt ✓",
-    "avoid": "Vermeiden – WIP",
+    "avoid": "Vermeiden",
+    "unavoid": "Nicht mehr vermeiden",
+    "avoided": "{{count}} Artikel auf Vermeiden-Liste",
+    "unavoided": "Von Vermeiden-Liste entfernt",
+    "avoidNeedsCanonical": "Nur Artikel mit kanonischem Namen können vermieden werden.",
     "avoidWip": "»Vermeiden« kommt bald: markierte Artikel werden dann beim Kauf angemahnt.",
     "subscribeOffers": "Angebote abonnieren",
     "subscribed": "{{count}} Artikel für Angebote abonniert"

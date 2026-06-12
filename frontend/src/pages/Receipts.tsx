@@ -33,6 +33,9 @@ export function Receipts() {
   const [search, setSearch] = useState('');
   const [storeFilter, setStoreFilter] = useState<string | null>(params.get('store'));
   const [kontoFilter, setKontoFilter] = useState<string | null>(params.get('konto'));
+  // Source filter — default to till receipts (Kassenbon) so cash/email don't
+  // clutter the everyday list; 'alle' shows everything.
+  const [quelleFilter, setQuelleFilter] = useState<string>(params.get('quelle') ?? 'zettel');
 
   const { data: kontenRaw } = useQuery({
     queryKey: ['konten'],
@@ -126,10 +129,11 @@ export function Receipts() {
     return () => ro.disconnect();
   }, [stores, updateChipScroll]);
 
+  const quelleParam = quelleFilter !== 'alle' ? `&quelle=${quelleFilter}` : '';
   const { data: progress } = useQuery({
-    queryKey: ['review-progress', kontoFilter],
+    queryKey: ['review-progress', kontoFilter, quelleFilter],
     queryFn: () => api<{ total: number; reviewed: number }>(
-      `/api/receipts/review-progress${kontoFilter ? `?konto=${encodeURIComponent(kontoFilter)}` : ''}`,
+      `/api/receipts/review-progress?${kontoFilter ? `konto=${encodeURIComponent(kontoFilter)}` : ''}${quelleFilter !== 'alle' ? `&quelle=${quelleFilter}` : ''}`,
     ),
   });
 
@@ -138,9 +142,9 @@ export function Receipts() {
   const {
     data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage,
   } = useInfiniteQuery({
-    queryKey: ['receipts', search, storeFilter, kontoFilter],
+    queryKey: ['receipts', search, storeFilter, kontoFilter, quelleFilter],
     queryFn: ({ pageParam }) =>
-      api<Receipt[]>(`/api/receipts?limit=${PAGE}&offset=${pageParam}&q=${encodeURIComponent(search)}${storeParam}${kontoParam}`),
+      api<Receipt[]>(`/api/receipts?limit=${PAGE}&offset=${pageParam}&q=${encodeURIComponent(search)}${storeParam}${kontoParam}${quelleParam}`),
     initialPageParam: 0,
     getNextPageParam: (last, all) => (last.length === PAGE ? all.length * PAGE : undefined),
   });
@@ -258,6 +262,24 @@ export function Receipts() {
             className="w-16 accent-emerald-600 sm:w-24"
           />
         </div>
+      </div>
+
+      {/* source filter — Kassenbon (default) / Bar / Email / Alle */}
+      <div className="scrollbar-none -mx-1 flex gap-1.5 overflow-x-auto px-1">
+        {(['zettel', 'bar', 'email', 'alle'] as const).map(qv => (
+          <button
+            key={qv}
+            onClick={() => setQuelleFilter(qv)}
+            className={cn(
+              'shrink-0 rounded-full border px-3 py-1 text-xs font-medium',
+              quelleFilter === qv
+                ? 'border-transparent bg-sky-600 text-white'
+                : 'border-zinc-300 text-zinc-500 dark:border-zinc-700',
+            )}
+          >
+            {t(`receipts.quelle_${qv}`)}
+          </button>
+        ))}
       </div>
 
       {konten && konten.length > 1 && (

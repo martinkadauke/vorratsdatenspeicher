@@ -109,6 +109,32 @@ export function nameRoutes(app: FastifyInstance): void {
     }));
   });
 
+  /** Household-wide "avoid" list (artikel_ausschluss): products we decided not
+   *  to buy. Used to warn on receipts and to keep them off shopping suggestions. */
+  app.get('/api/avoided', async () => {
+    const rows = await sql`SELECT canonical_name FROM artikel_ausschluss ORDER BY canonical_name`;
+    return rows.map(r => r.canonical_name as string);
+  });
+
+  /** Add/remove canonical names from the avoid list. Body: { canonical_names, avoid }. */
+  app.post('/api/avoided', async (req, reply) => {
+    const { canonical_names, avoid } = (req.body ?? {}) as { canonical_names?: string[]; avoid?: boolean };
+    if (!Array.isArray(canonical_names) || !canonical_names.length || typeof avoid !== 'boolean') {
+      return reply.code(400).send({ error: 'canonical_names[] and avoid (bool) required' });
+    }
+    await sql.begin(async tx => {
+      for (const cn of canonical_names) {
+        if (avoid) {
+          await tx`INSERT INTO artikel_ausschluss (canonical_name) VALUES (${cn}) ON CONFLICT DO NOTHING`;
+          await tx`DELETE FROM einkaufsliste WHERE canonical_name = ${cn}`; // also drop from the shopping list
+        } else {
+          await tx`DELETE FROM artikel_ausschluss WHERE canonical_name = ${cn}`;
+        }
+      }
+    });
+    return { ok: true, avoided: avoid, count: canonical_names.length };
+  });
+
   /** Bulk-set a canonical name on the selected articles' artikel_ids.
    *  Konto-scoped. Trims whitespace. */
   app.post('/api/artikel/set-canonical', async (req, reply) => {

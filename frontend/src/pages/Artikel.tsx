@@ -54,6 +54,12 @@ export function Artikel() {
     queryKey: ['artikel-list', search],
     queryFn: () => api<ArtikelGroup[]>(`/api/artikel-list?q=${encodeURIComponent(search)}`),
   });
+  const { data: avoidedList } = useQuery({
+    queryKey: ['avoided'],
+    queryFn: () => api<string[]>('/api/avoided'),
+    staleTime: 60_000,
+  });
+  const avoided = useMemo(() => new Set(avoidedList ?? []), [avoidedList]);
 
   const sorted = useMemo(() => {
     const rows = [...(data ?? [])];
@@ -116,6 +122,20 @@ export function Artikel() {
       void qc.invalidateQueries({ queryKey: ['subscriptions'] });
       setSelected(new Set());
       toast(t('artikel.subscribed', { count: r.subscribed }), 'success');
+    },
+    onError: (e) => toast((e as Error).message, 'error'),
+  });
+
+  // "Vermeiden": only canonical groups can be avoided (the list keys on canonical_name).
+  const avoidNames = selectedGroups.map(g => g.canonical_name).filter(Boolean) as string[];
+  const allAvoided = avoidNames.length > 0 && avoidNames.every(n => avoided.has(n));
+  const toggleAvoid = useMutation({
+    mutationFn: () => api<{ count: number }>('/api/avoided', { method: 'POST', body: { canonical_names: avoidNames, avoid: !allAvoided } }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['avoided'] });
+      void qc.invalidateQueries({ queryKey: ['artikel-list'] });
+      setSelected(new Set());
+      toast(allAvoided ? t('artikel.unavoided') : t('artikel.avoided', { count: avoidNames.length }), 'success');
     },
     onError: (e) => toast((e as Error).message, 'error'),
   });
@@ -185,6 +205,9 @@ export function Artikel() {
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 items-center gap-1.5">
                     <span className={cn('truncate font-medium', !g.has_canonical && 'italic text-zinc-500 dark:text-zinc-400')}>{g.display}</span>
+                    {g.canonical_name && avoided.has(g.canonical_name) && (
+                      <Ban size={13} className="shrink-0 text-red-500" aria-label={t('artikel.avoid')} />
+                    )}
                     <ConsumerDots ids={g.consumers} />
                   </div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-zinc-400">
@@ -214,8 +237,13 @@ export function Artikel() {
             <Button variant="secondary" onClick={() => subscribeOffers.mutate()} disabled={subscribeOffers.isPending}>
               <Bell size={15} /> {t('artikel.subscribeOffers')}
             </Button>
-            <Button variant="ghost" onClick={() => toast(t('artikel.avoidWip'), 'info')} title="Work in progress">
-              <Ban size={15} /> {t('artikel.avoid')}
+            <Button
+              variant="secondary"
+              onClick={() => toggleAvoid.mutate()}
+              disabled={!avoidNames.length || toggleAvoid.isPending}
+              title={!avoidNames.length ? t('artikel.avoidNeedsCanonical') : ''}
+            >
+              <Ban size={15} /> {allAvoided ? t('artikel.unavoid') : t('artikel.avoid')}
             </Button>
             <Button variant="ghost" onClick={() => setSelected(new Set())}>
               <X size={15} />
