@@ -110,6 +110,17 @@ export function Stores() {
                     )}
                   </div>
                 </div>
+                {/* single-branch chains: direct profile link (multi-branch get per-branch links in the expanded list) */}
+                {!multi && s.filialen?.[0]?.branch_id != null && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); navigate(`/filialen/${s.filialen![0].branch_id}`); }}
+                    title={t('stores.openProfile')}
+                    className="shrink-0 self-center rounded-lg p-2 text-zinc-400 hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-950/30"
+                  >
+                    <SlidersHorizontal size={16} />
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); navigate(`/receipts?store=${encodeURIComponent(s.key)}`); }}
