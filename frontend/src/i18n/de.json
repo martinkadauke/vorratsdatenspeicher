@@ -52,6 +52,12 @@
     "delete": "Beleg löschen",
     "deleteConfirm": "Diesen Beleg mit allen Artikeln wirklich löschen?"
   },
+  "receiptDetail": {
+    "mismatch": "Summe der Positionen weicht vom Bon-Gesamtbetrag ab",
+    "mismatchHint": "Eine Position fehlt, ist doppelt oder hat falschen Preis",
+    "sumLabel": "Σ Positionen:",
+    "printedLabel": "· Bon:"
+  },
   "article": {
     "edit": "Artikel bearbeiten",
     "originalText": "Original (Kassenbon)",
@@ -60,6 +66,8 @@
     "amount": "Menge",
     "unit": "Einheit",
     "price": "Preis",
+    "unitPrice": "Preis/Einheit",
+    "totalPrice": "Gesamtpreis",
     "consumers": "Wer isst/braucht das?",
     "exclusive": "Exklusiv",
     "applyTo": "Änderung anwenden auf",

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, Pencil, Trash2 } from 'lucide-react';
+import { ArrowLeft, Pencil, Trash2, AlertTriangle } from 'lucide-react';
 import { api } from '../api/client';
 import type { Artikel, ReceiptDetail } from '../api/types';
 import { Card, Spinner, Badge, Modal, Input, Label, Button } from '../components/ui';
@@ -38,6 +38,16 @@ export function ReceiptDetailPage() {
   if (isLoading) return <Spinner />;
   if (!data) return null;
 
+  // Sum of line totals — flag if it doesn't match the receipt's printed gesamt_betrag.
+  const itemSum = data.artikel.reduce((acc, a) => {
+    const p = parseFloat((a.preis ?? '').toString().replace(',', '.'));
+    return acc + (Number.isFinite(p) ? p : 0);
+  }, 0);
+  const printedTotal = parseFloat((data.gesamt_betrag ?? '').toString().replace(',', '.'));
+  const totalKnown = Number.isFinite(printedTotal);
+  const diff = totalKnown ? itemSum - printedTotal : 0;
+  const mismatch = totalKnown && Math.abs(diff) > 0.01;
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-2 sm:gap-3">
@@ -66,6 +76,21 @@ export function ReceiptDetailPage() {
           <Trash2 size={18} />
         </button>
       </div>
+
+      {mismatch && (
+        <div
+          className="flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700/50 dark:bg-amber-950/40 dark:text-amber-300"
+          title={t('receiptDetail.mismatchHint')}
+        >
+          <AlertTriangle size={16} className="shrink-0" />
+          <div className="min-w-0 flex-1">
+            <span className="font-medium">{t('receiptDetail.mismatch')}: </span>
+            <span className="tabular">{t('receiptDetail.sumLabel')} {eur(itemSum)} </span>
+            <span className="tabular">{t('receiptDetail.printedLabel')} {eur(printedTotal)} </span>
+            <span className="tabular font-semibold">({diff > 0 ? '+' : ''}{eur(diff)})</span>
+          </div>
+        </div>
+      )}
 
       <ReceiptEditModal receipt={data} open={editReceipt} onClose={() => setEditReceipt(false)} />
 

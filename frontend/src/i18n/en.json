@@ -52,6 +52,12 @@
     "delete": "Delete receipt",
     "deleteConfirm": "Really delete this receipt and all its items?"
   },
+  "receiptDetail": {
+    "mismatch": "Sum of items doesn't match receipt total",
+    "mismatchHint": "A line is missing, duplicated, or has the wrong price",
+    "sumLabel": "Σ items:",
+    "printedLabel": "· receipt:"
+  },
   "article": {
     "edit": "Edit item",
     "originalText": "Original (receipt)",
@@ -60,6 +66,8 @@
     "amount": "Amount",
     "unit": "Unit",
     "price": "Price",
+    "unitPrice": "Unit price",
+    "totalPrice": "Line total",
     "consumers": "Who consumes this?",
     "exclusive": "Exclusive",
     "applyTo": "Apply change to",

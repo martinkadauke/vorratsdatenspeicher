@@ -7,6 +7,24 @@ import { Button, Input, Label, Modal } from './ui';
 import { CategoryPicker } from './CategoryPicker';
 import { ConsumerChips } from './ConsumerChips';
 
+/** Parse "12", "1,5", "0.99" into number; null if not parseable. */
+const num = (s: string): number | null => {
+  const n = parseFloat((s ?? '').toString().replace(',', '.'));
+  return Number.isFinite(n) ? n : null;
+};
+/** Format a number with 2 decimal places, comma as separator. */
+const fmt = (n: number): string => n.toFixed(2).replace('.', ',');
+const multiply = (mengeStr: string, preisStr: string): string | null => {
+  const m = num(mengeStr), p = num(preisStr);
+  if (m === null || p === null) return null;
+  return fmt(m * p);
+};
+const computeEinzel = (mengeStr: string, totalStr: string): string => {
+  const m = num(mengeStr), t = num(totalStr);
+  if (m === null || t === null || m === 0) return '';
+  return fmt(t / m);
+};
+
 interface NameOption { canonical_name: string }
 
 export function ArticleEditModal({ artikel, open, onClose, invalidateKeys }: {
@@ -22,7 +40,8 @@ export function ArticleEditModal({ artikel, open, onClose, invalidateKeys }: {
   const [category, setCategory] = useState<string | null>(null);
   const [menge, setMenge] = useState('');
   const [einheit, setEinheit] = useState('');
-  const [preis, setPreis] = useState('');
+  const [preis, setPreis] = useState('');           // Gesamtpreis (line total, persisted)
+  const [einzelPreis, setEinzelPreis] = useState(''); // Preis/Einheit (derived helper)
   const [consumers, setConsumers] = useState<number[]>([]);
   const [exclusive, setExclusive] = useState(false);
   const [applyAll, setApplyAll] = useState(true);
@@ -32,13 +51,34 @@ export function ArticleEditModal({ artikel, open, onClose, invalidateKeys }: {
     if (!artikel) return;
     setCanonical(artikel.canonical_name ?? '');
     setCategory(artikel.category_path);
-    setMenge(artikel.menge ?? '');
+    const m = artikel.menge ?? '';
+    const p = artikel.preis ?? '';
+    setMenge(m);
     setEinheit(artikel.einheit ?? '');
-    setPreis(artikel.preis ?? '');
+    setPreis(p);
+    setEinzelPreis(computeEinzel(m, p));
     setConsumers(artikel.consumers);
     setExclusive(artikel.consumers_exclusive);
     setApplyAll(true);
   }, [artikel]);
+
+  // Editing menge: keep einzelPreis, recompute Gesamt
+  const onMengeChange = (v: string) => {
+    setMenge(v);
+    const newTotal = multiply(v, einzelPreis);
+    if (newTotal !== null) setPreis(newTotal);
+  };
+  // Editing einzelPreis: recompute Gesamt
+  const onEinzelChange = (v: string) => {
+    setEinzelPreis(v);
+    const newTotal = multiply(menge, v);
+    if (newTotal !== null) setPreis(newTotal);
+  };
+  // Editing Gesamt: recompute einzelPreis
+  const onPreisChange = (v: string) => {
+    setPreis(v);
+    setEinzelPreis(computeEinzel(menge, v));
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -125,18 +165,22 @@ export function ArticleEditModal({ artikel, open, onClose, invalidateKeys }: {
           <CategoryPicker value={category} onChange={setCategory} />
         </div>
 
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <div>
             <Label>{t('article.amount')}</Label>
-            <Input inputMode="decimal" value={menge} onChange={e => setMenge(e.target.value)} />
+            <Input inputMode="decimal" value={menge} onChange={e => onMengeChange(e.target.value)} />
           </div>
           <div>
             <Label>{t('article.unit')}</Label>
             <Input value={einheit} onChange={e => setEinheit(e.target.value)} />
           </div>
-          <div className="col-span-2 sm:col-span-1">
-            <Label>{t('article.price')} (€)</Label>
-            <Input inputMode="decimal" value={preis} onChange={e => setPreis(e.target.value)} />
+          <div>
+            <Label>{t('article.unitPrice')} (€)</Label>
+            <Input inputMode="decimal" value={einzelPreis} onChange={e => onEinzelChange(e.target.value)} />
+          </div>
+          <div>
+            <Label>{t('article.totalPrice')} (€)</Label>
+            <Input inputMode="decimal" value={preis} onChange={e => onPreisChange(e.target.value)} />
           </div>
         </div>
 
