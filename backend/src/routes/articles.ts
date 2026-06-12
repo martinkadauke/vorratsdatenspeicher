@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import sql from '../db.js';
 import { kontoScope, canSeeKonto } from '../auth/konto.js';
+import { recordAlias, recordAliases } from '../lib/canonicalAlias.js';
 
 const PATCHABLE = ['name', 'canonical_name', 'category_path', 'menge', 'einheit', 'preis'] as const;
 const DECIMAL_FIELDS = new Set(['menge', 'preis']);
@@ -66,8 +67,12 @@ export function articleRoutes(app: FastifyInstance): void {
     }
     if (!Object.keys(updates).length) return reply.code(400).send({ error: 'no patchable fields' });
 
-    const rows = await sql`UPDATE artikel SET ${sql(updates)} WHERE id = ${id} RETURNING id`;
+    const rows = await sql`UPDATE artikel SET ${sql(updates)} WHERE id = ${id} RETURNING id, original_text, name`;
     if (!rows.length) return reply.code(404).send({ error: 'not found' });
+    // learn from the manual correction so future scans of the same OCR text match
+    if ('canonical_name' in updates && updates.canonical_name) {
+      await recordAlias((rows[0].original_text as string) ?? (rows[0].name as string), updates.canonical_name as string);
+    }
     return { ok: true };
   });
 
@@ -113,6 +118,8 @@ export function articleRoutes(app: FastifyInstance): void {
         ${kontoScope(req.user, sql`e.konto_id`)}
       RETURNING a.id
     `;
+    // learn this OCR identity → canonical for future scans
+    await recordAliases([[ot, canonical_name], [ag, canonical_name], [nm, canonical_name]]);
     return { ok: true, updated: rows.length };
   });
 

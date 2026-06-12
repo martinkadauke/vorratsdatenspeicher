@@ -4,6 +4,7 @@ import { parseLlmJson } from '../llm/ollama.js';
 import { providerForTask } from '../llm/provider.js';
 import { searxngSearch, searxngImageSearch } from '../llm/searxng.js';
 import { matchExistingCanonical } from '../lib/canonicalMatch.js';
+import { ocrKey, recordAlias, loadAliasMap } from '../lib/canonicalAlias.js';
 import { STAGE1_PROMPT, STAGE2_PROMPT } from '../llm/prompts.js';
 import { mostSimilar } from '../llm/similarity.js';
 import { notify } from '../notify.js';
@@ -139,6 +140,7 @@ async function churnWork(eventId: number): Promise<void> {
     WHERE canonical_name IS NOT NULL
     GROUP BY canonical_name ORDER BY n DESC LIMIT 200
   `).map(r => r.canonical_name as string);
+  const aliases = await loadAliasMap();
 
   let autoApplied = 0;
   let queued = 0;
@@ -155,12 +157,14 @@ async function churnWork(eventId: number): Promise<void> {
     await progress.set({ phase: 'canonical', current: processed, total: candidates.length });
     processed++;
     try {
-      // Deterministic first: if the item clearly contains a known canonical name
-      // ("Bio Quetschie" → "Quetschie"), assign it directly and skip the LLM.
-      const pre = matchExistingCanonical([a.original_text, a.name, a.ai_guess], existing);
+      // 1) learned alias memory (exact OCR repeat), 2) deterministic whole-word
+      // match — both free + reliable, before the (slow) LLM.
+      const fromAlias = aliases.get(ocrKey(a.original_text ?? a.name));
+      const pre = fromAlias ?? matchExistingCanonical([a.original_text, a.name, a.ai_guess], existing);
       if (pre) {
         if (pre !== a.canonical_name) {
           await sql`UPDATE artikel SET canonical_name = ${pre} WHERE id = ${a.id}`;
+          if (!fromAlias) await recordAlias(a.original_text ?? a.name, pre); // learn deterministic hits
           autoApplied++;
         } else { skipped++; }
         continue;
@@ -218,6 +222,7 @@ async function churnWork(eventId: number): Promise<void> {
 
       if (confidence >= confidenceGate) {
         await sql`UPDATE artikel SET canonical_name = ${canonical} WHERE id = ${a.id}`;
+        await recordAlias(a.original_text ?? a.name, canonical); // learn so future repeats skip the LLM
         if (translationEn) {
           await sql`
             INSERT INTO canonical_translation (canonical_name, lang, translated, source)

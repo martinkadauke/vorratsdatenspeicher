@@ -9,6 +9,7 @@ import { kontoScope, canSeeKonto } from '../auth/konto.js';
 import { ocrFromImage } from '../llm/ocr.js';
 import { searchFilter, col, numCol, lk, type Frag } from '../lib/search.js';
 import { matchExistingCanonical } from '../lib/canonicalMatch.js';
+import { ocrKey, loadAliasMap, recordAliases } from '../lib/canonicalAlias.js';
 
 /** Search config for the receipts list/nav: free text hits the store name or
  *  any of the receipt's items; supports laden:/kategorie: and preis> filters.
@@ -69,15 +70,19 @@ async function ocrAndStore(id: number, bildPfad: string): Promise<{ items: numbe
   if (!parsed.datum || !parsed.ladenkette) throw new Error('OCR returned no usable receipt data');
   const ladenName = cleanLadenName(parsed.ladenkette, parsed.filiale);
   const gesamt = Number.isFinite(parsed.gesamt_betrag) ? parsed.gesamt_betrag : null;
-  // Deterministically inherit known canonical names already at scan time, so a
-  // new receipt's items match the existing list without waiting for the churn.
+  // Inherit known canonical names already at scan time: first the learned alias
+  // memory (exact OCR repeat → instant), then deterministic whole-word match.
   const existing = (await sql`SELECT DISTINCT canonical_name FROM artikel WHERE canonical_name IS NOT NULL`)
     .map(r => r.canonical_name as string);
+  const aliases = await loadAliasMap();
+  const learn: [string | null, string][] = [];
   await sql.begin(async tx => {
     await tx`DELETE FROM artikel WHERE einkauf_id = ${id}`;
     await tx`UPDATE einkauf SET datum = ${parsed.datum}, roh_ladenname = ${ladenName}, gesamt_betrag = ${gesamt} WHERE id = ${id}`;
     for (const a of parsed.artikel ?? []) {
-      const canon = matchExistingCanonical([a.original_text, a.name, a.ai_guess], existing);
+      const fromAlias = aliases.get(ocrKey(a.original_text ?? a.name));
+      const canon = fromAlias ?? matchExistingCanonical([a.original_text, a.name, a.ai_guess], existing);
+      if (canon && !fromAlias) learn.push([a.original_text ?? a.name ?? null, canon]); // remember new matches
       await tx`
         INSERT INTO artikel
           (einkauf_id, name, menge, einheit, preis, kategorie, original_text, ai_guess, canonical_name)
@@ -88,6 +93,7 @@ async function ocrAndStore(id: number, bildPfad: string): Promise<{ items: numbe
       `;
     }
   });
+  await recordAliases(learn);
   return { items: parsed.artikel?.length ?? 0, confidence: parsed.confidence };
 }
 

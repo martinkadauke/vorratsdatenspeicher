@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import sql from '../db.js';
 import { kontoScope } from '../auth/konto.js';
 import { searchFilter, col, numCol, lk } from '../lib/search.js';
+import { recordAliases } from '../lib/canonicalAlias.js';
 
 export function nameRoutes(app: FastifyInstance): void {
   app.get('/api/names', async (req) => {
@@ -151,8 +152,10 @@ export function nameRoutes(app: FastifyInstance): void {
       FROM einkauf e
       WHERE a.einkauf_id = e.id AND a.id IN ${sql(artikel_ids)}
         ${kontoScope(req.user, sql`e.konto_id`)}
-      RETURNING a.id
+      RETURNING a.id, a.original_text, a.name
     `;
+    // learn each OCR text → canonical so future scans match without the LLM
+    await recordAliases(rows.map(r => [(r.original_text as string) ?? (r.name as string), name]));
     return { ok: true, updated: rows.length };
   });
 
