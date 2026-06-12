@@ -42,9 +42,9 @@ export function storeRoutes(app: FastifyInstance): void {
         COUNT(e.id)::int                       AS receipts,
         COALESCE(SUM(e.gesamt_betrag), 0)::numeric(10,2) AS total,
         MAX(e.datum)                           AS last_visit
-      FROM filiale f
+      FROM store_branch f
       LEFT JOIN einkauf e
-        ON e.filiale_id = f.id
+        ON e.branch_id = f.id
        ${kontoScope(req.user, sql`e.konto_id`)}
       WHERE f.kind = ${kind}
       GROUP BY f.id

@@ -5,6 +5,11 @@
 -- "shops" (Amazon, eBay …) instead of physical branches; cash receipts
 -- (quelle='bar') need no store at all.
 --
+-- NOTE: a *legacy* `filiale` table (+ the unused einkauf.filiale_id column)
+-- already exists in this DB from the original Einkaufszettelpuppe schema, with
+-- a different shape. We do NOT touch it — this entity lives in its own table
+-- `store_branch` and links via a fresh `einkauf.branch_id` column.
+--
 -- Because receipts are inserted from several paths (n8n Telegram ingestion,
 -- in-app re-OCR, manual edits), the create-and-link logic lives in a DB
 -- trigger so EVERY path is covered without touching n8n.
@@ -24,7 +29,7 @@ END;
 $$ LANGUAGE plpgsql IMMUTABLE;
 
 -- ── the entity ───────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS filiale (
+CREATE TABLE IF NOT EXISTS store_branch (
   id             SERIAL PRIMARY KEY,
   chain_key      TEXT NOT NULL,                        -- normalized chain ("lidl")
   name           TEXT NOT NULL,                        -- raw branch/shop name as seen on the receipt
@@ -40,27 +45,23 @@ CREATE TABLE IF NOT EXISTS filiale (
   created_at     TIMESTAMP NOT NULL DEFAULT NOW(),
   updated_at     TIMESTAMP
 );
-CREATE UNIQUE INDEX IF NOT EXISTS ux_filiale_kind_name ON filiale(kind, name);
-CREATE INDEX IF NOT EXISTS ix_filiale_chain ON filiale(chain_key);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_store_branch_kind_name ON store_branch(kind, name);
+CREATE INDEX IF NOT EXISTS ix_store_branch_chain ON store_branch(chain_key);
 
--- ── einkauf → filiale link ────────────────────────────────────────────────
--- einkauf.filiale_id already exists (legacy, unused). Clear any stale legacy
--- values, then wire up a real FK before the trigger starts populating it.
-UPDATE einkauf SET filiale_id = NULL WHERE filiale_id IS NOT NULL;
+-- ── einkauf → store_branch link (fresh column, independent of legacy filiale_id) ──
+ALTER TABLE einkauf ADD COLUMN IF NOT EXISTS branch_id INT;
 DO $$
 BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'fk_einkauf_filiale'
-  ) THEN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_einkauf_branch') THEN
     ALTER TABLE einkauf
-      ADD CONSTRAINT fk_einkauf_filiale
-      FOREIGN KEY (filiale_id) REFERENCES filiale(id) ON DELETE SET NULL;
+      ADD CONSTRAINT fk_einkauf_branch
+      FOREIGN KEY (branch_id) REFERENCES store_branch(id) ON DELETE SET NULL;
   END IF;
 END $$;
-CREATE INDEX IF NOT EXISTS ix_einkauf_filiale ON einkauf(filiale_id);
+CREATE INDEX IF NOT EXISTS ix_einkauf_branch ON einkauf(branch_id);
 
 -- ── auto-create + link trigger ────────────────────────────────────────────
-CREATE OR REPLACE FUNCTION link_filiale() RETURNS trigger AS $$
+CREATE OR REPLACE FUNCTION link_store_branch() RETURNS trigger AS $$
 DECLARE
   v_kind TEXT;
   v_name TEXT;
@@ -70,29 +71,29 @@ BEGIN
 
   -- cash receipts need no store; nameless receipts can't create one
   IF NEW.quelle = 'bar' OR v_name IS NULL THEN
-    NEW.filiale_id := NULL;
+    NEW.branch_id := NULL;
     RETURN NEW;
   END IF;
 
   v_kind := CASE WHEN NEW.quelle = 'email' THEN 'shop' ELSE 'filiale' END;
 
-  SELECT id INTO v_id FROM filiale WHERE kind = v_kind AND name = v_name;
+  SELECT id INTO v_id FROM store_branch WHERE kind = v_kind AND name = v_name;
   IF v_id IS NULL THEN
-    INSERT INTO filiale (chain_key, name, kind)
+    INSERT INTO store_branch (chain_key, name, kind)
     VALUES (normalize_store(v_name), v_name, v_kind)
     ON CONFLICT (kind, name) DO UPDATE SET name = EXCLUDED.name
     RETURNING id INTO v_id;
   END IF;
 
-  NEW.filiale_id := v_id;
+  NEW.branch_id := v_id;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
-DROP TRIGGER IF EXISTS trg_link_filiale ON einkauf;
-CREATE TRIGGER trg_link_filiale
+DROP TRIGGER IF EXISTS trg_link_store_branch ON einkauf;
+CREATE TRIGGER trg_link_store_branch
   BEFORE INSERT OR UPDATE OF roh_ladenname, quelle ON einkauf
-  FOR EACH ROW EXECUTE FUNCTION link_filiale();
+  FOR EACH ROW EXECUTE FUNCTION link_store_branch();
 
 -- ── backfill existing receipts ────────────────────────────────────────────
 -- Touch roh_ladenname so the BEFORE-UPDATE trigger creates every chain/branch
