@@ -1,6 +1,5 @@
 import type { FastifyInstance } from 'fastify';
 import path from 'node:path';
-import { stat } from 'node:fs/promises';
 import Jimp from 'jimp';
 import sql from '../db.js';
 import { requireAdmin } from '../auth/plugin.js';
@@ -80,19 +79,15 @@ export function receiptRoutes(app: FastifyInstance): void {
     const localPath = path.join(RECEIPTS_LOCAL_PATH, filename);
 
     try {
-      const before = await stat(localPath);
       const image = await Jimp.read(localPath);
       image.rotate(90);
+      // writeAsync overwrites in place → mode/ownership preserved.
+      // One-time chmod 666 on the host's receipts share is enough for
+      // every future rotation (the container is root-squashed via NFS
+      // and can't chmod, but mode-666 lets it write).
       await image.writeAsync(localPath);
-      const after = await stat(localPath);
-      const changed = before.size !== after.size || before.mtimeMs !== after.mtimeMs;
-      req.log.info(`rotated ${localPath}: before=${before.size}b mtime=${before.mtimeMs} → after=${after.size}b mtime=${after.mtimeMs} changed=${changed}`);
-      return {
-        ok: true,
-        changed,
-        before: { size: before.size, mtime: before.mtimeMs, mode: before.mode.toString(8) },
-        after: { size: after.size, mtime: after.mtimeMs, mode: after.mode.toString(8) },
-      };
+      req.log.info(`rotated ${localPath} 90° CW`);
+      return { ok: true };
     } catch (e) {
       req.log.error(`rotate failed for ${localPath}: ${(e as Error).message}`);
       return reply.code(502).send({ error: (e as Error).message });
