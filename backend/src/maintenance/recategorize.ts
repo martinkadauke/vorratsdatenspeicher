@@ -39,15 +39,20 @@ export async function runRecategorize(onlyMissing: boolean): Promise<number> {
 export async function processRecategorizeBatch(onlyMissing: boolean): Promise<{ total: number; updated: number; fallback: number }> {
   const llm = await providerForTask('recategorize');
   const validPaths = (await sql`SELECT path FROM category ORDER BY path`).map(r => r.path as string);
+  // "missing" also retries items previously dumped into the fallback bucket,
+  // so a stronger model on the next run can rescue them.
   const items = onlyMissing
-    ? await sql`SELECT id, name, ai_guess, canonical_name FROM artikel WHERE category_path IS NULL ORDER BY id`
+    ? await sql`SELECT id, name, ai_guess, canonical_name FROM artikel
+                WHERE category_path IS NULL OR category_path = 'Sonstiges/Unkategorisiert'
+                ORDER BY id`
     : await sql`SELECT id, name, ai_guess, canonical_name FROM artikel ORDER BY id`;
 
   let updated = 0;
   let fallback = 0;
 
-  for (let i = 0; i < items.length; i += 20) {
-    const batch = items.slice(i, i + 20);
+  const BATCH = 20;
+  for (let i = 0; i < items.length; i += BATCH) {
+    const batch = items.slice(i, i + BATCH);
     let assignments: CatAssignment[] = [];
     try {
       assignments = parseLlmJson<CatAssignment[]>(await llm.chat({
@@ -59,15 +64,24 @@ export async function processRecategorizeBatch(onlyMissing: boolean): Promise<{ 
         json: true,
       }));
     } catch (err) {
-      console.error(`[recategorize] batch at ${i} failed:`, (err as Error).message);
-      continue;
+      console.error(`[recategorize] batch at ${i} failed: ${(err as Error).message} — falling through to per-item fallback`);
     }
 
-    for (const asg of assignments) {
-      if (!asg || typeof asg.id !== 'number') continue;
-      const safePath = validPaths.includes(asg.category_path) ? asg.category_path : 'Sonstiges/Unkategorisiert';
-      if (safePath === 'Sonstiges/Unkategorisiert') fallback++;
-      await sql`UPDATE artikel SET category_path = ${safePath} WHERE id = ${asg.id}`;
+    // index returned assignments by id for fast lookup
+    const byId = new Map<number, CatAssignment>();
+    if (Array.isArray(assignments)) {
+      for (const asg of assignments) {
+        if (asg && typeof asg.id === 'number') byId.set(asg.id, asg);
+      }
+    }
+
+    // for every item in the batch: write whatever the LLM gave us OR fallback path,
+    // so the count of NULLs always shrinks each run (no infinite-retry on hard items)
+    for (const b of batch) {
+      const asg = byId.get(b.id);
+      const proposed = asg && validPaths.includes(asg.category_path) ? asg.category_path : 'Sonstiges/Unkategorisiert';
+      if (proposed === 'Sonstiges/Unkategorisiert') fallback++;
+      await sql`UPDATE artikel SET category_path = ${proposed} WHERE id = ${b.id}`;
       updated++;
     }
   }

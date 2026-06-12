@@ -44,7 +44,7 @@ const DEFAULTS: AppConfig = {
   'churner.enabled': true,
   'churner.cron': '0 3 * * *',
   'churner.confidence': 0.85,
-  'churner.batch_size': 30,
+  'churner.batch_size': 200,
   'searxng.url': 'http://192.168.1.238:8089',
   'app.default_lang': 'de',
   'app.base_url': 'http://192.168.1.238:8766',
