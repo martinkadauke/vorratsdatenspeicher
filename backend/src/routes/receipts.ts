@@ -1,7 +1,13 @@
 import type { FastifyInstance } from 'fastify';
+import path from 'node:path';
+import Jimp from 'jimp';
 import sql from '../db.js';
 import { requireAdmin } from '../auth/plugin.js';
 import { ocrFromUrl } from '../llm/ocr.js';
+
+/** Local mount where receipt photos are persisted on disk. Host path is
+ *  mapped here via the docker volume in deploy/stack.yml. */
+const RECEIPTS_LOCAL_PATH = process.env.RECEIPTS_LOCAL_PATH ?? '/receipts';
 
 export function receiptRoutes(app: FastifyInstance): void {
   app.get('/api/receipts', async (req) => {
@@ -53,6 +59,34 @@ export function receiptRoutes(app: FastifyInstance): void {
     const rows = await sql`UPDATE einkauf SET ${sql(updates)} WHERE id = ${id} RETURNING id`;
     if (!rows.length) return reply.code(404).send({ error: 'not found' });
     return { ok: true };
+  });
+
+  /** Rotate the photo 90° clockwise on disk so the file itself is now
+   *  upright — a subsequent re-OCR will see the correctly oriented image.
+   *  Requires the host receipts directory to be volume-mounted into the
+   *  container at RECEIPTS_LOCAL_PATH (default /receipts). */
+  app.post('/api/receipts/:id/rotate', { preHandler: requireAdmin }, async (req, reply) => {
+    const id = parseInt((req.params as { id: string }).id, 10);
+    if (!id) return reply.code(400).send({ error: 'invalid id' });
+    const rows = await sql`SELECT bild_pfad FROM einkauf WHERE id = ${id}`;
+    if (!rows.length) return reply.code(404).send({ error: 'not found' });
+    const bildPfad = rows[0].bild_pfad as string | null;
+    if (!bildPfad) return reply.code(400).send({ error: 'receipt has no image' });
+
+    // Derive the filename from the URL and look it up under the mount.
+    const filename = bildPfad.split('/').pop();
+    if (!filename) return reply.code(400).send({ error: 'cannot derive filename from bild_pfad' });
+    const localPath = path.join(RECEIPTS_LOCAL_PATH, filename);
+
+    try {
+      const image = await Jimp.read(localPath);
+      image.rotate(90);
+      await image.write(localPath as `${string}.${string}`);
+      return { ok: true };
+    } catch (e) {
+      req.log.error(`rotate failed for ${localPath}: ${(e as Error).message}`);
+      return reply.code(502).send({ error: (e as Error).message });
+    }
   });
 
   /** Re-run vision OCR on this receipt's image. Wipes existing artikel
@@ -120,18 +154,22 @@ export function receiptRoutes(app: FastifyInstance): void {
   app.get('/api/receipts/:id/neighbors', async (req, reply) => {
     const id = parseInt((req.params as { id: string }).id, 10);
     if (!id) return reply.code(400).send({ error: 'invalid id' });
-    const [cur] = await sql`SELECT datum, id FROM einkauf WHERE id = ${id}`;
+    // datum is a DATE column; coerce to YYYY-MM-DD string so the comparison
+    // is not affected by timezone juggling that breaks row-tuple compares.
+    const [cur] = await sql`SELECT TO_CHAR(datum, 'YYYY-MM-DD') AS datum, id FROM einkauf WHERE id = ${id}`;
     if (!cur) return reply.code(404).send({ error: 'not found' });
-    // prev = newer (sorts before in DESC order)
+    const datum = cur.datum as string;
+    const curId = cur.id as number;
+    // prev = newer (one position earlier in the (datum DESC, id DESC) list)
     const [prev] = await sql`
       SELECT id FROM einkauf
-      WHERE (datum, id) > (${cur.datum}, ${cur.id})
+      WHERE datum > ${datum}::date OR (datum = ${datum}::date AND id > ${curId})
       ORDER BY datum ASC, id ASC LIMIT 1
     `;
-    // next = older (sorts after in DESC order)
+    // next = older (one position later in the list)
     const [next] = await sql`
       SELECT id FROM einkauf
-      WHERE (datum, id) < (${cur.datum}, ${cur.id})
+      WHERE datum < ${datum}::date OR (datum = ${datum}::date AND id < ${curId})
       ORDER BY datum DESC, id DESC LIMIT 1
     `;
     return { prev_id: prev?.id ?? null, next_id: next?.id ?? null };

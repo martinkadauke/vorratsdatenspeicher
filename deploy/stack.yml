@@ -10,10 +10,13 @@ services:
       PORT: "80"
       # Only the prod env runs the nightly churner cron (saves Ollama/DeepSeek load)
       VDS_ENV: ${VDS_ENV:-prod}
+      RECEIPTS_LOCAL_PATH: "/receipts"
     ports:
       - "${PORT:-8766}:80"   # 8766 = prod, 8767 = staging — gesetzt von cicd.yml
-    # Belege-Fotos: NPM auf Unraid serviert /receipts/* direkt aus dem Filesystem.
-    # Der Container braucht die Fotos nicht — daher kein Volume-Mount.
+    # NPM auf Unraid serviert /receipts/* direkt aus dem Filesystem, wir
+    # mounten den gleichen Pfad damit der Container Bilder rotieren kann.
+    volumes:
+      - "${RECEIPTS_HOST_PATH:-/mnt/user/Aufnahmen/receipts}:/receipts:rw"
     healthcheck:
       # Node statt wget — garantiert im Image vorhanden, deutlich robuster
       test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:80/api/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]

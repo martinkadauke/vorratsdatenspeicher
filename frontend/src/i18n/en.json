@@ -62,7 +62,8 @@
     "reocrDone": "OCR done: {{count}} items · confidence {{confidence}}%",
     "addArticle": "Add item",
     "prev": "Previous receipt",
-    "next": "Next receipt"
+    "next": "Next receipt",
+    "rotate": "Rotate 90° clockwise"
   },
   "article": {
     "edit": "Edit item",

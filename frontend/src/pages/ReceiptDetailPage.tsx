@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, Plus, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, Plus, ChevronLeft, ChevronRight, RotateCw } from 'lucide-react';
 import { api } from '../api/client';
 import type { Artikel, ReceiptDetail } from '../api/types';
 import { Card, Spinner, Badge, Modal, Input, Label, Button } from '../components/ui';
@@ -21,6 +21,7 @@ export function ReceiptDetailPage() {
   const [editReceipt, setEditReceipt] = useState(false);
   const [imageOpen, setImageOpen] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [imgVersion, setImgVersion] = useState(0); // cache-buster after rotate
 
   const deleteReceipt = useMutation({
     mutationFn: () => api(`/api/receipts/${id}`, { method: 'DELETE' }),
@@ -29,6 +30,12 @@ export function ReceiptDetailPage() {
       void qc.invalidateQueries({ queryKey: ['stores'] });
       navigate('/receipts');
     },
+  });
+
+  const rotate = useMutation({
+    mutationFn: () => api(`/api/receipts/${id}/rotate`, { method: 'POST' }),
+    onSuccess: () => setImgVersion(v => v + 1),
+    onError: (err: Error) => alert(`Drehen fehlgeschlagen: ${err.message}`),
   });
 
   const reocr = useMutation({
@@ -110,7 +117,7 @@ export function ReceiptDetailPage() {
         <button
           onClick={goPrev}
           disabled={!neighbors?.prev_id}
-          className="shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 disabled:opacity-30 dark:hover:bg-zinc-800"
+          className="hidden shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 disabled:opacity-30 dark:hover:bg-zinc-800 sm:block"
           title={t('receiptDetail.prev')}
         >
           <ChevronLeft size={20} />
@@ -127,10 +134,18 @@ export function ReceiptDetailPage() {
         <button
           onClick={goNext}
           disabled={!neighbors?.next_id}
-          className="shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 disabled:opacity-30 dark:hover:bg-zinc-800"
+          className="hidden shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 disabled:opacity-30 dark:hover:bg-zinc-800 sm:block"
           title={t('receiptDetail.next')}
         >
           <ChevronRight size={20} />
+        </button>
+        <button
+          onClick={() => rotate.mutate()}
+          disabled={rotate.isPending || !data.bild_pfad}
+          className="shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 disabled:opacity-30 dark:hover:bg-zinc-800"
+          title={t('receiptDetail.rotate')}
+        >
+          <RotateCw size={18} className={rotate.isPending ? 'animate-spin' : ''} />
         </button>
         <button
           onClick={() => { if (confirm(t('receiptDetail.reocrConfirm'))) reocr.mutate(); }}
@@ -179,7 +194,7 @@ export function ReceiptDetailPage() {
         <div>
           {data.bild_pfad ? (
             <img
-              src={data.bild_pfad}
+              src={imgVersion ? `${data.bild_pfad}?v=${imgVersion}` : data.bild_pfad}
               alt="Beleg"
               onClick={() => setImageOpen(true)}
               className="w-full cursor-zoom-in rounded-2xl border border-zinc-200 dark:border-zinc-800"
@@ -232,7 +247,7 @@ export function ReceiptDetailPage() {
       {/* Fullscreen image */}
       {imageOpen && data.bild_pfad && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-2" onClick={() => setImageOpen(false)}>
-          <img src={data.bild_pfad} alt="Beleg" className="max-h-full max-w-full rounded-lg object-contain" />
+          <img src={imgVersion ? `${data.bild_pfad}?v=${imgVersion}` : data.bild_pfad} alt="Beleg" className="max-h-full max-w-full rounded-lg object-contain" />
         </div>
       )}
 

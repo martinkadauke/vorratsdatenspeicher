@@ -62,7 +62,8 @@
     "reocrDone": "OCR fertig: {{count}} Artikel · Konfidenz {{confidence}}%",
     "addArticle": "Artikel hinzufügen",
     "prev": "Vorheriger Beleg",
-    "next": "Nächster Beleg"
+    "next": "Nächster Beleg",
+    "rotate": "90° im Uhrzeigersinn drehen"
   },
   "article": {
     "edit": "Artikel bearbeiten",
