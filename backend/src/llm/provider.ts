@@ -1,6 +1,6 @@
 import { getConfig, setConfig } from '../config.js';
 
-export type ProviderName = 'ollama' | 'deepseek';
+export type ProviderName = 'ollama' | 'deepseek' | 'anthropic';
 export type AiTask = 'recategorize' | 'churner_stage1' | 'churner_stage2';
 
 export interface LlmChatOptions {
@@ -122,6 +122,60 @@ export async function deepseekHealth(): Promise<HealthInfo> {
   }
 }
 
+// ── Anthropic (Claude Messages API) ─────────────────────────────────────
+class AnthropicProvider implements LlmProvider {
+  readonly name: ProviderName = 'anthropic';
+  constructor(private apiKey: string, private model: string) {
+    if (!apiKey) throw new Error('Anthropic API-Key fehlt — in Admin → AI Settings setzen');
+  }
+
+  async chat(opts: LlmChatOptions): Promise<string> {
+    // Claude doesn't have an OpenAI-style "json_object" flag — we just
+    // make the system prompt strict, and parseLlmJson() is tolerant.
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': this.apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: this.model,
+        max_tokens: 4096,
+        system: opts.system,
+        messages: [{ role: 'user', content: opts.user }],
+      }),
+      signal: AbortSignal.timeout(180_000),
+    });
+    if (!res.ok) throw new Error(`Anthropic HTTP ${res.status}: ${await safeBody(res)}`);
+    const data = (await res.json()) as { content?: { text?: string }[] };
+    return data.content?.[0]?.text ?? '';
+  }
+}
+
+export async function listAnthropicModels(): Promise<string[]> {
+  const apiKey = await getConfig('anthropic.api_key');
+  if (!apiKey) throw new Error('Anthropic API-Key fehlt');
+  const res = await fetch('https://api.anthropic.com/v1/models', {
+    headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) throw new Error(`Anthropic HTTP ${res.status}: ${await safeBody(res)}`);
+  const data = (await res.json()) as { data?: { id: string }[] };
+  return (data.data ?? []).map(m => m.id);
+}
+
+export async function anthropicHealth(): Promise<HealthInfo> {
+  try {
+    const apiKey = await getConfig('anthropic.api_key');
+    if (!apiKey) return { ok: false, error: 'API-Key fehlt' };
+    await listAnthropicModels();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
 // ── Per-task resolver ───────────────────────────────────────────────────
 /** Resolve which provider/model to use for a given AI task. */
 export async function providerForTask(task: AiTask): Promise<LlmProvider> {
@@ -133,6 +187,10 @@ export async function providerForTask(task: AiTask): Promise<LlmProvider> {
     const apiKey = await getConfig('deepseek.api_key');
     return new DeepSeekProvider(url, apiKey, model);
   }
+  if (provider === 'anthropic') {
+    const apiKey = await getConfig('anthropic.api_key');
+    return new AnthropicProvider(apiKey, model);
+  }
   // default: ollama
   const url = await getConfig('ollama.url');
   return new OllamaProvider(url, model);
@@ -140,12 +198,16 @@ export async function providerForTask(task: AiTask): Promise<LlmProvider> {
 
 /** List models for a provider. */
 export async function listModelsForProvider(provider: ProviderName): Promise<string[]> {
-  return provider === 'deepseek' ? listDeepSeekModels() : listOllamaModels();
+  if (provider === 'deepseek') return listDeepSeekModels();
+  if (provider === 'anthropic') return listAnthropicModels();
+  return listOllamaModels();
 }
 
 /** Health check for a provider. */
 export async function healthForProvider(provider: ProviderName): Promise<HealthInfo> {
-  return provider === 'deepseek' ? deepseekHealth() : ollamaHealth();
+  if (provider === 'deepseek') return deepseekHealth();
+  if (provider === 'anthropic') return anthropicHealth();
+  return ollamaHealth();
 }
 
 /** Set provider+model for a task atomically. */

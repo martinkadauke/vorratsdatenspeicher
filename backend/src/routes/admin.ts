@@ -11,7 +11,7 @@ import { sendMail } from '../mailer.js';
 import { createAuthToken } from '../auth/routes.js';
 import { listModelsForProvider, healthForProvider, setTaskAi, type ProviderName, type AiTask } from '../llm/provider.js';
 
-const VALID_PROVIDERS: ProviderName[] = ['ollama', 'deepseek'];
+const VALID_PROVIDERS: ProviderName[] = ['ollama', 'deepseek', 'anthropic'];
 const VALID_TASKS: AiTask[] = ['recategorize', 'churner_stage1', 'churner_stage2'];
 
 export function adminRoutes(app: FastifyInstance): void {

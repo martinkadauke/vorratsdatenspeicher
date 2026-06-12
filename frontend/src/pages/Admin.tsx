@@ -34,7 +34,7 @@ export function Admin() {
 }
 
 // ── AI Providers (Ollama + DeepSeek connection settings) ─────────────────
-type Provider = 'ollama' | 'deepseek';
+type Provider = 'ollama' | 'deepseek' | 'anthropic';
 
 function HealthBadge({ provider, label }: { provider: Provider | 'searxng'; label: string }) {
   const { t } = useTranslation();
@@ -74,6 +74,7 @@ function AiProvidersSection() {
       void qc.invalidateQueries({ queryKey: ['config'] });
       void qc.invalidateQueries({ queryKey: ['ollama-health'] });
       void qc.invalidateQueries({ queryKey: ['deepseek-health'] });
+      void qc.invalidateQueries({ queryKey: ['anthropic-health'] });
       void qc.invalidateQueries({ queryKey: ['ai-models'] });
     },
   });
@@ -86,6 +87,7 @@ function AiProvidersSection() {
         <div className="flex flex-wrap gap-2">
           <HealthBadge provider="ollama" label="Ollama" />
           <HealthBadge provider="deepseek" label="DeepSeek" />
+          <HealthBadge provider="anthropic" label="Anthropic" />
           <HealthBadge provider="searxng" label="SearXNG" />
         </div>
 
@@ -183,6 +185,7 @@ function TaskRow({ task, taskLabel, config }: {
         <Select value={provider} onChange={e => onProviderChange(e.target.value as Provider)}>
           <option value="ollama">Ollama</option>
           <option value="deepseek">DeepSeek</option>
+          <option value="anthropic">Anthropic</option>
         </Select>
         {modelsLoading ? (
           <Input value="…" disabled />
