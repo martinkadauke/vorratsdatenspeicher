@@ -2,14 +2,14 @@ import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Search, ArrowRightLeft, Image as ImageIcon, ChevronRight, ChevronDown, Store as StoreIco } from 'lucide-react';
+import { Search, ArrowRightLeft, Image as ImageIcon, ChevronRight, ChevronDown, Store as StoreIco, SlidersHorizontal } from 'lucide-react';
 import { api } from '../api/client';
 import { Card, Input, Button, Label, Modal, Spinner, EmptyState, Badge, Select } from '../components/ui';
 import { IconPicker, StoreIcon } from '../components/IconPicker';
 import { eur } from '../lib/utils';
 import { searchMatch } from '../lib/search';
 
-interface Filiale { name: string; receipts: number; total: number }
+interface Filiale { name: string; receipts: number; total: number; branch_id: number | null }
 interface StoreRow {
   key: string;
   display: string;
@@ -107,17 +107,27 @@ export function Stores() {
               {isOpen && s.filialen && (
                 <div className="mt-2 flex flex-col gap-1 border-t border-zinc-100 pt-2 dark:border-zinc-800">
                   {s.filialen.map(f => (
-                    <button
-                      key={f.name}
-                      type="button"
-                      onClick={() => navigate(`/receipts?store=${encodeURIComponent(f.name)}`)}
-                      className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
-                    >
-                      <StoreIco size={13} className="shrink-0 text-zinc-400" />
-                      <span className="min-w-0 flex-1 truncate">{f.name}</span>
-                      <span className="tabular shrink-0 text-xs text-zinc-400">{f.receipts} · {eur(f.total)}</span>
-                      <ChevronRight size={13} className="shrink-0 text-zinc-300" />
-                    </button>
+                    <div key={f.name} className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/receipts?store=${encodeURIComponent(f.name)}`)}
+                        className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
+                      >
+                        <StoreIco size={13} className="shrink-0 text-zinc-400" />
+                        <span className="min-w-0 flex-1 truncate">{f.name}</span>
+                        <span className="tabular shrink-0 text-xs text-zinc-400">{f.receipts} · {eur(f.total)}</span>
+                      </button>
+                      {f.branch_id != null && (
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/filialen/${f.branch_id}`)}
+                          title={t('stores.openProfile')}
+                          className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-950/30"
+                        >
+                          <SlidersHorizontal size={14} />
+                        </button>
+                      )}
+                    </div>
                   ))}
                 </div>
               )}

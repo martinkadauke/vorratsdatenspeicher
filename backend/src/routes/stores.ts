@@ -53,19 +53,76 @@ export function storeRoutes(app: FastifyInstance): void {
     `;
   });
 
+  /** Single branch profile: the entity + user-visible spend stats. */
+  app.get('/api/filialen/:id', async (req, reply) => {
+    const id = parseInt((req.params as { id: string }).id, 10);
+    if (!id) return reply.code(400).send({ error: 'invalid id' });
+    const [row] = await sql`
+      SELECT
+        f.id, f.chain_key, f.name, f.kind, f.address, f.lat, f.lon,
+        f.opening_hours, f.prospectus_url, f.warengruppen, f.subscribed,
+        COUNT(e.id)::int                                 AS receipts,
+        COALESCE(SUM(e.gesamt_betrag), 0)::numeric(10,2)  AS total,
+        MAX(e.datum)                                     AS last_visit
+      FROM store_branch f
+      LEFT JOIN einkauf e
+        ON e.branch_id = f.id
+       ${kontoScope(req.user, sql`e.konto_id`)}
+      WHERE f.id = ${id}
+      GROUP BY f.id
+    `;
+    if (!row) return reply.code(404).send({ error: 'not found' });
+    return row;
+  });
+
+  /** Update an editable branch profile field. Currently address + the tiered
+   *  warengruppen ordering ([[catPathA, catPathB], [catPathC]] — each tier is a
+   *  set of categories treated as equal/parallel). */
+  app.patch('/api/filialen/:id', async (req, reply) => {
+    const id = parseInt((req.params as { id: string }).id, 10);
+    if (!id) return reply.code(400).send({ error: 'invalid id' });
+    const body = (req.body ?? {}) as { address?: string | null; warengruppen?: unknown };
+
+    const updates: Record<string, unknown> = {};
+    if ('address' in body) updates.address = (body.address ?? '').toString().trim() || null;
+    if ('warengruppen' in body) {
+      const wg = body.warengruppen;
+      // must be an array of arrays of strings (tiers of category paths)
+      const valid = Array.isArray(wg) && wg.every(tier =>
+        Array.isArray(tier) && tier.every(c => typeof c === 'string'));
+      if (!valid) return reply.code(400).send({ error: 'warengruppen must be string[][]' });
+      // drop empty tiers, trim, de-dupe within a tier
+      const cleaned = (wg as string[][])
+        .map(tier => [...new Set(tier.map(c => c.trim()).filter(Boolean))])
+        .filter(tier => tier.length);
+      updates.warengruppen = JSON.stringify(cleaned);
+    }
+    if (!Object.keys(updates).length) return reply.code(400).send({ error: 'nothing to update' });
+    updates.updated_at = new Date();
+
+    const [row] = await sql`
+      UPDATE store_branch SET ${sql(updates)} WHERE id = ${id}
+      RETURNING id, address, warengruppen
+    `;
+    if (!row) return reply.code(404).send({ error: 'not found' });
+    return { ok: true, ...row };
+  });
+
   /** List all stores ever seen with receipt count + total spend. */
   app.get('/api/stores', async (req) => {
     const rows = await sql`
-      SELECT roh_ladenname, COUNT(*)::int AS receipts, SUM(gesamt_betrag)::numeric(10,2) AS total
+      SELECT e.roh_ladenname, COUNT(*)::int AS receipts, SUM(e.gesamt_betrag)::numeric(10,2) AS total,
+             MAX(sb.id) AS branch_id
       FROM einkauf e
-      WHERE roh_ladenname IS NOT NULL
+      LEFT JOIN store_branch sb ON sb.name = e.roh_ladenname AND sb.kind = 'filiale'
+      WHERE e.roh_ladenname IS NOT NULL
         ${kontoScope(req.user, sql`e.konto_id`)}
-      GROUP BY roh_ladenname
+      GROUP BY e.roh_ladenname
       ORDER BY receipts DESC
     `;
     // Group by normalized name in JS so "LIDL" + "Lidl GmbH" merge.
     // Each distinct roh_ladenname becomes a "filiale" (branch) under the chain.
-    interface Filiale { name: string; receipts: number; total: number }
+    interface Filiale { name: string; receipts: number; total: number; branch_id: number | null }
     const grouped = new Map<string, { receipts: number; total: number; filialen: Filiale[] }>();
     for (const r of rows) {
       const key = normalizeStore(r.roh_ladenname as string);
@@ -73,7 +130,7 @@ export function storeRoutes(app: FastifyInstance): void {
       const e = grouped.get(key) ?? { receipts: 0, total: 0, filialen: [] };
       e.receipts += r.receipts;
       e.total += Number(r.total ?? 0);
-      e.filialen.push({ name: r.roh_ladenname as string, receipts: r.receipts, total: Number(r.total ?? 0) });
+      e.filialen.push({ name: r.roh_ladenname as string, receipts: r.receipts, total: Number(r.total ?? 0), branch_id: (r.branch_id as number | null) ?? null });
       grouped.set(key, e);
     }
     return [...grouped.entries()]

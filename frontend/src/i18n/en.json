@@ -144,7 +144,28 @@
     "mergeHint": "All receipts of this store will move to the target store. This store will disappear.",
     "mergeTarget": "Target store",
     "pickTarget": "Pick",
-    "merge": "Merge"
+    "merge": "Merge",
+    "openProfile": "Open branch profile"
+  },
+  "filiale": {
+    "kindFiliale": "Branch",
+    "kindShop": "Online shop",
+    "total": "Spent",
+    "lastVisit": "Last visit",
+    "address": "Address",
+    "addressPlaceholder": "Street, ZIP City",
+    "warengruppen": "Aisle order",
+    "warengruppenHint": "Set the order you walk the store in. Each step can hold several equal-rank aisles (parallel).",
+    "warengruppenEmpty": "No order set yet — add a first step below.",
+    "parallel": "parallel",
+    "addCategory": "aisle",
+    "newTier": "New step:",
+    "unplacedCount": "{{count}} more aisles available",
+    "comingSoon": "Coming soon",
+    "openingHours": "Opening hours",
+    "prospectus": "Offer leaflet",
+    "subscribe": "Subscribe to offers",
+    "wipHint": "Work in progress — coming in a later update."
   },
   "names": {
     "title": "Canonical names",
@@ -388,6 +409,8 @@
   "common": {
     "searchOps": "Search operators: “eggs organic” = both · “apples, bananas” = or · “eggs -organic” = without “organic” · \"exact phrase\" · laden:lidl · kategorie:fruit · preis>2 (accent/case-insensitive)",
     "save": "Save",
+    "saving": "Saving…",
+    "saved": "Saved",
     "cancel": "Cancel",
     "delete": "Delete",
     "edit": "Edit",

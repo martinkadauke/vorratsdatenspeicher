@@ -144,7 +144,28 @@
     "mergeHint": "Alle Belege dieses Ladens werden dem Zielladen zugeordnet. Dieser Laden verschwindet danach.",
     "mergeTarget": "Ziel-Laden",
     "pickTarget": "Wählen",
-    "merge": "Zusammenführen"
+    "merge": "Zusammenführen",
+    "openProfile": "Filial-Profil öffnen"
+  },
+  "filiale": {
+    "kindFiliale": "Filiale",
+    "kindShop": "Online-Shop",
+    "total": "Ausgaben",
+    "lastVisit": "Zuletzt",
+    "address": "Adresse",
+    "addressPlaceholder": "Straße, PLZ Ort",
+    "warengruppen": "Warengruppen-Reihenfolge",
+    "warengruppenHint": "Lege fest, in welcher Reihenfolge du den Laden durchläufst. Jede Stufe kann mehrere gleichrangige Warengruppen enthalten (parallel).",
+    "warengruppenEmpty": "Noch keine Reihenfolge festgelegt — füge unten eine erste Stufe hinzu.",
+    "parallel": "parallel",
+    "addCategory": "Warengruppe",
+    "newTier": "Neue Stufe:",
+    "unplacedCount": "{{count}} weitere Warengruppen verfügbar",
+    "comingSoon": "Demnächst",
+    "openingHours": "Öffnungszeiten",
+    "prospectus": "Angebotsprospekt",
+    "subscribe": "Angebote abonnieren",
+    "wipHint": "In Arbeit — kommt in einem späteren Update."
   },
   "names": {
     "title": "Kanonische Namen",
@@ -388,6 +409,8 @@
   "common": {
     "searchOps": "Suchoperatoren: »eier bio« = beide · »äpfel, bananen« = oder · »eier -bio« = ohne »bio« · \"genaue phrase\" · laden:lidl · kategorie:obst · preis>2 (Akzente/Groß-klein egal)",
     "save": "Speichern",
+    "saving": "Speichert…",
+    "saved": "Gespeichert",
     "cancel": "Abbrechen",
     "delete": "Löschen",
     "edit": "Bearbeiten",

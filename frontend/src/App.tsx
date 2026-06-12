@@ -10,6 +10,7 @@ import { Pantry } from './pages/Pantry';
 import { Shopping } from './pages/Shopping';
 import { Artikel } from './pages/Artikel';
 import { Stores } from './pages/Stores';
+import { FilialProfil } from './pages/FilialProfil';
 import { Queue } from './pages/Queue';
 import { Admin } from './pages/Admin';
 import { CategoriesAdmin } from './pages/CategoriesAdmin';
@@ -45,6 +46,7 @@ export function App() {
           <Route path="/pantry" element={<Pantry />} />
           <Route path="/names" element={<Artikel />} />
           <Route path="/stores" element={<Stores />} />
+          <Route path="/filialen/:id" element={<FilialProfil />} />
           <Route path="/queue" element={<Queue />} />
           <Route path="/admin" element={<AdminOnly><Admin /></AdminOnly>} />
           <Route path="/admin/categories" element={<AdminOnly><CategoriesAdmin /></AdminOnly>} />
