@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import path from 'node:path';
+import { chmod } from 'node:fs/promises';
 import Jimp from 'jimp';
 import sql from '../db.js';
 import { requireAdmin } from '../auth/plugin.js';
@@ -81,10 +82,12 @@ export function receiptRoutes(app: FastifyInstance): void {
     try {
       const image = await Jimp.read(localPath);
       image.rotate(90);
-      // writeAsync is the promise-returning variant; plain write() is
-      // callback-based in jimp@0.22 and an `await` on it is a no-op,
-      // so the response could return before the file flushed.
       await image.writeAsync(localPath);
+      // Node.js default umask (022) would drop the file back to 0644 — but
+      // the container is root-squashed via NFS and CAN'T overwrite 0644
+      // files owned by the original writer. Force 0666 so future rotations
+      // (and re-OCR) keep working.
+      await chmod(localPath, 0o666);
       req.log.info(`rotated ${localPath} 90° CW`);
       return { ok: true };
     } catch (e) {
