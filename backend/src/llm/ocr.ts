@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import { getConfig } from '../config.js';
 import { parseLlmJson } from './ollama.js';
 
@@ -49,18 +50,24 @@ export interface OcrResult {
   usage?: { input_tokens: number; output_tokens: number };
 }
 
-/** Fetches an image from a URL and runs Claude vision OCR over it. */
-export async function ocrFromUrl(imageUrl: string): Promise<OcrResult> {
+/** Runs Claude vision OCR on an image. Source can be a local filesystem
+ *  path (preferred — fastest, no roundtrip) or an absolute URL. */
+export async function ocrFromImage(source: string): Promise<OcrResult> {
   const apiKey = await getConfig('anthropic.api_key');
   const model = await getConfig('anthropic.model');
   if (!apiKey) throw new Error('anthropic.api_key not configured');
 
-  // Fetch the image, base64-encode it
-  const imgRes = await fetch(imageUrl, { signal: AbortSignal.timeout(60_000) });
-  if (!imgRes.ok) throw new Error(`image fetch failed: HTTP ${imgRes.status}`);
-  const buf = Buffer.from(await imgRes.arrayBuffer());
+  let buf: Buffer;
+  if (/^https?:\/\//i.test(source)) {
+    const imgRes = await fetch(source, { signal: AbortSignal.timeout(60_000) });
+    if (!imgRes.ok) throw new Error(`image fetch failed: HTTP ${imgRes.status}`);
+    buf = Buffer.from(await imgRes.arrayBuffer());
+  } else {
+    // Relative URL or filesystem path → read from disk.
+    buf = await readFile(source);
+  }
   const b64 = buf.toString('base64');
-  const mediaType = /\.png$/i.test(imageUrl) ? 'image/png' : 'image/jpeg';
+  const mediaType = /\.png$/i.test(source) ? 'image/png' : 'image/jpeg';
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',

@@ -3,7 +3,7 @@ import path from 'node:path';
 import Jimp from 'jimp';
 import sql from '../db.js';
 import { requireAdmin } from '../auth/plugin.js';
-import { ocrFromUrl } from '../llm/ocr.js';
+import { ocrFromImage } from '../llm/ocr.js';
 
 /** Local mount where receipt photos are persisted on disk. Host path is
  *  mapped here via the docker volume in deploy/stack.yml. */
@@ -106,8 +106,11 @@ export function receiptRoutes(app: FastifyInstance): void {
     const bildPfad = rows[0].bild_pfad as string | null;
     if (!bildPfad) return reply.code(400).send({ error: 'receipt has no image' });
 
+    // Prefer the local NFS path over the (possibly relative) bild_pfad URL.
+    const filename = bildPfad.split('/').pop();
+    const source = filename ? path.join(RECEIPTS_LOCAL_PATH, filename) : bildPfad;
     try {
-      const parsed = await ocrFromUrl(bildPfad);
+      const parsed = await ocrFromImage(source);
       if (!parsed.datum || !parsed.ladenkette) {
         return reply.code(422).send({ error: 'OCR returned no usable receipt data', confidence: parsed.confidence });
       }
