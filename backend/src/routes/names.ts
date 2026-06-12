@@ -1,11 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import sql from '../db.js';
 import { kontoScope } from '../auth/konto.js';
+import { searchFilter, col, numCol, lk } from '../lib/search.js';
 
 export function nameRoutes(app: FastifyInstance): void {
   app.get('/api/names', async (req) => {
-    const q = (req.query as { q?: string }).q?.trim();
-    const like = `%${q ?? ''}%`;
+    const q = (req.query as { q?: string }).q?.trim() ?? '';
     const rows = await sql`
       SELECT a.canonical_name,
              COUNT(*)::int AS artikel_count,
@@ -14,11 +14,14 @@ export function nameRoutes(app: FastifyInstance): void {
       FROM artikel a
       LEFT JOIN einkauf e ON e.id = a.einkauf_id
       WHERE a.canonical_name IS NOT NULL
-        ${q ? sql`AND (
-          a.canonical_name ILIKE ${like}
-          OR EXISTS (SELECT 1 FROM canonical_translation ct
-                     WHERE ct.canonical_name = a.canonical_name AND ct.translated ILIKE ${like})
-        )` : sql``}
+        ${searchFilter(q, {
+          text: [
+            col(sql`a.canonical_name`),
+            p => sql`EXISTS (SELECT 1 FROM canonical_translation ct
+                            WHERE ct.canonical_name = a.canonical_name AND ${lk(sql`ct.translated`, p)})`,
+          ],
+          fields: { kategorie: col(sql`a.category_path`) },
+        })}
         ${kontoScope(req.user, sql`e.konto_id`)}
       GROUP BY a.canonical_name
       ORDER BY a.canonical_name ASC
@@ -55,8 +58,7 @@ export function nameRoutes(app: FastifyInstance): void {
    *  name when present, else by ai_guess/name. Returns purchase stats + the
    *  artikel_ids backing each group (for bulk operations). Konto-scoped. */
   app.get('/api/artikel-list', async (req) => {
-    const search = (req.query as { q?: string }).q?.trim();
-    const like = `%${search ?? ''}%`;
+    const search = (req.query as { q?: string }).q?.trim() ?? '';
     const rows = await sql`
       SELECT
         CASE WHEN a.canonical_name IS NOT NULL THEN 'c:' || a.canonical_name
@@ -71,10 +73,11 @@ export function nameRoutes(app: FastifyInstance): void {
         array_agg(a.id) AS artikel_ids
       FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
       WHERE TRUE
-        ${search ? sql`AND (
-          a.canonical_name ILIKE ${like} OR a.ai_guess ILIKE ${like}
-          OR a.name ILIKE ${like} OR a.original_text ILIKE ${like}
-        )` : sql``}
+        ${searchFilter(search, {
+          text: [col(sql`a.canonical_name`), col(sql`a.ai_guess`), col(sql`a.name`), col(sql`a.original_text`)],
+          fields: { kategorie: col(sql`a.category_path`), laden: col(sql`e.roh_ladenname`) },
+          nums: { preis: numCol(sql`a.preis`) },
+        })}
         ${kontoScope(req.user, sql`e.konto_id`)}
       GROUP BY grp
     `;

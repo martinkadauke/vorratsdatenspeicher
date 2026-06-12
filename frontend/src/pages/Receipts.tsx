@@ -232,6 +232,7 @@ export function Receipts() {
           <Input
             className="pl-9 pr-9"
             placeholder={t('receipts.search')}
+            title={t('common.searchOps')}
             value={search}
             onChange={e => setSearch(e.target.value)}
           />

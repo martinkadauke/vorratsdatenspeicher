@@ -13,6 +13,7 @@ import { SortableArticleList } from '../components/SortableArticleList';
 import { toast } from '../components/Toast';
 import { confirm } from '../components/Confirm';
 import { eur, fmtDate } from '../lib/utils';
+import { searchMatch } from '../lib/search';
 
 export function ReceiptDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -153,14 +154,14 @@ export function ReceiptDetailPage() {
   const diff = totalKnown ? itemSum - printedTotal : 0;
   const mismatch = totalKnown && Math.abs(diff) > 0.01;
 
-  // Which line items to spotlight.
-  const q = itemSearch.trim().toLowerCase();
+  // Which line items to spotlight. Supports the shared search operators
+  // (foo bar = AND, "foo, bar" = OR, -foo = exclude, "phrase", accent-insensitive).
+  const q = itemSearch.trim();
   const matchIds = new Set<number>();
   if (highlightId) matchIds.add(highlightId);
   if (q) {
     for (const a of data.artikel) {
-      const hay = `${a.canonical_name ?? ''} ${a.ai_guess ?? ''} ${a.name ?? ''} ${a.original_text ?? ''}`.toLowerCase();
-      if (hay.includes(q)) matchIds.add(a.id);
+      if (searchMatch(q, [a.canonical_name, a.ai_guess, a.name, a.original_text])) matchIds.add(a.id);
     }
   }
   const scrollToId = highlightId ?? (q ? [...matchIds][0] ?? null : null);

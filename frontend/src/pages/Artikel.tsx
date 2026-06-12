@@ -126,7 +126,7 @@ export function Artikel() {
 
       <div className="relative">
         <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
-        <Input className="pl-9 pr-9" placeholder={t('artikel.search')} value={search} onChange={e => setSearch(e.target.value)} />
+        <Input className="pl-9 pr-9" placeholder={t('artikel.search')} title={t('common.searchOps')} value={search} onChange={e => setSearch(e.target.value)} />
         {search && (
           <button onClick={() => setSearch('')} className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
             <X size={15} />

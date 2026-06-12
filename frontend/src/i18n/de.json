@@ -373,6 +373,7 @@
     "avoidWip": "»Vermeiden« kommt bald: markierte Artikel werden dann beim Kauf angemahnt."
   },
   "common": {
+    "searchOps": "Suchoperatoren: »eier bio« = beide · »äpfel, bananen« = oder · »eier -bio« = ohne »bio« · \"genaue phrase\" · laden:lidl · kategorie:obst · preis>2 (Akzente/Groß-klein egal)",
     "save": "Speichern",
     "cancel": "Abbrechen",
     "delete": "Löschen",

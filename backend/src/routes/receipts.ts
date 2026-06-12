@@ -5,6 +5,28 @@ import sql from '../db.js';
 import { requireAdmin } from '../auth/plugin.js';
 import { kontoScope, canSeeKonto } from '../auth/konto.js';
 import { ocrFromImage } from '../llm/ocr.js';
+import { searchFilter, col, numCol, lk, type Frag } from '../lib/search.js';
+
+/** Search config for the receipts list/nav: free text hits the store name or
+ *  any of the receipt's items; supports laden:/kategorie: and preis> filters.
+ *  `e` is the einkauf alias fragment (the list uses `e`, neighbors `einkauf`). */
+function receiptSearch(e: Frag) {
+  const itemsWhere = (cond: Frag) =>
+    sql`EXISTS (SELECT 1 FROM artikel ax WHERE ax.einkauf_id = ${e}.id AND ${cond})`;
+  return {
+    text: [
+      col(sql`${e}.roh_ladenname`),
+      (p: string) => itemsWhere(sql`(${lk(sql`ax.name`, p)} OR ${lk(sql`ax.canonical_name`, p)} OR ${lk(sql`ax.ai_guess`, p)})`),
+    ],
+    fields: {
+      laden: col(sql`${e}.roh_ladenname`),
+      kategorie: (p: string) => itemsWhere(lk(sql`ax.category_path`, p)),
+    },
+    nums: {
+      preis: (op: '>' | '<' | '>=' | '<=' | '=', v: number) => itemsWhere(numCol(sql`ax.preis`)(op, v)),
+    },
+  };
+}
 
 /** Local mount where receipt photos are persisted on disk. Host path is
  *  mapped here via the docker volume in deploy/stack.yml. */
@@ -25,7 +47,6 @@ export function receiptRoutes(app: FastifyInstance): void {
     const limit = Math.min(parseInt(q.limit ?? '50', 10) || 50, 200);
     const offset = parseInt(q.offset ?? '0', 10) || 0;
     const search = (q.q ?? '').trim();
-    const like = `%${search}%`;
     const storeLike = q.store ? `%${q.store}%` : null;
     const kontoId = q.konto ? parseInt(q.konto, 10) : null;
     const quellen = q.quelle ? q.quelle.split(',').filter(Boolean) : null;
@@ -38,10 +59,7 @@ export function receiptRoutes(app: FastifyInstance): void {
       LEFT JOIN artikel a ON a.einkauf_id = e.id
       LEFT JOIN konto k ON k.id = e.konto_id
       WHERE TRUE
-        ${search ? sql`AND (e.roh_ladenname ILIKE ${like} OR EXISTS (
-          SELECT 1 FROM artikel ax WHERE ax.einkauf_id = e.id
-          AND (ax.name ILIKE ${like} OR ax.canonical_name ILIKE ${like} OR ax.ai_guess ILIKE ${like})
-        ))` : sql``}
+        ${searchFilter(search, receiptSearch(sql`e`))}
         ${storeLike ? sql`AND e.roh_ladenname ILIKE ${storeLike}` : sql``}
         ${kontoId ? sql`AND e.konto_id = ${kontoId}` : sql``}
         ${quellen ? sql`AND e.quelle IN ${sql(quellen)}` : sql``}
@@ -222,14 +240,10 @@ export function receiptRoutes(app: FastifyInstance): void {
     // visible (filtered) set the user is navigating.
     const fq = req.query as { q?: string; store?: string };
     const search = (fq.q ?? '').trim();
-    const like = `%${search}%`;
     const storeLike = fq.store ? `%${fq.store}%` : null;
     const filter = sql`
-      ${search ? sql`AND (roh_ladenname ILIKE ${like} OR EXISTS (
-        SELECT 1 FROM artikel ax WHERE ax.einkauf_id = einkauf.id
-        AND (ax.name ILIKE ${like} OR ax.canonical_name ILIKE ${like} OR ax.ai_guess ILIKE ${like})
-      ))` : sql``}
-      ${storeLike ? sql`AND roh_ladenname ILIKE ${storeLike}` : sql``}
+      ${searchFilter(search, receiptSearch(sql`einkauf`))}
+      ${storeLike ? sql`AND einkauf.roh_ladenname ILIKE ${storeLike}` : sql``}
       ${kontoScope(req.user, sql`einkauf.konto_id`)}
     `;
 

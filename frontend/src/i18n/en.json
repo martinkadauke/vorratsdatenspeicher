@@ -373,6 +373,7 @@
     "avoidWip": "\"Avoid\" is coming soon: flagged items will warn you when bought."
   },
   "common": {
+    "searchOps": "Search operators: “eggs organic” = both · “apples, bananas” = or · “eggs -organic” = without “organic” · \"exact phrase\" · laden:lidl · kategorie:fruit · preis>2 (accent/case-insensitive)",
     "save": "Save",
     "cancel": "Cancel",
     "delete": "Delete",

@@ -7,6 +7,7 @@ import { api } from '../api/client';
 import { Card, Input, Button, Label, Modal, Spinner, EmptyState, Badge, Select } from '../components/ui';
 import { IconPicker, StoreIcon } from '../components/IconPicker';
 import { eur } from '../lib/utils';
+import { searchMatch } from '../lib/search';
 
 interface Filiale { name: string; receipts: number; total: number }
 interface StoreRow {
@@ -38,9 +39,8 @@ export function Stores() {
 
   const filtered = useMemo(() => {
     if (!data) return [];
-    const q = search.toLowerCase();
-    return q ? data.filter(s => s.display.toLowerCase().includes(q) ||
-                                s.raw.some(r => r.toLowerCase().includes(q))) : data;
+    if (!search.trim()) return data;
+    return data.filter(s => searchMatch(search, [s.display, ...s.raw]));
   }, [data, search]);
 
   return (

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { existsSync } from 'node:fs';
 import './types.js';
 import sql, { migrate, ensureAdmin } from './db.js';
+import { initSearch } from './lib/search.js';
 import { PORT } from './config.js';
 import { registerAuth } from './auth/plugin.js';
 import { authRoutes } from './auth/routes.js';
@@ -32,6 +33,7 @@ import { rescheduleChurner } from './churner/scheduler.js';
 async function main(): Promise<void> {
   await migrate();
   await ensureAdmin();
+  await initSearch();
 
   // Sweep any maintenance events left "running" by a previous container that
   // died mid-loop. Without this they'd block new runs forever (running flag
