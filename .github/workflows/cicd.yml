@@ -101,3 +101,5 @@ jobs:
           sleep 5
           docker service ls --filter name="${STACK}"
           docker service ps "${STACK}_app" --no-trunc | head -5
+          echo "===== recent app logs (startup/crash diagnostics) ====="
+          docker service logs --tail 60 "${STACK}_app" 2>&1 | tail -60 || true
