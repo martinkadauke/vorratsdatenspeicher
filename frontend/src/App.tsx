@@ -11,6 +11,7 @@ import { Shopping } from './pages/Shopping';
 import { Artikel } from './pages/Artikel';
 import { Stores } from './pages/Stores';
 import { FilialProfil } from './pages/FilialProfil';
+import { Offers } from './pages/Offers';
 import { Queue } from './pages/Queue';
 import { Admin } from './pages/Admin';
 import { CategoriesAdmin } from './pages/CategoriesAdmin';
@@ -47,6 +48,7 @@ export function App() {
           <Route path="/names" element={<Artikel />} />
           <Route path="/stores" element={<Stores />} />
           <Route path="/filialen/:id" element={<FilialProfil />} />
+          <Route path="/offers" element={<Offers />} />
           <Route path="/queue" element={<Queue />} />
           <Route path="/admin" element={<AdminOnly><Admin /></AdminOnly>} />
           <Route path="/admin/categories" element={<AdminOnly><CategoriesAdmin /></AdminOnly>} />

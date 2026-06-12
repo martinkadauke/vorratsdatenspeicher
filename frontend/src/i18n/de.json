@@ -6,6 +6,7 @@
     "pantry": "Vorrat",
     "names": "Artikel",
     "stores": "Läden",
+    "offers": "Angebote",
     "queue": "Prüfung",
     "admin": "Admin",
     "profile": "Profil",
@@ -228,6 +229,14 @@
     "searchPlaceholder": "Produkt-Suche…",
     "hint": "Suchbegriff eingeben und Enter drücken, dann auf ein Bild klicken.",
     "noResults": "Keine Treffer"
+  },
+  "offers": {
+    "title": "Angebote für dich",
+    "hint": "Angebote für deine abonnierten Artikel, automatisch per Web-Suche gefunden. Artikel abonnieren: in der Artikel-Liste »Angebote abonnieren«.",
+    "empty": "Noch keine Angebote. Abonniere Artikel (»Angebote abonnieren«), dann sucht VDS nächtlich nach passenden Angeboten.",
+    "until": "bis",
+    "source": "Quelle",
+    "disclaimer": "Laut Web-Suche — Preise/Gültigkeit bitte vor dem Kauf an der Quelle prüfen."
   },
   "queue": {
     "title": "Verifikations-Queue",

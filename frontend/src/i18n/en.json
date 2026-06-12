@@ -6,6 +6,7 @@
     "pantry": "Pantry",
     "names": "Items",
     "stores": "Stores",
+    "offers": "Offers",
     "queue": "Review",
     "admin": "Admin",
     "profile": "Profile",
@@ -228,6 +229,14 @@
     "searchPlaceholder": "Product search…",
     "hint": "Type a query and press enter, then tap an image.",
     "noResults": "No results"
+  },
+  "offers": {
+    "title": "Offers for you",
+    "hint": "Offers for the items you subscribed to, found automatically via web search. Subscribe to items in the Items list → »Subscribe to offers«.",
+    "empty": "No offers yet. Subscribe to items (»Subscribe to offers«) and VDS will search nightly for matching offers.",
+    "until": "until",
+    "source": "Source",
+    "disclaimer": "Per web search — please verify price/validity at the source before buying."
   },
   "queue": {
     "title": "Verification queue",

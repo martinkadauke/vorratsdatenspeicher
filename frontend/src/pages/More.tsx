@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Tags, ListChecks, Settings, UserCircle, ChevronRight, Store } from 'lucide-react';
+import { Tags, ListChecks, Settings, UserCircle, ChevronRight, Store, BadgePercent } from 'lucide-react';
 import { useAuth } from '../context/auth';
 import { Card } from '../components/ui';
 
@@ -11,6 +11,7 @@ export function More() {
   const items = [
     { to: '/names', icon: Tags, label: t('nav.names') },
     { to: '/stores', icon: Store, label: t('nav.stores') },
+    { to: '/offers', icon: BadgePercent, label: t('nav.offers') },
     { to: '/queue', icon: ListChecks, label: t('nav.queue') },
     ...(user?.is_admin ? [{ to: '/admin', icon: Settings, label: t('nav.admin') }] : []),
     { to: '/profile', icon: UserCircle, label: t('nav.profile') },

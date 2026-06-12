@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   ReceiptText, ChartPie, ShoppingCart, Package, Tags, ListChecks, Store,
-  Settings, UserCircle, LogOut, MoreHorizontal,
+  Settings, UserCircle, LogOut, MoreHorizontal, BadgePercent,
 } from 'lucide-react';
 import { useAuth } from '../context/auth';
 import { NotificationBell } from './NotificationBell';
@@ -19,6 +19,7 @@ const NAV = [
   { to: '/pantry', icon: Package, key: 'nav.pantry' },
   { to: '/names', icon: Tags, key: 'nav.names' },
   { to: '/stores', icon: Store, key: 'nav.stores' },
+  { to: '/offers', icon: BadgePercent, key: 'nav.offers' },
   { to: '/queue', icon: ListChecks, key: 'nav.queue' },
 ] as const;
 
