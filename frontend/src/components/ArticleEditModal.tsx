@@ -47,7 +47,7 @@ export function ArticleEditModal({ artikel, open, onClose, invalidateKeys }: {
   const [einzelPreis, setEinzelPreis] = useState(''); // Preis/Einheit (derived helper)
   const [consumers, setConsumers] = useState<number[]>([]);
   const [exclusive, setExclusive] = useState(false);
-  const [applyAll, setApplyAll] = useState(true);
+  const [applyAll, setApplyAll] = useState(false);
   const [nameOptions, setNameOptions] = useState<string[]>([]);
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
 
@@ -63,7 +63,7 @@ export function ArticleEditModal({ artikel, open, onClose, invalidateKeys }: {
     setEinzelPreis(computeEinzel(m, p));
     setConsumers(artikel.consumers);
     setExclusive(artikel.consumers_exclusive);
-    setApplyAll(true);
+    setApplyAll(false);
   }, [artikel]);
 
   // Editing menge: keep einzelPreis, recompute Gesamt

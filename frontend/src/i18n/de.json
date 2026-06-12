@@ -145,9 +145,17 @@
     "mergeTarget": "Ziel-Laden",
     "pickTarget": "Wählen",
     "merge": "Zusammenführen",
-    "openProfile": "Filial-Profil öffnen"
+    "openProfile": "Filial-Profil öffnen",
+    "tab_filialen": "Filialen",
+    "tab_shops": "Shops",
+    "searchShops": "Shop suchen…",
+    "shopsEmpty": "Noch keine Online-Shops. Shops (z.B. Amazon, eBay) entstehen aus Email-Rechnungen."
   },
   "filiale": {
+    "subscribeHint": "Werde benachrichtigt, wenn häufig gekaufte Artikel hier im Angebot sind. (Benachrichtigung folgt – WIP)",
+    "subscribeAction": "Abonnieren",
+    "subscribed": "Abonniert",
+    "unsubscribed": "Abo entfernt",
     "kindFiliale": "Filiale",
     "kindShop": "Online-Shop",
     "total": "Ausgaben",
@@ -404,7 +412,9 @@
     "setCanonicalHint": "Setzt den kanonischen Namen auf alle Artikel der Auswahl. Gleiche Namen collapsen danach zu einer Gruppe.",
     "canonicalSet": "Name gesetzt ✓",
     "avoid": "Vermeiden – WIP",
-    "avoidWip": "»Vermeiden« kommt bald: markierte Artikel werden dann beim Kauf angemahnt."
+    "avoidWip": "»Vermeiden« kommt bald: markierte Artikel werden dann beim Kauf angemahnt.",
+    "subscribeOffers": "Angebote abonnieren",
+    "subscribed": "{{count}} Artikel für Angebote abonniert"
   },
   "common": {
     "searchOps": "Suchoperatoren: »eier bio« = beide · »äpfel, bananen« = oder · »eier -bio« = ohne »bio« · \"genaue phrase\" · laden:lidl · kategorie:obst · preis>2 (Akzente/Groß-klein egal)",

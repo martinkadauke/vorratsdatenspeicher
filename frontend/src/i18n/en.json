@@ -145,9 +145,17 @@
     "mergeTarget": "Target store",
     "pickTarget": "Pick",
     "merge": "Merge",
-    "openProfile": "Open branch profile"
+    "openProfile": "Open branch profile",
+    "tab_filialen": "Branches",
+    "tab_shops": "Shops",
+    "searchShops": "Search shop…",
+    "shopsEmpty": "No online shops yet. Shops (e.g. Amazon, eBay) are created from email receipts."
   },
   "filiale": {
+    "subscribeHint": "Get notified when frequently-bought items are on offer here. (Notification coming – WIP)",
+    "subscribeAction": "Subscribe",
+    "subscribed": "Subscribed",
+    "unsubscribed": "Unsubscribed",
     "kindFiliale": "Branch",
     "kindShop": "Online shop",
     "total": "Spent",
@@ -404,7 +412,9 @@
     "setCanonicalHint": "Sets the canonical name on every article in the selection. Identical names then collapse into one group.",
     "canonicalSet": "Name set ✓",
     "avoid": "Avoid – WIP",
-    "avoidWip": "\"Avoid\" is coming soon: flagged items will warn you when bought."
+    "avoidWip": "\"Avoid\" is coming soon: flagged items will warn you when bought.",
+    "subscribeOffers": "Subscribe to offers",
+    "subscribed": "Subscribed {{count}} items to offers"
   },
   "common": {
     "searchOps": "Search operators: “eggs organic” = both · “apples, bananas” = or · “eggs -organic” = without “organic” · \"exact phrase\" · laden:lidl · kategorie:fruit · preis>2 (accent/case-insensitive)",

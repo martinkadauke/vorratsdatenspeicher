@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Search, X, Rows3, CheckSquare, Square, Users, Ban, Tag } from 'lucide-react';
+import { Search, X, Rows3, CheckSquare, Square, Users, Ban, Tag, Bell } from 'lucide-react';
 import { api } from '../api/client';
 import type { CanonicalName } from '../api/types';
 import { Card, Input, Spinner, EmptyState, Badge, Select, Button, Modal } from '../components/ui';
@@ -107,6 +107,19 @@ export function Artikel() {
     },
   });
 
+  const subscribeOffers = useMutation({
+    mutationFn: () => {
+      const refs = selectedGroups.map(g => g.canonical_name ?? g.display).filter(Boolean);
+      return api<{ subscribed: number }>('/api/subscriptions/bulk', { method: 'POST', body: { kind: 'artikel', refs } });
+    },
+    onSuccess: (r) => {
+      void qc.invalidateQueries({ queryKey: ['subscriptions'] });
+      setSelected(new Set());
+      toast(t('artikel.subscribed', { count: r.subscribed }), 'success');
+    },
+    onError: (e) => toast((e as Error).message, 'error'),
+  });
+
   const openDetail = (g: ArtikelGroup) => {
     if (!g.canonical_name) { toggleOne(g.key); return; } // loose items: select only
     setDetail({
@@ -197,6 +210,9 @@ export function Artikel() {
             </Button>
             <Button variant="secondary" onClick={() => setAssignOpen(true)}>
               <Users size={15} /> {t('artikel.assignMembers')}
+            </Button>
+            <Button variant="secondary" onClick={() => subscribeOffers.mutate()} disabled={subscribeOffers.isPending}>
+              <Bell size={15} /> {t('artikel.subscribeOffers')}
             </Button>
             <Button variant="ghost" onClick={() => toast(t('artikel.avoidWip'), 'info')} title="Work in progress">
               <Ban size={15} /> {t('artikel.avoid')}

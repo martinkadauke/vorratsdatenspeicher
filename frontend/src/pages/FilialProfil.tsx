@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, MapPin, Clock, FileText } from 'lucide-react';
+import { ArrowLeft, MapPin, Clock, FileText, Bell, BellRing } from 'lucide-react';
 import { api } from '../api/client';
 import { Card, Button, Input, Label, Select, Spinner, Badge } from '../components/ui';
 import { eur, fmtDate } from '../lib/utils';
@@ -32,6 +32,19 @@ export function FilialProfil() {
   const { data: categories } = useQuery({
     queryKey: ['categories', i18n.language],
     queryFn: () => api<Category[]>(`/api/categories?lang=${i18n.language}`),
+  });
+  const { data: subs } = useQuery({
+    queryKey: ['subscriptions'],
+    queryFn: () => api<{ filiale: number[]; artikel: string[] }>('/api/subscriptions'),
+  });
+  const subscribed = !!subs?.filiale.includes(Number(id));
+  const toggleSub = useMutation({
+    mutationFn: () => api<{ subscribed: boolean }>('/api/subscriptions/toggle', { method: 'POST', body: { kind: 'filiale', ref: Number(id) } }),
+    onSuccess: (r) => {
+      toast(r.subscribed ? t('filiale.subscribed') : t('filiale.unsubscribed'), 'success');
+      void qc.invalidateQueries({ queryKey: ['subscriptions'] });
+    },
+    onError: (e) => toast((e as Error).message, 'error'),
   });
 
   const [address, setAddress] = useState('');
@@ -117,13 +130,31 @@ export function FilialProfil() {
         />
       </Card>
 
-      {/* WIP profile features */}
+      {/* offer subscription — active; the notification itself is still WIP */}
+      <Card className="flex flex-col gap-2 p-4">
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold">{t('filiale.subscribe')}</h2>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('filiale.subscribeHint')}</p>
+          </div>
+          <Button
+            variant={subscribed ? 'secondary' : 'primary'}
+            onClick={() => toggleSub.mutate()}
+            disabled={toggleSub.isPending}
+            className="shrink-0"
+          >
+            {subscribed ? <BellRing size={15} /> : <Bell size={15} />}
+            {subscribed ? t('filiale.subscribed') : t('filiale.subscribeAction')}
+          </Button>
+        </div>
+      </Card>
+
+      {/* still-WIP profile features */}
       <Card className="flex flex-col gap-2 p-4 opacity-70">
         <h2 className="text-sm font-semibold text-zinc-500">{t('filiale.comingSoon')}</h2>
         <div className="flex flex-wrap gap-2">
           <WipChip icon={<Clock size={13} />} label={t('filiale.openingHours')} />
           <WipChip icon={<FileText size={13} />} label={t('filiale.prospectus')} />
-          <WipChip icon={<span className="text-[13px] leading-none">🔔</span>} label={t('filiale.subscribe')} />
         </div>
       </Card>
 
