@@ -6,6 +6,7 @@ import { requireAdmin } from '../auth/plugin.js';
 import { getAllConfig, setConfig, getConfig } from '../config.js';
 import { rescheduleChurner } from '../churner/scheduler.js';
 import { rescheduleSupermarket } from '../supermarket/scheduler.js';
+import { rescheduleModelReview } from '../maintenance/modelReview.js';
 import { listOllamaModels, ollamaHealth } from '../llm/ollama.js';
 import { searxngHealth } from '../llm/searxng.js';
 import { sendMail } from '../mailer.js';
@@ -35,7 +36,7 @@ function estCostUsd(model: string, inTok: number, outTok: number): number {
   if (!p) return 0;
   return (inTok / 1e6) * p.in + (outTok / 1e6) * p.out;
 }
-const VALID_TASKS: AiTask[] = ['recategorize', 'churner_stage1', 'churner_stage2', 'ocr', 'categories_chat'];
+const VALID_TASKS: AiTask[] = ['recategorize', 'churner_stage1', 'churner_stage2', 'ocr', 'categories_chat', 'model_review'];
 
 export function adminRoutes(app: FastifyInstance): void {
   // ── app config ──────────────────────────────────────────────────────────
@@ -48,6 +49,7 @@ export function adminRoutes(app: FastifyInstance): void {
     await setConfig(key, value, req.user!.id);
     if (key.startsWith('churner.')) await rescheduleChurner();
     if (key.startsWith('supermarket.')) await rescheduleSupermarket();
+    if (key.startsWith('model_review.')) await rescheduleModelReview();
     return { ok: true };
   });
 

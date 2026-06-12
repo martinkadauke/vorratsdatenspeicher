@@ -31,6 +31,8 @@ import { kontoRoutes } from './routes/konten.js';
 import { subscriptionRoutes } from './routes/subscriptions.js';
 import { rescheduleChurner } from './churner/scheduler.js';
 import { rescheduleSupermarket } from './supermarket/scheduler.js';
+import { rescheduleModelReview } from './maintenance/modelReview.js';
+import { modelReviewRoutes } from './routes/modelReview.js';
 
 async function main(): Promise<void> {
   await migrate();
@@ -86,6 +88,7 @@ async function main(): Promise<void> {
   iconRoutes(app);
   kontoRoutes(app);
   subscriptionRoutes(app);
+  modelReviewRoutes(app);
 
   // Receipt photos under /receipts/* — served directly by the app so a
   // single-container install (Unraid CA, docker-compose) doesn't need a
@@ -136,6 +139,7 @@ async function main(): Promise<void> {
 
   await rescheduleChurner();
   await rescheduleSupermarket();
+  await rescheduleModelReview();
 
   await app.listen({ port: PORT, host: '0.0.0.0' });
   app.log.info(`Vorratsdatenspeicher listening on :${PORT}`);

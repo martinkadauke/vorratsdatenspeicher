@@ -10,6 +10,7 @@ import { useFamily } from '../components/ConsumerChips';
 import { useAuth } from '../context/auth';
 import { confirm } from '../components/Confirm';
 import { cn, cronToHuman, downloadFile, fmtBytes } from '../lib/utils';
+import { toast } from '../components/Toast';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -28,6 +29,7 @@ export function Admin() {
       <h1 className="text-lg font-bold">{t('admin.title')}</h1>
       <AiProvidersSection />
       <AiTasksSection />
+      <ModelReviewSection />
       <TokenUsageSection />
       <ChurnerSection />
       <CategoriesLinkSection />
@@ -166,6 +168,7 @@ const AI_TASKS = [
   { key: 'churner_stage2',   i18n: 'admin.taskChurnerStage2',  descI18n: 'admin.taskChurnerStage2Desc' },
   { key: 'ocr',              i18n: 'admin.taskOcr',            descI18n: 'admin.taskOcrDesc' },
   { key: 'categories_chat',  i18n: 'admin.taskCategoriesChat', descI18n: 'admin.taskCategoriesChatDesc' },
+  { key: 'model_review',     i18n: 'admin.taskModelReview',    descI18n: 'admin.taskModelReviewDesc' },
 ] as const;
 
 interface AiTaskLogRow {
@@ -293,6 +296,89 @@ function AiTasksSection() {
           <History size={13} /> {showLog ? t('admin.taskLogHide') : t('admin.taskLogShow')}
         </button>
         {showLog && <AiTaskLog />}
+      </div>
+    </Section>
+  );
+}
+
+// ── Bi-weekly AI model review ─────────────────────────────────────────────
+interface ModelProposal { task: string; provider: string; current_model: string; suggested_model: string; reason: string }
+interface ModelReview { id: number; created_at: string; status: string; proposals: ModelProposal[]; decided_at: string | null }
+
+function ModelReviewSection() {
+  const { t, i18n } = useTranslation();
+  const qc = useQueryClient();
+  const { data: review } = useQuery({
+    queryKey: ['model-review-latest'],
+    queryFn: () => api<ModelReview | null>('/api/model-review/latest'),
+  });
+  const run = useMutation({
+    mutationFn: () => api<{ proposals: boolean }>('/api/model-review/run', { method: 'POST' }),
+    onSuccess: (r) => {
+      void qc.invalidateQueries({ queryKey: ['model-review-latest'] });
+      void qc.invalidateQueries({ queryKey: ['config'] });
+      toast(r.proposals ? t('admin.reviewRunFound') : t('admin.reviewRunNone'), 'success');
+    },
+    onError: (e) => toast((e as Error).message, 'error'),
+  });
+  const decide = useMutation({
+    mutationFn: ({ id, action }: { id: number; action: 'apply' | 'reject' }) =>
+      api(`/api/model-review/${id}/decide`, { method: 'POST', body: { action } }),
+    onSuccess: (_d, v) => {
+      void qc.invalidateQueries({ queryKey: ['model-review-latest'] });
+      void qc.invalidateQueries({ queryKey: ['config'] });
+      void qc.invalidateQueries({ queryKey: ['ai-task-log'] });
+      toast(v.action === 'apply' ? t('admin.reviewApplied') : t('admin.reviewRejected'), 'success');
+    },
+    onError: (e) => toast((e as Error).message, 'error'),
+  });
+
+  const taskLabel = (task: string) => {
+    const def = AI_TASKS.find(x => x.key === task);
+    return def ? t(def.i18n) : task;
+  };
+
+  return (
+    <Section title={t('admin.reviewTitle')}>
+      <div className="flex flex-col gap-3">
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('admin.reviewHint')}</p>
+        <Button variant="secondary" onClick={() => run.mutate()} disabled={run.isPending} className="self-start">
+          <Play size={14} /> {run.isPending ? t('admin.reviewRunning') : t('admin.reviewRunBtn')}
+        </Button>
+
+        {review && (
+          <div className="rounded-xl border border-zinc-200 p-3 dark:border-zinc-800">
+            <div className="mb-2 flex items-center justify-between text-xs text-zinc-400">
+              <span>{new Date(review.created_at).toLocaleString(i18n.language === 'en' ? 'en-GB' : 'de-DE')}</span>
+              <Badge className={
+                review.status === 'pending' ? 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
+                : review.status === 'applied' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+                : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800'
+              }>{t(`admin.reviewStatus_${review.status}`)}</Badge>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              {review.proposals.map((p, i) => (
+                <div key={i} className="text-xs">
+                  <span className="font-medium">{taskLabel(p.task)}</span>:{' '}
+                  <span className="text-zinc-400">{p.current_model}</span>
+                  <span className="mx-1">→</span>
+                  <span className="font-medium text-emerald-600 dark:text-emerald-400">{p.suggested_model}</span>
+                  {p.reason && <div className="text-zinc-400">{p.reason}</div>}
+                </div>
+              ))}
+            </div>
+            {review.status === 'pending' && (
+              <div className="mt-3 flex justify-end gap-2">
+                <Button variant="ghost" onClick={() => decide.mutate({ id: review.id, action: 'reject' })} disabled={decide.isPending}>
+                  {t('admin.reviewReject')}
+                </Button>
+                <Button onClick={() => decide.mutate({ id: review.id, action: 'apply' })} disabled={decide.isPending}>
+                  {t('admin.reviewApply')}
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </Section>
   );

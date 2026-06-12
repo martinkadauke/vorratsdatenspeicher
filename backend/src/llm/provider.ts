@@ -2,7 +2,7 @@ import sql from '../db.js';
 import { getConfig, setConfig } from '../config.js';
 
 export type ProviderName = 'ollama' | 'deepseek' | 'anthropic';
-export type AiTask = 'recategorize' | 'churner_stage1' | 'churner_stage2' | 'ocr' | 'categories_chat';
+export type AiTask = 'recategorize' | 'churner_stage1' | 'churner_stage2' | 'ocr' | 'categories_chat' | 'model_review';
 
 export interface LlmChatOptions {
   system: string;

@@ -21,6 +21,8 @@ export interface AppConfig {
   'ai.churner_stage1.model': string;
   'ai.churner_stage2.provider': string;
   'ai.churner_stage2.model': string;
+  'ai.model_review.provider': string;
+  'ai.model_review.model': string;
   'churner.enabled': boolean;
   'churner.cron': string;
   'churner.confidence': number;
@@ -42,6 +44,9 @@ export interface AppConfig {
   // supermarket info crawler (opening hours via OSM, nightly)
   'supermarket.enabled': boolean;
   'supermarket.cron': string;
+  // bi-weekly AI model review (reviewer model is itself configurable → can be fully local)
+  'model_review.enabled': boolean;
+  'model_review.cron': string;
 }
 
 const DEFAULTS: AppConfig = {
@@ -61,6 +66,8 @@ const DEFAULTS: AppConfig = {
   'ai.churner_stage1.model': 'qwen2.5:14b',
   'ai.churner_stage2.provider': 'ollama',
   'ai.churner_stage2.model': 'qwen2.5:14b',
+  'ai.model_review.provider': 'ollama',
+  'ai.model_review.model': 'qwen2.5:14b',
   'churner.enabled': true,
   'churner.cron': '0 3 * * *',
   'churner.confidence': 0.85,
@@ -80,6 +87,8 @@ const DEFAULTS: AppConfig = {
   'offers.extra_categories': [],
   'supermarket.enabled': true,
   'supermarket.cron': '0 4 * * *',
+  'model_review.enabled': true,
+  'model_review.cron': '0 5 1,15 * *', // ~bi-weekly: 1st & 15th, 05:00
 };
 
 export async function getConfig<K extends keyof AppConfig>(key: K): Promise<AppConfig[K]> {
