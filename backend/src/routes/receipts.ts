@@ -81,7 +81,11 @@ export function receiptRoutes(app: FastifyInstance): void {
     try {
       const image = await Jimp.read(localPath);
       image.rotate(90);
-      await image.write(localPath as `${string}.${string}`);
+      // writeAsync is the promise-returning variant; plain write() is
+      // callback-based in jimp@0.22 and an `await` on it is a no-op,
+      // so the response could return before the file flushed.
+      await image.writeAsync(localPath);
+      req.log.info(`rotated ${localPath} 90° CW`);
       return { ok: true };
     } catch (e) {
       req.log.error(`rotate failed for ${localPath}: ${(e as Error).message}`);
