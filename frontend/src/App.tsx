@@ -8,7 +8,7 @@ import { ReceiptDetailPage } from './pages/ReceiptDetailPage';
 import { Stats } from './pages/Stats';
 import { Pantry } from './pages/Pantry';
 import { Shopping } from './pages/Shopping';
-import { Names } from './pages/Names';
+import { Artikel } from './pages/Artikel';
 import { Stores } from './pages/Stores';
 import { Queue } from './pages/Queue';
 import { Admin } from './pages/Admin';
@@ -43,7 +43,7 @@ export function App() {
           <Route path="/stats" element={<Stats />} />
           <Route path="/shopping" element={<Shopping />} />
           <Route path="/pantry" element={<Pantry />} />
-          <Route path="/names" element={<Names />} />
+          <Route path="/names" element={<Artikel />} />
           <Route path="/stores" element={<Stores />} />
           <Route path="/queue" element={<Queue />} />
           <Route path="/admin" element={<AdminOnly><Admin /></AdminOnly>} />

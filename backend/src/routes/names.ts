@@ -50,4 +50,96 @@ export function nameRoutes(app: FastifyInstance): void {
       consumers_exclusive: coMap.get(r.canonical_name as string)?.exclusive ?? false,
     }));
   });
+
+  /** Grouped article list for the Artikel page. Articles collapse by canonical
+   *  name when present, else by ai_guess/name. Returns purchase stats + the
+   *  artikel_ids backing each group (for bulk operations). Konto-scoped. */
+  app.get('/api/artikel-list', async (req) => {
+    const search = (req.query as { q?: string }).q?.trim();
+    const like = `%${search ?? ''}%`;
+    const rows = await sql`
+      SELECT
+        CASE WHEN a.canonical_name IS NOT NULL THEN 'c:' || a.canonical_name
+             ELSE 'g:' || COALESCE(NULLIF(a.ai_guess, ''), a.name, '?') END AS grp,
+        bool_or(a.canonical_name IS NOT NULL) AS has_canonical,
+        MAX(a.canonical_name) AS canonical_name,
+        COALESCE(MAX(a.canonical_name), MAX(NULLIF(a.ai_guess, '')), MAX(a.name)) AS display,
+        COUNT(*)::int AS count,
+        mode() WITHIN GROUP (ORDER BY a.category_path) AS category,
+        MAX(e.datum)::text AS last_bought,
+        ROUND(AVG(a.preis) FILTER (WHERE a.preis > 0), 2) AS avg_price,
+        array_agg(a.id) AS artikel_ids
+      FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
+      WHERE TRUE
+        ${search ? sql`AND (
+          a.canonical_name ILIKE ${like} OR a.ai_guess ILIKE ${like}
+          OR a.name ILIKE ${like} OR a.original_text ILIKE ${like}
+        )` : sql``}
+        ${kontoScope(req.user, sql`e.konto_id`)}
+      GROUP BY grp
+    `;
+
+    // Consumer dots: canonical groups read canonical_consumer.
+    const canonicals = rows.map(r => r.canonical_name).filter(Boolean) as string[];
+    const consumers = canonicals.length ? await sql`
+      SELECT canonical_name, family_member_id, is_exclusive FROM canonical_consumer
+      WHERE canonical_name IN ${sql(canonicals)}
+    ` : [];
+    const coMap = new Map<string, number[]>();
+    for (const c of consumers) {
+      const arr = coMap.get(c.canonical_name as string) ?? [];
+      arr.push(c.family_member_id as number);
+      coMap.set(c.canonical_name as string, arr);
+    }
+
+    return rows.map(r => ({
+      key: r.grp,
+      display: r.display,
+      has_canonical: r.has_canonical,
+      canonical_name: r.canonical_name,
+      count: r.count,
+      category: r.category,
+      last_bought: r.last_bought,
+      avg_price: r.avg_price,
+      artikel_ids: r.artikel_ids,
+      consumers: r.canonical_name ? (coMap.get(r.canonical_name as string) ?? []) : [],
+    }));
+  });
+
+  /** Bulk-assign family members to selected articles. Canonical groups set
+   *  canonical_consumer (cascades to future buys); loose artikel set
+   *  artikel_consumer. Konto-scoped — only touches artikel the user can see. */
+  app.post('/api/artikel/assign-consumers', async (req, reply) => {
+    const { canonical_names, artikel_ids, member_ids } = (req.body ?? {}) as {
+      canonical_names?: string[]; artikel_ids?: number[]; member_ids?: number[];
+    };
+    if (!Array.isArray(member_ids)) return reply.code(400).send({ error: 'member_ids required' });
+    const cns = Array.isArray(canonical_names) ? canonical_names : [];
+    const aids = Array.isArray(artikel_ids) ? artikel_ids : [];
+
+    await sql.begin(async tx => {
+      for (const cn of cns) {
+        await tx`DELETE FROM canonical_consumer WHERE canonical_name = ${cn}`;
+        for (const m of member_ids) {
+          await tx`INSERT INTO canonical_consumer (canonical_name, family_member_id, is_exclusive)
+                   VALUES (${cn}, ${m}, FALSE) ON CONFLICT DO NOTHING`;
+        }
+      }
+      if (aids.length) {
+        // Only loose artikel the caller may see.
+        const visible = (await tx`
+          SELECT a.id FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
+          WHERE a.id IN ${tx(aids)} ${kontoScope(req.user, tx`e.konto_id`)}
+        `).map(r => r.id as number);
+        for (const aid of visible) {
+          await tx`DELETE FROM artikel_consumer WHERE artikel_id = ${aid}`;
+          for (const m of member_ids) {
+            await tx`INSERT INTO artikel_consumer (artikel_id, family_member_id)
+                     VALUES (${aid}, ${m}) ON CONFLICT DO NOTHING`;
+          }
+        }
+      }
+    });
+    return { ok: true };
+  });
 }

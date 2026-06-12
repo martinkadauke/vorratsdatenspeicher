@@ -4,7 +4,7 @@
     "stats": "Statistik",
     "shopping": "Liste",
     "pantry": "Vorrat",
-    "names": "Namen",
+    "names": "Artikel",
     "stores": "Läden",
     "queue": "Prüfung",
     "admin": "Admin",
@@ -343,6 +343,23 @@
     "zettel": "Kassenbon",
     "email": "E-Mail",
     "bar": "Bar"
+  },
+  "artikel": {
+    "search": "Suchen (Name, OCR-Text, KI-Vorschlag…)",
+    "sortAlpha": "A–Z",
+    "sortCount": "Häufigkeit",
+    "sortDate": "Zuletzt",
+    "sortCategory": "Kategorie",
+    "items": "Artikel",
+    "select": "Auswählen",
+    "selectAll": "Alle markieren",
+    "selected": "ausgewählt",
+    "assignMembers": "Mitglieder zuweisen",
+    "assignTitle": "Mitglieder zu {{count}} Artikeln zuweisen",
+    "assignHint": "Setzt die Konsumenten. Bei Artikeln mit kanonischem Namen gilt es für alle zukünftigen Käufe.",
+    "assigned": "Zugewiesen ✓",
+    "avoid": "Vermeiden – WIP",
+    "avoidWip": "»Vermeiden« kommt bald: markierte Artikel werden dann beim Kauf angemahnt."
   },
   "common": {
     "save": "Speichern",

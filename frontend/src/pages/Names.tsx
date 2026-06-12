@@ -62,7 +62,7 @@ export function Names() {
   );
 }
 
-function NameEditModal({ name, onClose }: { name: CanonicalName | null; onClose: () => void }) {
+export function NameEditModal({ name, onClose }: { name: CanonicalName | null; onClose: () => void }) {
   const { t, i18n } = useTranslation();
   const qc = useQueryClient();
   const [newName, setNewName] = useState('');

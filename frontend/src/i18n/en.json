@@ -4,7 +4,7 @@
     "stats": "Statistics",
     "shopping": "List",
     "pantry": "Pantry",
-    "names": "Names",
+    "names": "Items",
     "stores": "Stores",
     "queue": "Review",
     "admin": "Admin",
@@ -343,6 +343,23 @@
     "zettel": "Receipt",
     "email": "Email",
     "bar": "Cash"
+  },
+  "artikel": {
+    "search": "Search (name, OCR text, AI guess…)",
+    "sortAlpha": "A–Z",
+    "sortCount": "Frequency",
+    "sortDate": "Recent",
+    "sortCategory": "Category",
+    "items": "items",
+    "select": "Select",
+    "selectAll": "Select all",
+    "selected": "selected",
+    "assignMembers": "Assign members",
+    "assignTitle": "Assign members to {{count}} items",
+    "assignHint": "Sets the consumers. For items with a canonical name it applies to all future purchases.",
+    "assigned": "Assigned ✓",
+    "avoid": "Avoid – WIP",
+    "avoidWip": "\"Avoid\" is coming soon: flagged items will warn you when bought."
   },
   "common": {
     "save": "Save",
