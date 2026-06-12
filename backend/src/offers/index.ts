@@ -15,14 +15,15 @@ export function isOfferSearchRunning(): boolean { return running; }
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 const OFFER_PROMPT =
-  'Du prüfst AUSSCHLIESSLICH anhand der gegebenen Web-Suchergebnisse, ob ein bestimmtes Produkt aktuell '
-  + 'bei einem konkreten Laden im Angebot/reduziert ist. Erfinde NICHTS. Antworte NUR mit JSON: '
-  + '{"found": boolean, "store": "Laden/Kette", "price": "Preis wie angegeben", '
-  + '"valid_until": "Datum/Zeitraum falls genannt, sonst null", "source_url": "passende URL aus den Ergebnissen", '
+  'Du prüfst anhand der gegebenen Web-Suchergebnisse, ob ein bestimmtes Produkt aktuell bei einem konkreten '
+  + 'Laden/Kette im Angebot oder im aktuellen Prospekt ist. Erfinde NICHTS, aber sei nicht übermäßig streng. '
+  + 'Antworte NUR mit JSON: {"found": boolean, "store": "Laden/Kette", "price": "Preis falls genannt, sonst null", '
+  + '"valid_until": "Zeitraum falls genannt, sonst null", "source_url": "passende URL aus den Ergebnissen", '
   + '"confidence": 0.0-1.0, "reason": "kurz"}. '
-  + 'found=true NUR, wenn aus den Ergebnissen klar hervorgeht, dass GENAU dieses Produkt aktuell/demnächst bei '
-  + 'einem konkreten Laden im Angebot ist, mit nachvollziehbarer Quelle. Bei Unsicherheit, alten/abgelaufenen '
-  + 'Angaben oder nur allgemeinen Shop-/Preisvergleichsseiten ohne Aktion: found=false.';
+  + 'found=true, wenn ein Ergebnis klar sagt, dass GENAU dieses Produkt (oder die Marke) aktuell bei einem BENANNTEN '
+  + 'Laden im Prospekt/Angebot/reduziert ist — AUCH OHNE genauen Preis (dann price=null). Gib immer die source_url an. '
+  + 'found=false nur, wenn es keinen klaren Hinweis auf ein aktuelles Angebot bei einem benannten Laden gibt '
+  + '(z.B. nur allgemeine Shop-/Hofladen-/Preisvergleichsseiten oder irrelevante Treffer).';
 
 interface OfferExtract {
   found?: boolean; store?: string | null; price?: string | null;
@@ -32,10 +33,10 @@ interface OfferExtract {
 /** Try a few offer queries (specific → broad) and return the first with hits. */
 async function offerSearchHits(product: string, region: string): Promise<{ query: string; hits: { title: string; content: string; url: string }[] }> {
   const queries = [
-    region ? `${product} Angebot ${region}` : '',
-    `${product} Angebot Prospekt`,
+    region ? `${product} Angebot ${region}` : '',  // local prospectus mention
+    `${product} Angebot Prospekt`,                  // chain-wide weekly offer
     `${product} Angebot`,
-    `${product} reduziert Preis`,
+    `${product} reduziert`,
   ].filter(Boolean);
   for (const query of queries) {
     try {
@@ -76,7 +77,7 @@ export async function runOfferSearch(): Promise<{ checked: number; found: number
           user: JSON.stringify({ produkt: product, region, suchergebnisse: hits.slice(0, 5) }),
           json: true,
         }));
-        if (!ex.found || (ex.confidence ?? 0) < 0.6 || !ex.source_url) continue;
+        if (!ex.found || (ex.confidence ?? 0) < 0.5 || !ex.source_url) continue; // price optional
         // de-dup: same product+store+price already seen recently
         const dupe = await sql`
           SELECT 1 FROM offer
