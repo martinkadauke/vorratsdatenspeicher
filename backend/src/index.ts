@@ -32,6 +32,16 @@ async function main(): Promise<void> {
   await migrate();
   await ensureAdmin();
 
+  // Sweep any maintenance events left "running" by a previous container that
+  // died mid-loop. Without this they'd block new runs forever (running flag
+  // resets on restart but the row stays unfinished).
+  await sql`
+    UPDATE maintenance_event
+    SET status = 'interrupted', ended_at = NOW(),
+        summary = COALESCE(summary, '{}'::jsonb) || ${sql.json({ interrupted_by: 'container_restart' })}
+    WHERE status = 'running'
+  `;
+
   const app = Fastify({ logger: { level: 'info' } });
 
   registerAuth(app);
