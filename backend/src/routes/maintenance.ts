@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import sql from '../db.js';
 import { requireAdmin } from '../auth/plugin.js';
-import { runChurn, isChurnRunning } from '../churner/index.js';
+import { runChurn, isChurnRunning, requestChurnStop } from '../churner/index.js';
 import { runRecategorize, isRecategorizeRunning, recategorizeOne } from '../maintenance/recategorize.js';
 import { getConfig } from '../config.js';
 import { PROGRESS_FRESH_MS, type JobProgress } from '../maintenance/progress.js';
@@ -14,6 +14,12 @@ export function maintenanceRoutes(app: FastifyInstance): void {
     } catch (e) {
       return reply.code(409).send({ error: (e as Error).message });
     }
+  });
+
+  /** Cooperatively stop the running churn (cross-replica via DB flag). */
+  app.post('/api/maintenance/churn/stop', { preHandler: requireAdmin }, async () => {
+    const stopped = await requestChurnStop();
+    return { ok: true, stopping: stopped };
   });
 
   app.post('/api/maintenance/recategorize', { preHandler: requireAdmin }, async (req, reply) => {

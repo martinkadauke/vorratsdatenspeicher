@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { api } from '../api/client';
 import { Card, Button, Input, Spinner, ProgressBar } from '../components/ui';
+import { confirm } from '../components/Confirm';
 
 interface JobProgress { phase: string; current: number; total: number }
 interface MaintenanceStatus { recategorize: { running: boolean; progress: JobProgress | null } }
@@ -351,7 +352,7 @@ export function CategoriesAdmin() {
       {/* ── apply + recategorize ── */}
       <Card className="flex flex-col gap-3 p-4">
         <div className="flex flex-wrap items-center gap-2">
-          <Button onClick={() => { if (confirm(t('categoriesAdmin.applyConfirm'))) applyCategories.mutate(); }} disabled={applyCategories.isPending || !tree.length}>
+          <Button onClick={async () => { if (await confirm({ title: t('categoriesAdmin.apply'), message: t('categoriesAdmin.applyConfirm'), confirmLabel: t('categoriesAdmin.apply'), cancelLabel: t('common.cancel'), danger: true })) applyCategories.mutate(); }} disabled={applyCategories.isPending || !tree.length}>
             <FolderTree size={15} /> {applyCategories.isPending ? t('admin.running') : t('categoriesAdmin.apply')}
           </Button>
           <Button variant="secondary" onClick={() => recategorize.mutate(false)} disabled={recatRunning}>

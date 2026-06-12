@@ -29,6 +29,25 @@ export function isChurnRunning(): boolean {
   return running;
 }
 
+/** Request cancellation of the running churn (cross-replica via DB flag). */
+export async function requestChurnStop(): Promise<boolean> {
+  const rows = await sql`
+    UPDATE maintenance_event SET cancel_requested = TRUE
+    WHERE kind = 'churner.run' AND status = 'running'
+    RETURNING id
+  `;
+  return rows.length > 0;
+}
+
+async function isCancelled(eventId: number): Promise<boolean> {
+  const [row] = await sql`SELECT cancel_requested FROM maintenance_event WHERE id = ${eventId}`;
+  return Boolean(row?.cancel_requested);
+}
+
+class ChurnCancelled extends Error {
+  constructor(public partial?: Record<string, unknown>) { super('churn cancelled'); }
+}
+
 /** One churner pass: clean up weak canonical names. Returns the maintenance_event id. */
 export async function runChurn(trigger: 'cron' | 'manual'): Promise<number> {
   if (running) throw new Error('churner already running');
@@ -43,7 +62,13 @@ export async function runChurn(trigger: 'cron' | 'manual'): Promise<number> {
 
   // Fire-and-forget the actual work; the event row tracks progress.
   void churnWork(eventId).catch(async err => {
-    await sql`UPDATE maintenance_event SET ended_at = NOW(), status = 'error',
+    if (err instanceof ChurnCancelled) {
+      await sql`UPDATE maintenance_event SET ended_at = NOW(), status = 'cancelled', progress = NULL,
+                summary = ${sql.json({ cancelled: true, ...(err.partial ?? {}) })} WHERE id = ${eventId}`;
+      console.log('[churner] cancelled by user');
+      return;
+    }
+    await sql`UPDATE maintenance_event SET ended_at = NOW(), status = 'error', progress = NULL,
               summary = ${sql.json({ error: (err as Error).message })} WHERE id = ${eventId}`;
   }).finally(() => { running = false; });
 
@@ -95,6 +120,7 @@ async function churnWork(eventId: number): Promise<void> {
 
   let processed = 0;
   for (const a of candidates) {
+    if (processed % 5 === 0 && await isCancelled(eventId)) throw new ChurnCancelled();
     await progress.set({ phase: 'canonical', current: processed, total: candidates.length });
     processed++;
     try {
@@ -186,9 +212,12 @@ async function churnWork(eventId: number): Promise<void> {
     }
   }
 
-  // Also fetch store icons for any stores that don't have one yet
+  // Fetch missing icons: store logos + canonical-name product images.
   await progress.set({ phase: 'store_icons', current: 0, total: 1 }, true);
   const storeIconsAdded = await churnStoreIcons();
+  if (await isCancelled(eventId)) throw new ChurnCancelled({ recategorize, candidates: candidates.length, auto_applied: autoApplied, queued, skipped, garbage: dropped, store_icons: storeIconsAdded });
+  await progress.set({ phase: 'canonical_icons', current: 0, total: 1 }, true);
+  const canonicalIconsAdded = await churnCanonicalIcons();
   await progress.clear();
 
   const summary = {
@@ -199,6 +228,7 @@ async function churnWork(eventId: number): Promise<void> {
     skipped,
     garbage: dropped,
     store_icons: storeIconsAdded,
+    canonical_icons: canonicalIconsAdded,
   };
   await sql`UPDATE maintenance_event SET ended_at = NOW(), status = 'success', progress = NULL,
             summary = ${sql.json(summary)} WHERE id = ${eventId}`;
@@ -234,6 +264,41 @@ async function churnStoreIcons(): Promise<number> {
       added++;
     } catch (err) {
       console.warn(`[churner] store-icon ${c.key} failed:`, (err as Error).message);
+    }
+  }
+  return added;
+}
+
+/** Fetches a product image for canonical names that have none yet, prioritising
+ *  the most-frequently-bought ones. Picks first SearXNG image hit. Bounded
+ *  to 20 per run so SearXNG isn't hammered. */
+async function churnCanonicalIcons(): Promise<number> {
+  // Most-used canonical names without an icon yet.
+  const candidates = await sql`
+    SELECT a.canonical_name AS name, COUNT(*)::int AS n
+    FROM artikel a
+    LEFT JOIN canonical_meta m ON m.canonical_name = a.canonical_name AND m.icon_url IS NOT NULL
+    WHERE a.canonical_name IS NOT NULL AND m.canonical_name IS NULL
+    GROUP BY a.canonical_name
+    ORDER BY n DESC
+    LIMIT 20
+  `;
+
+  let added = 0;
+  for (const c of candidates) {
+    const name = c.name as string;
+    try {
+      const hits = await searxngImageSearch(`${name} Produkt`);
+      if (!hits.length) continue;
+      const url = hits[0].src;
+      await sql`
+        INSERT INTO canonical_meta (canonical_name, icon_url, source, updated_at)
+        VALUES (${name}, ${url}, 'churner', NOW())
+        ON CONFLICT (canonical_name) DO UPDATE SET icon_url = EXCLUDED.icon_url, source = 'churner', updated_at = NOW()
+      `;
+      added++;
+    } catch (err) {
+      console.warn(`[churner] canonical-icon ${name} failed:`, (err as Error).message);
     }
   }
   return added;

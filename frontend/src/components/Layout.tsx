@@ -9,6 +9,7 @@ import { useAuth } from '../context/auth';
 import { NotificationBell } from './NotificationBell';
 import { Tour } from './Tour';
 import { Toaster } from './Toast';
+import { ConfirmHost } from './Confirm';
 import { cn } from '../lib/utils';
 
 const NAV = [
@@ -109,6 +110,7 @@ export function Layout() {
 
       <Tour open={tourOpen} onClose={() => setTourOpen(false)} />
       <Toaster />
+      <ConfirmHost />
     </div>
   );
 }

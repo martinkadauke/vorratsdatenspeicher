@@ -2,12 +2,13 @@ import { useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Trash2, Play, ChevronRight, History } from 'lucide-react';
+import { Trash2, Play, ChevronRight, History, Square } from 'lucide-react';
 import { api } from '../api/client';
 import type { FamilyMember, MaintenanceEvent, User } from '../api/types';
 import { Card, Button, Input, Label, Select, Switch, Spinner, Badge, ProgressBar } from '../components/ui';
 import { useFamily } from '../components/ConsumerChips';
 import { useAuth } from '../context/auth';
+import { confirm } from '../components/Confirm';
 import { cronToHuman } from '../lib/utils';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -301,10 +302,11 @@ function PhaseProgress({ progress }: { progress: JobProgress }) {
     recategorize: t('admin.phaseRecategorize'),
     canonical: t('admin.phaseCanonical'),
     store_icons: t('admin.phaseStoreIcons'),
+    canonical_icons: t('admin.phaseCanonicalIcons'),
   };
   const label = phaseLabel[progress.phase] ?? progress.phase;
-  // store_icons has no measurable total → indeterminate
-  const indeterminate = progress.phase === 'store_icons' || !progress.total;
+  // icon phases have no measurable total → indeterminate
+  const indeterminate = progress.phase === 'store_icons' || progress.phase === 'canonical_icons' || !progress.total;
   return (
     <ProgressBar
       label={label}
@@ -338,6 +340,10 @@ function ChurnerSection() {
   });
   const churnNow = useMutation({
     mutationFn: () => api('/api/maintenance/churn', { method: 'POST' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['maintenance-status'] }),
+  });
+  const churnStop = useMutation({
+    mutationFn: () => api('/api/maintenance/churn/stop', { method: 'POST' }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['maintenance-status'] }),
   });
 
@@ -398,6 +404,11 @@ function ChurnerSection() {
           <Button onClick={() => churnNow.mutate()} disabled={churnRunning}>
             <Play size={15} /> {churnRunning ? t('admin.running') : t('admin.churnNow')}
           </Button>
+          {churnRunning && (
+            <Button variant="danger" onClick={() => churnStop.mutate()} disabled={churnStop.isPending}>
+              <Square size={14} /> {churnStop.isPending ? t('admin.stopping') : t('admin.churnStop')}
+            </Button>
+          )}
         </div>
 
         {status?.churner.running && status.churner.progress && (
@@ -499,8 +510,8 @@ function UsersSection() {
                 className="shrink-0 px-2 text-red-500"
                 disabled={isSelf}
                 title={isSelf ? t('admin.cannotDeleteSelf') : t('common.delete')}
-                onClick={() => {
-                  if (confirm(t('common.confirm'))) remove.mutate(u.id);
+                onClick={async () => {
+                  if (await confirm({ message: t('common.confirm'), confirmLabel: t('common.delete'), cancelLabel: t('common.cancel'), danger: true })) remove.mutate(u.id);
                 }}
               ><Trash2 size={15} /></Button>
             </div>
@@ -679,7 +690,7 @@ function FamilySection() {
             />
             <button
               type="button"
-              onClick={() => { if (confirm(t('common.confirm'))) remove.mutate(m.id); }}
+              onClick={async () => { if (await confirm({ message: t('common.confirm'), confirmLabel: t('common.delete'), cancelLabel: t('common.cancel'), danger: true })) remove.mutate(m.id); }}
               className="flex h-9 items-center justify-center rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30"
               aria-label={t('common.delete')}
             ><Trash2 size={15} /></button>

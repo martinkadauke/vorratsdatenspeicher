@@ -12,6 +12,7 @@ import { AddArticleModal } from '../components/AddArticleModal';
 import { ConsumerDots } from '../components/ConsumerChips';
 import { CanonicalIcon } from '../components/IconPicker';
 import { toast } from '../components/Toast';
+import { confirm } from '../components/Confirm';
 import { eur, fmtDate } from '../lib/utils';
 
 export function ReceiptDetailPage() {
@@ -166,7 +167,7 @@ export function ReceiptDetailPage() {
           <RotateCw size={18} className={rotate.isPending ? 'animate-spin' : ''} />
         </button>
         <button
-          onClick={() => { if (confirm(t('receiptDetail.reocrConfirm'))) reocr.mutate(); }}
+          onClick={async () => { if (await confirm({ title: t('receiptDetail.reocr'), message: t('receiptDetail.reocrConfirm'), confirmLabel: t('receiptDetail.reocr'), cancelLabel: t('common.cancel') })) reocr.mutate(); }}
           disabled={reocr.isPending || !data.bild_pfad}
           className="shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 disabled:opacity-30 dark:hover:bg-zinc-800"
           title={t('receiptDetail.reocr')}
@@ -181,7 +182,7 @@ export function ReceiptDetailPage() {
           <Pencil size={18} />
         </button>
         <button
-          onClick={() => { if (confirm(t('receiptEdit.deleteConfirm'))) deleteReceipt.mutate(); }}
+          onClick={async () => { if (await confirm({ title: t('receiptEdit.delete'), message: t('receiptEdit.deleteConfirm'), confirmLabel: t('common.delete'), cancelLabel: t('common.cancel'), danger: true })) deleteReceipt.mutate(); }}
           disabled={deleteReceipt.isPending}
           className="shrink-0 rounded-xl p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30"
           title={t('receiptEdit.delete')}

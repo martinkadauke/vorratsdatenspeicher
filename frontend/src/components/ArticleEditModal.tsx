@@ -8,6 +8,7 @@ import { Button, Input, Label, Modal } from './ui';
 import { CategoryPicker } from './CategoryPicker';
 import { ConsumerChips } from './ConsumerChips';
 import { CanonicalIcon, IconPicker } from './IconPicker';
+import { confirm } from './Confirm';
 
 /** Parse "12", "1,5", "0.99" into number; null if not parseable. */
 const num = (s: string): number | null => {
@@ -237,7 +238,7 @@ export function ArticleEditModal({ artikel, open, onClose, invalidateKeys }: {
         <div className="flex items-center justify-between gap-2 pt-1">
           <Button
             variant="danger"
-            onClick={() => { if (confirm(t('article.deleteConfirm'))) remove.mutate(); }}
+            onClick={async () => { if (await confirm({ title: t('article.delete'), message: t('article.deleteConfirm'), confirmLabel: t('common.delete'), cancelLabel: t('common.cancel'), danger: true })) remove.mutate(); }}
           >
             {t('article.delete')}
           </Button>
