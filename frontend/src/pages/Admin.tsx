@@ -7,6 +7,7 @@ import type { FamilyMember, MaintenanceEvent, User } from '../api/types';
 import { Card, Button, Input, Label, Select, Switch, Spinner, Badge } from '../components/ui';
 import { useFamily } from '../components/ConsumerChips';
 import { useAuth } from '../context/auth';
+import { cronToHuman } from '../lib/utils';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -124,6 +125,13 @@ function AiProvidersSection() {
             />
           </div>
           <div>
+            <Label>{t('admin.anthropicUrl')}</Label>
+            <Input
+              defaultValue={config['anthropic.url'] as string}
+              onBlur={e => e.target.value !== config['anthropic.url'] && setCfg.mutate({ key: 'anthropic.url', value: e.target.value })}
+            />
+          </div>
+          <div>
             <Label>{t('admin.anthropicApiKey')}</Label>
             <Input
               type="password"
@@ -141,14 +149,16 @@ function AiProvidersSection() {
 
 // ── AI Tasks (per-task provider+model dropdowns) ─────────────────────────
 const AI_TASKS = [
-  { key: 'recategorize',     i18n: 'admin.taskRecategorize' },
-  { key: 'churner_stage1',   i18n: 'admin.taskChurnerStage1' },
-  { key: 'churner_stage2',   i18n: 'admin.taskChurnerStage2' },
+  { key: 'recategorize',     i18n: 'admin.taskRecategorize',   descI18n: 'admin.taskRecategorizeDesc' },
+  { key: 'churner_stage1',   i18n: 'admin.taskChurnerStage1',  descI18n: 'admin.taskChurnerStage1Desc' },
+  { key: 'churner_stage2',   i18n: 'admin.taskChurnerStage2',  descI18n: 'admin.taskChurnerStage2Desc' },
+  { key: 'ocr',              i18n: 'admin.taskOcr',            descI18n: 'admin.taskOcrDesc' },
 ] as const;
 
-function TaskRow({ task, taskLabel, config }: {
+function TaskRow({ task, taskLabel, taskDesc, config }: {
   task: typeof AI_TASKS[number]['key'];
   taskLabel: string;
+  taskDesc: string;
   config: Record<string, unknown>;
 }) {
   const qc = useQueryClient();
@@ -180,7 +190,8 @@ function TaskRow({ task, taskLabel, config }: {
 
   return (
     <div className="rounded-xl border border-zinc-200 p-3 dark:border-zinc-800">
-      <div className="mb-2 text-sm font-medium">{taskLabel}</div>
+      <div className="mb-0.5 text-sm font-medium">{taskLabel}</div>
+      <p className="mb-2 text-xs text-zinc-500 dark:text-zinc-400">{taskDesc}</p>
       <div className="grid gap-2 sm:grid-cols-2">
         <Select value={provider} onChange={e => onProviderChange(e.target.value as Provider)}>
           <option value="ollama">Ollama</option>
@@ -219,8 +230,8 @@ function AiTasksSection() {
     <Section title={t('admin.aiTasks')}>
       <div className="flex flex-col gap-3">
         <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('admin.aiTasksHint')}</p>
-        {AI_TASKS.map(({ key, i18n }) => (
-          <TaskRow key={key} task={key} taskLabel={t(i18n)} config={config} />
+        {AI_TASKS.map(({ key, i18n, descI18n }) => (
+          <TaskRow key={key} task={key} taskLabel={t(i18n)} taskDesc={t(descI18n)} config={config} />
         ))}
       </div>
     </Section>
@@ -257,15 +268,19 @@ function ChurnerSection() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['maintenance-status'] }),
   });
 
-  if (isLoading || !config) return <Section title={t('admin.churner')}><Spinner /></Section>;
+  if (isLoading || !config) return <Section title={t('admin.maintenance')}><Spinner /></Section>;
   const churnRunning = status?.churner.running ?? false;
   const recatRunning = status?.recategorize.running ?? false;
+  const cronStr = (config['churner.cron'] as string) ?? '';
+  const lang = (config['app.default_lang'] as string) === 'en' ? 'en' : 'de';
 
   return (
-    <Section title={t('admin.churner')}>
+    <Section title={t('admin.maintenance')}>
       <div className="flex flex-col gap-4">
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('admin.maintenanceHint')}</p>
+
         <div className="flex items-center justify-between">
-          <span className="text-sm font-medium">{t('admin.churnerEnabled')}</span>
+          <span className="text-sm font-medium">{t('admin.maintenanceEnabled')}</span>
           <Switch
             checked={config['churner.enabled'] as boolean}
             onChange={v => setCfg.mutate({ key: 'churner.enabled', value: v })}
@@ -276,9 +291,10 @@ function ChurnerSection() {
           <div>
             <Label>{t('admin.cron')}</Label>
             <Input
-              defaultValue={config['churner.cron'] as string}
+              defaultValue={cronStr}
               onBlur={e => e.target.value !== config['churner.cron'] && setCfg.mutate({ key: 'churner.cron', value: e.target.value })}
             />
+            <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{cronToHuman(cronStr, lang)}</p>
           </div>
           <div>
             <Label>{t('admin.defaultLang')}</Label>
@@ -302,6 +318,7 @@ function ChurnerSection() {
               onTouchEnd={e => setCfg.mutate({ key: 'churner.confidence', value: parseFloat((e.target as HTMLInputElement).value) })}
               className="w-full accent-emerald-600"
             />
+            <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{t('admin.confidenceHint')}</p>
           </div>
         </div>
 

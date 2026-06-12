@@ -1,7 +1,7 @@
 import { getConfig, setConfig } from '../config.js';
 
 export type ProviderName = 'ollama' | 'deepseek' | 'anthropic';
-export type AiTask = 'recategorize' | 'churner_stage1' | 'churner_stage2';
+export type AiTask = 'recategorize' | 'churner_stage1' | 'churner_stage2' | 'ocr';
 
 export interface LlmChatOptions {
   system: string;
@@ -154,9 +154,10 @@ class AnthropicProvider implements LlmProvider {
 }
 
 export async function listAnthropicModels(): Promise<string[]> {
+  const url = await getConfig('anthropic.url');
   const apiKey = await getConfig('anthropic.api_key');
   if (!apiKey) throw new Error('Anthropic API-Key fehlt');
-  const res = await fetch('https://api.anthropic.com/v1/models', {
+  const res = await fetch(`${url}/v1/models`, {
     headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
     signal: AbortSignal.timeout(10_000),
   });

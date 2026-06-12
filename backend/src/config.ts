@@ -9,8 +9,10 @@ export interface AppConfig {
   'ollama.model': string;
   'deepseek.url': string;
   'deepseek.api_key': string;
+  'anthropic.url': string;
   'anthropic.api_key': string;
-  'anthropic.model': string;
+  'ai.ocr.provider': string;
+  'ai.ocr.model': string;
   'ai.recategorize.provider': string;
   'ai.recategorize.model': string;
   'ai.churner_stage1.provider': string;
@@ -37,8 +39,10 @@ const DEFAULTS: AppConfig = {
   'ollama.model': 'qwen2.5:14b',
   'deepseek.url': 'https://api.deepseek.com',
   'deepseek.api_key': '',
+  'anthropic.url': 'https://api.anthropic.com',
   'anthropic.api_key': '',
-  'anthropic.model': 'claude-sonnet-4-5',
+  'ai.ocr.provider': 'anthropic',
+  'ai.ocr.model': 'claude-sonnet-4-5',
   'ai.recategorize.provider': 'ollama',
   'ai.recategorize.model': 'qwen2.5:14b',
   'ai.churner_stage1.provider': 'ollama',

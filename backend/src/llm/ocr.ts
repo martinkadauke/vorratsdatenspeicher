@@ -50,11 +50,18 @@ export interface OcrResult {
   usage?: { input_tokens: number; output_tokens: number };
 }
 
-/** Runs Claude vision OCR on an image. Source can be a local filesystem
- *  path (preferred — fastest, no roundtrip) or an absolute URL. */
+/** Runs vision OCR on an image. Source can be a local filesystem path
+ *  (preferred — fastest, no roundtrip) or an absolute URL. The provider
+ *  and model are taken from the `ai.ocr.*` config — currently only
+ *  Anthropic Vision is implemented. */
 export async function ocrFromImage(source: string): Promise<OcrResult> {
+  const provider = await getConfig('ai.ocr.provider');
+  const model = await getConfig('ai.ocr.model');
+  if (provider !== 'anthropic') {
+    throw new Error(`OCR provider "${provider}" not implemented yet — only "anthropic" is supported`);
+  }
+  const url = await getConfig('anthropic.url');
   const apiKey = await getConfig('anthropic.api_key');
-  const model = await getConfig('anthropic.model');
   if (!apiKey) throw new Error('anthropic.api_key not configured');
 
   let buf: Buffer;
@@ -69,7 +76,7 @@ export async function ocrFromImage(source: string): Promise<OcrResult> {
   const b64 = buf.toString('base64');
   const mediaType = /\.png$/i.test(source) ? 'image/png' : 'image/jpeg';
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const res = await fetch(`${url}/v1/messages`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
