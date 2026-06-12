@@ -372,9 +372,10 @@ async function cmdRun() {
       const dt = formatDateTime(parsed.datum, parsed.uhrzeit);
       const baseName = f.filename.replace(/^[A-Z0-9_]+_\d{4}-\d{2}-\d{2}_\d{6}_/, '');
       const newName = `${kette}_${dt}_${baseName}`;
-      // Use absolute URL so stage/dev (which don't have NPM in path) can load images
-      // from prod's NPM. Prod itself works fine with absolute URL too.
-      const bildPfad = `https://vds.giziko.online/receipts/${newName}`;
+      // Relative URL — browser loads from whatever origin it's on
+      // (dev/stage/prod), and the backend's fastify-static (mounted /receipts
+      // via NFS) serves the file. Same-origin = no TLS, no host pinning.
+      const bildPfad = `/receipts/${newName}`;
 
       const einkaufId = await insertReceipt(sql, parsed, bildPfad, f.absPath);
       const newPath = path.join(SOURCE_ROOT, newName);
