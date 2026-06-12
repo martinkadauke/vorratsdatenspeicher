@@ -101,12 +101,26 @@ async function main(): Promise<void> {
     app.log.warn(`no receipts dir at ${receiptsDir} — rotation + static serving disabled`);
   }
 
-  // Static SPA
+  // Static SPA. Vite emits content-hashed assets under /assets/* (safe to cache
+  // forever), but index.html points at the current hashes and MUST always be
+  // revalidated — otherwise a browser keeps loading an old bundle after a deploy
+  // (the cause of "I don't see the new feature" / stale-data ghosts).
   const publicDir = path.join(process.cwd(), 'public');
   if (existsSync(publicDir)) {
-    await app.register(fastifyStatic, { root: publicDir, wildcard: false });
+    await app.register(fastifyStatic, {
+      root: publicDir,
+      wildcard: false,
+      maxAge: '1y',
+      immutable: true,
+      setHeaders(res, filePath) {
+        if (filePath.endsWith('index.html')) {
+          res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+        }
+      },
+    });
     app.setNotFoundHandler((req, reply) => {
       if (req.method === 'GET' && !req.url.startsWith('/api/')) {
+        void reply.header('Cache-Control', 'no-cache, must-revalidate');
         return reply.sendFile('index.html');
       }
       return reply.code(404).send({ error: 'not found' });
