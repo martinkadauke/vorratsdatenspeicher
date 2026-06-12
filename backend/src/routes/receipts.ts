@@ -1,6 +1,5 @@
 import type { FastifyInstance } from 'fastify';
 import path from 'node:path';
-import { chmod } from 'node:fs/promises';
 import Jimp from 'jimp';
 import sql from '../db.js';
 import { requireAdmin } from '../auth/plugin.js';
@@ -82,12 +81,11 @@ export function receiptRoutes(app: FastifyInstance): void {
     try {
       const image = await Jimp.read(localPath);
       image.rotate(90);
+      // writeAsync overwrites the existing file → mode/ownership preserved
+      // (so the one-time `chmod 666` on the receipts share is enough for
+      // every rotation forever, and the container — root-squashed to
+      // nobody on NFS — can't chmod anyway since it's not the owner).
       await image.writeAsync(localPath);
-      // Node.js default umask (022) would drop the file back to 0644 — but
-      // the container is root-squashed via NFS and CAN'T overwrite 0644
-      // files owned by the original writer. Force 0666 so future rotations
-      // (and re-OCR) keep working.
-      await chmod(localPath, 0o666);
       req.log.info(`rotated ${localPath} 90° CW`);
       return { ok: true };
     } catch (e) {
