@@ -82,6 +82,27 @@ export async function runOfferSearch(): Promise<{ checked: number; found: number
   }
 }
 
+/** Debug helper: show the raw SearXNG hits + LLM extraction for one product. */
+export async function debugOfferSearch(product: string): Promise<unknown> {
+  const region = await regionHint();
+  const query = `${product} Angebot Prospekt Aktion ${region}`.trim();
+  let hits: { title: string; content: string; url: string }[] = [];
+  let llmRaw = '';
+  let parsed: unknown = null;
+  let error: string | null = null;
+  try {
+    hits = await searxngSearch(query);
+    const llm = await providerForTask('churner_stage2');
+    llmRaw = await llm.chat({
+      system: OFFER_PROMPT,
+      user: JSON.stringify({ produkt: product, region, suchergebnisse: hits.slice(0, 5) }),
+      json: true,
+    });
+    parsed = parseLlmJson<OfferExtract>(llmRaw);
+  } catch (e) { error = (e as Error).message; }
+  return { query, region, hitCount: hits.length, hits, llmRaw, parsed, error };
+}
+
 interface OfferRow { id: number; canonical_name: string; store: string | null; price: string | null; valid_until: string | null; source_url: string | null }
 
 /** Email each subscriber a digest of newly-found offers for their products,

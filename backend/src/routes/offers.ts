@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import sql from '../db.js';
 import { requireAdmin } from '../auth/plugin.js';
-import { runOfferSearch, sendOfferDigests, isOfferSearchRunning } from '../offers/index.js';
+import { runOfferSearch, sendOfferDigests, isOfferSearchRunning, debugOfferSearch } from '../offers/index.js';
 
 export function offerRoutes(app: FastifyInstance): void {
   /** Offers found for the things the current user subscribed to. */
@@ -25,6 +25,13 @@ export function offerRoutes(app: FastifyInstance): void {
       FROM offer WHERE found_at > NOW() - INTERVAL '21 days'
       ORDER BY found_at DESC LIMIT 200
     `;
+  });
+
+  /** Debug: see the raw SearXNG hits + LLM extraction for one product. */
+  app.get('/api/offers/debug', { preHandler: requireAdmin }, async (req) => {
+    const q = ((req.query as { q?: string }).q ?? '').trim();
+    if (!q) return { error: 'q required' };
+    return debugOfferSearch(q);
   });
 
   /** Run the offer web-search now (manual/testing); emails digests after. */
