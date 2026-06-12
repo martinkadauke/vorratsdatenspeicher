@@ -10,13 +10,15 @@ services:
       PORT: "80"
       # Only the prod env runs the nightly churner cron (saves Ollama/DeepSeek load)
       VDS_ENV: ${VDS_ENV:-prod}
-      RECEIPTS_LOCAL_PATH: "/receipts"
+      RECEIPTS_LOCAL_PATH: "${RECEIPTS_LOCAL_PATH:-/receipts}"
     ports:
       - "${PORT:-8766}:80"   # 8766 = prod, 8767 = staging — gesetzt von cicd.yml
-    # NPM auf Unraid serviert /receipts/* direkt aus dem Filesystem, wir
-    # mounten den gleichen Pfad damit der Container Bilder rotieren kann.
-    volumes:
-      - "${RECEIPTS_HOST_PATH:-/mnt/user/Aufnahmen/receipts}:/receipts:rw"
+    # NPM auf Unraid serviert /receipts/* direkt aus dem Filesystem. Wenn
+    # der Swarm-Host RECEIPTS_HOST_PATH gesetzt hat, wird der Pfad zusätzlich
+    # als Volume gemountet, damit /api/receipts/:id/rotate die Bilder
+    # tatsächlich auf der Platte editieren kann. Ohne Volume gibt der
+    # Endpoint ENOENT zurück — alles andere läuft trotzdem.
+    # Setzen mit z.B.: export RECEIPTS_HOST_PATH=/mnt/user/Aufnahmen/receipts
     healthcheck:
       # Node statt wget — garantiert im Image vorhanden, deutlich robuster
       test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:80/api/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
