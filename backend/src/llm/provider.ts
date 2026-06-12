@@ -21,10 +21,26 @@ export interface HealthInfo {
   error?: string;
 }
 
+/** Log token usage for one AI call. Best-effort — never let a logging error
+ *  break the actual task. */
+export async function recordUsage(
+  task: string, provider: ProviderName, model: string,
+  inputTokens: number, outputTokens: number,
+): Promise<void> {
+  try {
+    await sql`
+      INSERT INTO ai_usage (task, provider, model, input_tokens, output_tokens)
+      VALUES (${task}, ${provider}, ${model}, ${Math.round(inputTokens) || 0}, ${Math.round(outputTokens) || 0})
+    `;
+  } catch {
+    /* ignore — usage logging must not affect the request */
+  }
+}
+
 // ── Ollama ──────────────────────────────────────────────────────────────
 class OllamaProvider implements LlmProvider {
   readonly name: ProviderName = 'ollama';
-  constructor(private url: string, private model: string) {}
+  constructor(private url: string, private model: string, private task: AiTask = 'recategorize') {}
 
   async chat(opts: LlmChatOptions): Promise<string> {
     const res = await fetch(`${this.url}/api/chat`, {
@@ -43,7 +59,8 @@ class OllamaProvider implements LlmProvider {
       signal: AbortSignal.timeout(180_000),
     });
     if (!res.ok) throw new Error(`Ollama HTTP ${res.status}: ${await safeBody(res)}`);
-    const data = (await res.json()) as { message?: { content?: string } };
+    const data = (await res.json()) as { message?: { content?: string }; prompt_eval_count?: number; eval_count?: number };
+    await recordUsage(this.task, this.name, this.model, data.prompt_eval_count ?? 0, data.eval_count ?? 0);
     return data.message?.content ?? '';
   }
 }
@@ -71,7 +88,7 @@ export async function ollamaHealth(): Promise<HealthInfo> {
 // ── DeepSeek (OpenAI-compatible API) ────────────────────────────────────
 class DeepSeekProvider implements LlmProvider {
   readonly name: ProviderName = 'deepseek';
-  constructor(private url: string, private apiKey: string, private model: string) {
+  constructor(private url: string, private apiKey: string, private model: string, private task: AiTask = 'recategorize') {
     if (!apiKey) throw new Error('DeepSeek API-Key fehlt — in Admin → AI Settings setzen');
   }
 
@@ -94,7 +111,11 @@ class DeepSeekProvider implements LlmProvider {
       signal: AbortSignal.timeout(180_000),
     });
     if (!res.ok) throw new Error(`DeepSeek HTTP ${res.status}: ${await safeBody(res)}`);
-    const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+    const data = (await res.json()) as {
+      choices?: { message?: { content?: string } }[];
+      usage?: { prompt_tokens?: number; completion_tokens?: number };
+    };
+    await recordUsage(this.task, this.name, this.model, data.usage?.prompt_tokens ?? 0, data.usage?.completion_tokens ?? 0);
     return data.choices?.[0]?.message?.content ?? '';
   }
 }
@@ -126,7 +147,7 @@ export async function deepseekHealth(): Promise<HealthInfo> {
 // ── Anthropic (Claude Messages API) ─────────────────────────────────────
 class AnthropicProvider implements LlmProvider {
   readonly name: ProviderName = 'anthropic';
-  constructor(private apiKey: string, private model: string) {
+  constructor(private apiKey: string, private model: string, private task: AiTask = 'recategorize') {
     if (!apiKey) throw new Error('Anthropic API-Key fehlt — in Admin → AI Settings setzen');
   }
 
@@ -149,7 +170,8 @@ class AnthropicProvider implements LlmProvider {
       signal: AbortSignal.timeout(180_000),
     });
     if (!res.ok) throw new Error(`Anthropic HTTP ${res.status}: ${await safeBody(res)}`);
-    const data = (await res.json()) as { content?: { text?: string }[] };
+    const data = (await res.json()) as { content?: { text?: string }[]; usage?: { input_tokens?: number; output_tokens?: number } };
+    await recordUsage(this.task, this.name, this.model, data.usage?.input_tokens ?? 0, data.usage?.output_tokens ?? 0);
     return data.content?.[0]?.text ?? '';
   }
 }
@@ -187,15 +209,15 @@ export async function providerForTask(task: AiTask): Promise<LlmProvider> {
   if (provider === 'deepseek') {
     const url = await getConfig('deepseek.url');
     const apiKey = await getConfig('deepseek.api_key');
-    return new DeepSeekProvider(url, apiKey, model);
+    return new DeepSeekProvider(url, apiKey, model, task);
   }
   if (provider === 'anthropic') {
     const apiKey = await getConfig('anthropic.api_key');
-    return new AnthropicProvider(apiKey, model);
+    return new AnthropicProvider(apiKey, model, task);
   }
   // default: ollama
   const url = await getConfig('ollama.url');
-  return new OllamaProvider(url, model);
+  return new OllamaProvider(url, model, task);
 }
 
 /** List models for a provider. */

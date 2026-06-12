@@ -12,6 +12,28 @@ import { createAuthToken } from '../auth/routes.js';
 import { listModelsForProvider, healthForProvider, setTaskAi, type ProviderName, type AiTask } from '../llm/provider.js';
 
 const VALID_PROVIDERS: ProviderName[] = ['ollama', 'deepseek', 'anthropic'];
+
+/** Where to top up credit per provider (Ollama is local → none). */
+const TOP_UP_URL: Record<string, string> = {
+  anthropic: 'https://console.anthropic.com/settings/billing',
+  deepseek: 'https://platform.deepseek.com/top_up',
+};
+
+/** Rough public list prices in USD per 1M tokens [input, output], matched by
+ *  substring of the model name. Local (Ollama) and unknown models → no cost.
+ *  Estimate only — providers bill the authoritative amount. */
+const PRICES: { match: RegExp; in: number; out: number }[] = [
+  { match: /opus/i, in: 15, out: 75 },
+  { match: /sonnet/i, in: 3, out: 15 },
+  { match: /haiku/i, in: 0.8, out: 4 },
+  { match: /deepseek-(reasoner|r1)/i, in: 0.55, out: 2.19 },
+  { match: /deepseek/i, in: 0.27, out: 1.1 },
+];
+function estCostUsd(model: string, inTok: number, outTok: number): number {
+  const p = PRICES.find(x => x.match.test(model));
+  if (!p) return 0;
+  return (inTok / 1e6) * p.in + (outTok / 1e6) * p.out;
+}
 const VALID_TASKS: AiTask[] = ['recategorize', 'churner_stage1', 'churner_stage2', 'ocr', 'categories_chat'];
 
 export function adminRoutes(app: FastifyInstance): void {
@@ -201,6 +223,60 @@ export function adminRoutes(app: FastifyInstance): void {
     }
     await setTaskAi(task, provider, model, req.user!.id);
     return { ok: true };
+  });
+
+  /** Token-usage analytics: consumption per provider/model/task + a daily
+   *  series, with a rough cost estimate and top-up links per provider. */
+  app.get('/api/ai/usage', { preHandler: requireAdmin }, async () => {
+    const grouped = await sql`
+      SELECT provider, model, task,
+             COUNT(*)::int            AS calls,
+             SUM(input_tokens)::bigint  AS input_tokens,
+             SUM(output_tokens)::bigint AS output_tokens
+      FROM ai_usage
+      GROUP BY provider, model, task
+    `;
+    const daily = await sql`
+      SELECT to_char(created_at, 'YYYY-MM-DD') AS day,
+             SUM(input_tokens)::bigint  AS input_tokens,
+             SUM(output_tokens)::bigint AS output_tokens,
+             COUNT(*)::int             AS calls
+      FROM ai_usage
+      WHERE created_at >= NOW() - INTERVAL '30 days'
+      GROUP BY day ORDER BY day
+    `;
+
+    type Agg = { calls: number; input_tokens: number; output_tokens: number; est_cost_usd: number };
+    const blank = (): Agg => ({ calls: 0, input_tokens: 0, output_tokens: 0, est_cost_usd: 0 });
+    const byProvider = new Map<string, Agg>();
+    const byTask = new Map<string, Agg>();
+    const byModel: { provider: string; model: string; calls: number; input_tokens: number; output_tokens: number; est_cost_usd: number }[] = [];
+    const totals = blank();
+
+    for (const r of grouped) {
+      const inTok = Number(r.input_tokens) || 0;
+      const outTok = Number(r.output_tokens) || 0;
+      const calls = r.calls as number;
+      const cost = estCostUsd(r.model as string, inTok, outTok);
+      const add = (m: Map<string, Agg>, key: string) => {
+        const a = m.get(key) ?? blank();
+        a.calls += calls; a.input_tokens += inTok; a.output_tokens += outTok; a.est_cost_usd += cost;
+        m.set(key, a);
+      };
+      add(byProvider, r.provider as string);
+      add(byTask, r.task as string);
+      byModel.push({ provider: r.provider as string, model: r.model as string, calls, input_tokens: inTok, output_tokens: outTok, est_cost_usd: cost });
+      totals.calls += calls; totals.input_tokens += inTok; totals.output_tokens += outTok; totals.est_cost_usd += cost;
+    }
+
+    return {
+      totals,
+      byProvider: [...byProvider.entries()].map(([provider, a]) => ({ provider, ...a, top_up_url: TOP_UP_URL[provider] ?? null }))
+        .sort((a, b) => b.est_cost_usd - a.est_cost_usd || b.input_tokens - a.input_tokens),
+      byModel: byModel.sort((a, b) => b.est_cost_usd - a.est_cost_usd || b.input_tokens - a.input_tokens),
+      byTask: [...byTask.entries()].map(([task, a]) => ({ task, ...a })).sort((a, b) => b.calls - a.calls),
+      daily: daily.map(d => ({ day: d.day, input_tokens: Number(d.input_tokens) || 0, output_tokens: Number(d.output_tokens) || 0, calls: d.calls })),
+    };
   });
 
   /** Model-change history: who set which provider/model for which task, when. */

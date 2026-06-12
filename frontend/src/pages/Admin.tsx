@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Trash2, Play, ChevronRight, History, Square, Image as ImageIcon, Download } from 'lucide-react';
+import { Trash2, Play, ChevronRight, History, Square, Image as ImageIcon, Download, ExternalLink } from 'lucide-react';
 import { api } from '../api/client';
 import type { FamilyMember, MaintenanceEvent, User } from '../api/types';
 import { Card, Button, Input, Label, Select, Switch, Spinner, Badge, ProgressBar } from '../components/ui';
@@ -28,6 +28,7 @@ export function Admin() {
       <h1 className="text-lg font-bold">{t('admin.title')}</h1>
       <AiProvidersSection />
       <AiTasksSection />
+      <TokenUsageSection />
       <ChurnerSection />
       <CategoriesLinkSection />
       <UsersSection />
@@ -289,6 +290,153 @@ function AiTasksSection() {
         {showLog && <AiTaskLog />}
       </div>
     </Section>
+  );
+}
+
+// ── Token usage analytics + top-up links ─────────────────────────────────
+interface UsageAgg { calls: number; input_tokens: number; output_tokens: number; est_cost_usd: number }
+interface UsageResp {
+  totals: UsageAgg;
+  byProvider: (UsageAgg & { provider: string; top_up_url: string | null })[];
+  byModel: (UsageAgg & { provider: string; model: string })[];
+  byTask: (UsageAgg & { task: string })[];
+  daily: { day: string; input_tokens: number; output_tokens: number; calls: number }[];
+}
+
+const fmtTok = (n: number) => n >= 1e6 ? `${(n / 1e6).toFixed(2)} M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)} k` : String(n);
+const fmtUsd = (n: number) => n === 0 ? '–' : `$${n.toFixed(n < 1 ? 4 : 2)}`;
+/** Providers that can be topped up, shown even before any usage is recorded. */
+const TOPUP_LINKS: { provider: string; url: string }[] = [
+  { provider: 'Anthropic', url: 'https://console.anthropic.com/settings/billing' },
+  { provider: 'DeepSeek', url: 'https://platform.deepseek.com/top_up' },
+];
+
+function TokenUsageSection() {
+  const { t } = useTranslation();
+  const { data, isLoading } = useQuery({
+    queryKey: ['ai-usage'],
+    queryFn: () => api<UsageResp>('/api/ai/usage'),
+    refetchInterval: 60_000,
+  });
+  const taskLabel = (task: string) => {
+    const def = AI_TASKS.find(x => x.key === task);
+    return def ? t(def.i18n) : task;
+  };
+
+  return (
+    <Section title={t('admin.usageTitle')}>
+      <div className="flex flex-col gap-4">
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('admin.usageHint')}</p>
+
+        {isLoading ? <Spinner /> : !data || !data.totals.calls ? (
+          <p className="py-2 text-xs text-zinc-400">{t('admin.usageEmpty')}</p>
+        ) : (
+          <>
+            {/* totals */}
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <Stat label={t('admin.usageCalls')} value={String(data.totals.calls)} />
+              <Stat label={t('admin.usageInput')} value={fmtTok(data.totals.input_tokens)} />
+              <Stat label={t('admin.usageOutput')} value={fmtTok(data.totals.output_tokens)} />
+              <Stat label={t('admin.usageCost')} value={fmtUsd(data.totals.est_cost_usd)} sub={t('admin.usageEstimate')} />
+            </div>
+
+            {/* per provider, with inline top-up */}
+            <div className="overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-zinc-200 text-left text-zinc-400 dark:border-zinc-800">
+                    <th className="px-2 py-1.5 font-medium">{t('admin.usageProvider')}</th>
+                    <th className="px-2 py-1.5 text-right font-medium">{t('admin.usageCalls')}</th>
+                    <th className="px-2 py-1.5 text-right font-medium">In</th>
+                    <th className="px-2 py-1.5 text-right font-medium">Out</th>
+                    <th className="px-2 py-1.5 text-right font-medium">{t('admin.usageCost')}</th>
+                    <th className="px-2 py-1.5"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.byProvider.map(p => (
+                    <tr key={p.provider} className="border-b border-zinc-100 last:border-0 dark:border-zinc-800/60">
+                      <td className="px-2 py-1.5 font-medium capitalize">{p.provider}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">{p.calls}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">{fmtTok(p.input_tokens)}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">{fmtTok(p.output_tokens)}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">{fmtUsd(p.est_cost_usd)}</td>
+                      <td className="px-2 py-1.5 text-right">
+                        {p.top_up_url && (
+                          <a href={p.top_up_url} target="_blank" rel="noopener noreferrer"
+                             className="inline-flex items-center gap-1 rounded-lg px-1.5 py-0.5 font-medium text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950">
+                            <ExternalLink size={11} /> {t('admin.usageTopUp')}
+                          </a>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* daily bars (last 30d) */}
+            <UsageDailyBars daily={data.daily} />
+
+            {/* per task */}
+            <details className="text-xs">
+              <summary className="cursor-pointer select-none text-zinc-500 hover:text-emerald-600">{t('admin.usageByTask')}</summary>
+              <div className="mt-2 flex flex-col gap-1">
+                {data.byTask.map(tk => (
+                  <div key={tk.task} className="flex items-center justify-between rounded-lg bg-zinc-50 px-2 py-1 dark:bg-zinc-800/40">
+                    <span className="font-medium">{taskLabel(tk.task)}</span>
+                    <span className="tabular-nums text-zinc-400">{tk.calls}× · {fmtTok(tk.input_tokens + tk.output_tokens)} Tok · {fmtUsd(tk.est_cost_usd)}</span>
+                  </div>
+                ))}
+              </div>
+            </details>
+          </>
+        )}
+
+        {/* top-up links — always available, even before any usage */}
+        <div className="flex flex-wrap items-center gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+          <span className="text-xs text-zinc-500">{t('admin.usageTopUpLinks')}:</span>
+          {TOPUP_LINKS.map(l => (
+            <a key={l.provider} href={l.url} target="_blank" rel="noopener noreferrer"
+               className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 px-2 py-1 text-xs font-medium hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700">
+              <ExternalLink size={12} /> {l.provider}
+            </a>
+          ))}
+        </div>
+      </div>
+    </Section>
+  );
+}
+
+function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div className="rounded-xl bg-zinc-50 px-3 py-2 dark:bg-zinc-800/40">
+      <div className="text-xs text-zinc-400">{label}</div>
+      <div className="text-base font-semibold tabular-nums">{value}</div>
+      {sub && <div className="text-[10px] text-zinc-400">{sub}</div>}
+    </div>
+  );
+}
+
+function UsageDailyBars({ daily }: { daily: UsageResp['daily'] }) {
+  const { t } = useTranslation();
+  if (!daily.length) return null;
+  const max = Math.max(...daily.map(d => d.input_tokens + d.output_tokens), 1);
+  return (
+    <div>
+      <div className="mb-1 text-xs text-zinc-400">{t('admin.usageDaily')}</div>
+      <div className="flex h-20 items-end gap-0.5">
+        {daily.map(d => {
+          const tot = d.input_tokens + d.output_tokens;
+          const h = Math.max(2, Math.round((tot / max) * 76));
+          return (
+            <div key={d.day} className="flex-1 rounded-t bg-emerald-400/70 dark:bg-emerald-500/60"
+                 style={{ height: `${h}px` }}
+                 title={`${d.day}: ${fmtTok(tot)} Tok · ${d.calls}×`} />
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

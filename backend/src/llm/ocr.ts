@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { getConfig } from '../config.js';
 import { parseLlmJson } from './ollama.js';
+import { recordUsage } from './provider.js';
 
 const VISION_SYSTEM = `Du bist ein Datenextraktions-Assistent für deutsche Kassenbons.
 Antworte AUSSCHLIESSLICH mit gültigem JSON ohne Markdown-Fence, ohne Kommentare.
@@ -105,5 +106,6 @@ export async function ocrFromImage(source: string): Promise<OcrResult> {
   const text = data.content?.[0]?.text ?? '';
   const parsed = parseLlmJson<OcrResult>(text);
   parsed.usage = data.usage;
+  await recordUsage('ocr', 'anthropic', model, data.usage?.input_tokens ?? 0, data.usage?.output_tokens ?? 0);
   return parsed;
 }
