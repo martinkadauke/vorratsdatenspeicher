@@ -6,7 +6,7 @@ import sql from '../db.js';
 import { getConfig } from '../config.js';
 import { providerForTask } from '../llm/provider.js';
 import { parseLlmJson } from '../llm/ollama.js';
-import { searxngSearch } from '../llm/searxng.js';
+import { searxngSearchRaw } from '../llm/searxng.js';
 import { sendMail } from '../mailer.js';
 
 let running = false;
@@ -27,6 +27,23 @@ const OFFER_PROMPT =
 interface OfferExtract {
   found?: boolean; store?: string | null; price?: string | null;
   valid_until?: string | null; source_url?: string | null; confidence?: number;
+}
+
+/** Try a few offer queries (specific → broad) and return the first with hits. */
+async function offerSearchHits(product: string, region: string): Promise<{ query: string; hits: { title: string; content: string; url: string }[] }> {
+  const queries = [
+    region ? `${product} Angebot ${region}` : '',
+    `${product} Angebot Prospekt`,
+    `${product} Angebot`,
+    `${product} reduziert Preis`,
+  ].filter(Boolean);
+  for (const query of queries) {
+    try {
+      const hits = await searxngSearchRaw(query);
+      if (hits.length) return { query, hits };
+    } catch { /* try next */ }
+  }
+  return { query: queries[0] ?? product, hits: [] };
 }
 
 /** Region hint (city) from the household address, to bias the search locally. */
@@ -52,7 +69,7 @@ export async function runOfferSearch(): Promise<{ checked: number; found: number
     for (const product of products) {
       checked++;
       try {
-        const hits = await searxngSearch(`${product} Angebot Prospekt Aktion ${region}`.trim());
+        const { hits } = await offerSearchHits(product, region);
         if (!hits.length) continue;
         const ex = parseLlmJson<OfferExtract>(await llm.chat({
           system: OFFER_PROMPT,
@@ -85,13 +102,13 @@ export async function runOfferSearch(): Promise<{ checked: number; found: number
 /** Debug helper: show the raw SearXNG hits + LLM extraction for one product. */
 export async function debugOfferSearch(product: string): Promise<unknown> {
   const region = await regionHint();
-  const query = `${product} Angebot Prospekt Aktion ${region}`.trim();
+  let query = '';
   let hits: { title: string; content: string; url: string }[] = [];
   let llmRaw = '';
   let parsed: unknown = null;
   let error: string | null = null;
   try {
-    hits = await searxngSearch(query);
+    ({ query, hits } = await offerSearchHits(product, region));
     const llm = await providerForTask('churner_stage2');
     llmRaw = await llm.chat({
       system: OFFER_PROMPT,

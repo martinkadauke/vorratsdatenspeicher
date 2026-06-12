@@ -24,6 +24,18 @@ export async function searxngSearch(query: string): Promise<SearchHit[]> {
   }));
 }
 
+/** Raw web search with the query passed through verbatim (no extra keywords). */
+export async function searxngSearchRaw(query: string): Promise<SearchHit[]> {
+  const base = await getConfig('searxng.url');
+  const params = new URLSearchParams({ q: query, format: 'json', language: 'de' });
+  const res = await fetch(`${base}/search?${params}`, { signal: AbortSignal.timeout(20_000) });
+  if (!res.ok) throw new Error(`SearXNG HTTP ${res.status}`);
+  const data = (await res.json()) as { results?: { title?: string; content?: string; url?: string }[] };
+  return (data.results ?? []).slice(0, 6).map(r => ({
+    title: r.title ?? '', content: r.content ?? '', url: r.url ?? '',
+  }));
+}
+
 export async function searxngImageSearch(query: string): Promise<{ src: string; thumb: string; title: string }[]> {
   const base = await getConfig('searxng.url');
   const params = new URLSearchParams({
