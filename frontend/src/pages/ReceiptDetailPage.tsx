@@ -84,10 +84,17 @@ export function ReceiptDetailPage() {
     },
   });
 
+  const mountedAt = useRef(Date.now());
   const { data, isLoading } = useQuery({
     queryKey: ['receipt', id],
     queryFn: () => api<ReceiptDetail>(`/api/receipts/${id}`),
     enabled: !!id,
+    // a fresh upload OCRs in the background — poll briefly until items appear
+    refetchInterval: (q) => {
+      const d = q.state.data as ReceiptDetail | undefined;
+      const pending = !!d?.bild_pfad && d.artikel.length === 0;
+      return pending && Date.now() - mountedAt.current < 150_000 ? 4000 : false;
+    },
   });
   const { data: avoidedList } = useQuery({
     queryKey: ['avoided'],
@@ -170,6 +177,9 @@ export function ReceiptDetailPage() {
     }
   }
   const scrollToId = highlightId ?? (q ? [...matchIds][0] ?? null : null);
+
+  // A freshly uploaded photo is being OCR'd server-side (no items yet).
+  const ocrPending = !!data.bild_pfad && data.artikel.length === 0 && Date.now() - mountedAt.current < 150_000;
 
   // Warn if this receipt contains items the household decided to avoid.
   const avoidedSet = new Set(avoidedList ?? []);
@@ -269,6 +279,13 @@ export function ReceiptDetailPage() {
             <span className="tabular">{t('receiptDetail.printedLabel')} {eur(printedTotal)} </span>
             <span className="tabular font-semibold">({diff > 0 ? '+' : ''}{eur(diff)})</span>
           </div>
+        </div>
+      )}
+
+      {ocrPending && (
+        <div className="flex items-center gap-2 rounded-xl border border-sky-300 bg-sky-50 px-3 py-2 text-sm text-sky-800 dark:border-sky-700/50 dark:bg-sky-950/40 dark:text-sky-300">
+          <ScanLine size={16} className="shrink-0 animate-pulse" />
+          <span>{t('receiptDetail.ocrPending')}</span>
         </div>
       )}
 

@@ -151,15 +151,15 @@ export function receiptRoutes(app: FastifyInstance): void {
       RETURNING id
     `;
 
-    // If a photo was uploaded and OCR requested, run the same Claude-vision
-    // extraction n8n uses — synchronously so the caller lands on a populated
-    // receipt. Best-effort: a failed OCR still leaves the created receipt.
-    let ocr: { items: number } | null = null;
-    if (b.ocr && bildPfad) {
-      try { ocr = await ocrAndStore(row.id as number, bildPfad); }
-      catch (e) { req.log.error(`create-ocr failed: ${(e as Error).message}`); }
+    // If a photo was uploaded, run the same Claude-vision extraction n8n uses,
+    // but in the BACKGROUND so the caller gets an instant response (snap a photo
+    // on mobile and put the phone away — items fill in a moment later). A failed
+    // OCR just leaves the created receipt + photo for manual entry / re-OCR.
+    if (bildPfad) {
+      void ocrAndStore(row.id as number, bildPfad)
+        .catch(e => req.log.error(`background OCR failed for receipt ${row.id}: ${(e as Error).message}`));
     }
-    return { ok: true, id: row.id, ocr_items: ocr?.items ?? null };
+    return { ok: true, id: row.id };
   });
 
   /** Review-progress across visible receipts (for the overview progress bar).

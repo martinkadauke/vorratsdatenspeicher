@@ -1,18 +1,18 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Camera, Banknote, CreditCard } from 'lucide-react';
+import { Camera, ImagePlus, Banknote, CreditCard } from 'lucide-react';
 import { api } from '../api/client';
 import { Modal, Button, Input, Label, Select } from './ui';
 import { toast } from './Toast';
 import { cn, fileToResizedDataUrl } from '../lib/utils';
 
 interface StoreRow { display: string; raw: string[]; filialen?: { name: string }[] }
-interface Konto { id: number; name: string }
+interface Konto { id: number; name: string; is_shared: boolean }
 
 /** Quick manual purchase entry (cash or card) with an optional photo. Nothing
- *  except the store is required — the point is to capture *something* fast. */
+ *  is required; if a photo is added it's OCR'd in the background server-side. */
 export function CreatePurchaseModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
@@ -21,7 +21,6 @@ export function CreatePurchaseModal({ open, onClose }: { open: boolean; onClose:
 
   const { data: stores } = useQuery({ queryKey: ['stores'], queryFn: () => api<StoreRow[]>('/api/stores'), enabled: open });
   const { data: konten } = useQuery({ queryKey: ['konten'], queryFn: () => api<Konto[]>('/api/konten'), enabled: open });
-  // known store/branch names for the Laden autocomplete
   const storeNames = useMemo(() => {
     const set = new Set<string>();
     for (const s of stores ?? []) {
@@ -32,21 +31,27 @@ export function CreatePurchaseModal({ open, onClose }: { open: boolean; onClose:
     return [...set].sort((a, b) => a.localeCompare(b));
   }, [stores]);
 
-  const [quelle, setQuelle] = useState<'zettel' | 'bar'>('zettel'); // card → zettel, cash → bar
+  const [quelle, setQuelle] = useState<'zettel' | 'bar'>('zettel');
   const [laden, setLaden] = useState('');
   const [datum, setDatum] = useState(today);
   const [betrag, setBetrag] = useState('');
   const [kontoId, setKontoId] = useState('');
   const [photo, setPhoto] = useState<string | null>(null);
   const [photoBusy, setPhotoBusy] = useState(false);
-  const [ocr, setOcr] = useState(true);
+
+  // default to the shared account (GKK) once accounts load
+  useEffect(() => {
+    if (open && !kontoId && konten?.length) {
+      const shared = konten.find(k => k.is_shared) ?? konten[0];
+      if (shared) setKontoId(String(shared.id));
+    }
+  }, [open, konten, kontoId]);
 
   const reset = () => {
     setQuelle('zettel'); setLaden(''); setDatum(today()); setBetrag('');
-    setKontoId(''); setPhoto(null); setOcr(true);
+    setKontoId(''); setPhoto(null);
   };
   const close = () => { reset(); onClose(); };
-  const ocrActive = !!photo && ocr;
 
   const create = useMutation({
     mutationFn: () => api<{ id: number }>('/api/receipts', {
@@ -55,7 +60,6 @@ export function CreatePurchaseModal({ open, onClose }: { open: boolean; onClose:
         quelle, roh_ladenname: laden, datum, gesamt_betrag: betrag,
         konto_id: kontoId ? parseInt(kontoId, 10) : null,
         photo_base64: photo ?? undefined, photo_mime: photo ? 'image/jpeg' : undefined,
-        ocr: ocrActive,
       },
     }),
     onSuccess: (r) => {
@@ -63,9 +67,9 @@ export function CreatePurchaseModal({ open, onClose }: { open: boolean; onClose:
       void qc.invalidateQueries({ queryKey: ['receipt-quellen'] });
       void qc.invalidateQueries({ queryKey: ['review-progress'] });
       void qc.invalidateQueries({ queryKey: ['stores'] });
-      toast(t('createPurchase.created'), 'success');
+      toast(photo ? t('createPurchase.createdOcr') : t('createPurchase.created'), 'success');
       reset(); onClose();
-      navigate(`/receipts/${r.id}`);
+      navigate(`/receipts/${r.id}`); // shows the photo immediately; items fill in via OCR
     },
     onError: (e) => toast((e as Error).message, 'error'),
   });
@@ -75,7 +79,7 @@ export function CreatePurchaseModal({ open, onClose }: { open: boolean; onClose:
     e.target.value = '';
     if (!f) return;
     setPhotoBusy(true);
-    try { setPhoto(await fileToResizedDataUrl(f)); setOcr(true); }
+    try { setPhoto(await fileToResizedDataUrl(f)); }
     catch { toast(t('createPurchase.photoError'), 'error'); }
     finally { setPhotoBusy(false); }
   };
@@ -95,9 +99,15 @@ export function CreatePurchaseModal({ open, onClose }: { open: boolean; onClose:
     </button>
   );
 
-  const saveLabel = create.isPending
-    ? (ocrActive ? t('createPurchase.ocrRunning') : t('common.saving'))
-    : t('createPurchase.save');
+  const photoBtn = (icon: React.ReactNode, label: string, capture: boolean) => (
+    <label className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-zinc-300 px-3 py-2.5 text-sm font-medium text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700">
+      {icon} {label}
+      <input
+        type="file" accept="image/*" className="hidden" onChange={onPhoto}
+        {...(capture ? { capture: 'environment' as const } : {})}
+      />
+    </label>
+  );
 
   return (
     <Modal open={open} onClose={close} title={t('createPurchase.title')}>
@@ -119,7 +129,6 @@ export function CreatePurchaseModal({ open, onClose }: { open: boolean; onClose:
           <div>
             <Label>{t('createPurchase.konto')}</Label>
             <Select value={kontoId} onChange={e => setKontoId(e.target.value)}>
-              <option value="">{t('createPurchase.kontoDefault')}</option>
               {konten.map(k => <option key={k.id} value={k.id}>{k.name}</option>)}
             </Select>
           </div>
@@ -138,25 +147,28 @@ export function CreatePurchaseModal({ open, onClose }: { open: boolean; onClose:
 
         <div>
           <Label>{t('createPurchase.photo')}</Label>
-          <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-zinc-300 px-3 py-2.5 text-sm font-medium text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700">
-            <Camera size={16} /> {photoBusy ? t('createPurchase.photoBusy') : photo ? t('createPurchase.photoChange') : t('createPurchase.photoAdd')}
-            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={onPhoto} />
-          </label>
-          {photo && <img src={photo} alt="" className="mt-2 max-h-44 rounded-lg border border-zinc-200 dark:border-zinc-800" />}
-          {photo && (
-            <label className="mt-2 flex cursor-pointer items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
-              <input type="checkbox" checked={ocr} onChange={e => setOcr(e.target.checked)} className="h-4 w-4 accent-emerald-600" />
-              {t('createPurchase.ocr')}
-            </label>
+          {photo ? (
+            <img src={photo} alt="" className="max-h-44 rounded-lg border border-zinc-200 dark:border-zinc-800" />
+          ) : (
+            <div className="flex gap-2">
+              {photoBtn(<Camera size={16} />, t('createPurchase.photoCamera'), true)}
+              {photoBtn(<ImagePlus size={16} />, t('createPurchase.photoPick'), false)}
+            </div>
           )}
+          {photo && (
+            <button type="button" onClick={() => setPhoto(null)} className="mt-1 text-xs text-zinc-400 hover:text-red-500">
+              {t('createPurchase.photoRemove')}
+            </button>
+          )}
+          {photoBusy && <p className="mt-1 text-xs text-zinc-400">{t('createPurchase.photoBusy')}</p>}
         </div>
 
-        <p className="text-xs text-zinc-400">{ocrActive ? t('createPurchase.ocrHint') : t('createPurchase.hint')}</p>
+        <p className="text-xs text-zinc-400">{photo ? t('createPurchase.ocrHint') : t('createPurchase.cameraRollHint')}</p>
 
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={close} disabled={create.isPending}>{t('common.cancel')}</Button>
-          <Button onClick={() => create.mutate()} disabled={create.isPending || photoBusy || !laden.trim()}>
-            {saveLabel}
+          <Button onClick={() => create.mutate()} disabled={create.isPending || photoBusy}>
+            {create.isPending ? t('common.saving') : t('createPurchase.save')}
           </Button>
         </div>
       </div>
