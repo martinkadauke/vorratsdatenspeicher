@@ -26,7 +26,26 @@ Antworte AUSSCHLIESSLICH mit gültigem JSON (keine Code-Fences):
 
 - "proposal" nur setzen wenn du einen VOLLSTÄNDIGEN Strukturvorschlag machst (alle Kategorien, nicht nur die geänderten). Sonst null.
 - Pfade mit "/" getrennt, Eltern müssen in der Liste vor ihren Kindern stehen.
+- Der "path" enthält NUR Text — Emojis gehören AUSSCHLIESSLICH ins "emoji"-Feld, niemals in den Pfad.
 - Meta-Kategorien NICHT in proposal aufnehmen (bleiben automatisch erhalten).`;
+
+/** LLMs love sneaking emojis into path segments despite instructions —
+ *  strip them out and promote a leading emoji to the emoji field. */
+function normalizeProposal(entries: ProposalEntry[]): ProposalEntry[] {
+  const pict = /\p{Extended_Pictographic}/gu;
+  return entries
+    .filter(e => typeof e?.path === 'string' && e.path.trim())
+    .map(e => {
+      let emoji = e.emoji?.trim() || null;
+      const segs = e.path.split('/').map((seg, i, arr) => {
+        const found = seg.match(pict);
+        if (found && i === arr.length - 1 && !emoji) emoji = found[0];
+        return seg.replace(pict, '').replace(/️/g, '').replace(/\s+/g, ' ').trim();
+      }).filter(Boolean);
+      return { path: segs.join('/'), emoji };
+    })
+    .filter(e => e.path);
+}
 
 interface ChatMessage { role: 'user' | 'assistant'; content: string }
 interface ProposalEntry { path: string; emoji?: string | null; display_en?: string | null }
@@ -134,9 +153,12 @@ export function categoryRoutes(app: FastifyInstance): void {
         json: true,
       });
       const parsed = parseLlmJson<{ message?: string; proposal?: ProposalEntry[] | null }>(raw);
+      const proposal = Array.isArray(parsed.proposal) && parsed.proposal.length
+        ? normalizeProposal(parsed.proposal)
+        : null;
       return {
         message: parsed.message ?? '…',
-        proposal: Array.isArray(parsed.proposal) && parsed.proposal.length ? parsed.proposal : null,
+        proposal: proposal?.length ? proposal : null,
       };
     } catch (e) {
       req.log.error(`categories chat failed: ${(e as Error).message}`);
