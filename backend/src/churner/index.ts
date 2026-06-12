@@ -3,6 +3,7 @@ import { getConfig } from '../config.js';
 import { parseLlmJson } from '../llm/ollama.js';
 import { providerForTask } from '../llm/provider.js';
 import { searxngSearch, searxngImageSearch } from '../llm/searxng.js';
+import { matchExistingCanonical } from '../lib/canonicalMatch.js';
 import { STAGE1_PROMPT, STAGE2_PROMPT } from '../llm/prompts.js';
 import { mostSimilar } from '../llm/similarity.js';
 import { notify } from '../notify.js';
@@ -154,6 +155,17 @@ async function churnWork(eventId: number): Promise<void> {
     await progress.set({ phase: 'canonical', current: processed, total: candidates.length });
     processed++;
     try {
+      // Deterministic first: if the item clearly contains a known canonical name
+      // ("Bio Quetschie" → "Quetschie"), assign it directly and skip the LLM.
+      const pre = matchExistingCanonical([a.original_text, a.name, a.ai_guess], existing);
+      if (pre) {
+        if (pre !== a.canonical_name) {
+          await sql`UPDATE artikel SET canonical_name = ${pre} WHERE id = ${a.id}`;
+          autoApplied++;
+        } else { skipped++; }
+        continue;
+      }
+
       const stage1 = parseLlmJson<Stage1Result>(await stage1Llm.chat({
         system: STAGE1_PROMPT,
         user: JSON.stringify({

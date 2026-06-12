@@ -8,6 +8,7 @@ import { requireAdmin } from '../auth/plugin.js';
 import { kontoScope, canSeeKonto } from '../auth/konto.js';
 import { ocrFromImage } from '../llm/ocr.js';
 import { searchFilter, col, numCol, lk, type Frag } from '../lib/search.js';
+import { matchExistingCanonical } from '../lib/canonicalMatch.js';
 
 /** Search config for the receipts list/nav: free text hits the store name or
  *  any of the receipt's items; supports laden:/kategorie: and preis> filters.
@@ -34,6 +35,30 @@ function receiptSearch(e: Frag) {
  *  mapped here via the docker volume in deploy/stack.yml. */
 const RECEIPTS_LOCAL_PATH = process.env.RECEIPTS_LOCAL_PATH ?? '/receipts';
 
+/** Turn a verbose OCR'd store name into "Chain City", e.g.
+ *  "ALDI Süd Graethäuser Straße 15, 72810 Gomaringen" → "ALDI Gomaringen".
+ *  Chain = first word of the chain name (drops "Süd"/"Nord"/legal suffix);
+ *  city = the place after the 5-digit ZIP, else after the last comma. Falls
+ *  back to a lightly-cleaned full name when no address is present. */
+export function cleanLadenName(ladenkette: string | null, filiale: string | null): string {
+  const k = (ladenkette ?? '').trim();
+  const f = (filiale ?? '').trim();
+  const full = (f ? `${k} ${f}` : k).trim();
+  if (!full) return full;
+  const chain = (k.split(/[\s,]+/)[0] || full.split(/[\s,]+/)[0] || '').trim();
+
+  let city: string | null = null;
+  const zip = full.match(/\d{5}\s+([^\d,]+)/); // "72810 Gomaringen" → "Gomaringen"
+  if (zip) city = zip[1].trim();
+  else if (full.includes(',')) {
+    const last = full.split(',').pop()!.trim().replace(/^\d{5}\s+/, '');
+    if (/^[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\- ]+$/.test(last)) city = last;
+  }
+
+  if (city && chain) return `${chain} ${city}`.replace(/\s+/g, ' ').trim();
+  return full.replace(/\b(Süd|Nord|Ost|West|GmbH|Co\.?\s*KG|KG|AG|SE|e\.?\s*K\.?)\b\.?/gi, ' ').replace(/\s+/g, ' ').trim();
+}
+
 /** Run vision OCR on a receipt's stored image and replace its line items.
  *  Throws on unusable OCR. Shared by re-OCR and the in-app create-with-photo
  *  flow (the same Claude-vision path n8n uses, just without n8n/Telegram). */
@@ -42,19 +67,24 @@ async function ocrAndStore(id: number, bildPfad: string): Promise<{ items: numbe
   const source = filename ? path.join(RECEIPTS_LOCAL_PATH, filename) : bildPfad;
   const parsed = await ocrFromImage(source);
   if (!parsed.datum || !parsed.ladenkette) throw new Error('OCR returned no usable receipt data');
-  const ladenName = parsed.filiale ? `${parsed.ladenkette} ${parsed.filiale}` : parsed.ladenkette;
+  const ladenName = cleanLadenName(parsed.ladenkette, parsed.filiale);
   const gesamt = Number.isFinite(parsed.gesamt_betrag) ? parsed.gesamt_betrag : null;
+  // Deterministically inherit known canonical names already at scan time, so a
+  // new receipt's items match the existing list without waiting for the churn.
+  const existing = (await sql`SELECT DISTINCT canonical_name FROM artikel WHERE canonical_name IS NOT NULL`)
+    .map(r => r.canonical_name as string);
   await sql.begin(async tx => {
     await tx`DELETE FROM artikel WHERE einkauf_id = ${id}`;
     await tx`UPDATE einkauf SET datum = ${parsed.datum}, roh_ladenname = ${ladenName}, gesamt_betrag = ${gesamt} WHERE id = ${id}`;
     for (const a of parsed.artikel ?? []) {
+      const canon = matchExistingCanonical([a.original_text, a.name, a.ai_guess], existing);
       await tx`
         INSERT INTO artikel
           (einkauf_id, name, menge, einheit, preis, kategorie, original_text, ai_guess, canonical_name)
         VALUES
           (${id}, ${a.name ?? a.original_text ?? ''}, ${a.menge ?? null}, ${a.einheit ?? ''},
            ${a.preis ?? null}, ${a.kategorie ?? ''}, ${a.original_text ?? a.name ?? ''},
-           ${a.ai_guess ?? a.name ?? ''}, NULL)
+           ${a.ai_guess ?? a.name ?? ''}, ${canon})
       `;
     }
   });
