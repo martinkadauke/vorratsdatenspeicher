@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, Plus, ChevronLeft, ChevronRight, RotateCw } from 'lucide-react';
+import { TransformWrapper, TransformComponent, useControls } from 'react-zoom-pan-pinch';
 import { api } from '../api/client';
 import type { Artikel, ReceiptDetail } from '../api/types';
 import { Card, Spinner, Badge, Modal, Input, Label, Button } from '../components/ui';
@@ -19,7 +20,6 @@ export function ReceiptDetailPage() {
   const qc = useQueryClient();
   const [editing, setEditing] = useState<Artikel | null>(null);
   const [editReceipt, setEditReceipt] = useState(false);
-  const [imageOpen, setImageOpen] = useState(false);
   const [adding, setAdding] = useState(false);
   const [imgVersion, setImgVersion] = useState(0); // cache-buster after rotate
 
@@ -66,7 +66,7 @@ export function ReceiptDetailPage() {
   // Keyboard: ← / → arrow navigation, ignored when typing in a field or a modal is open
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (editing || editReceipt || adding || imageOpen) return;
+      if (editing || editReceipt || adding) return;
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if (e.key === 'ArrowLeft') { e.preventDefault(); goPrev(); }
@@ -75,12 +75,12 @@ export function ReceiptDetailPage() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [neighbors, editing, editReceipt, adding, imageOpen]);
+  }, [neighbors, editing, editReceipt, adding]);
 
   // Touch: horizontal swipe (>60px, mostly horizontal) navigates
   const touchStart = useRef<{ x: number; y: number } | null>(null);
   const onTouchStart = (e: React.TouchEvent) => {
-    if (editing || editReceipt || adding || imageOpen) return;
+    if (editing || editReceipt || adding) return;
     const t = e.touches[0];
     touchStart.current = { x: t.clientX, y: t.clientY };
   };
@@ -190,14 +190,11 @@ export function ReceiptDetailPage() {
       <ReceiptEditModal receipt={data} open={editReceipt} onClose={() => setEditReceipt(false)} />
 
       <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
-        {/* Receipt image */}
-        <div>
+        {/* Receipt image — zoomable in place so items list stays visible */}
+        <div className="lg:sticky lg:top-[60px] lg:self-start">
           {data.bild_pfad ? (
-            <img
+            <ZoomableReceiptImage
               src={imgVersion ? `${data.bild_pfad}?v=${imgVersion}` : data.bild_pfad}
-              alt="Beleg"
-              onClick={() => setImageOpen(true)}
-              className="w-full cursor-zoom-in rounded-2xl border border-zinc-200 dark:border-zinc-800"
             />
           ) : (
             <div className="flex h-48 items-center justify-center rounded-2xl bg-zinc-100 text-sm text-zinc-400 dark:bg-zinc-900">
@@ -243,13 +240,6 @@ export function ReceiptDetailPage() {
         onClose={() => setAdding(false)}
         invalidateKeys={[['receipt', id], ['receipts']]}
       />
-
-      {/* Fullscreen image */}
-      {imageOpen && data.bild_pfad && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-2" onClick={() => setImageOpen(false)}>
-          <img src={imgVersion ? `${data.bild_pfad}?v=${imgVersion}` : data.bild_pfad} alt="Beleg" className="max-h-full max-w-full rounded-lg object-contain" />
-        </div>
-      )}
 
       <ArticleEditModal
         artikel={editing}
@@ -311,5 +301,44 @@ function ReceiptEditModal({ receipt, open, onClose }: { receipt: ReceiptDetail; 
         </div>
       </div>
     </Modal>
+  );
+}
+
+/** Pan + zoom (wheel / pinch / drag) in a fixed-size container so the
+ *  surrounding layout (items list, sticky positioning) stays untouched. */
+function ZoomableReceiptImage({ src }: { src: string }) {
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900">
+      <TransformWrapper
+        initialScale={1}
+        minScale={1}
+        maxScale={6}
+        wheel={{ step: 0.15 }}
+        doubleClick={{ mode: 'reset' }}
+        panning={{ velocityDisabled: true }}
+      >
+        <ZoomResetButton />
+        <TransformComponent
+          wrapperClass="!w-full"
+          contentClass="!w-full"
+        >
+          <img src={src} alt="Beleg" draggable={false} className="block w-full select-none" />
+        </TransformComponent>
+      </TransformWrapper>
+    </div>
+  );
+}
+
+function ZoomResetButton() {
+  const { resetTransform } = useControls();
+  return (
+    <button
+      type="button"
+      onClick={() => resetTransform()}
+      className="absolute right-2 top-2 z-10 rounded-lg bg-black/40 px-2 py-1 text-xs font-medium text-white backdrop-blur transition hover:bg-black/60"
+      title="Zoom zurücksetzen (Doppelklick / -tap)"
+    >
+      1:1
+    </button>
   );
 }
