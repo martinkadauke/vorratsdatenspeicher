@@ -120,7 +120,8 @@ async function churnWork(eventId: number): Promise<void> {
 
   let processed = 0;
   for (const a of candidates) {
-    if (processed % 5 === 0 && await isCancelled(eventId)) throw new ChurnCancelled();
+    // Cheap DB check before each (slow) LLM call → cancellation is responsive.
+    if (await isCancelled(eventId)) throw new ChurnCancelled();
     await progress.set({ phase: 'canonical', current: processed, total: candidates.length });
     processed++;
     try {
