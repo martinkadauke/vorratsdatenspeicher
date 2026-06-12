@@ -11,6 +11,7 @@ import { ArticleEditModal } from '../components/ArticleEditModal';
 import { AddArticleModal } from '../components/AddArticleModal';
 import { ConsumerDots } from '../components/ConsumerChips';
 import { CanonicalIcon } from '../components/IconPicker';
+import { toast } from '../components/Toast';
 import { eur, fmtDate } from '../lib/utils';
 
 export function ReceiptDetailPage() {
@@ -35,7 +36,7 @@ export function ReceiptDetailPage() {
   const rotate = useMutation({
     mutationFn: () => api(`/api/receipts/${id}/rotate`, { method: 'POST' }),
     onSuccess: () => setImgVersion(v => v + 1),
-    onError: (err: Error) => alert(`Drehen fehlgeschlagen: ${err.message}`),
+    onError: (err: Error) => toast(`${t('receiptDetail.rotateFailed')}: ${err.message}`, 'error'),
   });
 
   const reocr = useMutation({
@@ -43,9 +44,9 @@ export function ReceiptDetailPage() {
     onSuccess: (res) => {
       void qc.invalidateQueries({ queryKey: ['receipt', id] });
       void qc.invalidateQueries({ queryKey: ['receipts'] });
-      alert(t('receiptDetail.reocrDone', { count: res.items, confidence: Math.round(res.confidence * 100) }));
+      toast(t('receiptDetail.reocrDone', { count: res.items, confidence: Math.round(res.confidence * 100) }), 'success');
     },
-    onError: (err: Error) => alert(`OCR fehlgeschlagen: ${err.message}`),
+    onError: (err: Error) => toast(`${t('receiptDetail.reocrFailed')}: ${err.message}`, 'error'),
   });
 
   const setReviewed = useMutation({

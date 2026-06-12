@@ -63,6 +63,8 @@
     "reocrConfirm": "Re-analyze receipt photo? All current items will be replaced.",
     "reocrRunning": "Analyzing receipt…",
     "reocrDone": "OCR done: {{count}} items · confidence {{confidence}}%",
+    "reocrFailed": "OCR failed",
+    "rotateFailed": "Rotation failed",
     "addArticle": "Add item",
     "prev": "Previous receipt",
     "next": "Next receipt",

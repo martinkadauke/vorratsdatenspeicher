@@ -8,6 +8,7 @@ import {
 import { useAuth } from '../context/auth';
 import { NotificationBell } from './NotificationBell';
 import { Tour } from './Tour';
+import { Toaster } from './Toast';
 import { cn } from '../lib/utils';
 
 const NAV = [
@@ -107,6 +108,7 @@ export function Layout() {
       </nav>
 
       <Tour open={tourOpen} onClose={() => setTourOpen(false)} />
+      <Toaster />
     </div>
   );
 }

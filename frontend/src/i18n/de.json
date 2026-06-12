@@ -63,6 +63,8 @@
     "reocrConfirm": "Bon-Foto erneut analysieren? Alle aktuellen Artikel werden ersetzt.",
     "reocrRunning": "Bon wird analysiert…",
     "reocrDone": "OCR fertig: {{count}} Artikel · Konfidenz {{confidence}}%",
+    "reocrFailed": "OCR fehlgeschlagen",
+    "rotateFailed": "Drehen fehlgeschlagen",
     "addArticle": "Artikel hinzufügen",
     "prev": "Vorheriger Beleg",
     "next": "Nächster Beleg",
