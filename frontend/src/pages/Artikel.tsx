@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Search, X, Rows3, CheckSquare, Square, Users, Ban, Tag, Bell } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Search, X, Rows3, CheckSquare, Square, Users, Ban, Tag, Bell, FolderTree, ReceiptText } from 'lucide-react';
 import { api } from '../api/client';
 import type { CanonicalName } from '../api/types';
 import { Card, Input, Spinner, EmptyState, Badge, Select, Button, Modal } from '../components/ui';
+import { CategoryPicker } from '../components/CategoryPicker';
 import { CanonicalIcon } from '../components/IconPicker';
 import { ConsumerDots, ConsumerChips } from '../components/ConsumerChips';
 import { toast } from '../components/Toast';
@@ -21,6 +23,8 @@ interface ArtikelGroup {
   last_bought: string | null;
   avg_price: string | null;
   artikel_ids: number[];
+  einkauf_id: number | null;
+  sample_artikel_id: number | null;
   consumers: number[];
 }
 
@@ -36,12 +40,15 @@ const SIZE_KEY = 'vds.artikelCardSize';
 export function Artikel() {
   const { t, i18n } = useTranslation();
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortMode>('alpha');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [detail, setDetail] = useState<CanonicalName | null>(null);
   const [assignOpen, setAssignOpen] = useState(false);
   const [canonicalOpen, setCanonicalOpen] = useState(false);
+  const [categoryOpen, setCategoryOpen] = useState(false);
+  const [pickedCategory, setPickedCategory] = useState<string | null>(null);
 
   const [sizeIdx, setSizeIdx] = useState(() => {
     const s = parseInt(localStorage.getItem(SIZE_KEY) ?? '', 10);
@@ -111,6 +118,22 @@ export function Artikel() {
       setSelected(new Set());
       toast(t('artikel.canonicalSet'), 'success');
     },
+  });
+
+  const setCategory = useMutation({
+    mutationFn: (categoryPath: string) => {
+      const artikel_ids = selectedGroups.flatMap(g => g.artikel_ids);
+      return api('/api/artikel/set-category', { method: 'POST', body: { artikel_ids, category_path: categoryPath } });
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['artikel-list'] });
+      void qc.invalidateQueries({ queryKey: ['names'] });
+      setCategoryOpen(false);
+      setPickedCategory(null);
+      setSelected(new Set());
+      toast(t('artikel.categorySet'), 'success');
+    },
+    onError: (e) => toast((e as Error).message, 'error'),
   });
 
   const subscribeOffers = useMutation({
@@ -218,6 +241,16 @@ export function Artikel() {
                   </div>
                 </div>
               </button>
+              {/* loose items (no canonical name): jump to the source receipt */}
+              {!g.has_canonical && g.einkauf_id != null && (
+                <button
+                  onClick={() => navigate(`/receipts/${g.einkauf_id}${g.sample_artikel_id ? `?highlight=${g.sample_artikel_id}` : ''}`)}
+                  title={t('artikel.openReceipt')}
+                  className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-950/30"
+                >
+                  <ReceiptText size={16} />
+                </button>
+              )}
             </Card>
           );
         })}
@@ -230,6 +263,9 @@ export function Artikel() {
           <div className="ml-auto flex flex-wrap justify-end gap-2">
             <Button variant="secondary" onClick={() => setCanonicalOpen(true)}>
               <Tag size={15} /> {t('artikel.setCanonical')}
+            </Button>
+            <Button variant="secondary" onClick={() => { setPickedCategory(null); setCategoryOpen(true); }}>
+              <FolderTree size={15} /> {t('artikel.setCategory')}
             </Button>
             <Button variant="secondary" onClick={() => setAssignOpen(true)}>
               <Users size={15} /> {t('artikel.assignMembers')}
@@ -253,6 +289,17 @@ export function Artikel() {
       )}
 
       <NameEditModal name={detail} onClose={() => setDetail(null)} />
+      <Modal open={categoryOpen} onClose={() => setCategoryOpen(false)} title={t('artikel.setCategoryTitle', { count: selected.size })}>
+        <div className="flex flex-col gap-3">
+          <CategoryPicker value={pickedCategory} onChange={setPickedCategory} />
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setCategoryOpen(false)}>{t('common.cancel')}</Button>
+            <Button onClick={() => pickedCategory && setCategory.mutate(pickedCategory)} disabled={!pickedCategory || setCategory.isPending}>
+              {setCategory.isPending ? t('common.saving') : t('common.save')}
+            </Button>
+          </div>
+        </div>
+      </Modal>
       <AssignMembersModal
         open={assignOpen}
         count={selected.size}

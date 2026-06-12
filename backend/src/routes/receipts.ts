@@ -34,6 +34,33 @@ function receiptSearch(e: Frag) {
  *  mapped here via the docker volume in deploy/stack.yml. */
 const RECEIPTS_LOCAL_PATH = process.env.RECEIPTS_LOCAL_PATH ?? '/receipts';
 
+/** Run vision OCR on a receipt's stored image and replace its line items.
+ *  Throws on unusable OCR. Shared by re-OCR and the in-app create-with-photo
+ *  flow (the same Claude-vision path n8n uses, just without n8n/Telegram). */
+async function ocrAndStore(id: number, bildPfad: string): Promise<{ items: number; confidence: number }> {
+  const filename = bildPfad.split('/').pop();
+  const source = filename ? path.join(RECEIPTS_LOCAL_PATH, filename) : bildPfad;
+  const parsed = await ocrFromImage(source);
+  if (!parsed.datum || !parsed.ladenkette) throw new Error('OCR returned no usable receipt data');
+  const ladenName = parsed.filiale ? `${parsed.ladenkette} ${parsed.filiale}` : parsed.ladenkette;
+  const gesamt = Number.isFinite(parsed.gesamt_betrag) ? parsed.gesamt_betrag : null;
+  await sql.begin(async tx => {
+    await tx`DELETE FROM artikel WHERE einkauf_id = ${id}`;
+    await tx`UPDATE einkauf SET datum = ${parsed.datum}, roh_ladenname = ${ladenName}, gesamt_betrag = ${gesamt} WHERE id = ${id}`;
+    for (const a of parsed.artikel ?? []) {
+      await tx`
+        INSERT INTO artikel
+          (einkauf_id, name, menge, einheit, preis, kategorie, original_text, ai_guess, canonical_name)
+        VALUES
+          (${id}, ${a.name ?? a.original_text ?? ''}, ${a.menge ?? null}, ${a.einheit ?? ''},
+           ${a.preis ?? null}, ${a.kategorie ?? ''}, ${a.original_text ?? a.name ?? ''},
+           ${a.ai_guess ?? a.name ?? ''}, NULL)
+      `;
+    }
+  });
+  return { items: parsed.artikel?.length ?? 0, confidence: parsed.confidence };
+}
+
 export function receiptRoutes(app: FastifyInstance): void {
   /** Ensure the receipt exists AND the caller may see its account.
    *  Returns false (and sends the response) when not. */
@@ -92,7 +119,7 @@ export function receiptRoutes(app: FastifyInstance): void {
     const b = (req.body ?? {}) as {
       quelle?: string; roh_ladenname?: string; datum?: string;
       gesamt_betrag?: number | string; konto_id?: number | null;
-      photo_base64?: string; photo_mime?: string;
+      photo_base64?: string; photo_mime?: string; ocr?: boolean;
     };
     const quelle = b.quelle === 'bar' ? 'bar' : 'zettel'; // cash → bar; card → normal store receipt
     const datum = (b.datum && /^\d{4}-\d{2}-\d{2}$/.test(b.datum)) ? b.datum : new Date().toISOString().slice(0, 10);
@@ -123,7 +150,16 @@ export function receiptRoutes(app: FastifyInstance): void {
       VALUES (${datum}, ${laden}, ${gesamt}, ${quelle}, ${kontoId}, ${bildPfad})
       RETURNING id
     `;
-    return { ok: true, id: row.id };
+
+    // If a photo was uploaded and OCR requested, run the same Claude-vision
+    // extraction n8n uses — synchronously so the caller lands on a populated
+    // receipt. Best-effort: a failed OCR still leaves the created receipt.
+    let ocr: { items: number } | null = null;
+    if (b.ocr && bildPfad) {
+      try { ocr = await ocrAndStore(row.id as number, bildPfad); }
+      catch (e) { req.log.error(`create-ocr failed: ${(e as Error).message}`); }
+    }
+    return { ok: true, id: row.id, ocr_items: ocr?.items ?? null };
   });
 
   /** Review-progress across visible receipts (for the overview progress bar).
@@ -228,41 +264,9 @@ export function receiptRoutes(app: FastifyInstance): void {
     const bildPfad = rows[0].bild_pfad as string | null;
     if (!bildPfad) return reply.code(400).send({ error: 'receipt has no image' });
 
-    // Prefer the local NFS path over the (possibly relative) bild_pfad URL.
-    const filename = bildPfad.split('/').pop();
-    const source = filename ? path.join(RECEIPTS_LOCAL_PATH, filename) : bildPfad;
     try {
-      const parsed = await ocrFromImage(source);
-      if (!parsed.datum || !parsed.ladenkette) {
-        return reply.code(422).send({ error: 'OCR returned no usable receipt data', confidence: parsed.confidence });
-      }
-      const ladenName = parsed.filiale ? `${parsed.ladenkette} ${parsed.filiale}` : parsed.ladenkette;
-      const gesamt = Number.isFinite(parsed.gesamt_betrag) ? parsed.gesamt_betrag : null;
-
-      await sql.begin(async tx => {
-        await tx`DELETE FROM artikel WHERE einkauf_id = ${id}`;
-        await tx`
-          UPDATE einkauf
-          SET datum = ${parsed.datum}, roh_ladenname = ${ladenName}, gesamt_betrag = ${gesamt}
-          WHERE id = ${id}
-        `;
-        for (const a of parsed.artikel ?? []) {
-          await tx`
-            INSERT INTO artikel
-              (einkauf_id, name, menge, einheit, preis, kategorie, original_text, ai_guess, canonical_name)
-            VALUES
-              (${id}, ${a.name ?? a.original_text ?? ''}, ${a.menge ?? null}, ${a.einheit ?? ''},
-               ${a.preis ?? null}, ${a.kategorie ?? ''}, ${a.original_text ?? a.name ?? ''},
-               ${a.ai_guess ?? a.name ?? ''}, NULL)
-          `;
-        }
-      });
-      return {
-        ok: true,
-        items: parsed.artikel?.length ?? 0,
-        confidence: parsed.confidence,
-        usage: parsed.usage ?? null,
-      };
+      const { items, confidence } = await ocrAndStore(id, bildPfad);
+      return { ok: true, items, confidence };
     } catch (e) {
       req.log.error(`reocr failed: ${(e as Error).message}`);
       return reply.code(502).send({ error: (e as Error).message });
