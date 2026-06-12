@@ -898,6 +898,14 @@ function OffersSection() {
       api(`/api/config/${key}`, { method: 'PUT', body: { value } }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['config'] }),
   });
+  const { data: avoided } = useQuery({
+    queryKey: ['avoided'],
+    queryFn: () => api<string[]>('/api/avoided'),
+  });
+  const unavoid = useMutation({
+    mutationFn: (name: string) => api('/api/avoided', { method: 'POST', body: { canonical_names: [name], avoid: false } }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['avoided'] }),
+  });
 
   const [newCat, setNewCat] = useState('');
 
@@ -974,6 +982,21 @@ function OffersSection() {
               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCat(); } }}
             />
             <Button variant="secondary" onClick={addCat} disabled={!newCat.trim()}>{t('common.add')}</Button>
+          </div>
+        </div>
+
+        {/* avoid list — products the household decided not to buy */}
+        <div className="flex flex-col gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+          <Label className="mb-0">{t('admin.avoidList')}</Label>
+          <p className="text-xs text-zinc-400">{t('admin.avoidListHint')}</p>
+          <div className="flex flex-wrap gap-1.5">
+            {(avoided ?? []).map(c => (
+              <span key={c} className="inline-flex items-center gap-1 rounded-lg bg-red-50 px-2 py-1 text-xs font-medium text-red-700 dark:bg-red-950/40 dark:text-red-300">
+                {c}
+                <button type="button" onClick={() => unavoid.mutate(c)} className="text-red-400 hover:text-red-600" title={t('artikel.unavoid')}>✕</button>
+              </span>
+            ))}
+            {!avoided?.length && <span className="text-xs text-zinc-400">{t('admin.avoidListEmpty')}</span>}
           </div>
         </div>
 

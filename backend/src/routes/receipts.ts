@@ -1,5 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import path from 'node:path';
+import crypto from 'node:crypto';
+import { writeFile } from 'node:fs/promises';
 import Jimp from 'jimp';
 import sql from '../db.js';
 import { requireAdmin } from '../auth/plugin.js';
@@ -71,6 +73,57 @@ export function receiptRoutes(app: FastifyInstance): void {
       LIMIT ${limit} OFFSET ${offset}
     `;
     return rows;
+  });
+
+  /** Distinct sources (quelle) the user has visible receipts for. The overview
+   *  only shows the source filter when there's more than one. */
+  app.get('/api/receipts/quellen', async (req) => {
+    const rows = await sql`
+      SELECT DISTINCT quelle FROM einkauf e
+      WHERE quelle IS NOT NULL ${kontoScope(req.user, sql`e.konto_id`)}
+    `;
+    return rows.map(r => r.quelle as string);
+  });
+
+  /** Manually create a purchase (cash or card). Everything is optional so it's
+   *  one tap to log something; details can be filled in later. An optional
+   *  photo is sent as base64 and stored alongside scanned receipts. */
+  app.post('/api/receipts', { bodyLimit: 16 * 1024 * 1024 }, async (req, reply) => {
+    const b = (req.body ?? {}) as {
+      quelle?: string; roh_ladenname?: string; datum?: string;
+      gesamt_betrag?: number | string; konto_id?: number | null;
+      photo_base64?: string; photo_mime?: string;
+    };
+    const quelle = b.quelle === 'bar' ? 'bar' : 'zettel'; // cash → bar; card → normal store receipt
+    const datum = (b.datum && /^\d{4}-\d{2}-\d{2}$/.test(b.datum)) ? b.datum : new Date().toISOString().slice(0, 10);
+    const laden = (b.roh_ladenname ?? '').toString().trim() || null;
+    const gesamtRaw = b.gesamt_betrag;
+    const gesamt = gesamtRaw != null && gesamtRaw !== ''
+      ? (Number.isFinite(Number(String(gesamtRaw).replace(',', '.'))) ? Number(String(gesamtRaw).replace(',', '.')) : null)
+      : null;
+    const kontoId = b.konto_id ?? null;
+    if (kontoId != null && !canSeeKonto(req.user, kontoId)) return reply.code(403).send({ error: 'forbidden' });
+
+    let bildPfad: string | null = null;
+    if (b.photo_base64) {
+      const mime = b.photo_mime || 'image/jpeg';
+      const ext = mime.includes('png') ? 'png' : 'jpg';
+      const data = b.photo_base64.replace(/^data:[^,]+,/, '');
+      try {
+        const filename = `vds-${crypto.randomUUID()}.${ext}`;
+        await writeFile(path.join(RECEIPTS_LOCAL_PATH, filename), Buffer.from(data, 'base64'));
+        bildPfad = `/receipts/${filename}`;
+      } catch (e) {
+        req.log.error(`photo save failed: ${(e as Error).message}`);
+      }
+    }
+
+    const [row] = await sql`
+      INSERT INTO einkauf (datum, roh_ladenname, gesamt_betrag, quelle, konto_id, bild_pfad)
+      VALUES (${datum}, ${laden}, ${gesamt}, ${quelle}, ${kontoId}, ${bildPfad})
+      RETURNING id
+    `;
+    return { ok: true, id: row.id };
   });
 
   /** Review-progress across visible receipts (for the overview progress bar).

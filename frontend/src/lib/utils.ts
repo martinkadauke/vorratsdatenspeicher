@@ -23,6 +23,32 @@ export async function downloadFile(path: string, filename: string): Promise<void
   URL.revokeObjectURL(url);
 }
 
+/** Read an image File, downscale so its longest side ≤ maxDim, and return a
+ *  JPEG data URL — keeps in-app photo uploads small. Falls back to the raw
+ *  data URL if canvas isn't available. */
+export async function fileToResizedDataUrl(file: File, maxDim = 1600, quality = 0.8): Promise<string> {
+  const dataUrl = await new Promise<string>((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result as string);
+    r.onerror = () => rej(new Error('read failed'));
+    r.readAsDataURL(file);
+  });
+  const img = await new Promise<HTMLImageElement>((res, rej) => {
+    const i = new Image();
+    i.onload = () => res(i);
+    i.onerror = () => rej(new Error('decode failed'));
+    i.src = dataUrl;
+  });
+  const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+  const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return dataUrl;
+  ctx.drawImage(img, 0, 0, w, h);
+  return canvas.toDataURL('image/jpeg', quality);
+}
+
 /** Human-readable byte size (e.g. 12.3 MB). */
 export function fmtBytes(bytes: number): string {
   if (!bytes) return '0 B';

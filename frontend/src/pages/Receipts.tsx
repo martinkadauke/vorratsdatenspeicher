@@ -2,11 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useInfiniteQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Search, CheckCircle2, Rows3, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, CheckCircle2, Rows3, X, ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { api } from '../api/client';
 import type { Receipt } from '../api/types';
 import { Card, Input, Spinner, EmptyState } from '../components/ui';
 import { StoreIcon } from '../components/IconPicker';
+import { CreatePurchaseModal } from '../components/CreatePurchaseModal';
 import { cn, eur, fmtDate, monthLabel } from '../lib/utils';
 
 interface Store { key: string; display: string; receipts: number; total: number; raw: string[] }
@@ -44,6 +45,18 @@ export function Receipts() {
   });
   // Only offer accounts that actually have receipts visible to this user.
   const konten = useMemo(() => (kontenRaw ?? []).filter(k => k.receipts > 0), [kontenRaw]);
+
+  const [createOpen, setCreateOpen] = useState(false);
+  // Source filter only makes sense if the user actually has >1 source.
+  const { data: quellenRaw } = useQuery({
+    queryKey: ['receipt-quellen'],
+    queryFn: () => api<string[]>('/api/receipts/quellen'),
+    staleTime: 60_000,
+  });
+  const quellen = quellenRaw ?? [];
+  const showQuelle = quellen.length > 1;
+  // when there's only one source, don't filter (Kassenbon == everything)
+  const effQuelle = showQuelle ? quelleFilter : 'alle';
   const updateKontoFilter = (id: string | null) => {
     setKontoFilter(id);
     const next = new URLSearchParams(params);
@@ -129,11 +142,11 @@ export function Receipts() {
     return () => ro.disconnect();
   }, [stores, updateChipScroll]);
 
-  const quelleParam = quelleFilter !== 'alle' ? `&quelle=${quelleFilter}` : '';
+  const quelleParam = effQuelle !== 'alle' ? `&quelle=${effQuelle}` : '';
   const { data: progress } = useQuery({
-    queryKey: ['review-progress', kontoFilter, quelleFilter],
+    queryKey: ['review-progress', kontoFilter, effQuelle],
     queryFn: () => api<{ total: number; reviewed: number }>(
-      `/api/receipts/review-progress?${kontoFilter ? `konto=${encodeURIComponent(kontoFilter)}` : ''}${quelleFilter !== 'alle' ? `&quelle=${quelleFilter}` : ''}`,
+      `/api/receipts/review-progress?${kontoFilter ? `konto=${encodeURIComponent(kontoFilter)}` : ''}${effQuelle !== 'alle' ? `&quelle=${effQuelle}` : ''}`,
     ),
   });
 
@@ -142,7 +155,7 @@ export function Receipts() {
   const {
     data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage,
   } = useInfiniteQuery({
-    queryKey: ['receipts', search, storeFilter, kontoFilter, quelleFilter],
+    queryKey: ['receipts', search, storeFilter, kontoFilter, effQuelle],
     queryFn: ({ pageParam }) =>
       api<Receipt[]>(`/api/receipts?limit=${PAGE}&offset=${pageParam}&q=${encodeURIComponent(search)}${storeParam}${kontoParam}${quelleParam}`),
     initialPageParam: 0,
@@ -264,23 +277,28 @@ export function Receipts() {
         </div>
       </div>
 
-      {/* source filter — Kassenbon (default) / Bar / Email / Alle */}
-      <div className="scrollbar-none -mx-1 flex gap-1.5 overflow-x-auto px-1">
-        {(['zettel', 'bar', 'email', 'alle'] as const).map(qv => (
-          <button
-            key={qv}
-            onClick={() => setQuelleFilter(qv)}
-            className={cn(
-              'shrink-0 rounded-full border px-3 py-1 text-xs font-medium',
-              quelleFilter === qv
-                ? 'border-transparent bg-sky-600 text-white'
-                : 'border-zinc-300 text-zinc-500 dark:border-zinc-700',
-            )}
-          >
-            {t(`receipts.quelle_${qv}`)}
-          </button>
-        ))}
-      </div>
+      {/* source filter — only when the user has more than one source; show only
+          the sources that exist, plus "Alle" */}
+      {showQuelle && (
+        <div className="scrollbar-none -mx-1 flex gap-1.5 overflow-x-auto px-1">
+          {(['zettel', 'bar', 'email', 'alle'] as const)
+            .filter(qv => qv === 'alle' || quellen.includes(qv))
+            .map(qv => (
+              <button
+                key={qv}
+                onClick={() => setQuelleFilter(qv)}
+                className={cn(
+                  'shrink-0 rounded-full border px-3 py-1 text-xs font-medium',
+                  quelleFilter === qv
+                    ? 'border-transparent bg-sky-600 text-white'
+                    : 'border-zinc-300 text-zinc-500 dark:border-zinc-700',
+                )}
+              >
+                {t(`receipts.quelle_${qv}`)}
+              </button>
+            ))}
+        </div>
+      )}
 
       {konten && konten.length > 1 && (
         <div className="scrollbar-none -mx-1 flex gap-1.5 overflow-x-auto px-1">
@@ -458,6 +476,17 @@ export function Receipts() {
           })}
         </div>
       )}
+
+      {/* floating action button — quick manual purchase entry */}
+      <button
+        type="button"
+        onClick={() => setCreateOpen(true)}
+        title={t('createPurchase.title')}
+        className="fixed bottom-20 right-4 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-600 text-white shadow-lg transition hover:bg-emerald-700 active:scale-95 md:bottom-6 md:right-6"
+      >
+        <Plus size={26} />
+      </button>
+      <CreatePurchaseModal open={createOpen} onClose={() => setCreateOpen(false)} />
     </div>
   );
 }
