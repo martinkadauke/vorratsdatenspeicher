@@ -2,18 +2,20 @@ import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Search, ArrowRightLeft, Image as ImageIcon, ChevronRight } from 'lucide-react';
+import { Search, ArrowRightLeft, Image as ImageIcon, ChevronRight, ChevronDown, Store as StoreIco } from 'lucide-react';
 import { api } from '../api/client';
 import { Card, Input, Button, Label, Modal, Spinner, EmptyState, Badge, Select } from '../components/ui';
 import { IconPicker, StoreIcon } from '../components/IconPicker';
 import { eur } from '../lib/utils';
 
+interface Filiale { name: string; receipts: number; total: number }
 interface StoreRow {
   key: string;
   display: string;
   receipts: number;
   total: number;
   raw: string[];
+  filialen?: Filiale[];
 }
 
 export function Stores() {
@@ -22,6 +24,12 @@ export function Stores() {
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<StoreRow | null>(null);
   const [iconPickerFor, setIconPickerFor] = useState<StoreRow | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggleExpand = (key: string) => setExpanded(prev => {
+    const next = new Set(prev);
+    next.has(key) ? next.delete(key) : next.add(key);
+    return next;
+  });
 
   const { data, isLoading } = useQuery({
     queryKey: ['stores'],
@@ -52,40 +60,70 @@ export function Stores() {
       {!isLoading && !filtered.length && <EmptyState>{t('stores.empty')}</EmptyState>}
 
       <div className="flex flex-col gap-2">
-        {filtered.map(s => (
-          <Card key={s.key} className="flex min-w-0 items-stretch gap-3 px-3 py-2.5">
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); setIconPickerFor(s); }}
-              className="group shrink-0 self-center"
-              title={t('stores.changeIcon')}
-            >
-              <StoreIcon storeKey={s.key} size={36} fallback={s.display[0]?.toUpperCase()} />
-            </button>
-            <div className="min-w-0 flex-1 cursor-pointer" onClick={() => setEditing(s)}>
-              <div className="flex min-w-0 items-center gap-1.5">
-                <span className="truncate font-medium">{s.display}</span>
-                {s.raw.length > 1 && (
-                  <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400">
-                    {s.raw.length} {t('stores.variants')}
-                  </Badge>
-                )}
+        {filtered.map(s => {
+          const multi = (s.filialen?.length ?? s.raw.length) > 1;
+          const isOpen = expanded.has(s.key);
+          return (
+            <Card key={s.key} className="flex min-w-0 flex-col px-3 py-2.5">
+              <div className="flex min-w-0 items-stretch gap-3">
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setIconPickerFor(s); }}
+                  className="group shrink-0 self-center"
+                  title={t('stores.changeIcon')}
+                >
+                  <StoreIcon storeKey={s.key} size={36} fallback={s.display[0]?.toUpperCase()} />
+                </button>
+                <div className="min-w-0 flex-1 cursor-pointer self-center" onClick={() => setEditing(s)}>
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <span className="truncate font-medium">{s.display}</span>
+                    {multi && (
+                      <button
+                        type="button"
+                        onClick={e => { e.stopPropagation(); toggleExpand(s.key); }}
+                        className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 hover:bg-amber-200 dark:bg-amber-950 dark:text-amber-400"
+                        title={t('stores.showFilialen')}
+                      >
+                        {(s.filialen?.length ?? s.raw.length)} {t('stores.variants')}
+                        {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); navigate(`/receipts?store=${encodeURIComponent(s.key)}`); }}
+                  className="group flex shrink-0 items-center gap-1 self-stretch rounded-lg px-2 text-right hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+                  title={t('stores.viewReceipts')}
+                >
+                  <div className="flex flex-col items-end">
+                    <span className="tabular text-sm font-semibold text-emerald-600 dark:text-emerald-500">{eur(s.total)}</span>
+                    <span className="text-xs text-zinc-400">{s.receipts} {t('stores.receipts')}</span>
+                  </div>
+                  <ChevronRight size={14} className="text-zinc-300 group-hover:text-emerald-500" />
+                </button>
               </div>
-            </div>
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); navigate(`/receipts?store=${encodeURIComponent(s.key)}`); }}
-              className="group flex shrink-0 items-center gap-1 self-stretch rounded-lg px-2 text-right hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
-              title={t('stores.viewReceipts')}
-            >
-              <div className="flex flex-col items-end">
-                <span className="tabular text-sm font-semibold text-emerald-600 dark:text-emerald-500">{eur(s.total)}</span>
-                <span className="text-xs text-zinc-400">{s.receipts} {t('stores.receipts')}</span>
-              </div>
-              <ChevronRight size={14} className="text-zinc-300 group-hover:text-emerald-500" />
-            </button>
-          </Card>
-        ))}
+
+              {isOpen && s.filialen && (
+                <div className="mt-2 flex flex-col gap-1 border-t border-zinc-100 pt-2 dark:border-zinc-800">
+                  {s.filialen.map(f => (
+                    <button
+                      key={f.name}
+                      type="button"
+                      onClick={() => navigate(`/receipts?store=${encodeURIComponent(f.name)}`)}
+                      className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
+                    >
+                      <StoreIco size={13} className="shrink-0 text-zinc-400" />
+                      <span className="min-w-0 flex-1 truncate">{f.name}</span>
+                      <span className="tabular shrink-0 text-xs text-zinc-400">{f.receipts} · {eur(f.total)}</span>
+                      <ChevronRight size={13} className="shrink-0 text-zinc-300" />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </Card>
+          );
+        })}
       </div>
 
       <StoreEditModal store={editing} allStores={data ?? []} onClose={() => setEditing(null)} />

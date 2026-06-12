@@ -24,20 +24,26 @@ export function storeRoutes(app: FastifyInstance): void {
       GROUP BY roh_ladenname
       ORDER BY receipts DESC
     `;
-    // Group by normalized name in JS so "LIDL" + "Lidl GmbH" merge
-    const grouped = new Map<string, { display: string; receipts: number; total: number; raw: string[] }>();
+    // Group by normalized name in JS so "LIDL" + "Lidl GmbH" merge.
+    // Each distinct roh_ladenname becomes a "filiale" (branch) under the chain.
+    interface Filiale { name: string; receipts: number; total: number }
+    const grouped = new Map<string, { display: string; receipts: number; total: number; filialen: Filiale[] }>();
     for (const r of rows) {
       const key = normalizeStore(r.roh_ladenname as string);
       if (!key) continue;
       const display = String(r.roh_ladenname).replace(/\s+(gmbh|kg|ag).*/i, '');
-      const e = grouped.get(key) ?? { display, receipts: 0, total: 0, raw: [] };
+      const e = grouped.get(key) ?? { display, receipts: 0, total: 0, filialen: [] };
       e.receipts += r.receipts;
       e.total += Number(r.total ?? 0);
-      e.raw.push(r.roh_ladenname as string);
+      e.filialen.push({ name: r.roh_ladenname as string, receipts: r.receipts, total: Number(r.total ?? 0) });
       grouped.set(key, e);
     }
     return [...grouped.entries()]
-      .map(([key, v]) => ({ key, display: v.display, receipts: v.receipts, total: v.total, raw: v.raw }))
+      .map(([key, v]) => ({
+        key, display: v.display, receipts: v.receipts, total: v.total,
+        filialen: v.filialen.sort((a, b) => b.receipts - a.receipts),
+        raw: v.filialen.map(f => f.name), // kept for the rename/merge modal
+      }))
       .sort((a, b) => b.receipts - a.receipts);
   });
 
