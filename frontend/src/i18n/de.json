@@ -72,7 +72,8 @@
     "next": "Nächster Beleg",
     "rotate": "90° im Uhrzeigersinn drehen",
     "reviewedNo": "Als vollständig geprüft markieren",
-    "reviewedYes": "Vollständig geprüft ✓"
+    "reviewedYes": "Vollständig geprüft ✓",
+    "searchItems": "Artikel in diesem Beleg suchen…"
   },
   "article": {
     "edit": "Artikel bearbeiten",
@@ -171,7 +172,8 @@
     "proposed": "Vorschlag",
     "ocr": "OCR-Text",
     "empty": "Nichts zu prüfen 🎉",
-    "editHint": "Name anpassen und übernehmen"
+    "editHint": "Name anpassen und übernehmen",
+    "openReceipt": "Beleg öffnen (Artikel hervorgehoben)"
   },
   "bell": {
     "title": "Benachrichtigungen",
@@ -243,6 +245,8 @@
     "churnNow": "Wartung jetzt ausführen",
     "churnStop": "Wartung stoppen",
     "stopping": "Stoppe…",
+    "fetchIcons": "Bilder holen",
+    "fetchIconsHint": "Holt fehlende Laden-Logos und Produkt-Bilder über die SearXNG-Web-Bildersuche (kein LLM, daher kein Modell-Dropdown). Läuft im Hintergrund (~1-2 Min).",
     "phaseRecategorize": "Kategorisiere Artikel…",
     "phaseCanonical": "Bereinige Produktnamen…",
     "phaseStoreIcons": "Hole Laden-Logos…",

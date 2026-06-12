@@ -72,7 +72,8 @@
     "next": "Next receipt",
     "rotate": "Rotate 90° clockwise",
     "reviewedNo": "Mark as fully reviewed",
-    "reviewedYes": "Fully reviewed ✓"
+    "reviewedYes": "Fully reviewed ✓",
+    "searchItems": "Search items in this receipt…"
   },
   "article": {
     "edit": "Edit item",
@@ -171,7 +172,8 @@
     "proposed": "Proposal",
     "ocr": "OCR text",
     "empty": "Nothing to review 🎉",
-    "editHint": "Adjust name and approve"
+    "editHint": "Adjust name and approve",
+    "openReceipt": "Open receipt (item highlighted)"
   },
   "bell": {
     "title": "Notifications",
@@ -243,6 +245,8 @@
     "churnNow": "Run maintenance now",
     "churnStop": "Stop maintenance",
     "stopping": "Stopping…",
+    "fetchIcons": "Fetch images",
+    "fetchIconsHint": "Fetches missing store logos and product images via SearXNG web image search (no LLM, so no model dropdown). Runs in the background (~1-2 min).",
     "phaseRecategorize": "Categorizing items…",
     "phaseCanonical": "Cleaning product names…",
     "phaseStoreIcons": "Fetching store logos…",

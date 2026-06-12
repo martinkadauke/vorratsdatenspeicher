@@ -1,13 +1,18 @@
 import type { FastifyInstance } from 'fastify';
 import sql from '../db.js';
+import { kontoScope } from '../auth/konto.js';
 
 export function queueRoutes(app: FastifyInstance): void {
-  app.get('/api/queue', async () => {
+  app.get('/api/queue', async (req) => {
     return sql`
-      SELECT id, proposed_canonical, raw_patterns, ai_examples, confidence, status, created_at
-      FROM verifikations_queue
-      WHERE status = 'pending'
-      ORDER BY created_at ASC
+      SELECT q.id, q.proposed_canonical, q.raw_patterns, q.ai_examples, q.confidence,
+             q.status, q.created_at, q.artikel_id, a.einkauf_id
+      FROM verifikations_queue q
+      LEFT JOIN artikel a ON a.id = q.artikel_id
+      LEFT JOIN einkauf e ON e.id = a.einkauf_id
+      WHERE q.status = 'pending'
+        ${kontoScope(req.user, sql`e.konto_id`)}
+      ORDER BY q.created_at ASC
       LIMIT 50
     `;
   });

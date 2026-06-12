@@ -115,6 +115,8 @@ export interface QueueItem {
   confidence: string | null;
   status: string;
   created_at: string;
+  artikel_id: number | null;
+  einkauf_id: number | null;
 }
 
 export interface Notification {

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Trash2, Play, ChevronRight, History, Square } from 'lucide-react';
+import { Trash2, Play, ChevronRight, History, Square, Image as ImageIcon } from 'lucide-react';
 import { api } from '../api/client';
 import type { FamilyMember, MaintenanceEvent, User } from '../api/types';
 import { Card, Button, Input, Label, Select, Switch, Spinner, Badge, ProgressBar } from '../components/ui';
@@ -347,6 +347,10 @@ function ChurnerSection() {
     mutationFn: () => api('/api/maintenance/churn/stop', { method: 'POST' }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['maintenance-status'] }),
   });
+  const fetchIcons = useMutation({
+    mutationFn: () => api('/api/maintenance/icons', { method: 'POST' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['maintenance-status'] }),
+  });
 
   if (isLoading || !config) return <Section title={t('admin.maintenance')}><Spinner /></Section>;
   const churnRunning = status?.churner.running ?? false;
@@ -410,7 +414,11 @@ function ChurnerSection() {
               <Square size={14} /> {churnStop.isPending ? t('admin.stopping') : t('admin.churnStop')}
             </Button>
           )}
+          <Button variant="secondary" onClick={() => fetchIcons.mutate()} disabled={churnRunning || fetchIcons.isPending}>
+            <ImageIcon size={15} /> {fetchIcons.isPending ? t('admin.running') : t('admin.fetchIcons')}
+          </Button>
         </div>
+        <p className="text-xs text-zinc-400">{t('admin.fetchIconsHint')}</p>
 
         {status?.churner.running && status.churner.progress && (
           <PhaseProgress progress={status.churner.progress} />

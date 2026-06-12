@@ -1,6 +1,8 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
+import { ReceiptText } from 'lucide-react';
 import { api } from '../api/client';
 import type { QueueItem } from '../api/types';
 import { Card, Spinner, EmptyState, Button, Input, Badge } from '../components/ui';
@@ -42,9 +44,20 @@ export function Queue() {
                     {q.raw_patterns ?? q.ai_examples ?? '–'}
                   </div>
                 </div>
-                {q.confidence && (
-                  <Badge>{t('queue.confidence')}: {q.confidence}</Badge>
-                )}
+                <div className="flex shrink-0 items-center gap-1.5">
+                  {q.einkauf_id && (
+                    <Link
+                      to={`/receipts/${q.einkauf_id}${q.artikel_id ? `?highlight=${q.artikel_id}` : ''}`}
+                      className="inline-flex items-center gap-1 rounded-lg bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-400"
+                      title={t('queue.openReceipt')}
+                    >
+                      <ReceiptText size={13} /> #{q.einkauf_id}
+                    </Link>
+                  )}
+                  {q.confidence && (
+                    <Badge>{t('queue.confidence')}: {q.confidence}</Badge>
+                  )}
+                </div>
               </div>
               <div>
                 <div className="mb-1 text-xs text-zinc-400">{t('queue.proposed')} — {t('queue.editHint')}</div>

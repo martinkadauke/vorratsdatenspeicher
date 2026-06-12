@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, Plus, ChevronLeft, ChevronRight, RotateCw, CheckCircle2, Circle, Hand, Wallet } from 'lucide-react';
+import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, Plus, ChevronLeft, ChevronRight, RotateCw, CheckCircle2, Circle, Hand, Wallet, X, Search } from 'lucide-react';
 import { TransformWrapper, TransformComponent, useControls } from 'react-zoom-pan-pinch';
 import { api } from '../api/client';
 import type { Artikel, ReceiptDetail } from '../api/types';
@@ -27,6 +27,14 @@ export function ReceiptDetailPage() {
   const [editReceipt, setEditReceipt] = useState(false);
   const [adding, setAdding] = useState(false);
   const [imgVersion, setImgVersion] = useState(0); // cache-buster after rotate
+  const [panEnabled, setPanEnabled] = useState(false); // mobile: image pan active?
+
+  // Item highlight: from URL (?highlight=<artikelId> or ?hq=<text>) or the
+  // in-view search box. Used to spotlight items when arriving from the queue,
+  // a canonical name, or a search.
+  const params = new URLSearchParams(location.search);
+  const highlightId = params.get('highlight') ? parseInt(params.get('highlight')!, 10) : null;
+  const [itemSearch, setItemSearch] = useState(params.get('hq') ?? '');
 
   const deleteReceipt = useMutation({
     mutationFn: () => api(`/api/receipts/${id}`, { method: 'DELETE' }),
@@ -98,7 +106,10 @@ export function ReceiptDetailPage() {
   const touchStart = useRef<{ x: number; y: number } | null>(null);
   const onTouchStart = (e: React.TouchEvent) => {
     if (editing || editReceipt || adding) return;
-    if ((e.target as HTMLElement).closest('[data-zoom-container]')) { touchStart.current = null; return; }
+    // Only block swipe over the image when panning is ACTIVE (would fight the
+    // drag). With pan off, swiping anywhere — including over the image —
+    // navigates to the prev/next receipt.
+    if (panEnabled && (e.target as HTMLElement).closest('[data-zoom-container]')) { touchStart.current = null; return; }
     const t = e.touches[0];
     touchStart.current = { x: t.clientX, y: t.clientY };
   };
@@ -125,6 +136,18 @@ export function ReceiptDetailPage() {
   const totalKnown = Number.isFinite(printedTotal);
   const diff = totalKnown ? itemSum - printedTotal : 0;
   const mismatch = totalKnown && Math.abs(diff) > 0.01;
+
+  // Which line items to spotlight.
+  const q = itemSearch.trim().toLowerCase();
+  const matchIds = new Set<number>();
+  if (highlightId) matchIds.add(highlightId);
+  if (q) {
+    for (const a of data.artikel) {
+      const hay = `${a.canonical_name ?? ''} ${a.ai_guess ?? ''} ${a.name ?? ''} ${a.original_text ?? ''}`.toLowerCase();
+      if (hay.includes(q)) matchIds.add(a.id);
+    }
+  }
+  const scrollToId = highlightId ?? (q ? [...matchIds][0] ?? null : null);
 
   return (
     <div className="flex flex-col gap-4" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
@@ -244,6 +267,8 @@ export function ReceiptDetailPage() {
           {data.bild_pfad ? (
             <ZoomableReceiptImage
               src={imgVersion ? `${data.bild_pfad}?v=${imgVersion}` : data.bild_pfad}
+              panEnabled={panEnabled}
+              onPanToggle={() => setPanEnabled(v => !v)}
             />
           ) : (
             <div className="flex h-48 items-center justify-center rounded-2xl bg-zinc-100 text-sm text-zinc-400 dark:bg-zinc-900">
@@ -254,7 +279,29 @@ export function ReceiptDetailPage() {
 
         {/* Line items — drag the grip handle to reorder */}
         <div className="flex min-w-0 flex-col gap-1.5">
-          <SortableArticleList receiptId={data.id} artikel={data.artikel} onEdit={setEditing} />
+          {data.artikel.length > 4 && (
+            <div className="relative">
+              <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+              <Input
+                className="pl-9 pr-9"
+                placeholder={t('receiptDetail.searchItems')}
+                value={itemSearch}
+                onChange={e => setItemSearch(e.target.value)}
+              />
+              {itemSearch && (
+                <button onClick={() => setItemSearch('')} className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800">
+                  <X size={15} />
+                </button>
+              )}
+            </div>
+          )}
+          <SortableArticleList
+            receiptId={data.id}
+            artikel={data.artikel}
+            onEdit={setEditing}
+            highlightIds={matchIds}
+            scrollToId={scrollToId}
+          />
           <button
             type="button"
             onClick={() => setAdding(true)}
@@ -340,11 +387,10 @@ function ReceiptEditModal({ receipt, open, onClose }: { receipt: ReceiptDetail; 
  *  the page scrolls freely when you drag over the image; tap the hand
  *  button to activate panning. Pinch-to-zoom always works. On desktop the
  *  mouse drag pans normally. */
-function ZoomableReceiptImage({ src }: { src: string }) {
+function ZoomableReceiptImage({ src, panEnabled, onPanToggle }: { src: string; panEnabled: boolean; onPanToggle: () => void }) {
   const { t } = useTranslation();
   const [isTouch] = useState(() =>
     typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches);
-  const [panEnabled, setPanEnabled] = useState(false);
   const panningDisabled = isTouch && !panEnabled;
 
   return (
@@ -361,7 +407,7 @@ function ZoomableReceiptImage({ src }: { src: string }) {
         {isTouch && (
           <button
             type="button"
-            onClick={() => setPanEnabled(v => !v)}
+            onClick={onPanToggle}
             className={`absolute bottom-2 right-2 z-10 flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium backdrop-blur transition ${
               panEnabled
                 ? 'bg-emerald-600 text-white'

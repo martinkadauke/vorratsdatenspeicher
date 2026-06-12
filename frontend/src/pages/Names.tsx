@@ -199,7 +199,7 @@ function NameEditModal({ name, onClose }: { name: CanonicalName | null; onClose:
               {receipts.map(r => (
                 <Link
                   key={r.id}
-                  to={`/receipts/${r.id}`}
+                  to={`/receipts/${r.id}?hq=${encodeURIComponent(name!.canonical_name)}`}
                   onClick={onClose}
                   className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
                 >

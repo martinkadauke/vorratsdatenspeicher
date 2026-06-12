@@ -75,6 +75,35 @@ export async function runChurn(trigger: 'cron' | 'manual'): Promise<number> {
   return eventId;
 }
 
+/** Standalone icon fetch (store logos + canonical product images) via SearXNG
+ *  image search — NO LLM involved. Decoupled from the slow nightly churn so it
+ *  can be triggered on demand. Tracked as its own maintenance_event. */
+export async function runIconFetch(): Promise<number> {
+  if (running) throw new Error('maintenance already running');
+  running = true;
+  const [event] = await sql`
+    INSERT INTO maintenance_event (kind, status, summary)
+    VALUES ('icons.run', 'running', ${sql.json({ trigger: 'manual' })}) RETURNING id
+  `;
+  const eventId = event.id as number;
+  void (async () => {
+    const progress = new ProgressReporter(eventId);
+    await progress.set({ phase: 'store_icons', current: 0, total: 1 }, true);
+    const stores = await churnStoreIcons(100);
+    await progress.set({ phase: 'canonical_icons', current: 0, total: 1 }, true);
+    const canon = await churnCanonicalIcons(150);
+    await progress.clear();
+    const summary = { store_icons: stores, canonical_icons: canon };
+    await sql`UPDATE maintenance_event SET ended_at = NOW(), status = 'success', progress = NULL,
+              summary = ${sql.json(summary)} WHERE id = ${eventId}`;
+    console.log('[icons] done:', JSON.stringify(summary));
+  })().catch(async err => {
+    await sql`UPDATE maintenance_event SET ended_at = NOW(), status = 'error', progress = NULL,
+              summary = ${sql.json({ error: (err as Error).message })} WHERE id = ${eventId}`;
+  }).finally(() => { running = false; });
+  return eventId;
+}
+
 async function churnWork(eventId: number): Promise<void> {
   const progress = new ProgressReporter(eventId);
 
@@ -195,8 +224,8 @@ async function churnWork(eventId: number): Promise<void> {
         if (!existing.includes(canonical)) existing.push(canonical);
       } else {
         await sql`
-          INSERT INTO verifikations_queue (proposed_canonical, raw_patterns, ai_examples, confidence, status)
-          VALUES (${canonical}, ${a.original_text ?? a.name}, ${a.ai_guess ?? a.name}, ${String(confidence.toFixed(2))}, 'pending')
+          INSERT INTO verifikations_queue (proposed_canonical, raw_patterns, ai_examples, confidence, status, artikel_id)
+          VALUES (${canonical}, ${a.original_text ?? a.name}, ${a.ai_guess ?? a.name}, ${String(confidence.toFixed(2))}, 'pending', ${a.id})
         `;
         await notify('churner.queued', {
           artikel_id: a.id,
@@ -238,8 +267,8 @@ async function churnWork(eventId: number): Promise<void> {
 }
 
 /** Fetches a logo image for every store that's been seen but has no icon yet.
- *  Picks first SearXNG image hit, logs source URL. Bounded to 20 per run. */
-async function churnStoreIcons(): Promise<number> {
+ *  Picks first SearXNG image hit, logs source URL. Bounded per run. */
+async function churnStoreIcons(limit = 20): Promise<number> {
   const rows = await sql`
     SELECT DISTINCT
       LOWER(SPLIT_PART(REGEXP_REPLACE(roh_ladenname, '[^A-Za-zäöüÄÖÜß0-9]+', ' ', 'g'), ' ', 1)) AS key,
@@ -249,7 +278,7 @@ async function churnStoreIcons(): Promise<number> {
     GROUP BY key
   `;
   const existing = new Set((await sql`SELECT store_key FROM store_meta WHERE icon_url IS NOT NULL`).map(r => r.store_key as string));
-  const candidates = rows.filter(r => r.key && !existing.has(r.key as string)).slice(0, 20);
+  const candidates = rows.filter(r => r.key && !existing.has(r.key as string)).slice(0, limit);
 
   let added = 0;
   for (const c of candidates) {
@@ -272,8 +301,8 @@ async function churnStoreIcons(): Promise<number> {
 
 /** Fetches a product image for canonical names that have none yet, prioritising
  *  the most-frequently-bought ones. Picks first SearXNG image hit. Bounded
- *  to 20 per run so SearXNG isn't hammered. */
-async function churnCanonicalIcons(): Promise<number> {
+ *  per run so SearXNG isn't hammered. */
+async function churnCanonicalIcons(limit = 20): Promise<number> {
   // Most-used canonical names without an icon yet.
   const candidates = await sql`
     SELECT a.canonical_name AS name, COUNT(*)::int AS n
@@ -282,7 +311,7 @@ async function churnCanonicalIcons(): Promise<number> {
     WHERE a.canonical_name IS NOT NULL AND m.canonical_name IS NULL
     GROUP BY a.canonical_name
     ORDER BY n DESC
-    LIMIT 20
+    LIMIT ${limit}
   `;
 
   let added = 0;

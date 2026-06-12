@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   DndContext, closestCenter, PointerSensor, KeyboardSensor,
   useSensor, useSensors, type DragEndEvent,
@@ -18,21 +18,28 @@ import { toast } from './Toast';
 import { api } from '../api/client';
 import { eur } from '../lib/utils';
 
-export function SortableArticleList({ receiptId, artikel, onEdit }: {
+export function SortableArticleList({ receiptId, artikel, onEdit, highlightIds, scrollToId }: {
   receiptId: number;
   artikel: Artikel[];
   onEdit: (a: Artikel) => void;
+  highlightIds?: Set<number>;
+  scrollToId?: number | null;
 }) {
   const qc = useQueryClient();
   const [items, setItems] = useState(artikel);
 
-  // Re-sync from the server only when the SET of items changes (add/remove/
-  // re-OCR) — not on a plain refetch that just confirms our own reorder
-  // (same ids, possibly different order → keep our optimistic order).
+  // Sync from the server while preserving our optimistic order:
+  //  - id set changed (add/remove/re-OCR) → take the server's list as-is
+  //  - same set → keep local ORDER but refresh each item's DATA (so an edit
+  //    like a new price shows up without a hard refresh)
   useEffect(() => {
-    const serverSet = artikel.map(x => x.id).sort((a, b) => a - b).join(',');
-    const localSet = items.map(x => x.id).sort((a, b) => a - b).join(',');
-    if (serverSet !== localSet) setItems(artikel);
+    setItems(prev => {
+      const serverSet = artikel.map(x => x.id).sort((a, b) => a - b).join(',');
+      const localSet = prev.map(x => x.id).sort((a, b) => a - b).join(',');
+      if (serverSet !== localSet) return artikel;
+      const byId = new Map(artikel.map(a => [a.id, a]));
+      return prev.map(p => byId.get(p.id) ?? p);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [artikel]);
 
@@ -65,25 +72,38 @@ export function SortableArticleList({ receiptId, artikel, onEdit }: {
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
       <SortableContext items={items.map(a => a.id)} strategy={verticalListSortingStrategy}>
         <div className="flex min-w-0 flex-col gap-1.5">
-          {items.map(a => <SortableRow key={a.id} a={a} onEdit={() => onEdit(a)} />)}
+          {items.map(a => (
+            <SortableRow
+              key={a.id}
+              a={a}
+              onEdit={() => onEdit(a)}
+              highlighted={highlightIds?.has(a.id) ?? false}
+              scrollHere={scrollToId === a.id}
+            />
+          ))}
         </div>
       </SortableContext>
     </DndContext>
   );
 }
 
-function SortableRow({ a, onEdit }: { a: Artikel; onEdit: () => void }) {
+function SortableRow({ a, onEdit, highlighted, scrollHere }: { a: Artikel; onEdit: () => void; highlighted: boolean; scrollHere: boolean }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: a.id });
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (scrollHere) rowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [scrollHere]);
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
     zIndex: isDragging ? 10 : undefined,
   };
   return (
-    <div ref={setNodeRef} style={style}>
+    <div ref={el => { setNodeRef(el); rowRef.current = el; }} style={style} className="scroll-mt-20">
       <Card
         className={`flex min-w-0 items-center gap-1.5 px-1.5 py-2.5 sm:gap-2 sm:px-2 ${
-          isDragging ? 'opacity-80 shadow-lg ring-2 ring-emerald-400' : ''
+          isDragging ? 'opacity-80 shadow-lg ring-2 ring-emerald-400'
+            : highlighted ? 'bg-amber-50 ring-2 ring-amber-400 dark:bg-amber-950/30' : ''
         }`}
       >
         {/* drag handle */}
