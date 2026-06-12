@@ -12,6 +12,7 @@ import { searxngHealth } from '../llm/searxng.js';
 import { sendMail } from '../mailer.js';
 import { createAuthToken } from '../auth/routes.js';
 import { listModelsForProvider, healthForProvider, setTaskAi, type ProviderName, type AiTask } from '../llm/provider.js';
+import { matchExistingCanonical } from '../lib/canonicalMatch.js';
 
 const VALID_PROVIDERS: ProviderName[] = ['ollama', 'deepseek', 'anthropic'];
 
@@ -280,6 +281,31 @@ export function adminRoutes(app: FastifyInstance): void {
       byModel: byModel.sort((a, b) => b.est_cost_usd - a.est_cost_usd || b.input_tokens - a.input_tokens),
       byTask: [...byTask.entries()].map(([task, a]) => ({ task, ...a })).sort((a, b) => b.calls - a.calls),
       daily: daily.map(d => ({ day: d.day, input_tokens: Number(d.input_tokens) || 0, output_tokens: Number(d.output_tokens) || 0, calls: d.calls })),
+    };
+  });
+
+  /** Validation: run the deterministic canonical matcher against every article
+   *  that already has a canonical name (using its OCR/name/guess texts) and
+   *  report how often the matcher reproduces the assigned canonical. */
+  app.get('/api/admin/canonical-match-test', { preHandler: requireAdmin }, async () => {
+    const rows = await sql`SELECT original_text, name, ai_guess, canonical_name FROM artikel WHERE canonical_name IS NOT NULL`;
+    const existing = [...new Set(rows.map(r => r.canonical_name as string))];
+    let hit = 0, missNull = 0, diff = 0;
+    const diffSamples: { texts: string; assigned: string; matched: string }[] = [];
+    const nullSamples: { texts: string; assigned: string }[] = [];
+    for (const r of rows) {
+      const m = matchExistingCanonical([r.original_text, r.name, r.ai_guess], existing);
+      const assigned = r.canonical_name as string;
+      if (m === assigned) hit++;
+      else if (m === null) { missNull++; if (nullSamples.length < 30) nullSamples.push({ texts: `${r.original_text ?? ''} | ${r.ai_guess ?? ''}`, assigned }); }
+      else { diff++; if (diffSamples.length < 30) diffSamples.push({ texts: `${r.original_text ?? ''} | ${r.ai_guess ?? ''}`, assigned, matched: m }); }
+    }
+    const total = rows.length;
+    return {
+      total, distinct_canonicals: existing.length,
+      hit, hitRate: total ? +(hit / total * 100).toFixed(1) : 0,
+      missNull, diff,
+      nullSamples, diffSamples,
     };
   });
 
