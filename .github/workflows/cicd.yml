@@ -90,6 +90,9 @@ jobs:
           PORT: ${{ needs.meta.outputs.port }}
           STACK: ${{ needs.meta.outputs.stack }}
           VDS_ENV: ${{ needs.meta.outputs.env == 'production' && 'prod' || needs.meta.outputs.env == 'staging' && 'stage' || 'dev' }}
+          # Optional host path for receipt photos. If unset, stack.yml falls back
+          # to a named volume (vds-receipts) so deploys never break.
+          RECEIPTS_VOLUME: ${{ vars.RECEIPTS_VOLUME }}
         run: docker stack deploy --with-registry-auth --detach=false -c deploy/stack.yml "$STACK"
       - name: Verify
         env:

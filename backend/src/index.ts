@@ -80,7 +80,24 @@ async function main(): Promise<void> {
   trendsRoutes(app);
   iconRoutes(app);
 
-  // Static SPA + receipt images
+  // Receipt photos under /receipts/* — served directly by the app so a
+  // single-container install (Unraid CA, docker-compose) doesn't need a
+  // reverse-proxy mount. In our multi-host setup NPM intercepts first
+  // and never reaches the backend, so this is purely additive.
+  const receiptsDir = process.env.RECEIPTS_LOCAL_PATH ?? '/receipts';
+  if (existsSync(receiptsDir)) {
+    await app.register(fastifyStatic, {
+      root: receiptsDir,
+      prefix: '/receipts/',
+      decorateReply: false,
+      wildcard: false,
+    });
+    app.log.info(`serving receipt photos from ${receiptsDir}`);
+  } else {
+    app.log.warn(`no receipts dir at ${receiptsDir} — rotation + static serving disabled`);
+  }
+
+  // Static SPA
   const publicDir = path.join(process.cwd(), 'public');
   if (existsSync(publicDir)) {
     await app.register(fastifyStatic, { root: publicDir, wildcard: false });

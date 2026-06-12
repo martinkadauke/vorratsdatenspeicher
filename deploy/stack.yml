@@ -13,12 +13,15 @@ services:
       RECEIPTS_LOCAL_PATH: "${RECEIPTS_LOCAL_PATH:-/receipts}"
     ports:
       - "${PORT:-8766}:80"   # 8766 = prod, 8767 = staging — gesetzt von cicd.yml
-    # NPM auf Unraid serviert /receipts/* direkt aus dem Filesystem. Wenn
-    # der Swarm-Host RECEIPTS_HOST_PATH gesetzt hat, wird der Pfad zusätzlich
-    # als Volume gemountet, damit /api/receipts/:id/rotate die Bilder
-    # tatsächlich auf der Platte editieren kann. Ohne Volume gibt der
-    # Endpoint ENOENT zurück — alles andere läuft trotzdem.
-    # Setzen mit z.B.: export RECEIPTS_HOST_PATH=/mnt/user/Aufnahmen/receipts
+    # Belege werden unter /receipts persistiert. Default: named volume
+    # (Docker verwaltet → keine Pfad-Annahmen, Deploy klappt immer).
+    # Override für Bind-Mount auf einen bestehenden Host-Ordner:
+    #   docker stack deploy ... # mit RECEIPTS_VOLUME=/mnt/user/Aufnahmen/receipts
+    # Single-Machine-User (Unraid Template / docker-compose) setzen
+    # RECEIPTS_VOLUME einfach auf ihren bevorzugten Pfad — die App serviert
+    # die Bilder dann direkt unter /receipts/* (kein NPM nötig).
+    volumes:
+      - "${RECEIPTS_VOLUME:-vds-receipts}:/receipts"
     healthcheck:
       # Node statt wget — garantiert im Image vorhanden, deutlich robuster
       test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:80/api/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
@@ -39,3 +42,6 @@ services:
       restart_policy:
         condition: any
         delay: 5s
+
+volumes:
+  vds-receipts:
