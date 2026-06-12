@@ -29,6 +29,30 @@ function chainDisplay(names: string[]): string {
 }
 
 export function storeRoutes(app: FastifyInstance): void {
+  /** List filiale/shop entities (auto-created on first receipt) with the
+   *  user-visible receipt count + spend. `?kind=filiale|shop` filters;
+   *  default returns physical branches. The profile editor (address,
+   *  warengruppen ordering, …) is built on top of this in a later schub. */
+  app.get('/api/filialen', async (req) => {
+    const kind = (req.query as { kind?: string }).kind ?? 'filiale';
+    return sql`
+      SELECT
+        f.id, f.chain_key, f.name, f.kind,
+        f.address, f.opening_hours, f.prospectus_url, f.warengruppen, f.subscribed,
+        COUNT(e.id)::int                       AS receipts,
+        COALESCE(SUM(e.gesamt_betrag), 0)::numeric(10,2) AS total,
+        MAX(e.datum)                           AS last_visit
+      FROM filiale f
+      LEFT JOIN einkauf e
+        ON e.filiale_id = f.id
+       ${kontoScope(req.user, sql`e.konto_id`)}
+      WHERE f.kind = ${kind}
+      GROUP BY f.id
+      HAVING COUNT(e.id) > 0
+      ORDER BY receipts DESC, f.name
+    `;
+  });
+
   /** List all stores ever seen with receipt count + total spend. */
   app.get('/api/stores', async (req) => {
     const rows = await sql`
