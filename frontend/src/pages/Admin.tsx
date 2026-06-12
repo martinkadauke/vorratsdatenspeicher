@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Trash2, Play, ChevronRight, History, Square, Image as ImageIcon, Download, ExternalLink, Store } from 'lucide-react';
+import { Trash2, Play, ChevronRight, ChevronDown, History, Square, Image as ImageIcon, Download, ExternalLink, Store, Search } from 'lucide-react';
 import { api } from '../api/client';
 import type { FamilyMember, MaintenanceEvent, User } from '../api/types';
 import { Card, Button, Input, Label, Select, Switch, Spinner, Badge, ProgressBar } from '../components/ui';
@@ -21,25 +21,114 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+// Accent/case-insensitive fold so "modell"/"Modèl" both match a search query.
+const fold = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+const OPEN_KEY = 'vds.adminOpenGroups';
+
+function CollapsibleGroup({
+  title, count, open, onToggle, children,
+}: {
+  title: string; count: number; open: boolean; onToggle: () => void; children: React.ReactNode;
+}) {
+  return (
+    <div className="min-w-0">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center justify-between rounded-xl bg-white px-3 py-2.5 text-left shadow-sm ring-1 ring-zinc-200 transition hover:bg-zinc-50 dark:bg-zinc-900 dark:ring-zinc-800 dark:hover:bg-zinc-800/60"
+      >
+        <span className="flex items-center gap-2 text-sm font-semibold">
+          {title}
+          <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-xs font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">{count}</span>
+        </span>
+        <ChevronDown className={cn('h-4 w-4 shrink-0 text-zinc-400 transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && <div className="mt-3 flex flex-col gap-3">{children}</div>}
+    </div>
+  );
+}
+
+type AdminEntry = { id: string; title: string; keywords: string; el: React.ReactNode; show?: boolean };
+
 export function Admin() {
   const { t } = useTranslation();
   const { user } = useAuth();
+  const [q, setQ] = useState('');
+  const [openGroups, setOpenGroups] = useState<Set<string>>(() => {
+    try { return new Set<string>(JSON.parse(localStorage.getItem(OPEN_KEY) || '[]')); } catch { return new Set(); }
+  });
+  const persist = (next: Set<string>) => {
+    localStorage.setItem(OPEN_KEY, JSON.stringify([...next]));
+    setOpenGroups(next);
+  };
+  const toggleGroup = (id: string) => {
+    const next = new Set(openGroups);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    persist(next);
+  };
+
+  const sections: AdminEntry[] = [
+    { id: 'ai-providers', title: t('admin.aiProviders'), keywords: 'ki ai modell model provider anbieter ollama deepseek anthropic api key schluessel url health verbindung connection searxng', el: <AiProvidersSection /> },
+    { id: 'ai-tasks', title: t('admin.aiTasks'), keywords: 'ki ai aufgaben tasks ocr churner recategorize kategorisierung modell zuweisung provider', el: <AiTasksSection /> },
+    { id: 'model-review', title: t('admin.reviewTitle'), keywords: 'modell review ueberpruefung vorschlag suggestion automatisch api open weight empfehlung recommendation', el: <ModelReviewSection /> },
+    { id: 'token-usage', title: t('admin.usageTitle'), keywords: 'token verbrauch usage kosten cost analytics statistik aufladen top up guthaben credit', el: <TokenUsageSection /> },
+    { id: 'churner', title: t('admin.maintenance'), keywords: 'wartung maintenance churner namen kanonisch canonical bilder icons bereinigung cleanup hintergrund background batch', el: <ChurnerSection /> },
+    { id: 'categories', title: t('categoriesAdmin.title'), keywords: 'kategorien categories artikelkategorien warengruppen baum tree', el: <CategoriesLinkSection /> },
+    { id: 'data', title: t('admin.data'), keywords: 'daten data export import backup loeschen delete zuruecksetzen reset csv download', el: <DataManagementSection />, show: !!user?.sees_all_konten },
+    { id: 'maintenance-log', title: t('admin.maintenance'), keywords: 'wartung maintenance protokoll log verlauf history ereignisse events lauf run nightly', el: <MaintenanceSection /> },
+    { id: 'konten', title: t('admin.konten'), keywords: 'konten accounts konto gkk haushalt budget sichtbarkeit', el: <KontenSection /> },
+    { id: 'offers', title: t('admin.offersTitle'), keywords: 'angebote offers prospekt deals umkreis radius adresse abonnement subscription vermeiden avoid haushalt', el: <OffersSection /> },
+    { id: 'family', title: t('admin.family'), keywords: 'familie family mitglieder members verbraucher consumer haushalt personen', el: <FamilySection /> },
+    { id: 'users', title: t('admin.users'), keywords: 'benutzer users nutzer einladen invite admin rolle role zugang access passwort', el: <UsersSection /> },
+    { id: 'smtp', title: 'SMTP / E-Mail', keywords: 'smtp email e-mail mail benachrichtigung notification versand digest server port', el: <SmtpSection /> },
+  ];
+  const byId = new Map(sections.filter(s => s.show !== false).map(s => [s.id, s] as const));
+
+  const groups: { id: string; title: string; members: string[] }[] = [
+    { id: 'ai', title: t('admin.groupAi'), members: ['ai-providers', 'ai-tasks', 'model-review', 'token-usage'] },
+    { id: 'data', title: t('admin.groupData'), members: ['churner', 'categories', 'data', 'maintenance-log'] },
+    { id: 'household', title: t('admin.groupHousehold'), members: ['konten', 'offers', 'family'] },
+    { id: 'access', title: t('admin.groupAccess'), members: ['users'] },
+    { id: 'system', title: t('admin.groupSystem'), members: ['smtp'] },
+  ];
+
+  const allOpen = groups.every(g => openGroups.has(g.id));
+  const toggleAll = () => persist(allOpen ? new Set<string>() : new Set(groups.map(g => g.id)));
+
+  const query = fold(q.trim());
+  const hits = query ? sections.filter(s => s.show !== false && fold(`${s.title} ${s.keywords}`).includes(query)) : [];
+
   return (
     <div className="flex flex-col gap-4">
-      <h1 className="text-lg font-bold">{t('admin.title')}</h1>
-      <AiProvidersSection />
-      <AiTasksSection />
-      <ModelReviewSection />
-      <TokenUsageSection />
-      <ChurnerSection />
-      <CategoriesLinkSection />
-      <UsersSection />
-      <KontenSection />
-      {user?.sees_all_konten && <DataManagementSection />}
-      <OffersSection />
-      <SmtpSection />
-      <FamilySection />
-      <MaintenanceSection />
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-lg font-bold">{t('admin.title')}</h1>
+        {!query && (
+          <button type="button" onClick={toggleAll} className="shrink-0 text-xs font-medium text-emerald-600 hover:underline dark:text-emerald-400">
+            {allOpen ? t('admin.collapseAll') : t('admin.expandAll')}
+          </button>
+        )}
+      </div>
+
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+        <Input value={q} onChange={e => setQ(e.target.value)} placeholder={t('admin.searchPlaceholder')} className="pl-9" />
+      </div>
+
+      {query ? (
+        hits.length === 0
+          ? <p className="px-1 py-6 text-center text-sm text-zinc-500">{t('admin.searchNoResults')}</p>
+          : <div className="flex flex-col gap-3">{hits.map(s => <div key={s.id} className="min-w-0">{s.el}</div>)}</div>
+      ) : (
+        groups.map(g => {
+          const members = g.members.map(id => byId.get(id)).filter(Boolean) as AdminEntry[];
+          if (members.length === 0) return null;
+          return (
+            <CollapsibleGroup key={g.id} title={g.title} count={members.length} open={openGroups.has(g.id)} onToggle={() => toggleGroup(g.id)}>
+              {members.map(s => <div key={s.id} className="min-w-0">{s.el}</div>)}
+            </CollapsibleGroup>
+          );
+        })
+      )}
     </div>
   );
 }
