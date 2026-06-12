@@ -56,7 +56,11 @@
     "mismatch": "Summe der Positionen weicht vom Bon-Gesamtbetrag ab",
     "mismatchHint": "Eine Position fehlt, ist doppelt oder hat falschen Preis",
     "sumLabel": "Σ Positionen:",
-    "printedLabel": "· Bon:"
+    "printedLabel": "· Bon:",
+    "reocr": "OCR erneut ausführen",
+    "reocrConfirm": "Bon-Foto erneut analysieren? Alle aktuellen Artikel werden ersetzt.",
+    "reocrDone": "OCR fertig: {{count}} Artikel · Konfidenz {{confidence}}%",
+    "addArticle": "Artikel hinzufügen"
   },
   "article": {
     "edit": "Artikel bearbeiten",
@@ -194,6 +198,7 @@
     "taskChurnerStage2": "Churner Stufe 2 — Web-Recherche",
     "deepseekUrl": "DeepSeek URL",
     "deepseekApiKey": "DeepSeek API-Key",
+    "anthropicApiKey": "Anthropic API-Key (Vision-OCR)",
     "churnerEnabled": "Nächtlicher Churner aktiv",
     "ollamaUrl": "Ollama URL",
     "ollamaModel": "Modell",

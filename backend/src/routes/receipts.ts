@@ -1,5 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import sql from '../db.js';
+import { requireAdmin } from '../auth/plugin.js';
+import { ocrFromUrl } from '../llm/ocr.js';
 
 export function receiptRoutes(app: FastifyInstance): void {
   app.get('/api/receipts', async (req) => {
@@ -51,6 +53,56 @@ export function receiptRoutes(app: FastifyInstance): void {
     const rows = await sql`UPDATE einkauf SET ${sql(updates)} WHERE id = ${id} RETURNING id`;
     if (!rows.length) return reply.code(404).send({ error: 'not found' });
     return { ok: true };
+  });
+
+  /** Re-run vision OCR on this receipt's image. Wipes existing artikel
+   *  and replaces them with the new extraction. Keeps the einkauf row
+   *  (preserves bild_pfad + id), just updates date/store/total. */
+  app.post('/api/receipts/:id/reocr', { preHandler: requireAdmin }, async (req, reply) => {
+    const id = parseInt((req.params as { id: string }).id, 10);
+    if (!id) return reply.code(400).send({ error: 'invalid id' });
+
+    const rows = await sql`SELECT id, bild_pfad FROM einkauf WHERE id = ${id}`;
+    if (!rows.length) return reply.code(404).send({ error: 'not found' });
+    const bildPfad = rows[0].bild_pfad as string | null;
+    if (!bildPfad) return reply.code(400).send({ error: 'receipt has no image' });
+
+    try {
+      const parsed = await ocrFromUrl(bildPfad);
+      if (!parsed.datum || !parsed.ladenkette) {
+        return reply.code(422).send({ error: 'OCR returned no usable receipt data', confidence: parsed.confidence });
+      }
+      const ladenName = parsed.filiale ? `${parsed.ladenkette} ${parsed.filiale}` : parsed.ladenkette;
+      const gesamt = Number.isFinite(parsed.gesamt_betrag) ? parsed.gesamt_betrag : null;
+
+      await sql.begin(async tx => {
+        await tx`DELETE FROM artikel WHERE einkauf_id = ${id}`;
+        await tx`
+          UPDATE einkauf
+          SET datum = ${parsed.datum}, roh_ladenname = ${ladenName}, gesamt_betrag = ${gesamt}
+          WHERE id = ${id}
+        `;
+        for (const a of parsed.artikel ?? []) {
+          await tx`
+            INSERT INTO artikel
+              (einkauf_id, name, menge, einheit, preis, kategorie, original_text, ai_guess, canonical_name)
+            VALUES
+              (${id}, ${a.name ?? a.original_text ?? ''}, ${a.menge ?? null}, ${a.einheit ?? ''},
+               ${a.preis ?? null}, ${a.kategorie ?? ''}, ${a.original_text ?? a.name ?? ''},
+               ${a.ai_guess ?? a.name ?? ''}, NULL)
+          `;
+        }
+      });
+      return {
+        ok: true,
+        items: parsed.artikel?.length ?? 0,
+        confidence: parsed.confidence,
+        usage: parsed.usage ?? null,
+      };
+    } catch (e) {
+      req.log.error(`reocr failed: ${(e as Error).message}`);
+      return reply.code(502).send({ error: (e as Error).message });
+    }
   });
 
   /** Delete a receipt (cascades to its artikel). */

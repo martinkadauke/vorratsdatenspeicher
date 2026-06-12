@@ -121,6 +121,16 @@ function AiProvidersSection() {
               onBlur={e => e.target.value && e.target.value !== config['deepseek.api_key'] && setCfg.mutate({ key: 'deepseek.api_key', value: e.target.value })}
             />
           </div>
+          <div>
+            <Label>{t('admin.anthropicApiKey')}</Label>
+            <Input
+              type="password"
+              autoComplete="off"
+              defaultValue={config['anthropic.api_key'] as string}
+              placeholder={(config['anthropic.api_key'] as string) ? '••••••••' : 'sk-ant-…'}
+              onBlur={e => e.target.value && e.target.value !== config['anthropic.api_key'] && setCfg.mutate({ key: 'anthropic.api_key', value: e.target.value })}
+            />
+          </div>
         </div>
       </div>
     </Section>

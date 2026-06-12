@@ -12,6 +12,33 @@ function coerceDecimal(v: unknown): string | null {
 }
 
 export function articleRoutes(app: FastifyInstance): void {
+  /** Manually add an artikel to an existing einkauf. */
+  app.post('/api/articles', async (req, reply) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const einkaufId = parseInt(String(body.einkauf_id ?? ''), 10);
+    if (!einkaufId) return reply.code(400).send({ error: 'einkauf_id required' });
+    const [exists] = await sql`SELECT id FROM einkauf WHERE id = ${einkaufId}`;
+    if (!exists) return reply.code(404).send({ error: 'einkauf not found' });
+
+    const name = String(body.name ?? '').trim();
+    if (!name && !body.canonical_name) return reply.code(400).send({ error: 'name or canonical_name required' });
+    const menge = coerceDecimal(body.menge);
+    const preis = coerceDecimal(body.preis);
+    const einheit = body.einheit ? String(body.einheit) : null;
+    const canonical = body.canonical_name ? String(body.canonical_name) : null;
+    const category = body.category_path ? String(body.category_path) : null;
+
+    const [row] = await sql`
+      INSERT INTO artikel
+        (einkauf_id, name, canonical_name, category_path, menge, einheit, preis, ai_guess, original_text)
+      VALUES
+        (${einkaufId}, ${name || canonical || 'Artikel'}, ${canonical}, ${category},
+         ${menge}, ${einheit}, ${preis}, ${canonical}, ${'manuell hinzugefügt'})
+      RETURNING id
+    `;
+    return { ok: true, id: row.id };
+  });
+
   app.patch('/api/articles/:id', async (req, reply) => {
     const id = parseInt((req.params as { id: string }).id, 10);
     if (!id) return reply.code(400).send({ error: 'invalid id' });

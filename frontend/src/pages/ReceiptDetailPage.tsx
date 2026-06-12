@@ -2,11 +2,12 @@ import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, Pencil, Trash2, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, Plus } from 'lucide-react';
 import { api } from '../api/client';
 import type { Artikel, ReceiptDetail } from '../api/types';
 import { Card, Spinner, Badge, Modal, Input, Label, Button } from '../components/ui';
 import { ArticleEditModal } from '../components/ArticleEditModal';
+import { AddArticleModal } from '../components/AddArticleModal';
 import { ConsumerDots } from '../components/ConsumerChips';
 import { CanonicalIcon } from '../components/IconPicker';
 import { eur, fmtDate } from '../lib/utils';
@@ -19,6 +20,7 @@ export function ReceiptDetailPage() {
   const [editing, setEditing] = useState<Artikel | null>(null);
   const [editReceipt, setEditReceipt] = useState(false);
   const [imageOpen, setImageOpen] = useState(false);
+  const [adding, setAdding] = useState(false);
 
   const deleteReceipt = useMutation({
     mutationFn: () => api(`/api/receipts/${id}`, { method: 'DELETE' }),
@@ -27,6 +29,16 @@ export function ReceiptDetailPage() {
       void qc.invalidateQueries({ queryKey: ['stores'] });
       navigate('/receipts');
     },
+  });
+
+  const reocr = useMutation({
+    mutationFn: () => api<{ items: number; confidence: number }>(`/api/receipts/${id}/reocr`, { method: 'POST' }),
+    onSuccess: (res) => {
+      void qc.invalidateQueries({ queryKey: ['receipt', id] });
+      void qc.invalidateQueries({ queryKey: ['receipts'] });
+      alert(t('receiptDetail.reocrDone', { count: res.items, confidence: Math.round(res.confidence * 100) }));
+    },
+    onError: (err: Error) => alert(`OCR fehlgeschlagen: ${err.message}`),
   });
 
   const { data, isLoading } = useQuery({
@@ -60,6 +72,14 @@ export function ReceiptDetailPage() {
             {fmtDate(data.datum, i18n.language)} · <span className="tabular font-semibold text-emerald-600 dark:text-emerald-500">{eur(data.gesamt_betrag)}</span>
           </div>
         </div>
+        <button
+          onClick={() => { if (confirm(t('receiptDetail.reocrConfirm'))) reocr.mutate(); }}
+          disabled={reocr.isPending || !data.bild_pfad}
+          className="shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 disabled:opacity-30 dark:hover:bg-zinc-800"
+          title={t('receiptDetail.reocr')}
+        >
+          <ScanLine size={18} className={reocr.isPending ? 'animate-pulse' : ''} />
+        </button>
         <button
           onClick={() => setEditReceipt(true)}
           className="shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
@@ -132,8 +152,22 @@ export function ReceiptDetailPage() {
               <div className="tabular shrink-0 font-semibold">{eur(a.preis)}</div>
             </Card>
           ))}
+          <button
+            type="button"
+            onClick={() => setAdding(true)}
+            className="flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-zinc-300 px-3 py-2 text-sm text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-emerald-500 dark:hover:text-emerald-400"
+          >
+            <Plus size={16} /> {t('receiptDetail.addArticle')}
+          </button>
         </div>
       </div>
+
+      <AddArticleModal
+        einkaufId={data.id}
+        open={adding}
+        onClose={() => setAdding(false)}
+        invalidateKeys={[['receipt', id], ['receipts']]}
+      />
 
       {/* Fullscreen image */}
       {imageOpen && data.bild_pfad && (

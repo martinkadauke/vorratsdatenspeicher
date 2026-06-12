@@ -56,7 +56,11 @@
     "mismatch": "Sum of items doesn't match receipt total",
     "mismatchHint": "A line is missing, duplicated, or has the wrong price",
     "sumLabel": "Σ items:",
-    "printedLabel": "· receipt:"
+    "printedLabel": "· receipt:",
+    "reocr": "Re-run OCR",
+    "reocrConfirm": "Re-analyze receipt photo? All current items will be replaced.",
+    "reocrDone": "OCR done: {{count}} items · confidence {{confidence}}%",
+    "addArticle": "Add item"
   },
   "article": {
     "edit": "Edit item",
@@ -194,6 +198,7 @@
     "taskChurnerStage2": "Churner Stage 2 — Web Lookup",
     "deepseekUrl": "DeepSeek URL",
     "deepseekApiKey": "DeepSeek API key",
+    "anthropicApiKey": "Anthropic API key (Vision OCR)",
     "churnerEnabled": "Nightly churner enabled",
     "ollamaUrl": "Ollama URL",
     "ollamaModel": "Model",
