@@ -51,6 +51,8 @@
     "date": "Datum",
     "store": "Laden",
     "total": "Gesamtbetrag",
+    "konto": "Konto",
+    "quelle": "Quelle",
     "delete": "Beleg löschen",
     "deleteConfirm": "Diesen Beleg mit allen Artikeln wirklich löschen?"
   },

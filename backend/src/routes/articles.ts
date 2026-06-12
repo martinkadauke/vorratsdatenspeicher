@@ -75,6 +75,41 @@ export function articleRoutes(app: FastifyInstance): void {
     return { ok: true };
   });
 
+  /** Apply a canonical name (and optionally category) to every artikel that
+   *  shares THIS one's OCR identity — same original_text / ai_guess / name.
+   *  This is what "Alle mit diesem Namen" means when the siblings don't yet
+   *  carry the canonical name (they only match on raw OCR text). */
+  app.post('/api/articles/:id/apply-canonical', async (req, reply) => {
+    const id = parseInt((req.params as { id: string }).id, 10);
+    if (!id) return reply.code(400).send({ error: 'invalid id' });
+    if (!await guardArtikel(req, reply, id)) return;
+    const { canonical_name, category_path } = (req.body ?? {}) as { canonical_name?: string; category_path?: string | null };
+    if (!canonical_name) return reply.code(400).send({ error: 'canonical_name required' });
+
+    const [src] = await sql`SELECT original_text, ai_guess, name FROM artikel WHERE id = ${id}`;
+    if (!src) return reply.code(404).send({ error: 'not found' });
+    const ot = (src.original_text as string | null)?.trim() || null;
+    const ag = (src.ai_guess as string | null)?.trim() || null;
+    const nm = (src.name as string | null)?.trim() || null;
+
+    // Match siblings by the same raw OCR line (most reliable), or ai_guess,
+    // or name. Scoped to accounts the caller can see.
+    const idMatch = sql`(
+      ${ot ? sql`a.original_text = ${ot}` : sql`FALSE`}
+      OR ${ag ? sql`a.ai_guess = ${ag}` : sql`FALSE`}
+      OR ${nm ? sql`a.name = ${nm}` : sql`FALSE`}
+    )`;
+    const setCat = category_path !== undefined ? sql`, category_path = ${category_path}` : sql``;
+    const rows = await sql`
+      UPDATE artikel a SET canonical_name = ${canonical_name} ${setCat}
+      FROM einkauf e
+      WHERE a.einkauf_id = e.id AND ${idMatch}
+        ${kontoScope(req.user, sql`e.konto_id`)}
+      RETURNING a.id
+    `;
+    return { ok: true, updated: rows.length };
+  });
+
   app.put('/api/articles/:id/consumers', async (req, reply) => {
     const id = parseInt((req.params as { id: string }).id, 10);
     if (!id) return reply.code(400).send({ error: 'invalid id' });

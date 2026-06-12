@@ -97,9 +97,8 @@ export function ArticleEditModal({ artikel, open, onClose, invalidateKeys }: {
   const save = useMutation({
     mutationFn: async () => {
       if (!artikel) return;
-      const oldCanonical = artikel.canonical_name;
 
-      // Per-artikel fields always patch this one row
+      // Per-artikel-only fields (qty/unit/price) always patch just this row.
       await api(`/api/articles/${artikel.id}`, {
         method: 'PATCH',
         body: {
@@ -112,10 +111,12 @@ export function ArticleEditModal({ artikel, open, onClose, invalidateKeys }: {
       });
 
       if (applyAll && canonical) {
-        // Cascade category to every artikel sharing the (possibly new) canonical name
-        await api(`/api/canonical/${encodeURIComponent(canonical)}`, {
-          method: 'PUT',
-          body: { category_path: category },
+        // Propagate canonical + category to all siblings that share this item's
+        // OCR identity (original_text / ai_guess / name) — handles the case
+        // where the other items don't carry the canonical name yet.
+        await api(`/api/articles/${artikel.id}/apply-canonical`, {
+          method: 'POST',
+          body: { canonical_name: canonical, category_path: category },
         });
         await api(`/api/canonical/${encodeURIComponent(canonical)}/consumers`, {
           method: 'PUT',
@@ -127,8 +128,6 @@ export function ArticleEditModal({ artikel, open, onClose, invalidateKeys }: {
           body: { members: consumers },
         });
       }
-
-      void oldCanonical;
     },
     onSuccess: () => { invalidate(); onClose(); },
   });
@@ -143,17 +142,9 @@ export function ArticleEditModal({ artikel, open, onClose, invalidateKeys }: {
 
   if (!artikel) return null;
 
-  // Enter (not in a textarea) saves.
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && (e.target as HTMLElement).tagName !== 'TEXTAREA' && !save.isPending) {
-      e.preventDefault();
-      save.mutate();
-    }
-  };
-
   return (
     <Modal open={open} onClose={onClose} title={t('article.edit')}>
-      <div className="flex flex-col gap-4" onKeyDown={onKeyDown}>
+      <form className="flex flex-col gap-4" onSubmit={e => { e.preventDefault(); if (!save.isPending) save.mutate(); }}>
         {artikel.original_text && (
           <div>
             <Label>{t('article.originalText')}</Label>
@@ -245,17 +236,18 @@ export function ArticleEditModal({ artikel, open, onClose, invalidateKeys }: {
 
         <div className="flex items-center justify-between gap-2 pt-1">
           <Button
+            type="button"
             variant="danger"
             onClick={async () => { if (await confirm({ title: t('article.delete'), message: t('article.deleteConfirm'), confirmLabel: t('common.delete'), cancelLabel: t('common.cancel'), danger: true })) remove.mutate(); }}
           >
             {t('article.delete')}
           </Button>
           <div className="flex gap-2">
-            <Button variant="secondary" onClick={onClose}>{t('article.cancel')}</Button>
-            <Button onClick={() => save.mutate()} disabled={save.isPending}>{t('article.save')}</Button>
+            <Button type="button" variant="secondary" onClick={onClose}>{t('article.cancel')}</Button>
+            <Button type="submit" disabled={save.isPending}>{t('article.save')}</Button>
           </div>
         </div>
-      </div>
+      </form>
 
       {canonical.trim() && (
         <IconPicker

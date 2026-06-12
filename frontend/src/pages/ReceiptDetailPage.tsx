@@ -6,7 +6,7 @@ import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, Plus, ChevronLeft, 
 import { TransformWrapper, TransformComponent, useControls } from 'react-zoom-pan-pinch';
 import { api } from '../api/client';
 import type { Artikel, ReceiptDetail } from '../api/types';
-import { Spinner, Modal, Input, Label, Button, ProgressBar } from '../components/ui';
+import { Spinner, Modal, Input, Label, Button, ProgressBar, Select } from '../components/ui';
 import { ArticleEditModal } from '../components/ArticleEditModal';
 import { AddArticleModal } from '../components/AddArticleModal';
 import { SortableArticleList } from '../components/SortableArticleList';
@@ -340,36 +340,42 @@ function ReceiptEditModal({ receipt, open, onClose }: { receipt: ReceiptDetail; 
   const [datum, setDatum] = useState((receipt.datum ?? '').slice(0, 10));
   const [laden, setLaden] = useState(receipt.roh_ladenname ?? '');
   const [gesamt, setGesamt] = useState(receipt.gesamt_betrag !== null ? String(receipt.gesamt_betrag) : '');
+  const [kontoId, setKontoId] = useState<number | ''>(receipt.konto_id ?? '');
+  const [quelle, setQuelle] = useState(receipt.quelle ?? 'zettel');
+
+  const { data: konten } = useQuery({
+    queryKey: ['konten'],
+    queryFn: () => api<{ id: number; name: string }[]>('/api/konten'),
+    enabled: open,
+  });
 
   useEffect(() => {
     if (open) {
       setDatum((receipt.datum ?? '').slice(0, 10));
       setLaden(receipt.roh_ladenname ?? '');
       setGesamt(receipt.gesamt_betrag !== null ? String(receipt.gesamt_betrag) : '');
+      setKontoId(receipt.konto_id ?? '');
+      setQuelle(receipt.quelle ?? 'zettel');
     }
   }, [open, receipt]);
 
   const save = useMutation({
     mutationFn: () => api(`/api/receipts/${receipt.id}`, {
       method: 'PATCH',
-      body: { datum, roh_ladenname: laden, gesamt_betrag: gesamt || null },
+      body: { datum, roh_ladenname: laden, gesamt_betrag: gesamt || null, konto_id: kontoId || null, quelle },
     }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['receipt', String(receipt.id)] });
       void qc.invalidateQueries({ queryKey: ['receipts'] });
       void qc.invalidateQueries({ queryKey: ['stores'] });
+      void qc.invalidateQueries({ queryKey: ['review-progress'] });
       onClose();
     },
   });
 
-  // Enter anywhere in the form saves (unless still loading / invalid).
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && datum && !save.isPending) { e.preventDefault(); save.mutate(); }
-  };
-
   return (
     <Modal open={open} onClose={onClose} title={t('receiptEdit.title')}>
-      <div className="flex flex-col gap-4" onKeyDown={onKeyDown}>
+      <form className="flex flex-col gap-4" onSubmit={e => { e.preventDefault(); if (datum && !save.isPending) save.mutate(); }}>
         <div>
           <Label>{t('receiptEdit.date')}</Label>
           <Input autoFocus type="date" value={datum} onChange={e => setDatum(e.target.value)} />
@@ -378,16 +384,32 @@ function ReceiptEditModal({ receipt, open, onClose }: { receipt: ReceiptDetail; 
           <Label>{t('receiptEdit.store')}</Label>
           <Input value={laden} onChange={e => setLaden(e.target.value)} />
         </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label>{t('receiptEdit.total')} (€)</Label>
+            <Input inputMode="decimal" value={gesamt} onChange={e => setGesamt(e.target.value)} />
+          </div>
+          <div>
+            <Label>{t('receiptEdit.quelle')}</Label>
+            <Select value={quelle} onChange={e => setQuelle(e.target.value)}>
+              <option value="zettel">{t('quelle.zettel')}</option>
+              <option value="bar">{t('quelle.bar')}</option>
+              <option value="email">{t('quelle.email')}</option>
+            </Select>
+          </div>
+        </div>
         <div>
-          <Label>{t('receiptEdit.total')} (€)</Label>
-          <Input inputMode="decimal" value={gesamt} onChange={e => setGesamt(e.target.value)} />
+          <Label>{t('receiptEdit.konto')}</Label>
+          <Select value={kontoId} onChange={e => setKontoId(e.target.value ? parseInt(e.target.value, 10) : '')}>
+            {konten?.map(k => <option key={k.id} value={k.id}>{k.name}</option>)}
+          </Select>
         </div>
         {save.isError && <p className="text-sm text-red-500">{(save.error as Error).message}</p>}
         <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose}>{t('common.cancel')}</Button>
-          <Button onClick={() => save.mutate()} disabled={!datum || save.isPending}>{t('common.save')}</Button>
+          <Button type="button" variant="secondary" onClick={onClose}>{t('common.cancel')}</Button>
+          <Button type="submit" disabled={!datum || save.isPending}>{t('common.save')}</Button>
         </div>
-      </div>
+      </form>
     </Modal>
   );
 }

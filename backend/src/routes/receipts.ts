@@ -72,6 +72,18 @@ export function receiptRoutes(app: FastifyInstance): void {
     if ('datum' in body && typeof body.datum === 'string') updates.datum = body.datum;
     if ('roh_ladenname' in body) updates.roh_ladenname = body.roh_ladenname;
     if ('geprueft' in body) updates.geprueft = Boolean(body.geprueft);
+    if ('quelle' in body && typeof body.quelle === 'string') updates.quelle = body.quelle;
+    if ('konto_id' in body) {
+      const v = body.konto_id;
+      if (v === null || v === '') updates.konto_id = null;
+      else {
+        const n = parseInt(String(v), 10);
+        if (!Number.isFinite(n)) return reply.code(400).send({ error: 'invalid konto_id' });
+        // Only allow moving to an account the caller can see.
+        if (!canSeeKonto(req.user, n)) return reply.code(403).send({ error: 'forbidden konto' });
+        updates.konto_id = n;
+      }
+    }
     if ('gesamt_betrag' in body) {
       const v = body.gesamt_betrag;
       if (v === null || v === '') updates.gesamt_betrag = null;
