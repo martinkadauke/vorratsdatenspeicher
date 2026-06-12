@@ -179,16 +179,31 @@ export function receiptRoutes(app: FastifyInstance): void {
     if (!cur) return reply.code(404).send({ error: 'not found' });
     const datum = cur.datum as string;
     const curId = cur.id as number;
+
+    // Respect the same filters the list used, so prev/next stay within the
+    // visible (filtered) set the user is navigating.
+    const fq = req.query as { q?: string; store?: string };
+    const search = (fq.q ?? '').trim();
+    const like = `%${search}%`;
+    const storeLike = fq.store ? `%${fq.store}%` : null;
+    const filter = sql`
+      ${search ? sql`AND (roh_ladenname ILIKE ${like} OR EXISTS (
+        SELECT 1 FROM artikel ax WHERE ax.einkauf_id = einkauf.id
+        AND (ax.name ILIKE ${like} OR ax.canonical_name ILIKE ${like} OR ax.ai_guess ILIKE ${like})
+      ))` : sql``}
+      ${storeLike ? sql`AND roh_ladenname ILIKE ${storeLike}` : sql``}
+    `;
+
     // prev = newer (one position earlier in the (datum DESC, id DESC) list)
     const [prev] = await sql`
       SELECT id FROM einkauf
-      WHERE datum > ${datum}::date OR (datum = ${datum}::date AND id > ${curId})
+      WHERE (datum > ${datum}::date OR (datum = ${datum}::date AND id > ${curId})) ${filter}
       ORDER BY datum ASC, id ASC LIMIT 1
     `;
     // next = older (one position later in the list)
     const [next] = await sql`
       SELECT id FROM einkauf
-      WHERE datum < ${datum}::date OR (datum = ${datum}::date AND id < ${curId})
+      WHERE (datum < ${datum}::date OR (datum = ${datum}::date AND id < ${curId})) ${filter}
       ORDER BY datum DESC, id DESC LIMIT 1
     `;
     return { prev_id: prev?.id ?? null, next_id: next?.id ?? null };

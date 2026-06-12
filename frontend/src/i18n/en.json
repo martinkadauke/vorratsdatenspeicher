@@ -65,6 +65,8 @@
     "reocrDone": "OCR done: {{count}} items · confidence {{confidence}}%",
     "reocrFailed": "OCR failed",
     "rotateFailed": "Rotation failed",
+    "panOn": "Pan on",
+    "panOff": "Pan",
     "addArticle": "Add item",
     "prev": "Previous receipt",
     "next": "Next receipt",
@@ -324,6 +326,9 @@
     "add": "Add",
     "loading": "Loading…",
     "error": "Error",
-    "confirm": "Are you sure?"
+    "confirm": "Are you sure?",
+    "clear": "Clear",
+    "scrollLeft": "Scroll left",
+    "scrollRight": "Scroll right"
   }
 }

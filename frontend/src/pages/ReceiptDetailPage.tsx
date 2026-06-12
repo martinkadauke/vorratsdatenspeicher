@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, Plus, ChevronLeft, ChevronRight, RotateCw, CheckCircle2, Circle } from 'lucide-react';
+import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, Plus, ChevronLeft, ChevronRight, RotateCw, CheckCircle2, Circle, Hand } from 'lucide-react';
 import { TransformWrapper, TransformComponent, useControls } from 'react-zoom-pan-pinch';
 import { api } from '../api/client';
 import type { Artikel, ReceiptDetail } from '../api/types';
@@ -18,7 +18,11 @@ export function ReceiptDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
   const qc = useQueryClient();
+  // Filter context (?store=&q=) carried from the list so prev/next stay
+  // within the filtered set.
+  const filterQs = location.search;
   const [editing, setEditing] = useState<Artikel | null>(null);
   const [editReceipt, setEditReceipt] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -65,13 +69,15 @@ export function ReceiptDetailPage() {
   });
 
   const { data: neighbors } = useQuery({
-    queryKey: ['receipt-neighbors', id],
-    queryFn: () => api<{ prev_id: number | null; next_id: number | null }>(`/api/receipts/${id}/neighbors`),
+    queryKey: ['receipt-neighbors', id, filterQs],
+    queryFn: () => api<{ prev_id: number | null; next_id: number | null }>(
+      `/api/receipts/${id}/neighbors${filterQs}`,
+    ),
     enabled: !!id,
   });
 
-  const goPrev = () => neighbors?.prev_id && navigate(`/receipts/${neighbors.prev_id}`);
-  const goNext = () => neighbors?.next_id && navigate(`/receipts/${neighbors.next_id}`);
+  const goPrev = () => neighbors?.prev_id && navigate(`/receipts/${neighbors.prev_id}${filterQs}`);
+  const goNext = () => neighbors?.next_id && navigate(`/receipts/${neighbors.next_id}${filterQs}`);
 
   // Keyboard: ← / → arrow navigation, ignored when typing in a field or a modal is open
   useEffect(() => {
@@ -87,10 +93,12 @@ export function ReceiptDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [neighbors, editing, editReceipt, adding]);
 
-  // Touch: horizontal swipe (>60px, mostly horizontal) navigates
+  // Touch: horizontal swipe (>60px, mostly horizontal) navigates — but not
+  // when the gesture starts on the zoomable image (would fight panning).
   const touchStart = useRef<{ x: number; y: number } | null>(null);
   const onTouchStart = (e: React.TouchEvent) => {
     if (editing || editReceipt || adding) return;
+    if ((e.target as HTMLElement).closest('[data-zoom-container]')) { touchStart.current = null; return; }
     const t = e.touches[0];
     touchStart.current = { x: t.clientX, y: t.clientY };
   };
@@ -121,7 +129,7 @@ export function ReceiptDetailPage() {
   return (
     <div className="flex flex-col gap-4" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
       <div className="flex items-center gap-2 sm:gap-3">
-        <Link to="/receipts" className="shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
+        <Link to={`/receipts${filterQs}`} className="shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
           <ArrowLeft size={20} />
         </Link>
         <button
@@ -333,20 +341,43 @@ function ReceiptEditModal({ receipt, open, onClose }: { receipt: ReceiptDetail; 
   );
 }
 
-/** Pan + zoom (wheel / pinch / drag) in a fixed-size container so the
- *  surrounding layout (items list, sticky positioning) stays untouched. */
+/** Pan + zoom in a fixed-size container so the surrounding layout stays
+ *  untouched. On touch devices, single-finger panning is OFF by default so
+ *  the page scrolls freely when you drag over the image; tap the hand
+ *  button to activate panning. Pinch-to-zoom always works. On desktop the
+ *  mouse drag pans normally. */
 function ZoomableReceiptImage({ src }: { src: string }) {
+  const { t } = useTranslation();
+  const [isTouch] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches);
+  const [panEnabled, setPanEnabled] = useState(false);
+  const panningDisabled = isTouch && !panEnabled;
+
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900">
+    <div data-zoom-container className="relative overflow-hidden rounded-2xl border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900">
       <TransformWrapper
         initialScale={1}
         minScale={1}
         maxScale={6}
         wheel={{ step: 0.15 }}
         doubleClick={{ mode: 'reset' }}
-        panning={{ velocityDisabled: true }}
+        panning={{ velocityDisabled: true, disabled: panningDisabled }}
       >
         <ZoomResetButton />
+        {isTouch && (
+          <button
+            type="button"
+            onClick={() => setPanEnabled(v => !v)}
+            className={`absolute bottom-2 right-2 z-10 flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium backdrop-blur transition ${
+              panEnabled
+                ? 'bg-emerald-600 text-white'
+                : 'bg-black/40 text-white hover:bg-black/60'
+            }`}
+          >
+            <Hand size={13} />
+            {panEnabled ? t('receiptDetail.panOn') : t('receiptDetail.panOff')}
+          </button>
+        )}
         <TransformComponent
           wrapperClass="!w-full"
           contentClass="!w-full"

@@ -65,6 +65,8 @@
     "reocrDone": "OCR fertig: {{count}} Artikel · Konfidenz {{confidence}}%",
     "reocrFailed": "OCR fehlgeschlagen",
     "rotateFailed": "Drehen fehlgeschlagen",
+    "panOn": "Verschieben an",
+    "panOff": "Verschieben",
     "addArticle": "Artikel hinzufügen",
     "prev": "Vorheriger Beleg",
     "next": "Nächster Beleg",
@@ -324,6 +326,9 @@
     "add": "Hinzufügen",
     "loading": "Laden…",
     "error": "Fehler",
-    "confirm": "Wirklich?"
+    "confirm": "Wirklich?",
+    "clear": "Löschen",
+    "scrollLeft": "Nach links",
+    "scrollRight": "Nach rechts"
   }
 }

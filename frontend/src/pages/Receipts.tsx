@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useInfiniteQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Search, CheckCircle2, Rows3 } from 'lucide-react';
+import { Search, CheckCircle2, Rows3, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { api } from '../api/client';
 import type { Receipt } from '../api/types';
 import { Card, Input, Spinner, EmptyState } from '../components/ui';
@@ -40,6 +40,16 @@ export function Receipts() {
   useEffect(() => { localStorage.setItem(SIZE_KEY, String(sizeIdx)); }, [sizeIdx]);
   const size = SIZES[sizeIdx];
 
+  // Filter query string carried into the detail view so prev/next stay
+  // within the currently-filtered list.
+  const filterQs = useMemo(() => {
+    const p = new URLSearchParams();
+    if (storeFilter) p.set('store', storeFilter);
+    if (search.trim()) p.set('q', search.trim());
+    const s = p.toString();
+    return s ? `?${s}` : '';
+  }, [storeFilter, search]);
+
   const gridRef = useRef<HTMLDivElement>(null);
   const [cols, setCols] = useState(3);
   useEffect(() => {
@@ -60,6 +70,21 @@ export function Receipts() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params]);
 
+  // Horizontal store-chip scroller (desktop has no swipe → arrow buttons)
+  const chipsRef = useRef<HTMLDivElement>(null);
+  const [chipScroll, setChipScroll] = useState({ left: false, right: false });
+  const updateChipScroll = useCallback(() => {
+    const el = chipsRef.current;
+    if (!el) return;
+    setChipScroll({
+      left: el.scrollLeft > 4,
+      right: el.scrollLeft + el.clientWidth < el.scrollWidth - 4,
+    });
+  }, []);
+  const scrollChips = (dir: -1 | 1) => {
+    chipsRef.current?.scrollBy({ left: dir * 240, behavior: 'smooth' });
+  };
+
   const updateStoreFilter = (key: string | null) => {
     setStoreFilter(key);
     const next = new URLSearchParams(params);
@@ -72,6 +97,16 @@ export function Receipts() {
     queryFn: () => api<Store[]>('/api/stores'),
     staleTime: 60_000,
   });
+
+  // Recompute chip-scroll arrows once the chips render / on resize.
+  useEffect(() => {
+    updateChipScroll();
+    const el = chipsRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(updateChipScroll);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [stores, updateChipScroll]);
 
   const { data: progress } = useQuery({
     queryKey: ['review-progress'],
@@ -174,11 +209,20 @@ export function Receipts() {
         <div className="relative min-w-0 flex-1">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
           <Input
-            className="pl-9"
+            className="pl-9 pr-9"
             placeholder={t('receipts.search')}
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
+          {search && (
+            <button
+              onClick={() => setSearch('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800"
+              title={t('common.clear')}
+            >
+              <X size={15} />
+            </button>
+          )}
         </div>
         {/* card-size slider */}
         <div className="flex shrink-0 items-center gap-1.5 rounded-xl border border-zinc-200 px-2.5 py-1.5 dark:border-zinc-800" title={t('receipts.cardSize')}>
@@ -195,33 +239,57 @@ export function Receipts() {
       </div>
 
       {stores && stores.length > 1 && (
-        <div className="scrollbar-none -mx-1 flex gap-1.5 overflow-x-auto px-1">
-          <button
-            onClick={() => updateStoreFilter(null)}
-            className={cn(
-              'shrink-0 rounded-full border px-3 py-1 text-xs font-medium',
-              storeFilter === null
-                ? 'border-transparent bg-emerald-600 text-white'
-                : 'border-zinc-300 text-zinc-500 dark:border-zinc-700',
-            )}
-          >
-            {t('receipts.allStores')}
-          </button>
-          {stores.slice(0, 12).map(s => (
+        <div className="relative">
+          {chipScroll.left && (
             <button
-              key={s.key}
-              onClick={() => updateStoreFilter(storeFilter === s.key ? null : s.key)}
+              onClick={() => scrollChips(-1)}
+              className="absolute left-0 top-1/2 z-10 hidden -translate-y-1/2 rounded-full border border-zinc-200 bg-white/90 p-1 shadow-sm backdrop-blur hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900/90 dark:hover:bg-zinc-800 sm:block"
+              title={t('common.scrollLeft')}
+            >
+              <ChevronLeft size={16} />
+            </button>
+          )}
+          <div
+            ref={chipsRef}
+            onScroll={updateChipScroll}
+            className="scrollbar-none -mx-1 flex gap-1.5 overflow-x-auto px-1"
+          >
+            <button
+              onClick={() => updateStoreFilter(null)}
               className={cn(
-                'inline-flex shrink-0 items-center gap-1.5 rounded-full border py-1 pl-1 pr-3 text-xs font-medium',
-                storeFilter === s.key
+                'shrink-0 rounded-full border px-3 py-1 text-xs font-medium',
+                storeFilter === null
                   ? 'border-transparent bg-emerald-600 text-white'
                   : 'border-zinc-300 text-zinc-500 dark:border-zinc-700',
               )}
             >
-              <StoreIcon storeKey={s.key} size={18} fallback={s.display[0]?.toUpperCase()} />
-              {s.display} <span className="opacity-60">·{s.receipts}</span>
+              {t('receipts.allStores')}
             </button>
-          ))}
+            {stores.map(s => (
+              <button
+                key={s.key}
+                onClick={() => updateStoreFilter(storeFilter === s.key ? null : s.key)}
+                className={cn(
+                  'inline-flex shrink-0 items-center gap-1.5 rounded-full border py-1 pl-1 pr-3 text-xs font-medium',
+                  storeFilter === s.key
+                    ? 'border-transparent bg-emerald-600 text-white'
+                    : 'border-zinc-300 text-zinc-500 dark:border-zinc-700',
+                )}
+              >
+                <StoreIcon storeKey={s.key} size={18} fallback={s.display[0]?.toUpperCase()} />
+                {s.display} <span className="opacity-60">·{s.receipts}</span>
+              </button>
+            ))}
+          </div>
+          {chipScroll.right && (
+            <button
+              onClick={() => scrollChips(1)}
+              className="absolute right-0 top-1/2 z-10 hidden -translate-y-1/2 rounded-full border border-zinc-200 bg-white/90 p-1 shadow-sm backdrop-blur hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900/90 dark:hover:bg-zinc-800 sm:block"
+              title={t('common.scrollRight')}
+            >
+              <ChevronRight size={16} />
+            </button>
+          )}
         </div>
       )}
 
@@ -247,7 +315,7 @@ export function Receipts() {
                     </div>
                   </div>
                 )}
-                <Card onClick={() => navigate(`/receipts/${r.id}`)} className="flex min-w-0 items-center gap-3 p-3">
+                <Card onClick={() => navigate(`/receipts/${r.id}${filterQs}`)} className="flex min-w-0 items-center gap-3 p-3">
                   {r.bild_pfad ? (
                     <img
                       src={r.bild_pfad}
