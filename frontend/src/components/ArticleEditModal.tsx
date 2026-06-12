@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
+import { ImageIcon } from 'lucide-react';
 import { api } from '../api/client';
 import type { Artikel } from '../api/types';
 import { Button, Input, Label, Modal } from './ui';
 import { CategoryPicker } from './CategoryPicker';
 import { ConsumerChips } from './ConsumerChips';
+import { CanonicalIcon, IconPicker } from './IconPicker';
 
 /** Parse "12", "1,5", "0.99" into number; null if not parseable. */
 const num = (s: string): number | null => {
@@ -46,6 +48,7 @@ export function ArticleEditModal({ artikel, open, onClose, invalidateKeys }: {
   const [exclusive, setExclusive] = useState(false);
   const [applyAll, setApplyAll] = useState(true);
   const [nameOptions, setNameOptions] = useState<string[]>([]);
+  const [iconPickerOpen, setIconPickerOpen] = useState(false);
 
   useEffect(() => {
     if (!artikel) return;
@@ -160,6 +163,23 @@ export function ArticleEditModal({ artikel, open, onClose, invalidateKeys }: {
           </datalist>
         </div>
 
+        {canonical.trim() && (
+          <button
+            type="button"
+            onClick={() => setIconPickerOpen(true)}
+            className="group flex items-center gap-3 rounded-xl border border-dashed border-zinc-300 p-2.5 text-left hover:border-emerald-500 dark:border-zinc-700"
+          >
+            <CanonicalIcon name={canonical.trim()} size={40} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 text-sm font-medium">
+                <ImageIcon size={14} className="text-zinc-400 group-hover:text-emerald-500" />
+                {t('names.changeIcon')}
+              </div>
+              <div className="text-xs text-zinc-400">{t('names.changeIconHint')}</div>
+            </div>
+          </button>
+        )}
+
         <div>
           <Label>{t('article.category')}</Label>
           <CategoryPicker value={category} onChange={setCategory} />
@@ -227,6 +247,14 @@ export function ArticleEditModal({ artikel, open, onClose, invalidateKeys }: {
           </div>
         </div>
       </div>
+
+      {canonical.trim() && (
+        <IconPicker
+          canonicalName={canonical.trim()}
+          open={iconPickerOpen}
+          onClose={() => setIconPickerOpen(false)}
+        />
+      )}
     </Modal>
   );
 }

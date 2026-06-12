@@ -43,7 +43,8 @@
     "empty": "Keine Belege gefunden",
     "loadMore": "Mehr laden",
     "allStores": "Alle Läden",
-    "reviewProgress": "Belege geprüft"
+    "reviewProgress": "Belege geprüft",
+    "cardSize": "Kartengröße"
   },
   "receiptEdit": {
     "title": "Beleg bearbeiten",
