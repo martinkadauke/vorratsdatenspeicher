@@ -86,7 +86,7 @@ export async function ocrFromImage(source: string): Promise<OcrResult> {
     },
     body: JSON.stringify({
       model,
-      max_tokens: 4096,
+      max_tokens: 8192, // long receipts (many line items) truncated the JSON at 4096
       system: VISION_SYSTEM,
       messages: [{
         role: 'user',
