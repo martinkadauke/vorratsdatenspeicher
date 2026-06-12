@@ -9,7 +9,7 @@ import { Card, Button, Input, Label, Select, Switch, Spinner, Badge, ProgressBar
 import { useFamily } from '../components/ConsumerChips';
 import { useAuth } from '../context/auth';
 import { confirm } from '../components/Confirm';
-import { cronToHuman, downloadFile, fmtBytes } from '../lib/utils';
+import { cn, cronToHuman, downloadFile, fmtBytes } from '../lib/utils';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -46,7 +46,7 @@ type Provider = 'ollama' | 'deepseek' | 'anthropic';
 
 function HealthBadge({ provider, label }: { provider: Provider | 'searxng'; label: string }) {
   const { t } = useTranslation();
-  const { data } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: [`${provider}-health`],
     queryFn: () => provider === 'searxng'
       ? api<{ ok: boolean; error?: string }>('/api/searxng/health')
@@ -54,14 +54,18 @@ function HealthBadge({ provider, label }: { provider: Provider | 'searxng'; labe
     retry: false,
     refetchInterval: 60_000,
   });
-  const ok = data?.ok;
+  // three states: unknown (loading → neutral grey), reachable (green), down (red)
+  const state = isLoading || !data ? 'unknown' : data.ok ? 'ok' : 'down';
+  const tone = {
+    unknown: 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400',
+    ok: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300',
+    down: 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300',
+  }[state];
+  const dot = { unknown: 'bg-zinc-400', ok: 'bg-emerald-500', down: 'bg-red-500' }[state];
   return (
-    <Badge
-      title={data?.error ?? ''}
-      className={ok ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400'
-                    : 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400'}
-    >
-      {label}: {ok ? t('admin.healthy') : t('admin.unhealthy')}
+    <Badge title={data?.error ?? ''} className={tone}>
+      <span className={cn('h-1.5 w-1.5 rounded-full', dot)} />
+      {label}: {state === 'unknown' ? '…' : state === 'ok' ? t('admin.healthy') : t('admin.unhealthy')}
     </Badge>
   );
 }

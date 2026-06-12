@@ -1,8 +1,12 @@
 import clsx, { type ClassValue } from 'clsx';
+import { twMerge } from 'tailwind-merge';
 import { getToken } from '../api/client';
 
+/** Compose class names, resolving conflicting Tailwind utilities so a later
+ *  override (e.g. a passed `bg-emerald-100`) beats an earlier base
+ *  (`bg-zinc-100`) instead of both coexisting. */
 export function cn(...inputs: ClassValue[]): string {
-  return clsx(...inputs);
+  return twMerge(clsx(...inputs));
 }
 
 /** Trigger a browser download of an authenticated endpoint (e.g. a CSV). */
