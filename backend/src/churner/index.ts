@@ -195,6 +195,7 @@ async function churnWork(eventId: number): Promise<void> {
         canonical = stage1.value;
       }
 
+      canonical = canonical?.trim() || null;
       if (!canonical) { skipped++; continue; }
 
       // Snap near-duplicates to existing canonical names

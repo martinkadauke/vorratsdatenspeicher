@@ -13,6 +13,21 @@ function normalizeStore(raw: string): string {
     .split(/\s+/)[0] ?? '';
 }
 
+/** Longest common leading word sequence across branch names → chain display.
+ *  Single branch returns its full name. */
+function chainDisplay(names: string[]): string {
+  if (names.length === 1) return names[0].replace(/\s+(gmbh|kg|ag)\b.*/i, '').trim();
+  const wordLists = names.map(n => n.replace(/\s+(gmbh|kg|ag)\b.*/i, '').trim().split(/\s+/));
+  const first = wordLists[0];
+  const common: string[] = [];
+  for (let i = 0; i < first.length; i++) {
+    const w = first[i];
+    if (wordLists.every(wl => (wl[i] ?? '').toLowerCase() === w.toLowerCase())) common.push(w);
+    else break;
+  }
+  return common.length ? common.join(' ') : first[0];
+}
+
 export function storeRoutes(app: FastifyInstance): void {
   /** List all stores ever seen with receipt count + total spend. */
   app.get('/api/stores', async (req) => {
@@ -27,23 +42,30 @@ export function storeRoutes(app: FastifyInstance): void {
     // Group by normalized name in JS so "LIDL" + "Lidl GmbH" merge.
     // Each distinct roh_ladenname becomes a "filiale" (branch) under the chain.
     interface Filiale { name: string; receipts: number; total: number }
-    const grouped = new Map<string, { display: string; receipts: number; total: number; filialen: Filiale[] }>();
+    const grouped = new Map<string, { receipts: number; total: number; filialen: Filiale[] }>();
     for (const r of rows) {
       const key = normalizeStore(r.roh_ladenname as string);
       if (!key) continue;
-      const display = String(r.roh_ladenname).replace(/\s+(gmbh|kg|ag).*/i, '');
-      const e = grouped.get(key) ?? { display, receipts: 0, total: 0, filialen: [] };
+      const e = grouped.get(key) ?? { receipts: 0, total: 0, filialen: [] };
       e.receipts += r.receipts;
       e.total += Number(r.total ?? 0);
       e.filialen.push({ name: r.roh_ladenname as string, receipts: r.receipts, total: Number(r.total ?? 0) });
       grouped.set(key, e);
     }
     return [...grouped.entries()]
-      .map(([key, v]) => ({
-        key, display: v.display, receipts: v.receipts, total: v.total,
-        filialen: v.filialen.sort((a, b) => b.receipts - a.receipts),
-        raw: v.filialen.map(f => f.name), // kept for the rename/merge modal
-      }))
+      .map(([key, v]) => {
+        const filialen = v.filialen.sort((a, b) => b.receipts - a.receipts);
+        return {
+          key,
+          // Chain display = the common leading word(s) across all branches
+          // ("LIDL Tübingen" + "Lidl Gomaringen" → "LIDL"). A single branch
+          // keeps its full name (don't truncate "Café Bäcker Mayer").
+          display: chainDisplay(filialen.map(f => f.name)),
+          receipts: v.receipts, total: v.total,
+          filialen,
+          raw: filialen.map(f => f.name), // kept for the rename/merge modal
+        };
+      })
       .sort((a, b) => b.receipts - a.receipts);
   });
 

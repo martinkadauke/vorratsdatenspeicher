@@ -60,6 +60,10 @@ export function articleRoutes(app: FastifyInstance): void {
       if (!(key in body)) continue;
       updates[key] = DECIMAL_FIELDS.has(key) ? coerceDecimal(body[key]) : body[key];
     }
+    // Canonical names must be trimmed so "Bananen" and "Bananen " don't split.
+    if (typeof updates.canonical_name === 'string') {
+      updates.canonical_name = (updates.canonical_name as string).trim() || null;
+    }
     if (!Object.keys(updates).length) return reply.code(400).send({ error: 'no patchable fields' });
 
     const rows = await sql`UPDATE artikel SET ${sql(updates)} WHERE id = ${id} RETURNING id`;
@@ -83,7 +87,9 @@ export function articleRoutes(app: FastifyInstance): void {
     const id = parseInt((req.params as { id: string }).id, 10);
     if (!id) return reply.code(400).send({ error: 'invalid id' });
     if (!await guardArtikel(req, reply, id)) return;
-    const { canonical_name, category_path } = (req.body ?? {}) as { canonical_name?: string; category_path?: string | null };
+    const raw = (req.body ?? {}) as { canonical_name?: string; category_path?: string | null };
+    const canonical_name = raw.canonical_name?.trim();
+    const category_path = raw.category_path;
     if (!canonical_name) return reply.code(400).send({ error: 'canonical_name required' });
 
     const [src] = await sql`SELECT original_text, ai_guess, name FROM artikel WHERE id = ${id}`;

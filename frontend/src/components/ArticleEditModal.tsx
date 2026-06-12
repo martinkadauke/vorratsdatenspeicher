@@ -97,12 +97,13 @@ export function ArticleEditModal({ artikel, open, onClose, invalidateKeys }: {
   const save = useMutation({
     mutationFn: async () => {
       if (!artikel) return;
+      const canonicalTrimmed = canonical.trim();
 
       // Per-artikel-only fields (qty/unit/price) always patch just this row.
       await api(`/api/articles/${artikel.id}`, {
         method: 'PATCH',
         body: {
-          canonical_name: canonical || null,
+          canonical_name: canonicalTrimmed || null,
           menge: menge === '' ? null : menge,
           einheit: einheit || null,
           preis: preis === '' ? null : preis,
@@ -110,15 +111,15 @@ export function ArticleEditModal({ artikel, open, onClose, invalidateKeys }: {
         },
       });
 
-      if (applyAll && canonical) {
+      if (applyAll && canonicalTrimmed) {
         // Propagate canonical + category to all siblings that share this item's
         // OCR identity (original_text / ai_guess / name) — handles the case
         // where the other items don't carry the canonical name yet.
         await api(`/api/articles/${artikel.id}/apply-canonical`, {
           method: 'POST',
-          body: { canonical_name: canonical, category_path: category },
+          body: { canonical_name: canonicalTrimmed, category_path: category },
         });
-        await api(`/api/canonical/${encodeURIComponent(canonical)}/consumers`, {
+        await api(`/api/canonical/${encodeURIComponent(canonicalTrimmed)}/consumers`, {
           method: 'PUT',
           body: { members: consumers, exclusive },
         });

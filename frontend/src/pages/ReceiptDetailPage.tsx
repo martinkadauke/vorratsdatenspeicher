@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, Plus, ChevronLeft, ChevronRight, RotateCw, CheckCircle2, Circle, Hand, Wallet, X, Search } from 'lucide-react';
 import { TransformWrapper, TransformComponent, useControls } from 'react-zoom-pan-pinch';
 import { api } from '../api/client';
-import type { Artikel, ReceiptDetail } from '../api/types';
+import type { Artikel, Receipt, ReceiptDetail } from '../api/types';
 import { Spinner, Modal, Input, Label, Button, ProgressBar, Select } from '../components/ui';
 import { ArticleEditModal } from '../components/ArticleEditModal';
 import { AddArticleModal } from '../components/AddArticleModal';
@@ -43,8 +43,17 @@ export function ReceiptDetailPage() {
   const deleteReceipt = useMutation({
     mutationFn: () => api(`/api/receipts/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
+      const delId = Number(id);
+      // Optimistically drop it from every cached receipts list so it can't
+      // flash back in before the refetch lands.
+      qc.setQueriesData<Receipt[][] | { pages: Receipt[][] } | undefined>({ queryKey: ['receipts'] }, (old) => {
+        if (!old || !('pages' in old)) return old;
+        return { ...old, pages: old.pages.map(p => p.filter(r => r.id !== delId)) };
+      });
+      qc.removeQueries({ queryKey: ['receipt', id] });
       void qc.invalidateQueries({ queryKey: ['receipts'] });
       void qc.invalidateQueries({ queryKey: ['stores'] });
+      void qc.invalidateQueries({ queryKey: ['review-progress'] });
       navigate('/receipts');
     },
   });
