@@ -474,6 +474,13 @@
   },
   "artikel": {
     "search": "Search (name, OCR text, AI guess…)",
+    "filterCategory": "Category",
+    "filterPeriod": "Period",
+    "filterClear": "Clear filter",
+    "preset3w": "3 weeks",
+    "presetMonth": "This month",
+    "preset3m": "Last 3 months",
+    "presetYear": "This year",
     "sortAlpha": "A–Z",
     "sortCount": "Frequency",
     "sortDate": "Recent",

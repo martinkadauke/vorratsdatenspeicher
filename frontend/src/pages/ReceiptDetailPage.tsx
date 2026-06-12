@@ -102,6 +102,26 @@ export function ReceiptDetailPage() {
     staleTime: 60_000,
   });
 
+  // Celebrate the moment the item sum first matches the receipt total.
+  const wasMatched = useRef(false);
+  const [matchFlash, setMatchFlash] = useState(false);
+  useEffect(() => {
+    if (!data) return;
+    const sum = data.artikel.reduce((acc, a) => {
+      const p = parseFloat((a.preis ?? '').toString().replace(',', '.'));
+      return acc + (Number.isFinite(p) ? p : 0);
+    }, 0);
+    const total = parseFloat((data.gesamt_betrag ?? '').toString().replace(',', '.'));
+    const matched = Number.isFinite(total) && Math.abs(sum - total) <= 0.01;
+    if (matched && !wasMatched.current) {
+      setMatchFlash(true);
+      const t = setTimeout(() => setMatchFlash(false), 1000);
+      wasMatched.current = matched;
+      return () => clearTimeout(t);
+    }
+    wasMatched.current = matched;
+  }, [data]);
+
   const { data: neighbors } = useQuery({
     queryKey: ['receipt-neighbors', id, filterQs],
     queryFn: () => api<{ prev_id: number | null; next_id: number | null }>(
@@ -189,6 +209,7 @@ export function ReceiptDetailPage() {
 
   return (
     <div className="flex flex-col gap-4" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+      {matchFlash && <div className="flash-green-overlay pointer-events-none fixed inset-0 z-50 bg-emerald-400/30" />}
       <div className="flex items-center gap-2 sm:gap-3">
         <Link to={`/receipts${filterQs}`} className="shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
           <ArrowLeft size={20} />

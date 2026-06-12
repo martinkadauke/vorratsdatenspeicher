@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Search, X, Rows3, CheckSquare, Square, Users, Ban, Tag, Bell, FolderTree, ReceiptText } from 'lucide-react';
+import { Search, X, Rows3, CheckSquare, Square, Users, Ban, Tag, Bell, FolderTree, ReceiptText, SlidersHorizontal } from 'lucide-react';
 import { api } from '../api/client';
 import type { CanonicalName } from '../api/types';
-import { Card, Input, Spinner, EmptyState, Badge, Select, Button, Modal } from '../components/ui';
+import { Card, Input, Label, Spinner, EmptyState, Badge, Select, Button, Modal } from '../components/ui';
 import { CategoryPicker } from '../components/CategoryPicker';
 import { CanonicalIcon } from '../components/IconPicker';
 import { ConsumerDots, ConsumerChips } from '../components/ConsumerChips';
@@ -37,6 +37,14 @@ const SIZES = [
 ];
 const SIZE_KEY = 'vds.artikelCardSize';
 
+const iso = (d: Date) => d.toISOString().slice(0, 10);
+const DATE_PRESETS = [
+  { key: '3w', i18n: 'artikel.preset3w', from: () => iso(new Date(Date.now() - 21 * 864e5)), to: () => iso(new Date()) },
+  { key: 'month', i18n: 'artikel.presetMonth', from: () => iso(new Date(new Date().getFullYear(), new Date().getMonth(), 1)), to: () => iso(new Date()) },
+  { key: '3m', i18n: 'artikel.preset3m', from: () => { const d = new Date(); d.setMonth(d.getMonth() - 3); return iso(d); }, to: () => iso(new Date()) },
+  { key: 'year', i18n: 'artikel.presetYear', from: () => iso(new Date(new Date().getFullYear(), 0, 1)), to: () => iso(new Date()) },
+] as const;
+
 export function Artikel() {
   const { t, i18n } = useTranslation();
   const qc = useQueryClient();
@@ -49,6 +57,17 @@ export function Artikel() {
   const [canonicalOpen, setCanonicalOpen] = useState(false);
   const [categoryOpen, setCategoryOpen] = useState(false);
   const [pickedCategory, setPickedCategory] = useState<string | null>(null);
+  // category + time-range filter
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [filterCat, setFilterCat] = useState<string | null>(null);
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const filterQs = [
+    filterCat ? `category=${encodeURIComponent(filterCat)}` : '',
+    from ? `from=${from}` : '',
+    to ? `to=${to}` : '',
+  ].filter(Boolean).join('&');
+  const filterActive = !!(filterCat || from || to);
 
   const [sizeIdx, setSizeIdx] = useState(() => {
     const s = parseInt(localStorage.getItem(SIZE_KEY) ?? '', 10);
@@ -58,8 +77,13 @@ export function Artikel() {
   const size = SIZES[sizeIdx];
 
   const { data, isLoading } = useQuery({
-    queryKey: ['artikel-list', search],
-    queryFn: () => api<ArtikelGroup[]>(`/api/artikel-list?q=${encodeURIComponent(search)}`),
+    queryKey: ['artikel-list', search, filterQs],
+    queryFn: () => api<ArtikelGroup[]>(`/api/artikel-list?q=${encodeURIComponent(search)}${filterQs ? `&${filterQs}` : ''}`),
+  });
+  const { data: spend } = useQuery({
+    queryKey: ['artikel-spend', search, filterQs],
+    queryFn: () => api<{ items: number; total: string }>(`/api/artikel-spend?q=${encodeURIComponent(search)}${filterQs ? `&${filterQs}` : ''}`),
+    enabled: filterActive,
   });
   const { data: avoidedList } = useQuery({
     queryKey: ['avoided'],
@@ -196,11 +220,52 @@ export function Artikel() {
           <option value="date">{t('artikel.sortDate')}</option>
           <option value="category">{t('artikel.sortCategory')}</option>
         </Select>
+        <button
+          onClick={() => setFilterOpen(o => !o)}
+          className={cn('flex shrink-0 items-center gap-1.5 rounded-xl border px-2.5 py-2 text-sm',
+            filterActive ? 'border-emerald-400 text-emerald-600' : 'border-zinc-200 text-zinc-500 dark:border-zinc-800')}
+        >
+          <SlidersHorizontal size={15} />{filterActive && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />}
+        </button>
         <div className="flex shrink-0 items-center gap-1.5 rounded-xl border border-zinc-200 px-2.5 py-2 dark:border-zinc-800">
           <Rows3 size={15} className="text-zinc-400" />
           <input type="range" min={0} max={SIZES.length - 1} value={sizeIdx} onChange={e => setSizeIdx(parseInt(e.target.value, 10))} className="w-16 accent-emerald-600 sm:w-24" />
         </div>
       </div>
+
+      {filterOpen && (
+        <div className="flex flex-col gap-3 rounded-xl border border-zinc-200 p-3 dark:border-zinc-800">
+          <div>
+            <Label>{t('artikel.filterCategory')}</Label>
+            <CategoryPicker value={filterCat} onChange={setFilterCat} />
+          </div>
+          <div>
+            <Label>{t('artikel.filterPeriod')}</Label>
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {DATE_PRESETS.map(p => (
+                <button key={p.key} type="button" onClick={() => { setFrom(p.from()); setTo(p.to()); }}
+                  className="rounded-full border border-zinc-300 px-2.5 py-1 text-xs hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700">
+                  {t(p.i18n)}
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Input type="date" value={from} onChange={e => setFrom(e.target.value)} />
+              <Input type="date" value={to} onChange={e => setTo(e.target.value)} />
+            </div>
+          </div>
+          {filterActive && (
+            <button type="button" onClick={() => { setFilterCat(null); setFrom(''); setTo(''); }}
+              className="self-start text-xs text-zinc-400 hover:text-red-500">{t('artikel.filterClear')}</button>
+          )}
+        </div>
+      )}
+      {filterActive && spend && (
+        <div className="flex items-center gap-2 rounded-xl bg-emerald-50 px-3 py-2 text-sm dark:bg-emerald-950/30">
+          <span className="text-base font-semibold text-emerald-700 dark:text-emerald-300">{eur(spend.total)}</span>
+          <span className="text-zinc-500 dark:text-zinc-400">· {spend.items} {t('artikel.items')}</span>
+        </div>
+      )}
 
       <div className="flex items-center justify-between text-xs text-zinc-500">
         <button onClick={toggleAll} className="flex items-center gap-1.5 rounded-lg px-2 py-1 font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800">

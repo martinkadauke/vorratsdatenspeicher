@@ -59,7 +59,11 @@ export function nameRoutes(app: FastifyInstance): void {
    *  name when present, else by ai_guess/name. Returns purchase stats + the
    *  artikel_ids backing each group (for bulk operations). Konto-scoped. */
   app.get('/api/artikel-list', async (req) => {
-    const search = (req.query as { q?: string }).q?.trim() ?? '';
+    const fq = req.query as { q?: string; category?: string; from?: string; to?: string };
+    const search = fq.q?.trim() ?? '';
+    const catFilter = fq.category ? sql`AND a.category_path LIKE ${fq.category + '%'}` : sql``;
+    const fromFilter = fq.from ? sql`AND e.datum >= ${fq.from}` : sql``;
+    const toFilter = fq.to ? sql`AND e.datum <= ${fq.to}` : sql``;
     const rows = await sql`
       SELECT
         CASE WHEN a.canonical_name IS NOT NULL THEN 'c:' || a.canonical_name
@@ -81,6 +85,7 @@ export function nameRoutes(app: FastifyInstance): void {
           fields: { kategorie: col(sql`a.category_path`), laden: col(sql`e.roh_ladenname`) },
           nums: { preis: numCol(sql`a.preis`) },
         })}
+        ${catFilter} ${fromFilter} ${toFilter}
         ${kontoScope(req.user, sql`e.konto_id`)}
       GROUP BY grp
     `;
@@ -112,6 +117,30 @@ export function nameRoutes(app: FastifyInstance): void {
       sample_artikel_id: r.sample_artikel_id,
       consumers: r.canonical_name ? (coMap.get(r.canonical_name as string) ?? []) : [],
     }));
+  });
+
+  /** Total spend for the same filters as artikel-list (category + date range +
+   *  search). Powers "how much on meat in 3 weeks / Jan–Apr / June". */
+  app.get('/api/artikel-spend', async (req) => {
+    const fq = req.query as { q?: string; category?: string; from?: string; to?: string };
+    const search = fq.q?.trim() ?? '';
+    const catFilter = fq.category ? sql`AND a.category_path LIKE ${fq.category + '%'}` : sql``;
+    const fromFilter = fq.from ? sql`AND e.datum >= ${fq.from}` : sql``;
+    const toFilter = fq.to ? sql`AND e.datum <= ${fq.to}` : sql``;
+    const [row] = await sql`
+      SELECT COUNT(*)::int AS items,
+             COALESCE(SUM(a.preis) FILTER (WHERE a.preis > 0), 0)::numeric(10,2) AS total
+      FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
+      WHERE TRUE
+        ${searchFilter(search, {
+          text: [col(sql`a.canonical_name`), col(sql`a.ai_guess`), col(sql`a.name`), col(sql`a.original_text`)],
+          fields: { kategorie: col(sql`a.category_path`), laden: col(sql`e.roh_ladenname`) },
+          nums: { preis: numCol(sql`a.preis`) },
+        })}
+        ${catFilter} ${fromFilter} ${toFilter}
+        ${kontoScope(req.user, sql`e.konto_id`)}
+    `;
+    return { items: row.items, total: row.total };
   });
 
   /** Household-wide "avoid" list (artikel_ausschluss): products we decided not
