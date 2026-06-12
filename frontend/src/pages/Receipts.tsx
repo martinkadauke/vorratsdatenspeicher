@@ -32,6 +32,19 @@ export function Receipts() {
   const [params, setParams] = useSearchParams();
   const [search, setSearch] = useState('');
   const [storeFilter, setStoreFilter] = useState<string | null>(params.get('store'));
+  const [kontoFilter, setKontoFilter] = useState<string | null>(params.get('konto'));
+
+  const { data: konten } = useQuery({
+    queryKey: ['konten'],
+    queryFn: () => api<{ id: number; name: string }[]>('/api/konten'),
+    staleTime: 60_000,
+  });
+  const updateKontoFilter = (id: string | null) => {
+    setKontoFilter(id);
+    const next = new URLSearchParams(params);
+    if (id) next.set('konto', id); else next.delete('konto');
+    setParams(next, { replace: true });
+  };
 
   const [sizeIdx, setSizeIdx] = useState(() => {
     const saved = parseInt(localStorage.getItem(SIZE_KEY) ?? '', 10);
@@ -45,10 +58,11 @@ export function Receipts() {
   const filterQs = useMemo(() => {
     const p = new URLSearchParams();
     if (storeFilter) p.set('store', storeFilter);
+    if (kontoFilter) p.set('konto', kontoFilter);
     if (search.trim()) p.set('q', search.trim());
     const s = p.toString();
     return s ? `?${s}` : '';
-  }, [storeFilter, search]);
+  }, [storeFilter, kontoFilter, search]);
 
   const gridRef = useRef<HTMLDivElement>(null);
   const [cols, setCols] = useState(3);
@@ -63,10 +77,12 @@ export function Receipts() {
   }, [size.min]);
   const singleColumn = cols <= 1;
 
-  // Sync ?store=... URL param ↔ storeFilter state
+  // Sync ?store= / ?konto= URL params ↔ filter state
   useEffect(() => {
-    const fromUrl = params.get('store');
-    if (fromUrl !== storeFilter) setStoreFilter(fromUrl);
+    const s = params.get('store');
+    if (s !== storeFilter) setStoreFilter(s);
+    const k = params.get('konto');
+    if (k !== kontoFilter) setKontoFilter(k);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params]);
 
@@ -114,12 +130,13 @@ export function Receipts() {
   });
 
   const storeParam = storeFilter ? `&store=${encodeURIComponent(storeFilter)}` : '';
+  const kontoParam = kontoFilter ? `&konto=${encodeURIComponent(kontoFilter)}` : '';
   const {
     data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage,
   } = useInfiniteQuery({
-    queryKey: ['receipts', search, storeFilter],
+    queryKey: ['receipts', search, storeFilter, kontoFilter],
     queryFn: ({ pageParam }) =>
-      api<Receipt[]>(`/api/receipts?limit=${PAGE}&offset=${pageParam}&q=${encodeURIComponent(search)}${storeParam}`),
+      api<Receipt[]>(`/api/receipts?limit=${PAGE}&offset=${pageParam}&q=${encodeURIComponent(search)}${storeParam}${kontoParam}`),
     initialPageParam: 0,
     getNextPageParam: (last, all) => (last.length === PAGE ? all.length * PAGE : undefined),
   });
@@ -237,6 +254,36 @@ export function Receipts() {
           />
         </div>
       </div>
+
+      {konten && konten.length > 1 && (
+        <div className="scrollbar-none -mx-1 flex gap-1.5 overflow-x-auto px-1">
+          <button
+            onClick={() => updateKontoFilter(null)}
+            className={cn(
+              'shrink-0 rounded-full border px-3 py-1 text-xs font-medium',
+              kontoFilter === null
+                ? 'border-transparent bg-violet-600 text-white'
+                : 'border-zinc-300 text-zinc-500 dark:border-zinc-700',
+            )}
+          >
+            {t('receipts.allKonten')}
+          </button>
+          {konten.map(k => (
+            <button
+              key={k.id}
+              onClick={() => updateKontoFilter(kontoFilter === String(k.id) ? null : String(k.id))}
+              className={cn(
+                'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium',
+                kontoFilter === String(k.id)
+                  ? 'border-transparent bg-violet-600 text-white'
+                  : 'border-zinc-300 text-zinc-500 dark:border-zinc-700',
+              )}
+            >
+              {k.name}
+            </button>
+          ))}
+        </div>
+      )}
 
       {stores && stores.length > 1 && (
         <div className="relative">

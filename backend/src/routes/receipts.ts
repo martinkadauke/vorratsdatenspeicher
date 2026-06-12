@@ -21,12 +21,14 @@ export function receiptRoutes(app: FastifyInstance): void {
   }
 
   app.get('/api/receipts', async (req) => {
-    const q = req.query as { limit?: string; offset?: string; q?: string; from?: string; to?: string; store?: string };
+    const q = req.query as { limit?: string; offset?: string; q?: string; from?: string; to?: string; store?: string; konto?: string; quelle?: string };
     const limit = Math.min(parseInt(q.limit ?? '50', 10) || 50, 200);
     const offset = parseInt(q.offset ?? '0', 10) || 0;
     const search = (q.q ?? '').trim();
     const like = `%${search}%`;
     const storeLike = q.store ? `%${q.store}%` : null;
+    const kontoId = q.konto ? parseInt(q.konto, 10) : null;
+    const quellen = q.quelle ? q.quelle.split(',').filter(Boolean) : null;
 
     const rows = await sql`
       SELECT e.id, e.datum, e.roh_ladenname, e.bild_pfad, e.gesamt_betrag, e.geprueft,
@@ -41,6 +43,8 @@ export function receiptRoutes(app: FastifyInstance): void {
           AND (ax.name ILIKE ${like} OR ax.canonical_name ILIKE ${like} OR ax.ai_guess ILIKE ${like})
         ))` : sql``}
         ${storeLike ? sql`AND e.roh_ladenname ILIKE ${storeLike}` : sql``}
+        ${kontoId ? sql`AND e.konto_id = ${kontoId}` : sql``}
+        ${quellen ? sql`AND e.quelle IN ${sql(quellen)}` : sql``}
         ${q.from ? sql`AND e.datum >= ${q.from}` : sql``}
         ${q.to ? sql`AND e.datum <= ${q.to}` : sql``}
         ${kontoScope(req.user, sql`e.konto_id`)}

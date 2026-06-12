@@ -34,7 +34,10 @@ export function ReceiptDetailPage() {
   // a canonical name, or a search.
   const params = new URLSearchParams(location.search);
   const highlightId = params.get('highlight') ? parseInt(params.get('highlight')!, 10) : null;
-  const [itemSearch, setItemSearch] = useState(params.get('hq') ?? '');
+  // Highlight term: explicit ?hq=, else the list search ?q= (so coming from a
+  // receipts search highlights matching items; store-name-only matches won't
+  // highlight because matchIds only checks item fields).
+  const [itemSearch, setItemSearch] = useState(params.get('hq') ?? params.get('q') ?? '');
   const searchRef = useRef<HTMLInputElement>(null);
 
   const deleteReceipt = useMutation({
