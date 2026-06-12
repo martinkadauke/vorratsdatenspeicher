@@ -35,6 +35,7 @@ export function ReceiptDetailPage() {
   const params = new URLSearchParams(location.search);
   const highlightId = params.get('highlight') ? parseInt(params.get('highlight')!, 10) : null;
   const [itemSearch, setItemSearch] = useState(params.get('hq') ?? '');
+  const searchRef = useRef<HTMLInputElement>(null);
 
   const deleteReceipt = useMutation({
     mutationFn: () => api(`/api/receipts/${id}`, { method: 'DELETE' }),
@@ -97,6 +98,7 @@ export function ReceiptDetailPage() {
       if (e.key === 'ArrowLeft') { e.preventDefault(); goPrev(); }
       if (e.key === 'ArrowRight') { e.preventDefault(); goNext(); }
       if (e.key === 'e' || e.key === 'E') { e.preventDefault(); setEditReceipt(true); }
+      if (e.key === 'f' || e.key === 'F') { e.preventDefault(); searchRef.current?.focus(); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -281,10 +283,11 @@ export function ReceiptDetailPage() {
 
         {/* Line items — drag the grip handle to reorder */}
         <div className="flex min-w-0 flex-col gap-1.5">
-          {data.artikel.length > 4 && (
+          {data.artikel.length > 1 && (
             <div className="relative">
               <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
               <Input
+                ref={searchRef}
                 className="pl-9 pr-9"
                 placeholder={t('receiptDetail.searchItems')}
                 value={itemSearch}
@@ -369,7 +372,7 @@ function ReceiptEditModal({ receipt, open, onClose }: { receipt: ReceiptDetail; 
       <div className="flex flex-col gap-4" onKeyDown={onKeyDown}>
         <div>
           <Label>{t('receiptEdit.date')}</Label>
-          <Input type="date" value={datum} onChange={e => setDatum(e.target.value)} />
+          <Input autoFocus type="date" value={datum} onChange={e => setDatum(e.target.value)} />
         </div>
         <div>
           <Label>{t('receiptEdit.store')}</Label>
