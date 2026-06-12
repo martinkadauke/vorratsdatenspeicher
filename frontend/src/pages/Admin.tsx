@@ -34,6 +34,7 @@ export function Admin() {
       <UsersSection />
       <KontenSection />
       {user?.sees_all_konten && <DataManagementSection />}
+      <OffersSection />
       <SmtpSection />
       <FamilySection />
       <MaintenanceSection />
@@ -877,6 +878,108 @@ function DataManagementSection() {
             </Button>
           </div>
         </div>
+      </div>
+    </Section>
+  );
+}
+
+// ── Household address + offer radius + offer-only categories ──────────────
+const RADII = [5, 10, 20, 50];
+
+function OffersSection() {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const { data: config } = useQuery({
+    queryKey: ['config'],
+    queryFn: () => api<Record<string, unknown>>('/api/config'),
+  });
+  const setCfg = useMutation({
+    mutationFn: ({ key, value }: { key: string; value: unknown }) =>
+      api(`/api/config/${key}`, { method: 'PUT', body: { value } }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['config'] }),
+  });
+
+  const [newCat, setNewCat] = useState('');
+
+  if (!config) return <Section title={t('admin.offersTitle')}><Spinner /></Section>;
+
+  const address = (config['household.address'] as string) ?? '';
+  const radiusEnabled = !!config['offers.radius_enabled'];
+  const radiusKm = (config['offers.radius_km'] as number) ?? 10;
+  const extra = (config['offers.extra_categories'] as string[]) ?? [];
+
+  const addCat = () => {
+    const v = newCat.trim();
+    if (!v || extra.some(c => c.toLowerCase() === v.toLowerCase())) { setNewCat(''); return; }
+    setCfg.mutate({ key: 'offers.extra_categories', value: [...extra, v] });
+    setNewCat('');
+  };
+  const removeCat = (c: string) =>
+    setCfg.mutate({ key: 'offers.extra_categories', value: extra.filter(x => x !== c) });
+
+  return (
+    <Section title={t('admin.offersTitle')}>
+      <div className="flex flex-col gap-4">
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('admin.offersHint')}</p>
+
+        {/* household address */}
+        <div>
+          <Label>{t('admin.householdAddress')}</Label>
+          <Input
+            defaultValue={address}
+            placeholder={t('admin.householdAddressPlaceholder')}
+            onBlur={e => e.target.value !== address && setCfg.mutate({ key: 'household.address', value: e.target.value })}
+          />
+        </div>
+
+        {/* radius toggle + km */}
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium">{t('admin.offerRadius')}</span>
+            <Switch checked={radiusEnabled} onChange={v => setCfg.mutate({ key: 'offers.radius_enabled', value: v })} />
+          </div>
+          {radiusEnabled && (
+            <div className="flex items-center gap-2">
+              <Label className="mb-0">{t('admin.offerRadiusKm')}</Label>
+              <Select
+                className="w-auto"
+                value={String(radiusKm)}
+                onChange={e => setCfg.mutate({ key: 'offers.radius_km', value: parseInt(e.target.value, 10) })}
+              >
+                {RADII.map(r => <option key={r} value={r}>{r} km</option>)}
+              </Select>
+            </div>
+          )}
+          <p className="text-xs text-zinc-400">{t('admin.offerRadiusHint')}</p>
+        </div>
+
+        {/* offer-only warengruppen */}
+        <div className="flex flex-col gap-2">
+          <Label className="mb-0">{t('admin.offerCategories')}</Label>
+          <p className="text-xs text-zinc-400">{t('admin.offerCategoriesHint')}</p>
+          <div className="flex flex-wrap gap-1.5">
+            {extra.map(c => (
+              <span key={c} className="inline-flex items-center gap-1 rounded-lg bg-zinc-100 px-2 py-1 text-xs font-medium dark:bg-zinc-800">
+                {c}
+                <button type="button" onClick={() => removeCat(c)} className="text-zinc-400 hover:text-red-500">✕</button>
+              </span>
+            ))}
+            {!extra.length && <span className="text-xs text-zinc-400">{t('admin.offerCategoriesEmpty')}</span>}
+          </div>
+          <div className="flex gap-2">
+            <Input
+              value={newCat}
+              placeholder={t('admin.offerCategoriesPlaceholder')}
+              onChange={e => setNewCat(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCat(); } }}
+            />
+            <Button variant="secondary" onClick={addCat} disabled={!newCat.trim()}>{t('common.add')}</Button>
+          </div>
+        </div>
+
+        <p className="rounded-lg bg-amber-50 px-2 py-1.5 text-xs text-amber-700 dark:bg-amber-950/40 dark:text-amber-400">
+          {t('admin.offersWip')}
+        </p>
       </div>
     </Section>
   );

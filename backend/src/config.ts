@@ -34,6 +34,11 @@ export interface AppConfig {
   'smtp.user': string;
   'smtp.pass': string;
   'smtp.from': string;
+  // household + offer-radius (the geo prospectus search itself is still WIP)
+  'household.address': string;
+  'offers.radius_enabled': boolean;
+  'offers.radius_km': number;
+  'offers.extra_categories': string[];
 }
 
 const DEFAULTS: AppConfig = {
@@ -66,6 +71,10 @@ const DEFAULTS: AppConfig = {
   'smtp.user': '',
   'smtp.pass': '',
   'smtp.from': 'Vorratsdatenspeicher <vds@localhost>',
+  'household.address': '',
+  'offers.radius_enabled': false,
+  'offers.radius_km': 10,
+  'offers.extra_categories': [],
 };
 
 export async function getConfig<K extends keyof AppConfig>(key: K): Promise<AppConfig[K]> {
