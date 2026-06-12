@@ -12,6 +12,7 @@ import { Names } from './pages/Names';
 import { Stores } from './pages/Stores';
 import { Queue } from './pages/Queue';
 import { Admin } from './pages/Admin';
+import { CategoriesAdmin } from './pages/CategoriesAdmin';
 import { Profile } from './pages/Profile';
 import { More } from './pages/More';
 import { Spinner } from './components/ui';
@@ -46,6 +47,7 @@ export function App() {
           <Route path="/stores" element={<Stores />} />
           <Route path="/queue" element={<Queue />} />
           <Route path="/admin" element={<AdminOnly><Admin /></AdminOnly>} />
+          <Route path="/admin/categories" element={<AdminOnly><CategoriesAdmin /></AdminOnly>} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/more" element={<More />} />
           <Route path="*" element={<Navigate to="/receipts" replace />} />

@@ -206,6 +206,12 @@
     "taskChurnerStage2Desc": "Only invoked when Stage 1 says \"web search\". Reads SearXNG hits and proposes a name.",
     "taskOcr": "Vision OCR",
     "taskOcrDesc": "Reads receipt photos and extracts date, store, total, and all line items. Used by the \"Re-OCR\" button on a receipt and by the batch reimport.",
+    "taskCategoriesChat": "Category designer",
+    "taskCategoriesChatDesc": "The chat assistant on the categories page that designs a category structure with you.",
+    "taskLogShow": "Show model history",
+    "taskLogHide": "Hide model history",
+    "taskLogEmpty": "No model changes logged yet.",
+    "taskLogAuto": "Auto review",
     "deepseekUrl": "DeepSeek URL",
     "deepseekApiKey": "DeepSeek API key",
     "anthropicUrl": "Anthropic URL",
@@ -276,6 +282,24 @@
       "title": "You're all set 🎉",
       "body": "Enjoy Vorratsdatenspeicher! Need a refresher? Replay this tour any time from Profile → Help."
     }
+  },
+  "categoriesAdmin": {
+    "title": "Item categories",
+    "subtitle": "Design your category structure with AI and re-sort your items",
+    "linkHint": "Restructure categories via AI chat, edit the tree, recategorize items",
+    "chatTitle": "AI category designer",
+    "chatEmpty": "Describe how your categories should look — e.g. \"I want groceries broken down in more detail, separate drugstore and household, plus a hobby category\". The AI knows your real items.",
+    "chatPlaceholder": "Message the category designer…",
+    "adoptProposal": "Adopt proposal ({{count}} categories)",
+    "treeTitle": "Category tree",
+    "treeHint": "Drag to move · double-click to rename · max 3 levels",
+    "unsaved": "unsaved",
+    "addRoot": "Top-level category",
+    "newCategory": "New category",
+    "apply": "Apply categories",
+    "applyConfirm": "The entire category catalog will be replaced (Meta categories are kept). Items keep their old paths until they're recategorized. Continue?",
+    "applyHint": "\"Apply categories\" replaces the catalog. Then click \"Recategorize all items\" so the AI sorts every item into the new structure.",
+    "applied": "{{count}} categories saved. {{orphans}} items now have stale paths — please recategorize."
   },
   "trends": {
     "thisWeek": "This week",

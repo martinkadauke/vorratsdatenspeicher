@@ -1,7 +1,8 @@
 import { useState } from 'react';
+import { Link as RouterLink } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Trash2, Play, RefreshCw } from 'lucide-react';
+import { Trash2, Play, ChevronRight, History } from 'lucide-react';
 import { api } from '../api/client';
 import type { FamilyMember, MaintenanceEvent, User } from '../api/types';
 import { Card, Button, Input, Label, Select, Switch, Spinner, Badge } from '../components/ui';
@@ -26,6 +27,7 @@ export function Admin() {
       <AiProvidersSection />
       <AiTasksSection />
       <ChurnerSection />
+      <CategoriesLinkSection />
       <UsersSection />
       <SmtpSection />
       <FamilySection />
@@ -153,7 +155,47 @@ const AI_TASKS = [
   { key: 'churner_stage1',   i18n: 'admin.taskChurnerStage1',  descI18n: 'admin.taskChurnerStage1Desc' },
   { key: 'churner_stage2',   i18n: 'admin.taskChurnerStage2',  descI18n: 'admin.taskChurnerStage2Desc' },
   { key: 'ocr',              i18n: 'admin.taskOcr',            descI18n: 'admin.taskOcrDesc' },
+  { key: 'categories_chat',  i18n: 'admin.taskCategoriesChat', descI18n: 'admin.taskCategoriesChatDesc' },
 ] as const;
+
+interface AiTaskLogRow {
+  id: number; task: string; provider: string; model: string;
+  source: string; changed_at: string; changed_by: string | null;
+}
+
+function AiTaskLog() {
+  const { t, i18n } = useTranslation();
+  const { data, isLoading } = useQuery({
+    queryKey: ['ai-task-log'],
+    queryFn: () => api<AiTaskLogRow[]>('/api/ai/tasks/log?limit=50'),
+  });
+  if (isLoading) return <Spinner />;
+  if (!data?.length) return <p className="py-2 text-xs text-zinc-400">{t('admin.taskLogEmpty')}</p>;
+  const taskLabel = (task: string) => {
+    const def = AI_TASKS.find(x => x.key === task);
+    return def ? t(def.i18n) : task;
+  };
+  return (
+    <div className="max-h-64 overflow-y-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
+      <table className="w-full text-xs">
+        <tbody>
+          {data.map(row => (
+            <tr key={row.id} className="border-b border-zinc-100 last:border-0 dark:border-zinc-800/60">
+              <td className="whitespace-nowrap px-2 py-1.5 text-zinc-400">
+                {new Date(row.changed_at).toLocaleString(i18n.language === 'en' ? 'en-GB' : 'de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+              </td>
+              <td className="px-2 py-1.5 font-medium">{taskLabel(row.task)}</td>
+              <td className="px-2 py-1.5"><span className="text-zinc-400">{row.provider}/</span>{row.model}</td>
+              <td className="whitespace-nowrap px-2 py-1.5 text-zinc-400">
+                {row.source === 'auto_review' ? t('admin.taskLogAuto') : (row.changed_by ?? '–')}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 function TaskRow({ task, taskLabel, taskDesc, config }: {
   task: typeof AI_TASKS[number]['key'];
@@ -219,6 +261,7 @@ function TaskRow({ task, taskLabel, taskDesc, config }: {
 
 function AiTasksSection() {
   const { t } = useTranslation();
+  const [showLog, setShowLog] = useState(false);
   const { data: config } = useQuery({
     queryKey: ['config'],
     queryFn: () => api<Record<string, unknown>>('/api/config'),
@@ -233,6 +276,13 @@ function AiTasksSection() {
         {AI_TASKS.map(({ key, i18n, descI18n }) => (
           <TaskRow key={key} task={key} taskLabel={t(i18n)} taskDesc={t(descI18n)} config={config} />
         ))}
+        <button
+          onClick={() => setShowLog(s => !s)}
+          className="flex items-center gap-1.5 self-start rounded-lg px-2 py-1 text-xs font-medium text-zinc-500 hover:bg-zinc-100 hover:text-emerald-600 dark:hover:bg-zinc-800"
+        >
+          <History size={13} /> {showLog ? t('admin.taskLogHide') : t('admin.taskLogShow')}
+        </button>
+        {showLog && <AiTaskLog />}
       </div>
     </Section>
   );
@@ -262,15 +312,9 @@ function ChurnerSection() {
     mutationFn: () => api('/api/maintenance/churn', { method: 'POST' }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['maintenance-status'] }),
   });
-  const recategorize = useMutation({
-    mutationFn: (onlyMissing: boolean) =>
-      api('/api/maintenance/recategorize', { method: 'POST', body: { only_missing: onlyMissing } }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['maintenance-status'] }),
-  });
 
   if (isLoading || !config) return <Section title={t('admin.maintenance')}><Spinner /></Section>;
   const churnRunning = status?.churner.running ?? false;
-  const recatRunning = status?.recategorize.running ?? false;
   const cronStr = (config['churner.cron'] as string) ?? '';
   const lang = (config['app.default_lang'] as string) === 'en' ? 'en' : 'de';
 
@@ -326,15 +370,25 @@ function ChurnerSection() {
           <Button onClick={() => churnNow.mutate()} disabled={churnRunning}>
             <Play size={15} /> {churnRunning ? t('admin.running') : t('admin.churnNow')}
           </Button>
-          <Button variant="secondary" onClick={() => recategorize.mutate(false)} disabled={recatRunning}>
-            <RefreshCw size={15} /> {recatRunning ? t('admin.running') : t('admin.recategorize')}
-          </Button>
-          <Button variant="ghost" onClick={() => recategorize.mutate(true)} disabled={recatRunning}>
-            {t('admin.recategorizeMissing')}
-          </Button>
         </div>
       </div>
     </Section>
+  );
+}
+
+// ── Categories link card ─────────────────────────────────────────────────
+function CategoriesLinkSection() {
+  const { t } = useTranslation();
+  return (
+    <Card className="min-w-0 p-3 sm:p-4">
+      <RouterLink to="/admin/categories" className="group flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-base font-semibold group-hover:text-emerald-600">{t('categoriesAdmin.title')}</h2>
+          <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{t('categoriesAdmin.linkHint')}</p>
+        </div>
+        <ChevronRight size={20} className="shrink-0 text-zinc-400 group-hover:text-emerald-600" />
+      </RouterLink>
+    </Card>
   );
 }
 

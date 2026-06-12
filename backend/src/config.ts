@@ -13,6 +13,8 @@ export interface AppConfig {
   'anthropic.api_key': string;
   'ai.ocr.provider': string;
   'ai.ocr.model': string;
+  'ai.categories_chat.provider': string;
+  'ai.categories_chat.model': string;
   'ai.recategorize.provider': string;
   'ai.recategorize.model': string;
   'ai.churner_stage1.provider': string;
@@ -43,6 +45,8 @@ const DEFAULTS: AppConfig = {
   'anthropic.api_key': '',
   'ai.ocr.provider': 'anthropic',
   'ai.ocr.model': 'claude-sonnet-4-5',
+  'ai.categories_chat.provider': 'anthropic',
+  'ai.categories_chat.model': 'claude-sonnet-4-5',
   'ai.recategorize.provider': 'ollama',
   'ai.recategorize.model': 'qwen2.5:14b',
   'ai.churner_stage1.provider': 'ollama',

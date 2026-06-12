@@ -12,7 +12,7 @@ import { createAuthToken } from '../auth/routes.js';
 import { listModelsForProvider, healthForProvider, setTaskAi, type ProviderName, type AiTask } from '../llm/provider.js';
 
 const VALID_PROVIDERS: ProviderName[] = ['ollama', 'deepseek', 'anthropic'];
-const VALID_TASKS: AiTask[] = ['recategorize', 'churner_stage1', 'churner_stage2', 'ocr'];
+const VALID_TASKS: AiTask[] = ['recategorize', 'churner_stage1', 'churner_stage2', 'ocr', 'categories_chat'];
 
 export function adminRoutes(app: FastifyInstance): void {
   // ── app config ──────────────────────────────────────────────────────────
@@ -200,5 +200,17 @@ export function adminRoutes(app: FastifyInstance): void {
     }
     await setTaskAi(task, provider, model, req.user!.id);
     return { ok: true };
+  });
+
+  /** Model-change history: who set which provider/model for which task, when. */
+  app.get('/api/ai/tasks/log', { preHandler: requireAdmin }, async (req) => {
+    const limit = Math.min(parseInt((req.query as { limit?: string }).limit ?? '50', 10) || 50, 200);
+    return sql`
+      SELECT l.id, l.task, l.provider, l.model, l.source, l.changed_at, u.username AS changed_by
+      FROM ai_task_log l
+      LEFT JOIN users u ON u.id = l.changed_by
+      ORDER BY l.id DESC
+      LIMIT ${limit}
+    `;
   });
 }

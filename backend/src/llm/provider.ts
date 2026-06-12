@@ -1,7 +1,8 @@
+import sql from '../db.js';
 import { getConfig, setConfig } from '../config.js';
 
 export type ProviderName = 'ollama' | 'deepseek' | 'anthropic';
-export type AiTask = 'recategorize' | 'churner_stage1' | 'churner_stage2' | 'ocr';
+export type AiTask = 'recategorize' | 'churner_stage1' | 'churner_stage2' | 'ocr' | 'categories_chat';
 
 export interface LlmChatOptions {
   system: string;
@@ -211,10 +212,21 @@ export async function healthForProvider(provider: ProviderName): Promise<HealthI
   return ollamaHealth();
 }
 
-/** Set provider+model for a task atomically. */
-export async function setTaskAi(task: AiTask, provider: ProviderName, model: string, userId?: number): Promise<void> {
+/** Set provider+model for a task atomically. Logs the change so the admin
+ *  can later see which model was active for which task at any point. */
+export async function setTaskAi(
+  task: AiTask,
+  provider: ProviderName,
+  model: string,
+  userId?: number,
+  source: 'manual' | 'auto_review' = 'manual',
+): Promise<void> {
   await setConfig(`ai.${task}.provider`, provider, userId);
   await setConfig(`ai.${task}.model`, model, userId);
+  await sql`
+    INSERT INTO ai_task_log (task, provider, model, source, changed_by)
+    VALUES (${task}, ${provider}, ${model}, ${source}, ${userId ?? null})
+  `;
 }
 
 async function safeBody(res: Response): Promise<string> {

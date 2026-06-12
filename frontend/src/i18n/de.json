@@ -206,6 +206,12 @@
     "taskChurnerStage2Desc": "Wird nur aufgerufen wenn Stufe 1 »Web-Suche« sagt. Bekommt SearXNG-Treffer und schlägt einen Namen vor.",
     "taskOcr": "Vision-OCR",
     "taskOcrDesc": "Liest Kassenbon-Fotos und extrahiert Datum, Laden, Gesamtbetrag und alle Artikel. Wird beim »Re-OCR«-Button auf einem Beleg und beim Batch-Reimport genutzt.",
+    "taskCategoriesChat": "Kategorien-Designer",
+    "taskCategoriesChatDesc": "Der Chat-Assistent auf der Artikelkategorien-Seite, der mit dir eine Kategorie-Struktur entwirft.",
+    "taskLogShow": "Modell-Verlauf anzeigen",
+    "taskLogHide": "Modell-Verlauf ausblenden",
+    "taskLogEmpty": "Noch keine Modell-Wechsel protokolliert.",
+    "taskLogAuto": "Auto-Review",
     "deepseekUrl": "DeepSeek URL",
     "deepseekApiKey": "DeepSeek API-Key",
     "anthropicUrl": "Anthropic URL",
@@ -276,6 +282,24 @@
       "title": "Du bist startklar 🎉",
       "body": "Viel Spaß mit Vorratsdatenspeicher! Wenn du Hilfe brauchst, findest du diese Tour jederzeit unter Profil → Hilfe."
     }
+  },
+  "categoriesAdmin": {
+    "title": "Artikelkategorien",
+    "subtitle": "Kategorie-Struktur mit KI entwerfen und Artikel neu einsortieren",
+    "linkHint": "Kategorien mit KI-Chat neu strukturieren, Baum bearbeiten, Artikel neu kategorisieren",
+    "chatTitle": "KI-Kategorien-Designer",
+    "chatEmpty": "Beschreibe, wie deine Kategorien aussehen sollen — z.B. »Ich will Lebensmittel detaillierter aufschlüsseln, Drogerie und Haushalt getrennt, und eine Hobby-Kategorie«. Die KI kennt deine echten Artikel.",
+    "chatPlaceholder": "Nachricht an den Kategorien-Designer…",
+    "adoptProposal": "Vorschlag übernehmen ({{count}} Kategorien)",
+    "treeTitle": "Kategorie-Baum",
+    "treeHint": "Ziehen zum Verschieben · Doppelklick zum Umbenennen · max. 3 Ebenen",
+    "unsaved": "ungespeichert",
+    "addRoot": "Hauptkategorie",
+    "newCategory": "Neue Kategorie",
+    "apply": "Kategorien anwenden",
+    "applyConfirm": "Der komplette Kategorien-Katalog wird ersetzt (Meta-Kategorien bleiben). Artikel behalten ihre alten Pfade, bis sie neu kategorisiert werden. Fortfahren?",
+    "applyHint": "»Kategorien anwenden« ersetzt den Katalog. Danach »Alle Artikel neu kategorisieren« klicken, damit die KI jeden Artikel in die neue Struktur einsortiert.",
+    "applied": "{{count}} Kategorien gespeichert. {{orphans}} Artikel haben jetzt veraltete Pfade — bitte neu kategorisieren."
   },
   "trends": {
     "thisWeek": "Diese Woche",
