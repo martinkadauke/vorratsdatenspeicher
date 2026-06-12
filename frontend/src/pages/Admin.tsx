@@ -2,14 +2,14 @@ import { useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Trash2, Play, ChevronRight, History, Square, Image as ImageIcon } from 'lucide-react';
+import { Trash2, Play, ChevronRight, History, Square, Image as ImageIcon, Download } from 'lucide-react';
 import { api } from '../api/client';
 import type { FamilyMember, MaintenanceEvent, User } from '../api/types';
 import { Card, Button, Input, Label, Select, Switch, Spinner, Badge, ProgressBar } from '../components/ui';
 import { useFamily } from '../components/ConsumerChips';
 import { useAuth } from '../context/auth';
 import { confirm } from '../components/Confirm';
-import { cronToHuman } from '../lib/utils';
+import { cronToHuman, downloadFile, fmtBytes } from '../lib/utils';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -22,6 +22,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 export function Admin() {
   const { t } = useTranslation();
+  const { user } = useAuth();
   return (
     <div className="flex flex-col gap-4">
       <h1 className="text-lg font-bold">{t('admin.title')}</h1>
@@ -31,6 +32,7 @@ export function Admin() {
       <CategoriesLinkSection />
       <UsersSection />
       <KontenSection />
+      {user?.sees_all_konten && <DataManagementSection />}
       <SmtpSection />
       <FamilySection />
       <MaintenanceSection />
@@ -677,6 +679,52 @@ function KontenSection() {
           </div>
           <Button type="submit" className="shrink-0" disabled={!newName.trim() || create.isPending}>{t('common.add')}</Button>
         </form>
+      </div>
+    </Section>
+  );
+}
+
+// ── Data management (super-admin only) ──────────────────────────────────
+interface DataStats { receipts: number; artikel: number; konten: number; photo_files: number; photo_bytes: number }
+
+function DataManagementSection() {
+  const { t } = useTranslation();
+  const { data } = useQuery({
+    queryKey: ['data-stats'],
+    queryFn: () => api<DataStats>('/api/admin/data-stats'),
+  });
+
+  const stat = (label: string, value: string | number) => (
+    <div className="rounded-xl border border-zinc-100 px-3 py-2 dark:border-zinc-800">
+      <div className="text-xs text-zinc-400">{label}</div>
+      <div className="tabular text-lg font-semibold">{value}</div>
+    </div>
+  );
+
+  return (
+    <Section title={t('admin.data')}>
+      <div className="flex flex-col gap-3">
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('admin.dataHint')}</p>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {stat(t('admin.dataReceipts'), data?.receipts ?? '…')}
+          {stat(t('admin.dataArtikel'), data?.artikel ?? '…')}
+          {stat(t('admin.dataKonten'), data?.konten ?? '…')}
+          {stat(t('admin.dataDisk'), data ? `${fmtBytes(data.photo_bytes)} (${data.photo_files})` : '…')}
+        </div>
+        <div>
+          <Label>{t('admin.dataExport')}</Label>
+          <div className="mt-1 flex flex-wrap gap-2">
+            <Button variant="secondary" onClick={() => downloadFile('/api/exports/receipts.csv', 'vds-belege.csv')}>
+              <Download size={14} /> Belege CSV
+            </Button>
+            <Button variant="secondary" onClick={() => downloadFile('/api/exports/artikel.csv', 'vds-artikel.csv')}>
+              <Download size={14} /> Artikel CSV
+            </Button>
+            <Button variant="secondary" onClick={() => downloadFile('/api/exports/monthly.csv', 'vds-monatlich.csv')}>
+              <Download size={14} /> Monatlich CSV
+            </Button>
+          </div>
+        </div>
       </div>
     </Section>
   );

@@ -47,6 +47,13 @@ export async function requireAdmin(req: FastifyRequest, reply: FastifyReply): Pr
   }
 }
 
+/** Super-admin = sees every account. Gates the data-management area. */
+export async function requireSuperAdmin(req: FastifyRequest, reply: FastifyReply): Promise<void> {
+  if (!req.user?.sees_all_konten) {
+    return reply.code(403).send({ error: 'forbidden' });
+  }
+}
+
 export function signToken(userId: number): string {
   return jwt.sign({ sub: userId }, JWT_SECRET, { expiresIn: '7d' });
 }

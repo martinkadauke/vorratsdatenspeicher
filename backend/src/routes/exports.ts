@@ -1,6 +1,12 @@
 import type { FastifyInstance } from 'fastify';
+import { readdir, stat } from 'node:fs/promises';
+import path from 'node:path';
+import { existsSync } from 'node:fs';
 import sql from '../db.js';
 import { kontoScope } from '../auth/konto.js';
+import { requireSuperAdmin } from '../auth/plugin.js';
+
+const RECEIPTS_LOCAL_PATH = process.env.RECEIPTS_LOCAL_PATH ?? '/receipts';
 
 function csvEscape(v: unknown): string {
   if (v === null || v === undefined) return '';
@@ -13,6 +19,28 @@ function csvRow(values: unknown[]): string {
 }
 
 export function exportRoutes(app: FastifyInstance): void {
+  /** Data-management stats for the super-admin: counts + receipt-photo disk
+   *  usage. Spans ALL accounts (super-admin sees everything). */
+  app.get('/api/admin/data-stats', { preHandler: requireSuperAdmin }, async () => {
+    const [{ receipts }] = await sql`SELECT COUNT(*)::int AS receipts FROM einkauf`;
+    const [{ artikel }] = await sql`SELECT COUNT(*)::int AS artikel FROM artikel`;
+    const [{ konten }] = await sql`SELECT COUNT(*)::int AS konten FROM konto`;
+
+    let diskBytes = 0;
+    let fileCount = 0;
+    if (existsSync(RECEIPTS_LOCAL_PATH)) {
+      try {
+        const entries = await readdir(RECEIPTS_LOCAL_PATH, { withFileTypes: true });
+        for (const e of entries) {
+          if (!e.isFile()) continue;
+          if (!/\.(jpe?g|png)$/i.test(e.name)) continue;
+          try { const s = await stat(path.join(RECEIPTS_LOCAL_PATH, e.name)); diskBytes += s.size; fileCount++; } catch { /* skip */ }
+        }
+      } catch { /* dir unreadable */ }
+    }
+    return { receipts, artikel, konten, photo_files: fileCount, photo_bytes: diskBytes };
+  });
+
   /** All artikel as CSV, joined with receipt metadata. Optional date range. */
   app.get('/api/exports/artikel.csv', async (req, reply) => {
     const q = req.query as { from?: string; to?: string };

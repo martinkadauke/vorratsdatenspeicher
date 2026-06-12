@@ -34,11 +34,13 @@ export function Receipts() {
   const [storeFilter, setStoreFilter] = useState<string | null>(params.get('store'));
   const [kontoFilter, setKontoFilter] = useState<string | null>(params.get('konto'));
 
-  const { data: konten } = useQuery({
+  const { data: kontenRaw } = useQuery({
     queryKey: ['konten'],
-    queryFn: () => api<{ id: number; name: string }[]>('/api/konten'),
+    queryFn: () => api<{ id: number; name: string; receipts: number }[]>('/api/konten'),
     staleTime: 60_000,
   });
+  // Only offer accounts that actually have receipts visible to this user.
+  const konten = useMemo(() => (kontenRaw ?? []).filter(k => k.receipts > 0), [kontenRaw]);
   const updateKontoFilter = (id: string | null) => {
     setKontoFilter(id);
     const next = new URLSearchParams(params);
@@ -125,8 +127,10 @@ export function Receipts() {
   }, [stores, updateChipScroll]);
 
   const { data: progress } = useQuery({
-    queryKey: ['review-progress'],
-    queryFn: () => api<{ total: number; reviewed: number }>('/api/receipts/review-progress'),
+    queryKey: ['review-progress', kontoFilter],
+    queryFn: () => api<{ total: number; reviewed: number }>(
+      `/api/receipts/review-progress${kontoFilter ? `?konto=${encodeURIComponent(kontoFilter)}` : ''}`,
+    ),
   });
 
   const storeParam = storeFilter ? `&store=${encodeURIComponent(storeFilter)}` : '';

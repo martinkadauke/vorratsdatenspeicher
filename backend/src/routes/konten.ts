@@ -1,23 +1,23 @@
 import type { FastifyInstance } from 'fastify';
 import sql from '../db.js';
 import { requireAdmin } from '../auth/plugin.js';
+import { kontoScope } from '../auth/konto.js';
 
 export function kontoRoutes(app: FastifyInstance): void {
-  /** Accounts the current user may see (for selectors / move-to-list). */
+  /** Accounts the current user may see (for selectors / move-to-list).
+   *  Includes the user-visible receipt count so the overview can hide
+   *  empty accounts from its filter chips. */
   app.get('/api/konten', async (req) => {
-    if (req.user?.sees_all_konten) {
-      return sql`
-        SELECT k.id, k.name, k.is_shared, k.user_id, u.username AS owner
-        FROM konto k LEFT JOIN users u ON u.id = k.user_id
-        ORDER BY k.is_shared DESC, k.sort_order, k.name
-      `;
-    }
-    const ids = req.user?.konto_ids ?? [];
-    if (!ids.length) return [];
+    const idFilter = req.user?.sees_all_konten ? sql`` : (() => {
+      const ids = req.user?.konto_ids ?? [];
+      return ids.length ? sql`WHERE k.id IN ${sql(ids)}` : sql`WHERE FALSE`;
+    })();
     return sql`
-      SELECT k.id, k.name, k.is_shared, k.user_id, u.username AS owner
+      SELECT k.id, k.name, k.is_shared, k.user_id, u.username AS owner,
+             (SELECT COUNT(*)::int FROM einkauf e
+              WHERE e.konto_id = k.id ${kontoScope(req.user, sql`e.konto_id`)}) AS receipts
       FROM konto k LEFT JOIN users u ON u.id = k.user_id
-      WHERE k.id IN ${sql(ids)}
+      ${idFilter}
       ORDER BY k.is_shared DESC, k.sort_order, k.name
     `;
   });

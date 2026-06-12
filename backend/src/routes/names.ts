@@ -106,6 +106,23 @@ export function nameRoutes(app: FastifyInstance): void {
     }));
   });
 
+  /** Bulk-set a canonical name on the selected articles' artikel_ids.
+   *  Konto-scoped. Trims whitespace. */
+  app.post('/api/artikel/set-canonical', async (req, reply) => {
+    const { artikel_ids, canonical_name } = (req.body ?? {}) as { artikel_ids?: number[]; canonical_name?: string };
+    const name = canonical_name?.trim();
+    if (!name) return reply.code(400).send({ error: 'canonical_name required' });
+    if (!Array.isArray(artikel_ids) || !artikel_ids.length) return reply.code(400).send({ error: 'artikel_ids required' });
+    const rows = await sql`
+      UPDATE artikel a SET canonical_name = ${name}
+      FROM einkauf e
+      WHERE a.einkauf_id = e.id AND a.id IN ${sql(artikel_ids)}
+        ${kontoScope(req.user, sql`e.konto_id`)}
+      RETURNING a.id
+    `;
+    return { ok: true, updated: rows.length };
+  });
+
   /** Bulk-assign family members to selected articles. Canonical groups set
    *  canonical_consumer (cascades to future buys); loose artikel set
    *  artikel_consumer. Konto-scoped — only touches artikel the user can see. */
