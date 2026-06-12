@@ -60,7 +60,9 @@
     "reocr": "OCR erneut ausführen",
     "reocrConfirm": "Bon-Foto erneut analysieren? Alle aktuellen Artikel werden ersetzt.",
     "reocrDone": "OCR fertig: {{count}} Artikel · Konfidenz {{confidence}}%",
-    "addArticle": "Artikel hinzufügen"
+    "addArticle": "Artikel hinzufügen",
+    "prev": "Vorheriger Beleg",
+    "next": "Nächster Beleg"
   },
   "article": {
     "edit": "Artikel bearbeiten",

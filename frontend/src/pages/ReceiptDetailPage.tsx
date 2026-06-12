@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, Plus } from 'lucide-react';
+import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, Plus, ChevronLeft, ChevronRight } from 'lucide-react';
 import { api } from '../api/client';
 import type { Artikel, ReceiptDetail } from '../api/types';
 import { Card, Spinner, Badge, Modal, Input, Label, Button } from '../components/ui';
@@ -47,6 +47,47 @@ export function ReceiptDetailPage() {
     enabled: !!id,
   });
 
+  const { data: neighbors } = useQuery({
+    queryKey: ['receipt-neighbors', id],
+    queryFn: () => api<{ prev_id: number | null; next_id: number | null }>(`/api/receipts/${id}/neighbors`),
+    enabled: !!id,
+  });
+
+  const goPrev = () => neighbors?.prev_id && navigate(`/receipts/${neighbors.prev_id}`);
+  const goNext = () => neighbors?.next_id && navigate(`/receipts/${neighbors.next_id}`);
+
+  // Keyboard: ← / → arrow navigation, ignored when typing in a field or a modal is open
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (editing || editReceipt || adding || imageOpen) return;
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (e.key === 'ArrowLeft') { e.preventDefault(); goPrev(); }
+      if (e.key === 'ArrowRight') { e.preventDefault(); goNext(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [neighbors, editing, editReceipt, adding, imageOpen]);
+
+  // Touch: horizontal swipe (>60px, mostly horizontal) navigates
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
+  const onTouchStart = (e: React.TouchEvent) => {
+    if (editing || editReceipt || adding || imageOpen) return;
+    const t = e.touches[0];
+    touchStart.current = { x: t.clientX, y: t.clientY };
+  };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    if (!touchStart.current) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - touchStart.current.x;
+    const dy = t.clientY - touchStart.current.y;
+    touchStart.current = null;
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      if (dx > 0) goPrev(); else goNext();
+    }
+  };
+
   if (isLoading) return <Spinner />;
   if (!data) return null;
 
@@ -61,17 +102,36 @@ export function ReceiptDetailPage() {
   const mismatch = totalKnown && Math.abs(diff) > 0.01;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
       <div className="flex items-center gap-2 sm:gap-3">
         <Link to="/receipts" className="shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
           <ArrowLeft size={20} />
         </Link>
+        <button
+          onClick={goPrev}
+          disabled={!neighbors?.prev_id}
+          className="shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 disabled:opacity-30 dark:hover:bg-zinc-800"
+          title={t('receiptDetail.prev')}
+        >
+          <ChevronLeft size={20} />
+        </button>
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-lg font-bold">{data.roh_ladenname ?? '?'}</h1>
+          <div className="flex min-w-0 items-baseline gap-2">
+            <h1 className="truncate text-lg font-bold">{data.roh_ladenname ?? '?'}</h1>
+            <span className="tabular shrink-0 text-xs font-medium text-zinc-400 dark:text-zinc-500">#{data.id}</span>
+          </div>
           <div className="text-sm text-zinc-500">
             {fmtDate(data.datum, i18n.language)} · <span className="tabular font-semibold text-emerald-600 dark:text-emerald-500">{eur(data.gesamt_betrag)}</span>
           </div>
         </div>
+        <button
+          onClick={goNext}
+          disabled={!neighbors?.next_id}
+          className="shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 disabled:opacity-30 dark:hover:bg-zinc-800"
+          title={t('receiptDetail.next')}
+        >
+          <ChevronRight size={20} />
+        </button>
         <button
           onClick={() => { if (confirm(t('receiptDetail.reocrConfirm'))) reocr.mutate(); }}
           disabled={reocr.isPending || !data.bild_pfad}

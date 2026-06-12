@@ -60,7 +60,9 @@
     "reocr": "Re-run OCR",
     "reocrConfirm": "Re-analyze receipt photo? All current items will be replaced.",
     "reocrDone": "OCR done: {{count}} items · confidence {{confidence}}%",
-    "addArticle": "Add item"
+    "addArticle": "Add item",
+    "prev": "Previous receipt",
+    "next": "Next receipt"
   },
   "article": {
     "edit": "Edit item",

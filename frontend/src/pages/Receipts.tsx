@@ -108,7 +108,10 @@ export function Receipts() {
               </div>
             )}
             <div className="min-w-0 flex-1">
-              <div className="truncate font-semibold">{r.roh_ladenname ?? '?'}</div>
+              <div className="flex min-w-0 items-baseline gap-1.5">
+                <div className="truncate font-semibold">{r.roh_ladenname ?? '?'}</div>
+                <span className="tabular shrink-0 text-[10px] font-medium text-zinc-400 dark:text-zinc-500">#{r.id}</span>
+              </div>
               <div className="truncate text-xs text-zinc-500 dark:text-zinc-400">
                 {fmtDate(r.datum, i18n.language)} · {r.item_count} {t('receipts.items')}
               </div>

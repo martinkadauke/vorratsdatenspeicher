@@ -114,6 +114,29 @@ export function receiptRoutes(app: FastifyInstance): void {
     return { ok: true, bild_pfad: rows[0].bild_pfad };
   });
 
+  /** Find the previous/next receipt in the canonical sort order
+   *  (datum DESC, id DESC) — same as /api/receipts. Used for arrow-key
+   *  and swipe navigation from the detail page. */
+  app.get('/api/receipts/:id/neighbors', async (req, reply) => {
+    const id = parseInt((req.params as { id: string }).id, 10);
+    if (!id) return reply.code(400).send({ error: 'invalid id' });
+    const [cur] = await sql`SELECT datum, id FROM einkauf WHERE id = ${id}`;
+    if (!cur) return reply.code(404).send({ error: 'not found' });
+    // prev = newer (sorts before in DESC order)
+    const [prev] = await sql`
+      SELECT id FROM einkauf
+      WHERE (datum, id) > (${cur.datum}, ${cur.id})
+      ORDER BY datum ASC, id ASC LIMIT 1
+    `;
+    // next = older (sorts after in DESC order)
+    const [next] = await sql`
+      SELECT id FROM einkauf
+      WHERE (datum, id) < (${cur.datum}, ${cur.id})
+      ORDER BY datum DESC, id DESC LIMIT 1
+    `;
+    return { prev_id: prev?.id ?? null, next_id: next?.id ?? null };
+  });
+
   app.get('/api/receipts/:id', async (req, reply) => {
     const id = parseInt((req.params as { id: string }).id, 10);
     if (!id) return reply.code(400).send({ error: 'invalid id' });
