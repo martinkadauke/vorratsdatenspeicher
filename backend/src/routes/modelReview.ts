@@ -1,7 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import sql from '../db.js';
 import { requireAdmin } from '../auth/plugin.js';
-import { runModelReview, decideModelReview, isModelReviewRunning } from '../maintenance/modelReview.js';
+import { runModelReview, decideModelReview, isModelReviewRunning, type ReviewAction } from '../maintenance/modelReview.js';
+
+const ACTIONS: ReviewAction[] = ['apply_api', 'apply_open', 'reject'];
 
 export function modelReviewRoutes(app: FastifyInstance): void {
   /** Latest review (for the admin display). */
@@ -27,8 +29,8 @@ export function modelReviewRoutes(app: FastifyInstance): void {
   /** In-app apply/reject from the admin UI (admin-authed; uses the row token). */
   app.post('/api/model-review/:id/decide', { preHandler: requireAdmin }, async (req, reply) => {
     const id = parseInt((req.params as { id: string }).id, 10);
-    const { action } = (req.body ?? {}) as { action?: 'apply' | 'reject' };
-    if (!id || (action !== 'apply' && action !== 'reject')) return reply.code(400).send({ error: 'id + action required' });
+    const { action } = (req.body ?? {}) as { action?: ReviewAction };
+    if (!id || !action || !ACTIONS.includes(action)) return reply.code(400).send({ error: 'id + valid action required' });
     const [row] = await sql`SELECT token FROM model_review WHERE id = ${id}`;
     if (!row) return reply.code(404).send({ error: 'not found' });
     const result = await decideModelReview(id, row.token as string, action);
@@ -47,19 +49,21 @@ export function modelReviewRoutes(app: FastifyInstance): void {
       + `.box{border:1px solid #e4e4e7;border-radius:1rem;padding:1.5rem}h1{font-size:1.25rem}</style></head>`
       + `<body><div class="box"><h1>${title}</h1><p>${msg}</p></div></body></html>`;
 
-    if (!id || !token || (action !== 'apply' && action !== 'reject')) {
+    if (!id || !token || !action || !ACTIONS.includes(action as ReviewAction)) {
       return reply.code(400).type('text/html').send(page('Ungültiger Link', 'Der Link ist unvollständig.'));
     }
-    const result = await decideModelReview(id, token, action);
+    const result = await decideModelReview(id, token, action as ReviewAction);
     if (!result.ok) {
       const msg = result.error === 'already decided'
         ? `Dieser Review wurde bereits bearbeitet (Status: ${result.status}).`
         : 'Der Link ist ungültig oder abgelaufen.';
       return reply.code(result.error === 'already decided' ? 200 : 403).type('text/html').send(page('Bereits bearbeitet', msg));
     }
-    const msg = result.status === 'applied'
-      ? `Alle vorgeschlagenen Modelle wurden übernommen (${result.applied?.length ?? 0}). Du kannst sie jederzeit in Admin → KI-Aufgaben anpassen.`
+    const applied = result.status !== 'rejected';
+    const kind = result.status === 'applied_api' ? 'API-Modelle' : result.status === 'applied_open' ? 'Open-Weight-Modelle' : '';
+    const msg = applied
+      ? `Alle ${kind} wurden übernommen (${result.applied ?? 0} Aufgaben). Du kannst sie jederzeit in Admin → KI-Aufgaben anpassen.`
       : 'Die Vorschläge wurden abgelehnt. Es wurde nichts geändert.';
-    return reply.type('text/html').send(page(result.status === 'applied' ? 'Übernommen ✓' : 'Abgelehnt', msg));
+    return reply.type('text/html').send(page(applied ? 'Übernommen ✓' : 'Abgelehnt', msg));
   });
 }

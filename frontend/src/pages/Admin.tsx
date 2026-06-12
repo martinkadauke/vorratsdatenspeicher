@@ -302,8 +302,10 @@ function AiTasksSection() {
 }
 
 // ── Bi-weekly AI model review ─────────────────────────────────────────────
-interface ModelProposal { task: string; provider: string; current_model: string; suggested_model: string; reason: string }
+interface ModelCandidate { provider: string; model: string; reason: string }
+interface ModelProposal { task: string; current_provider: string; current_model: string; api: ModelCandidate | null; open: ModelCandidate | null }
 interface ModelReview { id: number; created_at: string; status: string; proposals: ModelProposal[]; decided_at: string | null }
+type ReviewAction = 'apply_api' | 'apply_open' | 'reject';
 
 function ModelReviewSection() {
   const { t, i18n } = useTranslation();
@@ -316,19 +318,18 @@ function ModelReviewSection() {
     mutationFn: () => api<{ proposals: boolean }>('/api/model-review/run', { method: 'POST' }),
     onSuccess: (r) => {
       void qc.invalidateQueries({ queryKey: ['model-review-latest'] });
-      void qc.invalidateQueries({ queryKey: ['config'] });
       toast(r.proposals ? t('admin.reviewRunFound') : t('admin.reviewRunNone'), 'success');
     },
     onError: (e) => toast((e as Error).message, 'error'),
   });
   const decide = useMutation({
-    mutationFn: ({ id, action }: { id: number; action: 'apply' | 'reject' }) =>
+    mutationFn: ({ id, action }: { id: number; action: ReviewAction }) =>
       api(`/api/model-review/${id}/decide`, { method: 'POST', body: { action } }),
-    onSuccess: (_d, v) => {
+    onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['model-review-latest'] });
       void qc.invalidateQueries({ queryKey: ['config'] });
       void qc.invalidateQueries({ queryKey: ['ai-task-log'] });
-      toast(v.action === 'apply' ? t('admin.reviewApplied') : t('admin.reviewRejected'), 'success');
+      toast(t('admin.reviewDone'), 'success');
     },
     onError: (e) => toast((e as Error).message, 'error'),
   });
@@ -337,6 +338,9 @@ function ModelReviewSection() {
     const def = AI_TASKS.find(x => x.key === task);
     return def ? t(def.i18n) : task;
   };
+  const cand = (c: ModelCandidate | null) => c
+    ? <span><span className="font-medium text-emerald-600 dark:text-emerald-400">{c.model}</span> <span className="text-zinc-400">[{c.provider}]</span></span>
+    : <span className="text-zinc-400">—</span>;
 
   return (
     <Section title={t('admin.reviewTitle')}>
@@ -352,28 +356,33 @@ function ModelReviewSection() {
               <span>{new Date(review.created_at).toLocaleString(i18n.language === 'en' ? 'en-GB' : 'de-DE')}</span>
               <Badge className={
                 review.status === 'pending' ? 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
-                : review.status === 'applied' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+                : review.status.startsWith('applied') ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
                 : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800'
               }>{t(`admin.reviewStatus_${review.status}`)}</Badge>
             </div>
-            <div className="flex flex-col gap-1.5">
+            <div className="flex flex-col gap-2">
               {review.proposals.map((p, i) => (
-                <div key={i} className="text-xs">
-                  <span className="font-medium">{taskLabel(p.task)}</span>:{' '}
-                  <span className="text-zinc-400">{p.current_model}</span>
-                  <span className="mx-1">→</span>
-                  <span className="font-medium text-emerald-600 dark:text-emerald-400">{p.suggested_model}</span>
-                  {p.reason && <div className="text-zinc-400">{p.reason}</div>}
+                <div key={i} className="rounded-lg bg-zinc-50 p-2 text-xs dark:bg-zinc-800/40">
+                  <div className="font-medium">{taskLabel(p.task)} <span className="font-normal text-zinc-400">({t('admin.reviewCurrent')}: {p.current_model})</span></div>
+                  <div className="mt-1 grid grid-cols-[3.2rem_1fr] gap-x-2 gap-y-0.5">
+                    <span className="text-zinc-400">API:</span>
+                    <div>{cand(p.api)}{p.api?.reason && <span className="block text-zinc-400">{p.api.reason}</span>}</div>
+                    <span className="text-zinc-400">Open:</span>
+                    <div>{cand(p.open)}{p.open?.reason && <span className="block text-zinc-400">{p.open.reason}</span>}</div>
+                  </div>
                 </div>
               ))}
             </div>
             {review.status === 'pending' && (
-              <div className="mt-3 flex justify-end gap-2">
+              <div className="mt-3 flex flex-wrap justify-end gap-2">
                 <Button variant="ghost" onClick={() => decide.mutate({ id: review.id, action: 'reject' })} disabled={decide.isPending}>
                   {t('admin.reviewReject')}
                 </Button>
-                <Button onClick={() => decide.mutate({ id: review.id, action: 'apply' })} disabled={decide.isPending}>
-                  {t('admin.reviewApply')}
+                <Button variant="secondary" onClick={() => decide.mutate({ id: review.id, action: 'apply_open' })} disabled={decide.isPending}>
+                  {t('admin.reviewApplyOpen')}
+                </Button>
+                <Button onClick={() => decide.mutate({ id: review.id, action: 'apply_api' })} disabled={decide.isPending}>
+                  {t('admin.reviewApplyApi')}
                 </Button>
               </div>
             )}

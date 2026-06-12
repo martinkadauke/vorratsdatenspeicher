@@ -1,7 +1,8 @@
-// Bi-weekly AI model review. The reviewer LLM (itself a configurable AI task —
-// so the whole thing can run on a pure-local model) checks, per AI task,
-// whether a clearly better/newer model is available, and emails the super-admin
-// a yes/no proposal. Nothing is switched automatically.
+// Bi-weekly AI model review. For EVERY AI task the reviewer LLM (itself a
+// configurable task → can run pure-local) proposes the best API/cloud model AND
+// the best open-weight (Ollama) model, weighing price/performance. The
+// super-admin then accepts all-API or all-open-weight (or rejects) via tokenized
+// email links. Nothing is switched automatically.
 import crypto from 'node:crypto';
 import cron from 'node-cron';
 import sql from '../db.js';
@@ -16,57 +17,96 @@ let running = false;
 export function isModelReviewRunning(): boolean { return running; }
 
 const REVIEW_TASKS: AiTask[] = ['recategorize', 'churner_stage1', 'churner_stage2', 'ocr', 'categories_chat'];
+const CLOUD_PROVIDERS: ProviderName[] = ['anthropic', 'deepseek'];
 
+export interface Candidate { provider: string; model: string; reason: string }
 export interface Proposal {
-  task: string; provider: string; current_model: string; suggested_model: string; reason: string;
+  task: string; current_provider: string; current_model: string;
+  api: Candidate | null; open: Candidate | null;
 }
 
 const TASK_PURPOSE: Record<string, string> = {
-  recategorize: 'Klassifiziert Artikel in eine Kategorie-Hierarchie (Text, JSON-Ausgabe).',
-  churner_stage1: 'Normalisiert OCR-Artikelnamen zu kanonischen Produktnamen (Text, JSON).',
-  churner_stage2: 'Ordnet kanonische Produkte einer Kategorie zu (Text, JSON).',
-  ocr: 'Vision-OCR von Kassenbon-Fotos zu strukturiertem JSON (braucht Vision-Fähigkeit).',
-  categories_chat: 'Chat-Assistent zum Bearbeiten der Kategorie-Hierarchie (Reasoning).',
+  recategorize: 'Klassifiziert Artikel in eine Kategorie-Hierarchie (einfache Text-Klassifikation, JSON).',
+  churner_stage1: 'Normalisiert OCR-Artikelnamen zu kanonischen Produktnamen (einfache Text-Aufgabe, JSON).',
+  churner_stage2: 'Ordnet kanonische Produkte einer Kategorie zu (einfache Klassifikation, JSON).',
+  ocr: 'Vision-OCR von Kassenbon-Fotos zu strukturiertem JSON (braucht ein VISION-fähiges Modell, anspruchsvoll).',
+  categories_chat: 'Chat-Assistent zum Bearbeiten der Kategorie-Hierarchie (etwas Reasoning).',
 };
 
-/** Build proposals + email the super-admin. Returns the review id (or null when
- *  there's nothing to suggest). */
+/** Coarse cost tier so even a small local reviewer model judges price/performance. */
+function tier(model: string): string {
+  if (/opus|fable/i.test(model)) return 'Flaggschiff, SEHR TEUER';
+  if (/sonnet/i.test(model)) return 'ausgewogen, mittlerer Preis';
+  if (/haiku/i.test(model)) return 'klein & günstig';
+  if (/reasoner|r1/i.test(model)) return 'günstig (Reasoning)';
+  if (/deepseek/i.test(model)) return 'sehr günstig';
+  return 'open-weight, lokal/kostenlos';
+}
+
 export async function runModelReview(): Promise<number | null> {
   if (running) throw new Error('Model-Review läuft bereits');
   running = true;
   try {
+    // candidate pools (fetched once; same across tasks)
+    const apiModels: { provider: string; model: string }[] = [];
+    for (const p of CLOUD_PROVIDERS) {
+      try { (await listModelsForProvider(p)).forEach(m => apiModels.push({ provider: p, model: m })); } catch { /* not configured/reachable */ }
+    }
+    let openModels: string[] = [];
+    try { openModels = await listModelsForProvider('ollama'); } catch { /* ollama unreachable */ }
+
+    const apiList = apiModels.map(m => `${m.model} [${m.provider}, ${tier(m.model)}]`).join(', ') || '(keine)';
+    const openList = openModels.map(m => `${m} [${tier(m)}]`).join(', ') || '(keine)';
+
     const reviewer = await providerForTask('model_review');
     const proposals: Proposal[] = [];
+    let actionable = false;
 
     for (const task of REVIEW_TASKS) {
       const provider = (await getConfig(`ai.${task}.provider` as 'ai.recategorize.provider')) as ProviderName;
       const current = await getConfig(`ai.${task}.model` as 'ai.recategorize.model');
-      let available: string[] = [];
-      try { available = await listModelsForProvider(provider); } catch { continue; } // provider unreachable
-      if (!available.length) continue;
 
       const system =
-        'Du bewertest die LLM-Modellwahl für eine Aufgabe. Antworte AUSSCHLIESSLICH mit JSON: '
-        + '{"better": boolean, "suggested": "model-id aus der Liste", "reason": "kurz"}. '
-        + 'Empfiehl nur ein Modell aus der gegebenen Liste und nur, wenn es für die Aufgabe klar besser/neuer ist '
-        + 'als das aktuelle. Bei Vision-Aufgaben nur Vision-fähige Modelle. Im Zweifel oder wenn das aktuelle gut ist: better=false.';
+        'Du bist Experte für LLM-Modellwahl mit klarem Fokus auf PREIS/LEISTUNG. Für die gegebene Aufgabe wählst du '
+        + 'JE das beste API/Cloud-Modell UND das beste Open-Weight-Modell (lokal via Ollama). Regeln: '
+        + '(1) Wähle das GÜNSTIGSTE Modell, das die Aufgabe zuverlässig erfüllt. '
+        + '(2) Teure Flaggschiff-Modelle NUR, wenn die Aufgabe es wirklich erfordert (komplexes Reasoning oder anspruchsvolle Vision) — '
+        + 'für einfache Klassifikation/Normalisierung sind sie Verschwendung. '
+        + '(3) Vision-Aufgaben (OCR) brauchen ein vision-fähiges Modell. '
+        + '(4) Verwende NUR Modell-IDs aus den gegebenen Listen. '
+        + 'Antworte AUSSCHLIESSLICH mit JSON: '
+        + '{"api": {"provider": "anthropic|deepseek", "model": "id", "reason": "kurz, inkl. Preis/Leistung"} | null, '
+        + '"open": {"model": "ollama-id", "reason": "kurz"} | null}. '
+        + 'Wenn eine Liste leer ist, setze das jeweilige Feld auf null.';
       const user =
-        `Aufgabe: ${TASK_PURPOSE[task] ?? task}\nProvider: ${provider}\nAktuelles Modell: ${current}\n`
-        + `Verfügbare Modelle: ${available.join(', ')}\n\nGibt es ein klar besseres Modell aus der Liste?`;
+        `Aufgabe: ${TASK_PURPOSE[task] ?? task}\nAktuell: ${current} (${provider})\n`
+        + `API/Cloud-Modelle: ${apiList}\nOpen-Weight-Modelle (Ollama): ${openList}\n\n`
+        + `Wähle je das beste – preis/leistungs-optimal, nicht einfach das teuerste.`;
 
+      let api: Candidate | null = null;
+      let open: Candidate | null = null;
       try {
         const raw = await reviewer.chat({ system, user, json: true });
-        const res = parseLlmJson<{ better?: boolean; suggested?: string; reason?: string }>(raw);
-        if (res.better && res.suggested && res.suggested !== current && available.includes(res.suggested)) {
-          proposals.push({
-            task, provider, current_model: current, suggested_model: res.suggested,
-            reason: (res.reason ?? '').toString().slice(0, 300),
-          });
+        const res = parseLlmJson<{
+          api?: { provider?: string; model?: string; reason?: string } | null;
+          open?: { model?: string; reason?: string } | null;
+        }>(raw);
+        if (res.api?.model && apiModels.some(m => m.model === res.api!.model)) {
+          const prov = apiModels.find(m => m.model === res.api!.model)!.provider;
+          api = { provider: prov, model: res.api.model, reason: (res.api.reason ?? '').toString().slice(0, 240) };
         }
-      } catch { /* skip this task on LLM/parse error */ }
+        if (res.open?.model && openModels.includes(res.open.model)) {
+          open = { provider: 'ollama', model: res.open.model, reason: (res.open.reason ?? '').toString().slice(0, 240) };
+        }
+      } catch { /* skip on LLM/parse error */ }
+
+      if (!api && !open) continue;
+      proposals.push({ task, current_provider: provider, current_model: current, api, open });
+      if ((api && (api.provider !== provider || api.model !== current))
+        || (open && (provider !== 'ollama' || open.model !== current))) actionable = true;
     }
 
-    if (!proposals.length) { console.log('[model-review] no proposals'); return null; }
+    if (!proposals.length || !actionable) { console.log('[model-review] nothing actionable'); return null; }
 
     const token = crypto.randomBytes(24).toString('hex');
     const [row] = await sql`
@@ -84,13 +124,17 @@ async function emailReview(id: number, token: string, proposals: Proposal[]): Pr
   const supers = await sql`SELECT email FROM users WHERE sees_all_konten = TRUE AND email IS NOT NULL AND email <> ''`;
   if (!supers.length) { console.warn('[model-review] no super-admin email configured'); return; }
   const base = (await getConfig('app.base_url')).replace(/\/$/, '');
-  const applyUrl = `${base}/api/model-review/${id}/decide?token=${token}&action=apply`;
-  const rejectUrl = `${base}/api/model-review/${id}/decide?token=${token}&action=reject`;
-  const lines = proposals.map(p => `• ${p.task}: ${p.current_model}  →  ${p.suggested_model}\n    ${p.reason}`).join('\n');
+  const link = (action: string) => `${base}/api/model-review/${id}/decide?token=${token}&action=${action}`;
+  const lines = proposals.map(p =>
+    `• ${p.task}  (aktuell: ${p.current_model})\n`
+    + `    API:  ${p.api ? `${p.api.model} [${p.api.provider}] – ${p.api.reason}` : '—'}\n`
+    + `    Open: ${p.open ? `${p.open.model} – ${p.open.reason}` : '—'}`,
+  ).join('\n\n');
   const body =
-    `Der KI-Modell-Review schlägt folgende Änderungen vor:\n\n${lines}\n\n`
-    + `ALLE übernehmen:\n${applyUrl}\n\n`
-    + `ALLE ablehnen:\n${rejectUrl}\n\n`
+    `Der KI-Modell-Review hat pro Aufgabe je ein API- und ein Open-Weight-Modell vorgeschlagen:\n\n${lines}\n\n`
+    + `Alle API-Modelle übernehmen:\n${link('apply_api')}\n\n`
+    + `Alle Open-Weight-Modelle übernehmen:\n${link('apply_open')}\n\n`
+    + `Ablehnen (nichts ändern):\n${link('reject')}\n\n`
     + `Du kannst die Modelle auch jederzeit manuell in Admin → KI-Aufgaben ändern.`;
   for (const s of supers) {
     try { await sendMail(s.email as string, 'VDS: KI-Modell-Review – Vorschläge', body); }
@@ -98,26 +142,31 @@ async function emailReview(id: number, token: string, proposals: Proposal[]): Pr
   }
 }
 
-/** Apply or reject a pending review (token-checked). Used by both the email
- *  links and the in-app admin buttons (latter passes the row's token). */
+export type ReviewAction = 'apply_api' | 'apply_open' | 'reject';
+
+/** Apply (all-API or all-open) or reject a pending review (token-checked). */
 export async function decideModelReview(
-  id: number, token: string, action: 'apply' | 'reject',
-): Promise<{ ok: boolean; status?: string; applied?: Proposal[]; error?: string }> {
+  id: number, token: string, action: ReviewAction,
+): Promise<{ ok: boolean; status?: string; applied?: number; error?: string }> {
   const [row] = await sql`SELECT status, proposals, token FROM model_review WHERE id = ${id}`;
   if (!row) return { ok: false, error: 'not found' };
   if (row.token !== token) return { ok: false, error: 'invalid token' };
   if (row.status !== 'pending') return { ok: false, error: 'already decided', status: row.status as string };
 
   const proposals = row.proposals as Proposal[];
-  if (action === 'apply') {
-    for (const p of proposals) {
-      await setTaskAi(p.task as AiTask, p.provider as ProviderName, p.suggested_model, undefined, 'auto_review');
-    }
-    await sql`UPDATE model_review SET status = 'applied', decided_at = NOW() WHERE id = ${id}`;
-    return { ok: true, status: 'applied', applied: proposals };
+  let applied = 0;
+  let status: string;
+  if (action === 'apply_api') {
+    for (const p of proposals) if (p.api) { await setTaskAi(p.task as AiTask, p.api.provider as ProviderName, p.api.model, undefined, 'auto_review'); applied++; }
+    status = 'applied_api';
+  } else if (action === 'apply_open') {
+    for (const p of proposals) if (p.open) { await setTaskAi(p.task as AiTask, 'ollama', p.open.model, undefined, 'auto_review'); applied++; }
+    status = 'applied_open';
+  } else {
+    status = 'rejected';
   }
-  await sql`UPDATE model_review SET status = 'rejected', decided_at = NOW() WHERE id = ${id}`;
-  return { ok: true, status: 'rejected' };
+  await sql`UPDATE model_review SET status = ${status}, decided_at = NOW() WHERE id = ${id}`;
+  return { ok: true, status, applied };
 }
 
 // ── scheduler ───────────────────────────────────────────────────────────────

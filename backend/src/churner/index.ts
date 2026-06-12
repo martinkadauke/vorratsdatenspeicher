@@ -304,6 +304,18 @@ async function churnStoreIcons(limit = 20): Promise<number> {
  *  the most-frequently-bought ones. Picks first SearXNG image hit. Bounded
  *  per run so SearXNG isn't hammered. */
 async function churnCanonicalIcons(limit = 20): Promise<number> {
+  // Self-heal: if SearXNG ever returned the same garbage top-hit for many
+  // products (failing image engines), that one URL ends up on lots of
+  // canonicals. Clear auto-set icons shared by ≥3 canonicals so they re-fetch.
+  await sql`
+    UPDATE canonical_meta SET icon_url = NULL, source = 'churner'
+    WHERE source = 'churner' AND icon_url IN (
+      SELECT icon_url FROM canonical_meta
+      WHERE icon_url IS NOT NULL
+      GROUP BY icon_url HAVING COUNT(*) >= 3
+    )
+  `;
+
   // Most-used canonical names without an icon yet.
   const candidates = await sql`
     SELECT a.canonical_name AS name, COUNT(*)::int AS n
@@ -315,16 +327,22 @@ async function churnCanonicalIcons(limit = 20): Promise<number> {
     LIMIT ${limit}
   `;
 
+  // Don't reuse an image that's already an icon for another product.
+  const used = new Set(
+    (await sql`SELECT icon_url FROM canonical_meta WHERE icon_url IS NOT NULL`).map(r => r.icon_url as string),
+  );
+
   let added = 0;
   for (const c of candidates) {
     const name = c.name as string;
     try {
       const hits = await searxngImageSearch(`${name} Produkt`);
-      if (!hits.length) continue;
-      const url = hits[0].src;
+      const pick = hits.find(h => h.src && !used.has(h.src)) ?? hits[0];
+      if (!pick?.src) continue;
+      used.add(pick.src);
       await sql`
         INSERT INTO canonical_meta (canonical_name, icon_url, source, updated_at)
-        VALUES (${name}, ${url}, 'churner', NOW())
+        VALUES (${name}, ${pick.src}, 'churner', NOW())
         ON CONFLICT (canonical_name) DO UPDATE SET icon_url = EXCLUDED.icon_url, source = 'churner', updated_at = NOW()
       `;
       added++;
