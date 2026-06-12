@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { Trash2, Play, ChevronRight, History } from 'lucide-react';
 import { api } from '../api/client';
 import type { FamilyMember, MaintenanceEvent, User } from '../api/types';
-import { Card, Button, Input, Label, Select, Switch, Spinner, Badge } from '../components/ui';
+import { Card, Button, Input, Label, Select, Switch, Spinner, Badge, ProgressBar } from '../components/ui';
 import { useFamily } from '../components/ConsumerChips';
 import { useAuth } from '../context/auth';
 import { cronToHuman } from '../lib/utils';
@@ -289,6 +289,31 @@ function AiTasksSection() {
 }
 
 // ── Churner runtime settings ─────────────────────────────────────────────
+interface JobProgress { phase: string; current: number; total: number; label?: string }
+interface MaintenanceStatus {
+  churner: { enabled: boolean; cron: string; running: boolean; progress: JobProgress | null };
+  recategorize: { running: boolean; progress: JobProgress | null };
+}
+
+function PhaseProgress({ progress }: { progress: JobProgress }) {
+  const { t } = useTranslation();
+  const phaseLabel: Record<string, string> = {
+    recategorize: t('admin.phaseRecategorize'),
+    canonical: t('admin.phaseCanonical'),
+    store_icons: t('admin.phaseStoreIcons'),
+  };
+  const label = phaseLabel[progress.phase] ?? progress.phase;
+  // store_icons has no measurable total → indeterminate
+  const indeterminate = progress.phase === 'store_icons' || !progress.total;
+  return (
+    <ProgressBar
+      label={label}
+      value={indeterminate ? undefined : progress.current}
+      max={indeterminate ? undefined : progress.total}
+    />
+  );
+}
+
 function ChurnerSection() {
   const { t } = useTranslation();
   const qc = useQueryClient();
@@ -299,8 +324,11 @@ function ChurnerSection() {
   });
   const { data: status } = useQuery({
     queryKey: ['maintenance-status'],
-    queryFn: () => api<{ churner: { running: boolean }; recategorize: { running: boolean } }>('/api/maintenance/status'),
-    refetchInterval: 10_000,
+    queryFn: () => api<MaintenanceStatus>('/api/maintenance/status'),
+    refetchInterval: q => {
+      const s = q.state.data as MaintenanceStatus | undefined;
+      return s?.churner.running || s?.recategorize.running ? 1500 : 10_000;
+    },
   });
 
   const setCfg = useMutation({
@@ -371,6 +399,13 @@ function ChurnerSection() {
             <Play size={15} /> {churnRunning ? t('admin.running') : t('admin.churnNow')}
           </Button>
         </div>
+
+        {status?.churner.running && status.churner.progress && (
+          <PhaseProgress progress={status.churner.progress} />
+        )}
+        {status?.churner.running && !status.churner.progress && (
+          <ProgressBar label={t('admin.running')} />
+        )}
       </div>
     </Section>
   );

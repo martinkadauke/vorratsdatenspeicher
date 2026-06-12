@@ -7,6 +7,7 @@ import { STAGE1_PROMPT, STAGE2_PROMPT } from '../llm/prompts.js';
 import { mostSimilar } from '../llm/similarity.js';
 import { notify } from '../notify.js';
 import { processRecategorizeBatch } from '../maintenance/recategorize.js';
+import { ProgressReporter } from '../maintenance/progress.js';
 
 interface Stage1Result {
   action: 'match' | 'new' | 'lookup' | 'garbage';
@@ -50,11 +51,14 @@ export async function runChurn(trigger: 'cron' | 'manual'): Promise<number> {
 }
 
 async function churnWork(eventId: number): Promise<void> {
+  const progress = new ProgressReporter(eventId);
+
   // Step 1: assign categories to any artikel with NULL category_path.
   // This makes the nightly churn self-healing for freshly-imported data.
   let recategorize = { total: 0, updated: 0, fallback: 0 };
   try {
-    recategorize = await processRecategorizeBatch(true);
+    recategorize = await processRecategorizeBatch(true, (done, total) =>
+      progress.set({ phase: 'recategorize', current: done, total }));
     if (recategorize.updated > 0) {
       console.log(`[churner] recategorize: ${recategorize.updated}/${recategorize.total} artikel got a category_path`);
     }
@@ -89,7 +93,10 @@ async function churnWork(eventId: number): Promise<void> {
   const stage1Llm = await providerForTask('churner_stage1');
   const stage2Llm = await providerForTask('churner_stage2');
 
+  let processed = 0;
   for (const a of candidates) {
+    await progress.set({ phase: 'canonical', current: processed, total: candidates.length });
+    processed++;
     try {
       const stage1 = parseLlmJson<Stage1Result>(await stage1Llm.chat({
         system: STAGE1_PROMPT,
@@ -180,7 +187,9 @@ async function churnWork(eventId: number): Promise<void> {
   }
 
   // Also fetch store icons for any stores that don't have one yet
+  await progress.set({ phase: 'store_icons', current: 0, total: 1 }, true);
   const storeIconsAdded = await churnStoreIcons();
+  await progress.clear();
 
   const summary = {
     recategorize,
@@ -191,7 +200,7 @@ async function churnWork(eventId: number): Promise<void> {
     garbage: dropped,
     store_icons: storeIconsAdded,
   };
-  await sql`UPDATE maintenance_event SET ended_at = NOW(), status = 'success',
+  await sql`UPDATE maintenance_event SET ended_at = NOW(), status = 'success', progress = NULL,
             summary = ${sql.json(summary)} WHERE id = ${eventId}`;
   await notify('churner.run.summary', summary);
   console.log('[churner] done:', JSON.stringify(summary));

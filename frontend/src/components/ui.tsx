@@ -161,3 +161,31 @@ export function Spinner({ className }: { className?: string }) {
 export function EmptyState({ children }: { children: ReactNode }) {
   return <div className="py-12 text-center text-sm text-zinc-400 dark:text-zinc-500">{children}</div>;
 }
+
+// ── ProgressBar ──────────────────────────────────────────────────────────────
+/** A determinate (value/max) or indeterminate (omit value) progress bar.
+ *  Indeterminate mode shows a looping sweep — for single long-running calls
+ *  with no measurable sub-steps (e.g. one OCR request). */
+export function ProgressBar({ value, max, label, className }: {
+  value?: number; max?: number; label?: ReactNode; className?: string;
+}) {
+  const determinate = typeof value === 'number' && typeof max === 'number' && max > 0;
+  const pct = determinate ? Math.min(100, Math.round((value! / max!) * 100)) : 0;
+  return (
+    <div className={cn('flex flex-col gap-1', className)}>
+      {label && (
+        <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
+          <span>{label}</span>
+          {determinate && <span className="tabular font-medium">{value}/{max} · {pct}%</span>}
+        </div>
+      )}
+      <div className="h-2 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
+        {determinate ? (
+          <div className="h-full rounded-full bg-emerald-500 transition-[width] duration-500" style={{ width: `${pct}%` }} />
+        ) : (
+          <div className="h-full w-1/3 animate-progress-indeterminate rounded-full bg-emerald-500" />
+        )}
+      </div>
+    </div>
+  );
+}

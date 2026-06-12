@@ -35,18 +35,30 @@ export function maintenanceRoutes(app: FastifyInstance): void {
 
   app.get('/api/maintenance/status', { preHandler: requireAdmin }, async () => {
     const lastRuns = await sql`
-      SELECT DISTINCT ON (kind) kind, started_at, ended_at, status, summary
+      SELECT DISTINCT ON (kind) kind, started_at, ended_at, status, summary, progress
       FROM maintenance_event ORDER BY kind, id DESC
     `;
+    // Live progress comes from whichever event row is currently 'running'.
+    const live = await sql`
+      SELECT kind, progress FROM maintenance_event
+      WHERE status = 'running' AND progress IS NOT NULL
+      ORDER BY id DESC
+    `;
+    const churnRunning = isChurnRunning();
+    const recatRunning = isRecategorizeRunning();
+    const churnProgress = live.find(r => r.kind === 'churner.run')?.progress ?? null;
+    const recatProgress = live.find(r => r.kind === 'recategorize.run')?.progress ?? null;
     return {
       churner: {
         enabled: await getConfig('churner.enabled'),
         cron: await getConfig('churner.cron'),
-        running: isChurnRunning(),
+        running: churnRunning,
+        progress: churnRunning ? churnProgress : null,
         last_run: lastRuns.find(r => r.kind === 'churner.run') ?? null,
       },
       recategorize: {
-        running: isRecategorizeRunning(),
+        running: recatRunning,
+        progress: recatRunning ? recatProgress : null,
         last_run: lastRuns.find(r => r.kind === 'recategorize.run') ?? null,
       },
     };

@@ -3,6 +3,7 @@ import { parseLlmJson } from '../llm/ollama.js';
 import { providerForTask } from '../llm/provider.js';
 import { RECATEGORIZE_PROMPT } from '../llm/prompts.js';
 import { notify } from '../notify.js';
+import { ProgressReporter } from './progress.js';
 
 interface CatAssignment {
   id: number;
@@ -35,8 +36,12 @@ export async function runRecategorize(onlyMissing: boolean): Promise<number> {
   return eventId;
 }
 
-/** Categorize-batch work without event tracking — callable from other jobs. */
-export async function processRecategorizeBatch(onlyMissing: boolean): Promise<{ total: number; updated: number; fallback: number }> {
+/** Categorize-batch work without event tracking — callable from other jobs.
+ *  Optional onProgress reports (done, total) after each batch. */
+export async function processRecategorizeBatch(
+  onlyMissing: boolean,
+  onProgress?: (done: number, total: number) => Promise<void> | void,
+): Promise<{ total: number; updated: number; fallback: number }> {
   const llm = await providerForTask('recategorize');
   const validPaths = (await sql`SELECT path FROM category ORDER BY path`).map(r => r.path as string);
   // "missing" also retries items previously dumped into the fallback bucket,
@@ -84,13 +89,17 @@ export async function processRecategorizeBatch(onlyMissing: boolean): Promise<{ 
       await sql`UPDATE artikel SET category_path = ${proposed} WHERE id = ${b.id}`;
       updated++;
     }
+    if (onProgress) await onProgress(Math.min(i + BATCH, items.length), items.length);
   }
 
   return { total: items.length, updated, fallback };
 }
 
 async function recategorizeWork(eventId: number, onlyMissing: boolean): Promise<void> {
-  const summary = await processRecategorizeBatch(onlyMissing);
+  const progress = new ProgressReporter(eventId);
+  const summary = await processRecategorizeBatch(onlyMissing, (done, total) =>
+    progress.set({ phase: 'recategorize', current: done, total }));
+  await progress.clear();
   await sql`UPDATE maintenance_event SET ended_at = NOW(), status = 'success',
             summary = ${sql.json(summary)} WHERE id = ${eventId}`;
   await notify('recategorize.done', summary);

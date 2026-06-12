@@ -6,7 +6,7 @@ import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, Plus, ChevronLeft, 
 import { TransformWrapper, TransformComponent, useControls } from 'react-zoom-pan-pinch';
 import { api } from '../api/client';
 import type { Artikel, ReceiptDetail } from '../api/types';
-import { Card, Spinner, Badge, Modal, Input, Label, Button } from '../components/ui';
+import { Card, Spinner, Badge, Modal, Input, Label, Button, ProgressBar } from '../components/ui';
 import { ArticleEditModal } from '../components/ArticleEditModal';
 import { AddArticleModal } from '../components/AddArticleModal';
 import { ConsumerDots } from '../components/ConsumerChips';
@@ -180,6 +180,10 @@ export function ReceiptDetailPage() {
           <Trash2 size={18} />
         </button>
       </div>
+
+      {reocr.isPending && (
+        <ProgressBar label={t('receiptDetail.reocrRunning')} />
+      )}
 
       {mismatch && (
         <div

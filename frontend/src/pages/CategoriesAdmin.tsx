@@ -8,7 +8,10 @@ import {
   FolderTree, RefreshCw, Play, AlertTriangle,
 } from 'lucide-react';
 import { api } from '../api/client';
-import { Card, Button, Input, Spinner } from '../components/ui';
+import { Card, Button, Input, Spinner, ProgressBar } from '../components/ui';
+
+interface JobProgress { phase: string; current: number; total: number }
+interface MaintenanceStatus { recategorize: { running: boolean; progress: JobProgress | null } }
 
 // ── tree data model ────────────────────────────────────────────────────────
 interface CatNode {
@@ -122,10 +125,11 @@ export function CategoriesAdmin() {
 
   const { data: status } = useQuery({
     queryKey: ['maintenance-status'],
-    queryFn: () => api<{ recategorize: { running: boolean } }>('/api/maintenance/status'),
-    refetchInterval: 5_000,
+    queryFn: () => api<MaintenanceStatus>('/api/maintenance/status'),
+    refetchInterval: q => ((q.state.data as MaintenanceStatus | undefined)?.recategorize.running ? 1500 : 5_000),
   });
   const recatRunning = status?.recategorize.running ?? false;
+  const recatProgress = status?.recategorize.progress ?? null;
 
   // initial tree from server (only once / when not dirty)
   useEffect(() => {
@@ -358,6 +362,13 @@ export function CategoriesAdmin() {
           </Button>
         </div>
         <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('categoriesAdmin.applyHint')}</p>
+        {recatRunning && (
+          <ProgressBar
+            label={t('admin.phaseRecategorize')}
+            value={recatProgress?.total ? recatProgress.current : undefined}
+            max={recatProgress?.total ? recatProgress.total : undefined}
+          />
+        )}
         {applyCategories.isError && (
           <p className="text-sm text-red-500">{(applyCategories.error as Error).message}</p>
         )}
