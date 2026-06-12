@@ -30,6 +30,7 @@ import { trendsRoutes } from './routes/trends.js';
 import { iconRoutes } from './routes/icons.js';
 import { kontoRoutes } from './routes/konten.js';
 import { subscriptionRoutes } from './routes/subscriptions.js';
+import { offerRoutes } from './routes/offers.js';
 import { rescheduleChurner } from './churner/scheduler.js';
 import { rescheduleSupermarket } from './supermarket/scheduler.js';
 import { rescheduleModelReview } from './maintenance/modelReview.js';
@@ -90,6 +91,7 @@ async function main(): Promise<void> {
   iconRoutes(app);
   kontoRoutes(app);
   subscriptionRoutes(app);
+  offerRoutes(app);
   modelReviewRoutes(app);
 
   // Receipt photos under /receipts/* — served directly by the app so a

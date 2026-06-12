@@ -7,6 +7,7 @@
 // it can also pull leaflets / offers.
 import sql from '../db.js';
 import { getConfig } from '../config.js';
+import { runOfferSearch, sendOfferDigests } from '../offers/index.js';
 
 let running = false;
 export function isSupermarketRunning(): boolean { return running; }
@@ -88,8 +89,14 @@ export async function runSupermarketInfo(): Promise<number> {
       } catch { /* skip this branch, keep going */ }
       await sleep(1500); // be gentle to the public Overpass instance
     }
+
+    // Then refresh offers for subscribed products and email the digests.
+    let offers = { checked: 0, found: 0 };
+    try { offers = await runOfferSearch(); await sendOfferDigests(); }
+    catch (e) { console.error('[supermarket] offer search failed:', (e as Error).message); }
+
     await sql`UPDATE maintenance_event SET status='done', ended_at=NOW(),
-      summary=${sql.json({ checked, updated })} WHERE id=${eventId}`;
+      summary=${sql.json({ checked, updated, offers_checked: offers.checked, offers_found: offers.found })} WHERE id=${eventId}`;
     return eventId;
   } catch (e) {
     await sql`UPDATE maintenance_event SET status='error', ended_at=NOW(),
