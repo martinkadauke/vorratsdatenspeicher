@@ -30,6 +30,7 @@ import { iconRoutes } from './routes/icons.js';
 import { kontoRoutes } from './routes/konten.js';
 import { subscriptionRoutes } from './routes/subscriptions.js';
 import { rescheduleChurner } from './churner/scheduler.js';
+import { rescheduleSupermarket } from './supermarket/scheduler.js';
 
 async function main(): Promise<void> {
   await migrate();
@@ -134,6 +135,7 @@ async function main(): Promise<void> {
   }
 
   await rescheduleChurner();
+  await rescheduleSupermarket();
 
   await app.listen({ port: PORT, host: '0.0.0.0' });
   app.log.info(`Vorratsdatenspeicher listening on :${PORT}`);

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Trash2, Play, ChevronRight, History, Square, Image as ImageIcon, Download, ExternalLink } from 'lucide-react';
+import { Trash2, Play, ChevronRight, History, Square, Image as ImageIcon, Download, ExternalLink, Store } from 'lucide-react';
 import { api } from '../api/client';
 import type { FamilyMember, MaintenanceEvent, User } from '../api/types';
 import { Card, Button, Input, Label, Select, Switch, Spinner, Badge, ProgressBar } from '../components/ui';
@@ -906,6 +906,16 @@ function OffersSection() {
     mutationFn: (name: string) => api('/api/avoided', { method: 'POST', body: { canonical_names: [name], avoid: false } }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['avoided'] }),
   });
+  const { data: events } = useQuery({
+    queryKey: ['maintenance-events'],
+    queryFn: () => api<{ id: number; kind: string; ended_at: string | null; status: string; summary: Record<string, unknown> | null }[]>('/api/maintenance/events?limit=100'),
+    refetchInterval: 15_000,
+  });
+  const lastInfo = events?.find(e => e.kind === 'supermarket.info');
+  const fetchInfo = useMutation({
+    mutationFn: () => api('/api/maintenance/supermarket-info', { method: 'POST' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['maintenance-events'] }),
+  });
 
   const [newCat, setNewCat] = useState('');
 
@@ -997,6 +1007,25 @@ function OffersSection() {
               </span>
             ))}
             {!avoided?.length && <span className="text-xs text-zinc-400">{t('admin.avoidListEmpty')}</span>}
+          </div>
+        </div>
+
+        {/* supermarket info crawler (opening hours via OSM, nightly) */}
+        <div className="flex flex-col gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+          <Label className="mb-0">{t('admin.supermarketInfo')}</Label>
+          <p className="text-xs text-zinc-400">{t('admin.supermarketInfoHint')}</p>
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" onClick={() => fetchInfo.mutate()} disabled={fetchInfo.isPending || lastInfo?.status === 'running'}>
+              <Store size={14} /> {lastInfo?.status === 'running' || fetchInfo.isPending ? t('admin.supermarketInfoRunning') : t('admin.supermarketInfoBtn')}
+            </Button>
+            {lastInfo && lastInfo.status !== 'running' && (
+              <span className="text-xs text-zinc-400">
+                {t('admin.supermarketInfoLast', {
+                  updated: (lastInfo.summary?.updated as number) ?? 0,
+                  checked: (lastInfo.summary?.checked as number) ?? 0,
+                })}
+              </span>
+            )}
           </div>
         </div>
 

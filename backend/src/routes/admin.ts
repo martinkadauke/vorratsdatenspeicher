@@ -5,6 +5,7 @@ import sql from '../db.js';
 import { requireAdmin } from '../auth/plugin.js';
 import { getAllConfig, setConfig, getConfig } from '../config.js';
 import { rescheduleChurner } from '../churner/scheduler.js';
+import { rescheduleSupermarket } from '../supermarket/scheduler.js';
 import { listOllamaModels, ollamaHealth } from '../llm/ollama.js';
 import { searxngHealth } from '../llm/searxng.js';
 import { sendMail } from '../mailer.js';
@@ -46,6 +47,7 @@ export function adminRoutes(app: FastifyInstance): void {
     if (value === undefined) return reply.code(400).send({ error: 'value required' });
     await setConfig(key, value, req.user!.id);
     if (key.startsWith('churner.')) await rescheduleChurner();
+    if (key.startsWith('supermarket.')) await rescheduleSupermarket();
     return { ok: true };
   });
 

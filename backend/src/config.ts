@@ -39,6 +39,9 @@ export interface AppConfig {
   'offers.radius_enabled': boolean;
   'offers.radius_km': number;
   'offers.extra_categories': string[];
+  // supermarket info crawler (opening hours via OSM, nightly)
+  'supermarket.enabled': boolean;
+  'supermarket.cron': string;
 }
 
 const DEFAULTS: AppConfig = {
@@ -75,6 +78,8 @@ const DEFAULTS: AppConfig = {
   'offers.radius_enabled': false,
   'offers.radius_km': 10,
   'offers.extra_categories': [],
+  'supermarket.enabled': true,
+  'supermarket.cron': '0 4 * * *',
 };
 
 export async function getConfig<K extends keyof AppConfig>(key: K): Promise<AppConfig[K]> {

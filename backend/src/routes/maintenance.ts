@@ -3,6 +3,7 @@ import sql from '../db.js';
 import { requireAdmin } from '../auth/plugin.js';
 import { runChurn, isChurnRunning, requestChurnStop, runIconFetch } from '../churner/index.js';
 import { runRecategorize, isRecategorizeRunning, recategorizeOne } from '../maintenance/recategorize.js';
+import { runSupermarketInfo, isSupermarketRunning } from '../supermarket/info.js';
 import { getConfig } from '../config.js';
 import { PROGRESS_FRESH_MS, type JobProgress } from '../maintenance/progress.js';
 
@@ -41,6 +42,14 @@ export function maintenanceRoutes(app: FastifyInstance): void {
     } catch (e) {
       return reply.code(409).send({ error: (e as Error).message });
     }
+  });
+
+  /** Fetch supermarket info (opening hours via OSM) for all branches now. */
+  app.post('/api/maintenance/supermarket-info', { preHandler: requireAdmin }, async (_req, reply) => {
+    if (isSupermarketRunning()) return reply.code(409).send({ error: 'Supermarkt-Infos laufen bereits' });
+    // run in background; the event log + button state reflect progress
+    void runSupermarketInfo().catch(err => _req.log.error(`supermarket-info failed: ${err.message}`));
+    return { ok: true, started: true };
   });
 
   app.get('/api/maintenance/events', { preHandler: requireAdmin }, async (req) => {
