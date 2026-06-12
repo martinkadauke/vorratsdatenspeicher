@@ -42,7 +42,8 @@
     "noImage": "No photo",
     "empty": "No receipts found",
     "loadMore": "Load more",
-    "allStores": "All stores"
+    "allStores": "All stores",
+    "reviewProgress": "Receipts reviewed"
   },
   "receiptEdit": {
     "title": "Edit receipt",
@@ -63,7 +64,9 @@
     "addArticle": "Add item",
     "prev": "Previous receipt",
     "next": "Next receipt",
-    "rotate": "Rotate 90° clockwise"
+    "rotate": "Rotate 90° clockwise",
+    "reviewedNo": "Mark as fully reviewed",
+    "reviewedYes": "Fully reviewed ✓"
   },
   "article": {
     "edit": "Edit item",

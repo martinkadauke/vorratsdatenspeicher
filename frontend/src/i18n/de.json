@@ -42,7 +42,8 @@
     "noImage": "Kein Foto",
     "empty": "Keine Belege gefunden",
     "loadMore": "Mehr laden",
-    "allStores": "Alle Läden"
+    "allStores": "Alle Läden",
+    "reviewProgress": "Belege geprüft"
   },
   "receiptEdit": {
     "title": "Beleg bearbeiten",
@@ -63,7 +64,9 @@
     "addArticle": "Artikel hinzufügen",
     "prev": "Vorheriger Beleg",
     "next": "Nächster Beleg",
-    "rotate": "90° im Uhrzeigersinn drehen"
+    "rotate": "90° im Uhrzeigersinn drehen",
+    "reviewedNo": "Als vollständig geprüft markieren",
+    "reviewedYes": "Vollständig geprüft ✓"
   },
   "article": {
     "edit": "Artikel bearbeiten",

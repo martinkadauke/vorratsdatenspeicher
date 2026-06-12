@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, Plus, ChevronLeft, ChevronRight, RotateCw } from 'lucide-react';
+import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, Plus, ChevronLeft, ChevronRight, RotateCw, CheckCircle2, Circle } from 'lucide-react';
 import { TransformWrapper, TransformComponent, useControls } from 'react-zoom-pan-pinch';
 import { api } from '../api/client';
 import type { Artikel, ReceiptDetail } from '../api/types';
@@ -46,6 +46,15 @@ export function ReceiptDetailPage() {
       alert(t('receiptDetail.reocrDone', { count: res.items, confidence: Math.round(res.confidence * 100) }));
     },
     onError: (err: Error) => alert(`OCR fehlgeschlagen: ${err.message}`),
+  });
+
+  const setReviewed = useMutation({
+    mutationFn: (value: boolean) => api(`/api/receipts/${id}`, { method: 'PATCH', body: { geprueft: value } }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['receipt', id] });
+      void qc.invalidateQueries({ queryKey: ['receipts'] });
+      void qc.invalidateQueries({ queryKey: ['review-progress'] });
+    },
   });
 
   const { data, isLoading } = useQuery({
@@ -186,6 +195,21 @@ export function ReceiptDetailPage() {
           </div>
         </div>
       )}
+
+      <button
+        onClick={() => setReviewed.mutate(!data.geprueft)}
+        disabled={setReviewed.isPending}
+        className={`flex items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left text-sm font-medium transition ${
+          data.geprueft
+            ? 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700/50 dark:bg-emerald-950/40 dark:text-emerald-300'
+            : 'border-zinc-300 bg-white text-zinc-600 hover:border-emerald-300 hover:bg-emerald-50/50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-emerald-700/50'
+        }`}
+      >
+        {data.geprueft
+          ? <CheckCircle2 size={20} className="shrink-0 text-emerald-600 dark:text-emerald-500" />
+          : <Circle size={20} className="shrink-0 text-zinc-400" />}
+        <span>{data.geprueft ? t('receiptDetail.reviewedYes') : t('receiptDetail.reviewedNo')}</span>
+      </button>
 
       <ReceiptEditModal receipt={data} open={editReceipt} onClose={() => setEditReceipt(false)} />
 

@@ -19,7 +19,7 @@ export function receiptRoutes(app: FastifyInstance): void {
     const storeLike = q.store ? `%${q.store}%` : null;
 
     const rows = await sql`
-      SELECT e.id, e.datum, e.roh_ladenname, e.bild_pfad, e.gesamt_betrag,
+      SELECT e.id, e.datum, e.roh_ladenname, e.bild_pfad, e.gesamt_betrag, e.geprueft,
              COUNT(a.id)::int AS item_count
       FROM einkauf e
       LEFT JOIN artikel a ON a.einkauf_id = e.id
@@ -38,6 +38,16 @@ export function receiptRoutes(app: FastifyInstance): void {
     return rows;
   });
 
+  /** Review-progress across all receipts (for the overview progress bar). */
+  app.get('/api/receipts/review-progress', async () => {
+    const [row] = await sql`
+      SELECT COUNT(*)::int AS total,
+             COUNT(*) FILTER (WHERE geprueft)::int AS reviewed
+      FROM einkauf
+    `;
+    return { total: row.total, reviewed: row.reviewed };
+  });
+
   /** Patch receipt-level fields (date, store, total). */
   app.patch('/api/receipts/:id', async (req, reply) => {
     const id = parseInt((req.params as { id: string }).id, 10);
@@ -46,6 +56,7 @@ export function receiptRoutes(app: FastifyInstance): void {
     const updates: Record<string, unknown> = {};
     if ('datum' in body && typeof body.datum === 'string') updates.datum = body.datum;
     if ('roh_ladenname' in body) updates.roh_ladenname = body.roh_ladenname;
+    if ('geprueft' in body) updates.geprueft = Boolean(body.geprueft);
     if ('gesamt_betrag' in body) {
       const v = body.gesamt_betrag;
       if (v === null || v === '') updates.gesamt_betrag = null;
@@ -188,7 +199,7 @@ export function receiptRoutes(app: FastifyInstance): void {
     if (!id) return reply.code(400).send({ error: 'invalid id' });
 
     const receipts = await sql`
-      SELECT id, datum, roh_ladenname, bild_pfad, gesamt_betrag
+      SELECT id, datum, roh_ladenname, bild_pfad, gesamt_betrag, geprueft
       FROM einkauf WHERE id = ${id}
     `;
     if (!receipts.length) return reply.code(404).send({ error: 'not found' });

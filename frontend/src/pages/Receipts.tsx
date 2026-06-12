@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Search } from 'lucide-react';
+import { Search, CheckCircle2 } from 'lucide-react';
 import { api } from '../api/client';
 import type { Receipt } from '../api/types';
 import { Card, Input, Spinner, EmptyState, Button } from '../components/ui';
@@ -39,6 +39,11 @@ export function Receipts() {
     staleTime: 60_000,
   });
 
+  const { data: progress } = useQuery({
+    queryKey: ['review-progress'],
+    queryFn: () => api<{ total: number; reviewed: number }>('/api/receipts/review-progress'),
+  });
+
   const storeParam = storeFilter ? `&store=${encodeURIComponent(storeFilter)}` : '';
   const { data, isLoading } = useQuery({
     queryKey: ['receipts', search, storeFilter, limit],
@@ -46,8 +51,30 @@ export function Receipts() {
     placeholderData: keepPreviousData,
   });
 
+  const pct = progress && progress.total > 0 ? Math.round((progress.reviewed / progress.total) * 100) : 0;
+
   return (
     <div className="flex flex-col gap-3">
+      {progress && progress.total > 0 && (
+        <div className="rounded-2xl border border-zinc-200 bg-white px-3.5 py-3 dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="mb-1.5 flex items-center justify-between text-sm">
+            <span className="flex items-center gap-1.5 font-medium">
+              <CheckCircle2 size={15} className="text-emerald-500" />
+              {t('receipts.reviewProgress')}
+            </span>
+            <span className="tabular text-zinc-500">
+              {progress.reviewed} / {progress.total} · <span className="font-semibold text-emerald-600 dark:text-emerald-500">{pct}%</span>
+            </span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
+            <div
+              className="h-full rounded-full bg-emerald-500 transition-[width] duration-500"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       <div className="relative">
         <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
         <Input
@@ -119,6 +146,11 @@ export function Receipts() {
                 {eur(r.gesamt_betrag)}
               </div>
             </div>
+            {r.geprueft && (
+              <span className="shrink-0 self-start" title={t('receiptDetail.reviewedYes')}>
+                <CheckCircle2 size={18} className="text-emerald-500" />
+              </span>
+            )}
           </Card>
         ))}
       </div>

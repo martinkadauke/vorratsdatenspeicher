@@ -15,6 +15,7 @@ export interface Receipt {
   roh_ladenname: string | null;
   bild_pfad: string | null;
   gesamt_betrag: string | null;
+  geprueft?: boolean;
   item_count?: number;
 }
 
