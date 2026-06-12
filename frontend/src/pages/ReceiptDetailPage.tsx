@@ -6,11 +6,10 @@ import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, Plus, ChevronLeft, 
 import { TransformWrapper, TransformComponent, useControls } from 'react-zoom-pan-pinch';
 import { api } from '../api/client';
 import type { Artikel, ReceiptDetail } from '../api/types';
-import { Card, Spinner, Badge, Modal, Input, Label, Button, ProgressBar } from '../components/ui';
+import { Spinner, Modal, Input, Label, Button, ProgressBar } from '../components/ui';
 import { ArticleEditModal } from '../components/ArticleEditModal';
 import { AddArticleModal } from '../components/AddArticleModal';
-import { ConsumerDots } from '../components/ConsumerChips';
-import { CanonicalIcon } from '../components/IconPicker';
+import { SortableArticleList } from '../components/SortableArticleList';
 import { toast } from '../components/Toast';
 import { confirm } from '../components/Confirm';
 import { eur, fmtDate } from '../lib/utils';
@@ -241,27 +240,9 @@ export function ReceiptDetailPage() {
           )}
         </div>
 
-        {/* Line items */}
+        {/* Line items — drag the grip handle to reorder */}
         <div className="flex min-w-0 flex-col gap-1.5">
-          {data.artikel.map(a => (
-            <Card key={a.id} onClick={() => setEditing(a)} className="flex min-w-0 items-center gap-2 px-2.5 py-2.5 sm:gap-3 sm:px-3">
-              {a.canonical_name && <CanonicalIcon name={a.canonical_name} size={32} />}
-              <div className="min-w-0 flex-1">
-                <div className="flex min-w-0 items-center gap-1.5">
-                  <span className="truncate font-medium">{a.canonical_name ?? a.ai_guess ?? a.name}</span>
-                  <ConsumerDots ids={a.consumers} />
-                </div>
-                {a.original_text && (
-                  <div className="truncate font-mono text-[11px] text-zinc-400">{a.original_text}</div>
-                )}
-                <div className="mt-0.5 flex flex-wrap items-center gap-1">
-                  {a.category_path && <Badge>{a.category_path.split('/').pop()}</Badge>}
-                  {a.menge && <span className="text-xs text-zinc-400">{a.menge} {a.einheit ?? ''}</span>}
-                </div>
-              </div>
-              <div className="tabular shrink-0 font-semibold">{eur(a.preis)}</div>
-            </Card>
-          ))}
+          <SortableArticleList receiptId={data.id} artikel={data.artikel} onEdit={setEditing} />
           <button
             type="button"
             onClick={() => setAdding(true)}

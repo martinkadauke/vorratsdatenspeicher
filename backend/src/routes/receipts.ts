@@ -209,6 +209,25 @@ export function receiptRoutes(app: FastifyInstance): void {
     return { prev_id: prev?.id ?? null, next_id: next?.id ?? null };
   });
 
+  /** Persist a new line-item order (drag-to-reorder). Body: { order: [ids] }. */
+  app.put('/api/receipts/:id/artikel-order', async (req, reply) => {
+    const id = parseInt((req.params as { id: string }).id, 10);
+    if (!id) return reply.code(400).send({ error: 'invalid id' });
+    const { order } = (req.body ?? {}) as { order?: number[] };
+    if (!Array.isArray(order) || !order.length) return reply.code(400).send({ error: 'order array required' });
+
+    // Only renumber rows that actually belong to this receipt.
+    const owned = new Set((await sql`SELECT id FROM artikel WHERE einkauf_id = ${id}`).map(r => r.id as number));
+    await sql.begin(async tx => {
+      let pos = 0;
+      for (const artikelId of order) {
+        if (!owned.has(artikelId)) continue;
+        await tx`UPDATE artikel SET sort_order = ${pos++} WHERE id = ${artikelId} AND einkauf_id = ${id}`;
+      }
+    });
+    return { ok: true };
+  });
+
   app.get('/api/receipts/:id', async (req, reply) => {
     const id = parseInt((req.params as { id: string }).id, 10);
     if (!id) return reply.code(400).send({ error: 'invalid id' });
@@ -222,7 +241,8 @@ export function receiptRoutes(app: FastifyInstance): void {
     const artikel = await sql`
       SELECT a.id, a.name, a.menge, a.einheit, a.preis, a.original_text,
              a.ai_guess, a.canonical_name, a.category_path
-      FROM artikel a WHERE a.einkauf_id = ${id} ORDER BY a.id
+      FROM artikel a WHERE a.einkauf_id = ${id}
+      ORDER BY COALESCE(a.sort_order, a.id), a.id
     `;
 
     const canonicals = [...new Set(artikel.map(a => a.canonical_name).filter(Boolean))] as string[];
