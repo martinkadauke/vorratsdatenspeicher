@@ -819,6 +819,11 @@ function UsersSection() {
     mutationFn: (id: number) => api<{ emailed: boolean; reset_link: string }>(`/api/users/${id}/send-reset`, { method: 'POST' }),
     onSuccess: (res) => { setCreatedUsername(null); setInviteLink(res.emailed ? null : res.reset_link); },
   });
+  const resendInvite = useMutation({
+    mutationFn: (id: number) => api<{ emailed: boolean; invite_link: string }>(`/api/users/${id}/resend-invite`, { method: 'POST' }),
+    onSuccess: (res) => { invalidate(); setCreatedUsername(null); setInviteLink(res.emailed ? null : res.invite_link); },
+    onError: (e) => toast((e as Error).message, 'error'),
+  });
   const remove = useMutation({
     mutationFn: (id: number) => api(`/api/users/${id}`, { method: 'DELETE' }),
     onSuccess: invalidate,
@@ -832,9 +837,15 @@ function UsersSection() {
           return (
             <div key={u.id} className="flex items-center gap-2 rounded-xl border border-zinc-100 px-2.5 py-2 dark:border-zinc-800">
               <div className="min-w-0 flex-1">
-                <div className="truncate font-medium">
-                  {u.username}
-                  {isSelf && <span className="ml-1.5 text-xs font-normal text-zinc-400">({t('admin.you')})</span>}
+                <div className="flex min-w-0 items-center gap-1.5 truncate font-medium">
+                  <span className="truncate">{u.username}</span>
+                  {isSelf && <span className="text-xs font-normal text-zinc-400">({t('admin.you')})</span>}
+                  {u.invite_pending && (
+                    <span className="shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">{t('admin.invitePending')}</span>
+                  )}
+                  {u.invite_expired && (
+                    <span className="shrink-0 rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-600 dark:bg-red-950/50 dark:text-red-300">{t('admin.inviteExpired')}</span>
+                  )}
                 </div>
                 {u.email && <div className="truncate text-xs text-zinc-400">{u.email}</div>}
               </div>
@@ -853,6 +864,15 @@ function UsersSection() {
                   onChange={v => patch.mutate({ id: u.id, body: { is_admin: v } })}
                 />
               </label>
+              {(u.invite_pending || u.invite_expired) && (
+                <Button
+                  variant="ghost"
+                  className="shrink-0 px-2"
+                  title={t('admin.resendInvite')}
+                  disabled={resendInvite.isPending}
+                  onClick={() => resendInvite.mutate(u.id)}
+                >📨</Button>
+              )}
               <Button
                 variant="ghost"
                 className="shrink-0 px-2"

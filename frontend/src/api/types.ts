@@ -8,6 +8,8 @@ export interface User {
   preferred_lang: string;
   has_seen_tour?: boolean;
   created_at?: string;
+  invite_pending?: boolean;
+  invite_expired?: boolean;
 }
 
 export interface Receipt {

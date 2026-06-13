@@ -56,7 +56,19 @@ export function adminRoutes(app: FastifyInstance): void {
 
   // ── users (invite-only) ─────────────────────────────────────────────────
   app.get('/api/users', { preHandler: requireAdmin }, async () => {
-    return sql`SELECT id, username, email, is_admin, sees_all_konten, prefers_dark, preferred_lang, created_at FROM users ORDER BY id`;
+    return sql`
+      SELECT u.id, u.username, u.email, u.is_admin, u.sees_all_konten, u.prefers_dark, u.preferred_lang, u.created_at,
+        EXISTS (
+          SELECT 1 FROM auth_token t
+          WHERE t.user_id = u.id AND t.kind = 'invite' AND t.used_at IS NULL AND t.expires_at > NOW()
+        ) AS invite_pending,
+        (
+          EXISTS (SELECT 1 FROM auth_token t WHERE t.user_id = u.id AND t.kind = 'invite')
+          AND NOT EXISTS (SELECT 1 FROM auth_token t WHERE t.user_id = u.id AND t.kind = 'invite' AND t.used_at IS NOT NULL)
+          AND NOT EXISTS (SELECT 1 FROM auth_token t WHERE t.user_id = u.id AND t.kind = 'invite' AND t.used_at IS NULL AND t.expires_at > NOW())
+        ) AS invite_expired
+      FROM users u
+      ORDER BY u.id`;
   });
 
   /** Invite a new user by email. Username is derived from the email's
@@ -127,6 +139,32 @@ export function adminRoutes(app: FastifyInstance): void {
     if (!Object.keys(updates).length) return reply.code(400).send({ error: 'nothing to update' });
     await sql`UPDATE users SET ${sql(updates)} WHERE id = ${id}`;
     return { ok: true };
+  });
+
+  /** Resend an invite link to a user who hasn't accepted yet (fresh 7-day token). */
+  app.post('/api/users/:id/resend-invite', { preHandler: requireAdmin }, async (req, reply) => {
+    const id = parseInt((req.params as { id: string }).id, 10);
+    const rows = await sql`SELECT username, email FROM users WHERE id = ${id}`;
+    if (!rows.length) return reply.code(404).send({ error: 'not found' });
+    if (!rows[0].email) return reply.code(400).send({ error: 'user has no email' });
+    const token = await createAuthToken(id, 'invite', 7 * 24);
+    const baseUrl = await getConfig('app.base_url');
+    const link = `${baseUrl}/reset?token=${token}`;
+    let emailed = false;
+    try {
+      await sendMail(
+        rows[0].email as string,
+        'Einladung zu Vorratsdatenspeicher',
+        `Hallo,\n\n` +
+        `du wurdest zu Vorratsdatenspeicher eingeladen. ` +
+        `Setze über diesen Link dein Passwort (7 Tage gültig):\n\n${link}\n\n` +
+        `Dein Benutzername ist: ${rows[0].username}\n`,
+      );
+      emailed = true;
+    } catch (e) {
+      req.log.warn(`resend-invite mail failed: ${(e as Error).message}`);
+    }
+    return { ok: true, emailed, invite_link: link };
   });
 
   /** Send a fresh reset link to an existing user (admin action). */
