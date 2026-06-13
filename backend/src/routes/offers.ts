@@ -1,21 +1,80 @@
 import type { FastifyInstance } from 'fastify';
 import sql from '../db.js';
 import { requireAdmin } from '../auth/plugin.js';
+import { kontoScope } from '../auth/konto.js';
 import { runOfferSearch, sendOfferDigests, isOfferSearchRunning, debugOfferSearch } from '../offers/index.js';
 
+/** "0,99 €" / "1.299,00 €" → 0.99 / 1299.00. null if unparseable. */
+function parsePrice(s: string | null): number | null {
+  if (!s) return null;
+  const cleaned = s.replace(/[^\d.,]/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.');
+  const n = parseFloat(cleaned);
+  return Number.isFinite(n) ? n : null;
+}
+
 export function offerRoutes(app: FastifyInstance): void {
-  /** Offers found for the things the current user subscribed to. */
+  /** Offers for the user's subscribed articles, enriched with the household's
+   *  buy-rhythm ("when is it due again?") and a good-price flag vs. avg paid. */
   app.get('/api/offers/mine', async (req) => {
     const refs = (await sql`
       SELECT ref FROM offer_subscription WHERE user_id = ${req.user!.id} AND kind = 'artikel'
     `).map(r => r.ref as string);
-    if (!refs.length) return [];
-    return sql`
+    if (!refs.length) return { offers: [], pantry: {} };
+
+    const offers = await sql`
       SELECT id, canonical_name, store, price, old_price, valid_until, source_url, confidence, found_at, brand, image_url, unit, source
       FROM offer
       WHERE canonical_name IN ${sql(refs)} AND found_at > NOW() - INTERVAL '21 days'
-      ORDER BY found_at DESC LIMIT 100
+      ORDER BY found_at DESC LIMIT 200
     `;
+
+    // Per offered canonical: avg paid price + purchase rhythm (konto-scoped to the user).
+    const offered = [...new Set(offers.map(o => o.canonical_name as string))];
+    const hist = offered.length ? await sql`
+      SELECT a.canonical_name,
+             ROUND(AVG(a.preis) FILTER (WHERE a.preis > 0), 2)::float8 AS avg_paid,
+             COUNT(*)::int AS n,
+             MIN(e.datum)::text AS first_bought,
+             MAX(e.datum)::text AS last_bought
+      FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
+      WHERE a.canonical_name IN ${sql(offered)} ${kontoScope(req.user, sql`e.konto_id`)}
+      GROUP BY a.canonical_name
+    ` : [];
+
+    const DAY = 86_400_000;
+    const today = Date.now();
+    const pantry: Record<string, {
+      avg_paid: number | null; last_bought: string | null;
+      interval_days: number | null; due_in_days: number | null;
+      status: 'overdue' | 'soon' | 'ok' | null;
+    }> = {};
+    for (const h of hist) {
+      const first = h.first_bought ? Date.parse(h.first_bought as string) : null;
+      const last = h.last_bought ? Date.parse(h.last_bought as string) : null;
+      const n = h.n as number;
+      let interval_days: number | null = null, due_in_days: number | null = null;
+      let status: 'overdue' | 'soon' | 'ok' | null = null;
+      if (n >= 2 && first != null && last != null && last > first) {
+        interval_days = Math.round((last - first) / DAY / (n - 1));
+        const daysSince = Math.round((today - last) / DAY);
+        due_in_days = interval_days - daysSince;
+        status = due_in_days <= 0 ? 'overdue' : due_in_days <= 7 ? 'soon' : 'ok';
+      }
+      pantry[h.canonical_name as string] = { avg_paid: h.avg_paid as number | null, last_bought: h.last_bought as string | null, interval_days, due_in_days, status };
+    }
+
+    const enriched = offers.map(o => {
+      const p = parsePrice(o.price as string | null);
+      const avg = pantry[o.canonical_name as string]?.avg_paid ?? null;
+      let good_price = false, discount_pct: number | null = null;
+      if (p != null && avg != null && avg > 0 && p <= avg * 0.85) {
+        good_price = true;
+        discount_pct = Math.round((1 - p / avg) * 100);
+      }
+      return { ...o, good_price, discount_pct };
+    });
+
+    return { offers: enriched, pantry };
   });
 
   /** All recent offers (admin overview). */

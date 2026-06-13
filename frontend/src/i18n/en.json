@@ -240,7 +240,17 @@
     "refreshing": "Searching…",
     "refreshingHint": "VDS is searching for current offers for your items – this takes a moment.",
     "refreshDone": "Offers updated",
-    "disclaimer": "Per web search — please verify price/validity at the source before buying."
+    "allKetten": "All chains",
+    "from": "from",
+    "goodPrice": "good price",
+    "dueOverdue": "overdue",
+    "dueSoon": "due soon",
+    "rhythm": "bought roughly every {{days}} days",
+    "hide": "hide",
+    "unhide": "show",
+    "hiddenCount": "{{count}} hidden · show",
+    "hideHidden": "Hide hidden ones",
+    "disclaimer": "Per web/flyer search — please verify price/validity at the source before buying."
   },
   "hint": {
     "artikel": {

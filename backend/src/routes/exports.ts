@@ -41,8 +41,9 @@ export function exportRoutes(app: FastifyInstance): void {
     return { receipts, artikel, konten, photo_files: fileCount, photo_bytes: diskBytes };
   });
 
-  /** All artikel as CSV, joined with receipt metadata. Optional date range. */
-  app.get('/api/exports/artikel.csv', async (req, reply) => {
+  /** All artikel as CSV, joined with receipt metadata. Optional date range.
+   *  Super-admin only — exporting the whole dataset is a privileged action. */
+  app.get('/api/exports/artikel.csv', { preHandler: requireSuperAdmin }, async (req, reply) => {
     const q = req.query as { from?: string; to?: string };
 
     const rows = await sql`
@@ -81,8 +82,8 @@ export function exportRoutes(app: FastifyInstance): void {
     return out;
   });
 
-  /** Receipts (one row per receipt) as CSV. */
-  app.get('/api/exports/receipts.csv', async (req, reply) => {
+  /** Receipts (one row per receipt) as CSV. Super-admin only. */
+  app.get('/api/exports/receipts.csv', { preHandler: requireSuperAdmin }, async (req, reply) => {
     const q = req.query as { from?: string; to?: string };
     const rows = await sql`
       SELECT e.id, e.datum::text AS datum, e.roh_ladenname AS laden, e.gesamt_betrag,
@@ -108,8 +109,8 @@ export function exportRoutes(app: FastifyInstance): void {
     return out;
   });
 
-  /** Monthly category spend as CSV — pivot-ready for Excel. */
-  app.get('/api/exports/monthly.csv', async (req, reply) => {
+  /** Monthly category spend as CSV — pivot-ready for Excel. Super-admin only. */
+  app.get('/api/exports/monthly.csv', { preHandler: requireSuperAdmin }, async (req, reply) => {
     const rows = await sql`
       SELECT
         to_char(e.datum, 'YYYY-MM') AS ym,

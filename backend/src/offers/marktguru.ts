@@ -79,7 +79,9 @@ export async function searchMarktguru(query: string, zipCode: string, limit = 20
       unit: r.unit?.shortName ?? r.unit?.name ?? null,
       validFrom: vd.from ?? null,
       validTo: vd.to ?? null,
-      url: r.externalUrl || `https://www.marktguru.de/suche?q=${encodeURIComponent(query)}`,
+      // Marktguru has no public per-offer web URL (externalUrl is always null and
+      // /suche?q= 404s), so link the actual prospectus image as the source.
+      url: r.externalUrl || `https://mg2de.b-cdn.net/api/v1/offers/${r.id}/images/default/0/large.jpg`,
       image: `https://mg2de.b-cdn.net/api/v1/offers/${r.id}/images/default/0/medium.jpg`,
       categories: (r.categories ?? []).map(c => c.name ?? '').filter(Boolean),
     };

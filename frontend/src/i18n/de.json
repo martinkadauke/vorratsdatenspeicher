@@ -240,7 +240,17 @@
     "refreshing": "Suche läuft…",
     "refreshingHint": "VDS sucht gerade nach aktuellen Angeboten für deine Artikel – das dauert einen Moment.",
     "refreshDone": "Angebote aktualisiert",
-    "disclaimer": "Laut Web-Suche — Preise/Gültigkeit bitte vor dem Kauf an der Quelle prüfen."
+    "allKetten": "Alle Ketten",
+    "from": "ab",
+    "goodPrice": "guter Preis",
+    "dueOverdue": "überfällig",
+    "dueSoon": "bald fällig",
+    "rhythm": "ca. alle {{days}} Tage gekauft",
+    "hide": "ausblenden",
+    "unhide": "einblenden",
+    "hiddenCount": "{{count}} ausgeblendet · anzeigen",
+    "hideHidden": "Ausgeblendete verbergen",
+    "disclaimer": "Laut Web-/Prospekt-Suche — Preise/Gültigkeit bitte vor dem Kauf an der Quelle prüfen."
   },
   "hint": {
     "artikel": {
