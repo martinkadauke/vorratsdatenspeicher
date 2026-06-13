@@ -13,7 +13,8 @@ Regeln:
 - "lookup": NUR wenn der OCR-Text rein kryptisch ist (z.B. "ART.4711 0.79", "EAN12345", "8541X"). query = sinnvolle deutsche Produktsuche, value = vorläufige Vermutung.
 - "garbage": Klar kein Produkt (Zwischensumme, "Coupon", "PFAND-RÜCK", "EC-Cash", "BAR"). Im Zweifel KEIN garbage — lieber "new" mit niedriger Konfidenz.
 - KEINE Markennamen im kanonischen Namen, außer die Marke IST das Produkt (z.B. "Ben & Jerry's").
-- Bücher/Drogerie-Einzelartikel ohne klares Produkt → "new" mit generischem Namen ("Buch", "Drogerieartikel") und Konfidenz 0.4.`;
+- Bücher/Drogerie-Einzelartikel ohne klares Produkt → "new" mit generischem Namen ("Buch", "Drogerieartikel") und Konfidenz 0.4.
+- WICHTIG: Ist das Feld "frühere_nutzer_zuordnung" gesetzt, hat ein Nutzer sehr ähnlichen OCR-Text früher MANUELL genau so zugeordnet. Übernimm diese Zuordnung bevorzugt (action "match" wenn der Name in der Liste steht, sonst "new"; value = diese Zuordnung, confidence ≥ 0.9), sofern sie plausibel zum OCR-Text passt — der Nutzer hat fast immer recht.`;
 
 export const STAGE2_PROMPT = `Du bist ein Datenbereinigungs-Assistent. Du hast für einen kryptischen Kassenbon-Artikel eine Websuche ausgeführt.
 Anhand der Suchergebnisse: bestimme den sauberen deutschen kanonischen Produktnamen (kurz, generisch, z.B. "Spülmaschinentabs").

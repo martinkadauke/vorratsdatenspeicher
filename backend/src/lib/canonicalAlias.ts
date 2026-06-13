@@ -18,31 +18,50 @@ export function ocrKey(text: string | null | undefined): string {
     .trim();
 }
 
-/** Remember that an OCR text maps to a canonical (idempotent, reinforcing). */
-export async function recordAlias(text: string | null | undefined, canonical: string | null | undefined): Promise<void> {
+/** Remember that an OCR text maps to a canonical (idempotent, reinforcing).
+ *  `userConfirmed` = the mapping came from a manual user correction → it becomes
+ *  authoritative: a later AI/matcher write can NOT overwrite it (only another user
+ *  correction can). */
+export async function recordAlias(
+  text: string | null | undefined,
+  canonical: string | null | undefined,
+  userConfirmed = false,
+): Promise<void> {
   const key = ocrKey(text);
   const canon = (canonical ?? '').trim();
   if (key.length < 2 || !canon) return;
   try {
     await sql`
-      INSERT INTO canonical_alias (ocr_key, canonical_name, count, updated_at)
-      VALUES (${key}, ${canon}, 1, NOW())
+      INSERT INTO canonical_alias (ocr_key, canonical_name, count, user_confirmed, updated_at)
+      VALUES (${key}, ${canon}, 1, ${userConfirmed}, NOW())
       ON CONFLICT (ocr_key) DO UPDATE
-        SET canonical_name = EXCLUDED.canonical_name,
+        SET canonical_name = CASE
+              WHEN ${userConfirmed} OR NOT canonical_alias.user_confirmed THEN EXCLUDED.canonical_name
+              ELSE canonical_alias.canonical_name END,
+            user_confirmed = canonical_alias.user_confirmed OR ${userConfirmed},
             count = canonical_alias.count + 1, updated_at = NOW()
     `;
   } catch { /* alias learning is best-effort */ }
 }
 
 /** Record many at once (e.g. all items of a freshly OCR'd receipt). */
-export async function recordAliases(pairs: [string | null | undefined, string | null | undefined][]): Promise<void> {
-  for (const [t, c] of pairs) await recordAlias(t, c);
+export async function recordAliases(
+  pairs: [string | null | undefined, string | null | undefined][],
+  userConfirmed = false,
+): Promise<void> {
+  for (const [t, c] of pairs) await recordAlias(t, c, userConfirmed);
 }
 
 /** Load the whole alias table as a Map for fast in-memory lookup during a run. */
 export async function loadAliasMap(): Promise<Map<string, string>> {
   const rows = await sql`SELECT ocr_key, canonical_name FROM canonical_alias`;
   return new Map(rows.map(r => [r.ocr_key as string, r.canonical_name as string]));
+}
+
+/** User-confirmed aliases only — fed to the churner LLM as a strong prior. */
+export async function loadUserAliases(): Promise<{ key: string; canonical: string }[]> {
+  const rows = await sql`SELECT ocr_key, canonical_name FROM canonical_alias WHERE user_confirmed = TRUE`;
+  return rows.map(r => ({ key: r.ocr_key as string, canonical: r.canonical_name as string }));
 }
 
 /** One-time backfill from existing assignments (runs only if the table is empty),

@@ -30,7 +30,7 @@ const computeEinzel = (mengeStr: string, totalStr: string): string => {
   return fmt(t / m);
 };
 
-interface NameOption { canonical_name: string }
+interface NameOption { canonical_name: string; category_path: string | null }
 
 export function ArticleEditModal({ artikel, open, onClose, invalidateKeys }: {
   artikel: Artikel | null;
@@ -53,8 +53,16 @@ export function ArticleEditModal({ artikel, open, onClose, invalidateKeys }: {
   const [exclusive, setExclusive] = useState(false);
   const [applyAll, setApplyAll] = useState(false);
   const [nameOptions, setNameOptions] = useState<string[]>([]);
+  const [nameCategory, setNameCategory] = useState<Map<string, string | null>>(new Map());
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const canonRef = useRef<HTMLInputElement>(null);
+
+  // Typing/picking an existing canonical name prefills its category.
+  const onCanonicalChange = (v: string) => {
+    setCanonical(v);
+    const cat = nameCategory.get(v.trim());
+    if (cat) setCategory(cat);
+  };
 
   // On open, focus + select the canonical-name field so you can type immediately
   // (e.g. arriving here via Enter from the receipt's keyboard navigation).
@@ -100,7 +108,10 @@ export function ArticleEditModal({ artikel, open, onClose, invalidateKeys }: {
 
   useEffect(() => {
     if (!open) return;
-    api<NameOption[]>('/api/names').then(rows => setNameOptions(rows.map(r => r.canonical_name))).catch(() => {});
+    api<NameOption[]>('/api/names').then(rows => {
+      setNameOptions(rows.map(r => r.canonical_name));
+      setNameCategory(new Map(rows.map(r => [r.canonical_name, r.category_path])));
+    }).catch(() => {});
   }, [open]);
 
   const invalidate = () => {
@@ -173,7 +184,7 @@ export function ArticleEditModal({ artikel, open, onClose, invalidateKeys }: {
 
         <div>
           <Label>{t('article.canonical')}</Label>
-          <Input ref={canonRef} list="canonical-names" value={canonical} onChange={e => setCanonical(e.target.value)} />
+          <Input ref={canonRef} list="canonical-names" value={canonical} onChange={e => onCanonicalChange(e.target.value)} />
           <datalist id="canonical-names">
             {nameOptions.map(n => <option key={n} value={n} />)}
           </datalist>

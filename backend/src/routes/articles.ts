@@ -82,7 +82,7 @@ export function articleRoutes(app: FastifyInstance): void {
     if (!rows.length) return reply.code(404).send({ error: 'not found' });
     // learn from the manual correction so future scans of the same OCR text match
     if ('canonical_name' in updates && updates.canonical_name) {
-      await recordAlias((rows[0].original_text as string) ?? (rows[0].name as string), updates.canonical_name as string);
+      await recordAlias((rows[0].original_text as string) ?? (rows[0].name as string), updates.canonical_name as string, true);
     }
     return { ok: true };
   });
@@ -162,7 +162,7 @@ export function articleRoutes(app: FastifyInstance): void {
       RETURNING a.id
     `;
     // learn this OCR identity → canonical for future scans
-    await recordAliases([[ot, canonical_name], [ag, canonical_name], [nm, canonical_name]]);
+    await recordAliases([[ot, canonical_name], [ag, canonical_name], [nm, canonical_name]], true);
     return { ok: true, updated: rows.length };
   });
 

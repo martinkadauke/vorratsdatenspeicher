@@ -188,7 +188,7 @@ export function nameRoutes(app: FastifyInstance): void {
       RETURNING a.id, a.original_text, a.name
     `;
     // learn each OCR text → canonical so future scans match without the LLM
-    await recordAliases(rows.map(r => [(r.original_text as string) ?? (r.name as string), name]));
+    await recordAliases(rows.map(r => [(r.original_text as string) ?? (r.name as string), name]), true);
     return { ok: true, updated: rows.length };
   });
 

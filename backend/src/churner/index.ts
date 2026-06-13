@@ -4,7 +4,7 @@ import { parseLlmJson } from '../llm/ollama.js';
 import { providerForTask } from '../llm/provider.js';
 import { searxngSearch, searxngImageSearch } from '../llm/searxng.js';
 import { matchExistingCanonical } from '../lib/canonicalMatch.js';
-import { ocrKey, recordAlias, loadAliasMap } from '../lib/canonicalAlias.js';
+import { ocrKey, recordAlias, loadAliasMap, loadUserAliases } from '../lib/canonicalAlias.js';
 import { STAGE1_PROMPT, STAGE2_PROMPT } from '../llm/prompts.js';
 import { mostSimilar } from '../llm/similarity.js';
 import { notify } from '../notify.js';
@@ -29,6 +29,21 @@ let running = false;
 
 export function isChurnRunning(): boolean {
   return running;
+}
+
+/** The canonical a user previously assigned to the most textually-similar OCR text
+ *  (≥1 shared significant token). Fed to stage1 so manual corrections generalize to
+ *  near-miss OCR variants instead of needing the exact same string. */
+function userAliasHint(itemKey: string, userAliases: { key: string; canonical: string }[]): string | null {
+  const toks = new Set(itemKey.split(' ').filter(w => w.length >= 4));
+  if (!toks.size) return null;
+  let best: { canonical: string; score: number } | null = null;
+  for (const ua of userAliases) {
+    let score = 0;
+    for (const w of ua.key.split(' ')) if (w.length >= 4 && toks.has(w)) score++;
+    if (score > 0 && (!best || score > best.score)) best = { canonical: ua.canonical, score };
+  }
+  return best?.canonical ?? null;
 }
 
 /** Short store/chain hint from a raw OCR store name (drops street/zip noise). */
@@ -171,6 +186,7 @@ async function churnWork(eventId: number): Promise<void> {
     GROUP BY canonical_name ORDER BY n DESC LIMIT 200
   `).map(r => r.canonical_name as string);
   const aliases = await loadAliasMap();
+  const userAliases = await loadUserAliases(); // authoritative prior corrections, fed to the LLM
 
   let autoApplied = 0;
   let queued = 0;
@@ -209,6 +225,7 @@ async function churnWork(eventId: number): Promise<void> {
           ai_guess: a.ai_guess,
           current_canonical: a.canonical_name,
           existierende_namen: existing,
+          frühere_nutzer_zuordnung: userAliasHint(ocrKey(a.original_text ?? a.name), userAliases),
         }),
         json: true,
       }));

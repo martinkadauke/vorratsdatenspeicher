@@ -5,7 +5,7 @@ import { api } from '../api/client';
 import { Button, Input, Label, Modal } from './ui';
 import { CategoryPicker } from './CategoryPicker';
 
-interface NameOption { canonical_name: string }
+interface NameOption { canonical_name: string; category_path: string | null }
 
 const num = (s: string): number | null => {
   const n = parseFloat((s ?? '').toString().replace(',', '.'));
@@ -34,6 +34,14 @@ export function AddArticleModal({ einkaufId, open, onClose, invalidateKeys, afte
   const [einzelPreis, setEinzelPreis] = useState('');
   const [preis, setPreis] = useState('');
   const [nameOptions, setNameOptions] = useState<string[]>([]);
+  const [nameCategory, setNameCategory] = useState<Map<string, string | null>>(new Map());
+
+  // Typing/picking an existing canonical name prefills its category.
+  const onCanonicalChange = (v: string) => {
+    setCanonical(v);
+    const cat = nameCategory.get(v.trim());
+    if (cat) setCategory(cat);
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -43,7 +51,10 @@ export function AddArticleModal({ einkaufId, open, onClose, invalidateKeys, afte
     setEinheit('stk');
     setEinzelPreis('');
     setPreis('');
-    api<NameOption[]>('/api/names').then(rows => setNameOptions(rows.map(r => r.canonical_name))).catch(() => {});
+    api<NameOption[]>('/api/names').then(rows => {
+      setNameOptions(rows.map(r => r.canonical_name));
+      setNameCategory(new Map(rows.map(r => [r.canonical_name, r.category_path])));
+    }).catch(() => {});
   }, [open]);
 
   const onMengeChange = (v: string) => {
@@ -87,7 +98,7 @@ export function AddArticleModal({ einkaufId, open, onClose, invalidateKeys, afte
       <div className="flex flex-col gap-4">
         <div>
           <Label>{t('article.canonical')}</Label>
-          <Input list="canonical-names-add" value={canonical} onChange={e => setCanonical(e.target.value)} autoFocus />
+          <Input list="canonical-names-add" value={canonical} onChange={e => onCanonicalChange(e.target.value)} autoFocus />
           <datalist id="canonical-names-add">
             {nameOptions.map(n => <option key={n} value={n} />)}
           </datalist>
