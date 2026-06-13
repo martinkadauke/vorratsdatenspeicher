@@ -861,6 +861,7 @@ function UsersSection() {
                 <span className="hidden sm:inline">{t('admin.seesAll')}</span>
                 <Switch
                   checked={u.sees_all_konten ?? false}
+                  disabled={isSelf || !me?.sees_all_konten}
                   onChange={v => patch.mutate({ id: u.id, body: { sees_all_konten: v } })}
                 />
               </label>

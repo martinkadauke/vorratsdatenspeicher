@@ -129,6 +129,12 @@ export function adminRoutes(app: FastifyInstance): void {
     if (can_write === false && id === req.user!.id) {
       return reply.code(400).send({ error: 'cannot remove your own write access' });
     }
+    if (sees_all_konten !== undefined) {
+      // "Sieht alles" (super-admin) is a privileged grant: only a super-admin may
+      // change it, and never on their own account (no self-escalation/-lockout).
+      if (id === req.user!.id) return reply.code(400).send({ error: 'cannot change your own super-admin status' });
+      if (!req.user!.sees_all_konten) return reply.code(403).send({ error: 'only a super-admin can grant account-wide access' });
+    }
     const updates: Record<string, unknown> = {};
     if (is_admin !== undefined) updates.is_admin = is_admin;
     if (sees_all_konten !== undefined) updates.sees_all_konten = sees_all_konten;

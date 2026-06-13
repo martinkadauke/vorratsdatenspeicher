@@ -268,7 +268,8 @@
   "hint": {
     "artikel": {
       "title": "Tipp: deine Artikel",
-      "body": "Alle Käufe unter ihrem kanonischen Namen. Suche mit Operatoren (»eier -bio«), Taste F = Suche, C = Kategorie-Suche. Filtere oben nach Konto, und über das Regler-Symbol nach Kategorie + Zeitraum (mit Ausgabensumme). Mehrere markieren → Angebote abonnieren, vermeiden, Kategorie/Mitglied setzen."
+      "body": "Alle Käufe unter ihrem kanonischen Namen. Suche mit Operatoren (»eier -bio«), Taste F = Suche, C = Kategorie-Suche. Filtere oben nach Konto, und über das Regler-Symbol nach Kategorie + Zeitraum (mit Ausgabensumme). Mehrere markieren → Angebote abonnieren, vermeiden, Kategorie/Mitglied setzen.",
+      "bodyMobile": "Alle Käufe unter ihrem kanonischen Namen. Suche mit Operatoren (»eier -bio«). Filtere oben nach Konto und über das Regler-Symbol nach Kategorie + Zeitraum (mit Ausgabensumme), sowie nach abonnierten und gemiedenen Artikeln. Tippe mehrere an → Angebote abonnieren, vermeiden, Kategorie/Mitglied setzen."
     },
     "articleEdit": {
       "title": "Tipp: Artikel bearbeiten",
@@ -284,7 +285,8 @@
     },
     "receiptDetail": {
       "title": "Tipp: schnelles Erfassen",
-      "body": "Mit ↑/↓ springst du durch die Posten (grün umrandet), Enter öffnet den Artikel mit fokussiertem kanonischen Namen. Posten lassen sich per Griff neu ordnen. Stimmt die Summe mit dem Bon-Total überein, blitzt es grün."
+      "body": "Mit ↑/↓ springst du durch die Posten (grün umrandet), Enter öffnet den Artikel mit fokussiertem kanonischen Namen. Posten lassen sich per Griff neu ordnen. Stimmt die Summe mit dem Bon-Total überein, blitzt es grün.",
+      "bodyMobile": "Tippe einen Posten zum Bearbeiten – der kanonische Name ist gleich fokussiert. Mit dem Kopier-Symbol duplizierst du, mit der dünnen Linie zwischen zwei Posten fügst du eine neue Position ein, mit dem Griff ordnest du um. Stimmt die Summe mit dem Bon-Total überein, blitzt es grün."
     }
   },
   "queue": {

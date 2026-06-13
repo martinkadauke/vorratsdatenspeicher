@@ -301,7 +301,7 @@ export function ReceiptDetailPage() {
         )}
       </div>
 
-      <FirstVisitHint id="receiptDetail" titleKey="hint.receiptDetail.title" bodyKey="hint.receiptDetail.body" />
+      <FirstVisitHint id="receiptDetail2" titleKey="hint.receiptDetail.title" bodyKey="hint.receiptDetail.body" bodyKeyMobile="hint.receiptDetail.bodyMobile" />
 
       {reocr.isPending && (
         <ProgressBar label={t('receiptDetail.reocrRunning')} />

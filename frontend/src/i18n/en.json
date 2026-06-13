@@ -268,7 +268,8 @@
   "hint": {
     "artikel": {
       "title": "Tip: your items",
-      "body": "Every purchase grouped under its canonical name. Search with operators (»eggs -organic«), press F for search, C for the category search. Filter by account at the top, and by category + date range (with total spend) via the sliders icon. Select several → subscribe to offers, avoid, set category/member."
+      "body": "Every purchase grouped under its canonical name. Search with operators (»eggs -organic«), press F for search, C for the category search. Filter by account at the top, and by category + date range (with total spend) via the sliders icon. Select several → subscribe to offers, avoid, set category/member.",
+      "bodyMobile": "Every purchase grouped under its canonical name. Search with operators (»eggs -organic«). Filter by account at the top and by category + date range (with total spend) via the sliders icon, plus subscribed and avoided items. Tap several → subscribe to offers, avoid, set category/member."
     },
     "articleEdit": {
       "title": "Tip: editing an item",
@@ -284,7 +285,8 @@
     },
     "receiptDetail": {
       "title": "Tip: fast entry",
-      "body": "Use ↑/↓ to move through items (green outline), Enter opens the item with the canonical name focused. Drag the handle to reorder. When the item sum matches the receipt total, it flashes green."
+      "body": "Use ↑/↓ to move through items (green outline), Enter opens the item with the canonical name focused. Drag the handle to reorder. When the item sum matches the receipt total, it flashes green.",
+      "bodyMobile": "Tap an item to edit it – the canonical name is focused right away. Use the copy icon to duplicate, the thin line between two items to insert a new one, and the grip to reorder. When the item sum matches the receipt total, the screen flashes green."
     }
   },
   "queue": {

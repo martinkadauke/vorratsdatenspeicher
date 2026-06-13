@@ -254,7 +254,7 @@ export function Artikel() {
   return (
     <div className="flex flex-col gap-3 pb-20">
       <h1 className="text-lg font-bold">{t('nav.names')}</h1>
-      <FirstVisitHint id="artikel" titleKey="hint.artikel.title" bodyKey="hint.artikel.body" />
+      <FirstVisitHint id="artikel2" titleKey="hint.artikel.title" bodyKey="hint.artikel.body" bodyKeyMobile="hint.artikel.bodyMobile" />
 
       <div className="relative">
         <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
