@@ -77,7 +77,7 @@ export function Admin() {
     { id: 'data', title: t('admin.data'), keywords: 'daten data export import backup loeschen delete zuruecksetzen reset csv download', el: <DataManagementSection />, show: !!user?.sees_all_konten },
     { id: 'maintenance-log', title: t('admin.maintenance'), keywords: 'wartung maintenance protokoll log verlauf history ereignisse events lauf run nightly', el: <MaintenanceSection /> },
     { id: 'konten', title: t('admin.konten'), keywords: 'konten accounts konto gkk haushalt budget sichtbarkeit', el: <KontenSection /> },
-    { id: 'offers', title: t('admin.offersTitle'), keywords: 'angebote offers prospekt deals umkreis radius adresse abonnement subscription vermeiden avoid haushalt', el: <OffersSection /> },
+    { id: 'offers', title: t('admin.offersTitle'), keywords: 'angebote offers prospekt deals umkreis radius adresse abonnement subscription haushalt marktguru', el: <OffersSection /> },
     { id: 'family', title: t('admin.family'), keywords: 'familie family mitglieder members verbraucher consumer haushalt personen', el: <FamilySection /> },
     { id: 'users', title: t('admin.users'), keywords: 'benutzer users nutzer einladen invite admin rolle role zugang access passwort', el: <UsersSection /> },
     { id: 'smtp', title: 'SMTP / E-Mail', keywords: 'smtp email e-mail mail benachrichtigung notification versand digest server port', el: <SmtpSection /> },
@@ -1082,14 +1082,6 @@ function OffersSection() {
       api(`/api/config/${key}`, { method: 'PUT', body: { value } }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['config'] }),
   });
-  const { data: avoided } = useQuery({
-    queryKey: ['avoided'],
-    queryFn: () => api<string[]>('/api/avoided'),
-  });
-  const unavoid = useMutation({
-    mutationFn: (name: string) => api('/api/avoided', { method: 'POST', body: { canonical_names: [name], avoid: false } }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['avoided'] }),
-  });
   const { data: events } = useQuery({
     queryKey: ['maintenance-events'],
     queryFn: () => api<{ id: number; kind: string; ended_at: string | null; status: string; summary: Record<string, unknown> | null }[]>('/api/maintenance/events?limit=100'),
@@ -1176,21 +1168,6 @@ function OffersSection() {
               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCat(); } }}
             />
             <Button variant="secondary" onClick={addCat} disabled={!newCat.trim()}>{t('common.add')}</Button>
-          </div>
-        </div>
-
-        {/* avoid list — products the household decided not to buy */}
-        <div className="flex flex-col gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
-          <Label className="mb-0">{t('admin.avoidList')}</Label>
-          <p className="text-xs text-zinc-400">{t('admin.avoidListHint')}</p>
-          <div className="flex flex-wrap gap-1.5">
-            {(avoided ?? []).map(c => (
-              <span key={c} className="inline-flex items-center gap-1 rounded-lg bg-red-50 px-2 py-1 text-xs font-medium text-red-700 dark:bg-red-950/40 dark:text-red-300">
-                {c}
-                <button type="button" onClick={() => unavoid.mutate(c)} className="text-red-400 hover:text-red-600" title={t('artikel.unavoid')}>✕</button>
-              </span>
-            ))}
-            {!avoided?.length && <span className="text-xs text-zinc-400">{t('admin.avoidListEmpty')}</span>}
           </div>
         </div>
 

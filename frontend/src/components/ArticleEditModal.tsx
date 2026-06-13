@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { ImageIcon } from 'lucide-react';
@@ -50,6 +50,16 @@ export function ArticleEditModal({ artikel, open, onClose, invalidateKeys }: {
   const [applyAll, setApplyAll] = useState(false);
   const [nameOptions, setNameOptions] = useState<string[]>([]);
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
+  const canonRef = useRef<HTMLInputElement>(null);
+
+  // On open, focus + select the canonical-name field so you can type immediately
+  // (e.g. arriving here via Enter from the receipt's keyboard navigation).
+  useEffect(() => {
+    if (open && artikel) {
+      const id = setTimeout(() => { canonRef.current?.focus(); canonRef.current?.select(); }, 40);
+      return () => clearTimeout(id);
+    }
+  }, [open, artikel]);
 
   useEffect(() => {
     if (!artikel) return;
@@ -158,7 +168,7 @@ export function ArticleEditModal({ artikel, open, onClose, invalidateKeys }: {
 
         <div>
           <Label>{t('article.canonical')}</Label>
-          <Input list="canonical-names" value={canonical} onChange={e => setCanonical(e.target.value)} />
+          <Input ref={canonRef} list="canonical-names" value={canonical} onChange={e => setCanonical(e.target.value)} />
           <datalist id="canonical-names">
             {nameOptions.map(n => <option key={n} value={n} />)}
           </datalist>

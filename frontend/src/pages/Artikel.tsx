@@ -91,6 +91,36 @@ export function Artikel() {
     staleTime: 60_000,
   });
   const avoided = useMemo(() => new Set(avoidedList ?? []), [avoidedList]);
+  const { data: subsList } = useQuery({
+    queryKey: ['subscriptions'],
+    queryFn: () => api<{ kind: string; ref: string }[]>('/api/subscriptions'),
+    staleTime: 60_000,
+  });
+  const subscribed = useMemo(() => new Set((subsList ?? []).filter(s => s.kind === 'artikel').map(s => s.ref)), [subsList]);
+  const isSubscribed = (g: ArtikelGroup) => subscribed.has(g.canonical_name ?? g.display);
+
+  // membership filters (subscribed / avoided)
+  const [onlySub, setOnlySub] = useState(false);
+  const [onlyAvoided, setOnlyAvoided] = useState(false);
+
+  // keyboard: F → jump to search, C → open filters & jump to category search
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const el = document.activeElement as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return;
+      if (document.querySelector('.fixed.inset-0.z-50')) return; // a modal is open
+      const k = e.key.toLowerCase();
+      if (k === 'f') { e.preventDefault(); document.getElementById('artikel-search')?.focus(); }
+      else if (k === 'c') {
+        e.preventDefault();
+        setFilterOpen(true);
+        setTimeout(() => document.getElementById('artikel-cat-search')?.focus(), 30);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const sorted = useMemo(() => {
     const rows = [...(data ?? [])];
@@ -103,9 +133,19 @@ export function Artikel() {
     return rows;
   }, [data, sort, i18n.language]);
 
-  const allSelected = sorted.length > 0 && sorted.every(r => selected.has(r.key));
+  const visible = useMemo(() => {
+    if (!onlySub && !onlyAvoided) return sorted;
+    return sorted.filter(g => {
+      const sub = onlySub && isSubscribed(g);
+      const av = onlyAvoided && !!g.canonical_name && avoided.has(g.canonical_name);
+      return sub || av;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sorted, onlySub, onlyAvoided, subscribed, avoided]);
+
+  const allSelected = visible.length > 0 && visible.every(r => selected.has(r.key));
   const toggleAll = () => {
-    setSelected(allSelected ? new Set() : new Set(sorted.map(r => r.key)));
+    setSelected(allSelected ? new Set() : new Set(visible.map(r => r.key)));
   };
   const toggleOne = (key: string) => setSelected(prev => {
     const next = new Set(prev);
@@ -206,7 +246,7 @@ export function Artikel() {
 
       <div className="relative">
         <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
-        <Input className="pl-9 pr-9" placeholder={t('artikel.search')} title={t('common.searchOps')} value={search} onChange={e => setSearch(e.target.value)} />
+        <Input id="artikel-search" className="pl-9 pr-9" placeholder={t('artikel.search')} title={`${t('common.searchOps')} · [F]`} value={search} onChange={e => setSearch(e.target.value)} />
         {search && (
           <button onClick={() => setSearch('')} className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
             <X size={15} />
@@ -233,11 +273,34 @@ export function Artikel() {
         </div>
       </div>
 
+      {(subscribed.size > 0 || avoided.size > 0 || onlySub || onlyAvoided) && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setOnlySub(v => !v)}
+            className={cn('flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium',
+              onlySub ? 'border-emerald-400 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
+                : 'border-zinc-200 text-zinc-500 dark:border-zinc-700')}
+          >
+            <Bell size={13} /> {t('artikel.filterSubscribed')} <span className="text-zinc-400">{subscribed.size}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setOnlyAvoided(v => !v)}
+            className={cn('flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium',
+              onlyAvoided ? 'border-red-400 bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300'
+                : 'border-zinc-200 text-zinc-500 dark:border-zinc-700')}
+          >
+            <Ban size={13} /> {t('artikel.filterAvoided')} <span className="text-zinc-400">{avoided.size}</span>
+          </button>
+        </div>
+      )}
+
       {filterOpen && (
         <div className="flex flex-col gap-3 rounded-xl border border-zinc-200 p-3 dark:border-zinc-800">
           <div>
-            <Label>{t('artikel.filterCategory')}</Label>
-            <CategoryPicker value={filterCat} onChange={setFilterCat} />
+            <Label>{t('artikel.filterCategory')} <span className="font-normal text-zinc-400">· [C]</span></Label>
+            <CategoryPicker value={filterCat} onChange={setFilterCat} inputId="artikel-cat-search" />
           </div>
           <div>
             <Label>{t('artikel.filterPeriod')}</Label>
@@ -272,14 +335,14 @@ export function Artikel() {
           {allSelected ? <CheckSquare size={15} className="text-emerald-500" /> : <Square size={15} />}
           {t('artikel.selectAll')}
         </button>
-        <span>{sorted.length} {t('artikel.items')}</span>
+        <span>{visible.length} {t('artikel.items')}</span>
       </div>
 
       {isLoading && <Spinner />}
-      {!isLoading && !sorted.length && <EmptyState>–</EmptyState>}
+      {!isLoading && !visible.length && <EmptyState>–</EmptyState>}
 
       <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(min(${size.min}px, 100%), 1fr))` }}>
-        {sorted.map(g => {
+        {visible.map(g => {
           const isSel = selected.has(g.key);
           return (
             <Card key={g.key} className={cn('flex min-w-0 items-center gap-2 px-2.5 py-2', isSel && 'ring-2 ring-emerald-400')}>
@@ -295,6 +358,9 @@ export function Artikel() {
                     <span className={cn('truncate font-medium', !g.has_canonical && 'italic text-zinc-500 dark:text-zinc-400')}>{g.display}</span>
                     {g.canonical_name && avoided.has(g.canonical_name) && (
                       <Ban size={13} className="shrink-0 text-red-500" aria-label={t('artikel.avoid')} />
+                    )}
+                    {isSubscribed(g) && (
+                      <Bell size={13} className="shrink-0 text-emerald-500" aria-label={t('artikel.filterSubscribed')} />
                     )}
                     <ConsumerDots ids={g.consumers} />
                   </div>

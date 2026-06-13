@@ -18,9 +18,10 @@ export function useCategories() {
 const fold = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
 /** Typeahead search over every category (any level). Type "Gem" → Gemüse. */
-function CategorySearch({ categories, onPick }: {
+function CategorySearch({ categories, onPick, inputId }: {
   categories: Category[];
   onPick: (path: string) => void;
+  inputId?: string;
 }) {
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
@@ -76,6 +77,7 @@ function CategorySearch({ categories, onPick }: {
     <div ref={boxRef} className="relative">
       <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
       <input
+        id={inputId}
         value={q}
         onChange={e => { setQ(e.target.value); setOpen(true); }}
         onFocus={() => q && setOpen(true)}
@@ -123,9 +125,10 @@ function CategorySearch({ categories, onPick }: {
 }
 
 /** Cascading 3-level category dropdown with a typeahead search. value = full path or null. */
-export function CategoryPicker({ value, onChange }: {
+export function CategoryPicker({ value, onChange, inputId }: {
   value: string | null;
   onChange: (path: string | null) => void;
+  inputId?: string;
 }) {
   const { data: categories = [] } = useCategories();
 
@@ -145,7 +148,7 @@ export function CategoryPicker({ value, onChange }: {
 
   return (
     <div className="flex flex-col gap-2">
-      <CategorySearch categories={categories} onPick={pick} />
+      <CategorySearch categories={categories} onPick={pick} inputId={inputId} />
       <Select value={l1} onChange={e => pick(e.target.value)}>
         <option value="">–</option>
         {roots.map(c => (

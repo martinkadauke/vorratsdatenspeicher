@@ -486,6 +486,8 @@
     "filterCategory": "Category",
     "filterPeriod": "Period",
     "filterClear": "Clear filter",
+    "filterSubscribed": "Subscribed",
+    "filterAvoided": "Avoided",
     "preset3w": "3 weeks",
     "presetMonth": "This month",
     "preset3m": "Last 3 months",

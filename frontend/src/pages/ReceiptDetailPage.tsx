@@ -378,6 +378,7 @@ export function ReceiptDetailPage() {
             onEdit={setEditing}
             highlightIds={matchIds}
             scrollToId={scrollToId}
+            keyboardNav={!editing && !adding && !editReceipt}
           />
           <button
             type="button"

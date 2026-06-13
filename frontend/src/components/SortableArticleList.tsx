@@ -18,15 +18,33 @@ import { toast } from './Toast';
 import { api } from '../api/client';
 import { eur } from '../lib/utils';
 
-export function SortableArticleList({ receiptId, artikel, onEdit, highlightIds, scrollToId }: {
+export function SortableArticleList({ receiptId, artikel, onEdit, highlightIds, scrollToId, keyboardNav }: {
   receiptId: number;
   artikel: Artikel[];
   onEdit: (a: Artikel) => void;
   highlightIds?: Set<number>;
   scrollToId?: number | null;
+  keyboardNav?: boolean;
 }) {
   const qc = useQueryClient();
   const [items, setItems] = useState(artikel);
+  // Keyboard navigation: ↑/↓ move a green-outlined cursor, Enter opens the editor.
+  const [cursor, setCursor] = useState(-1);
+  useEffect(() => { setCursor(c => (c >= items.length ? items.length - 1 : c)); }, [items.length]);
+  useEffect(() => {
+    if (!keyboardNav) return;
+    const onKey = (e: KeyboardEvent) => {
+      const el = document.activeElement as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return;
+      if (e.key === 'ArrowDown') { e.preventDefault(); setCursor(i => Math.min((i < 0 ? -1 : i) + 1, items.length - 1)); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); setCursor(i => (i <= 0 ? 0 : i - 1)); }
+      else if (e.key === 'Enter') {
+        if (cursor >= 0 && cursor < items.length) { e.preventDefault(); onEdit(items[cursor]); }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [keyboardNav, items, cursor, onEdit]);
 
   // Sync from the server while preserving our optimistic order:
   //  - id set changed (add/remove/re-OCR) → take the server's list as-is
@@ -72,13 +90,14 @@ export function SortableArticleList({ receiptId, artikel, onEdit, highlightIds, 
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
       <SortableContext items={items.map(a => a.id)} strategy={verticalListSortingStrategy}>
         <div className="flex min-w-0 flex-col gap-1.5">
-          {items.map(a => (
+          {items.map((a, i) => (
             <SortableRow
               key={a.id}
               a={a}
               onEdit={() => onEdit(a)}
               highlighted={highlightIds?.has(a.id) ?? false}
               scrollHere={scrollToId === a.id}
+              cursored={i === cursor}
             />
           ))}
         </div>
@@ -87,12 +106,15 @@ export function SortableArticleList({ receiptId, artikel, onEdit, highlightIds, 
   );
 }
 
-function SortableRow({ a, onEdit, highlighted, scrollHere }: { a: Artikel; onEdit: () => void; highlighted: boolean; scrollHere: boolean }) {
+function SortableRow({ a, onEdit, highlighted, scrollHere, cursored }: { a: Artikel; onEdit: () => void; highlighted: boolean; scrollHere: boolean; cursored: boolean }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: a.id });
   const rowRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (scrollHere) rowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, [scrollHere]);
+  useEffect(() => {
+    if (cursored) rowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [cursored]);
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -103,7 +125,8 @@ function SortableRow({ a, onEdit, highlighted, scrollHere }: { a: Artikel; onEdi
       <Card
         className={`flex min-w-0 items-center gap-1.5 px-1.5 py-2.5 sm:gap-2 sm:px-2 ${
           isDragging ? 'opacity-80 shadow-lg ring-2 ring-emerald-400'
-            : highlighted ? 'bg-amber-50 ring-2 ring-amber-400 dark:bg-amber-950/30' : ''
+            : cursored ? 'ring-2 ring-emerald-500 dark:ring-emerald-500'
+              : highlighted ? 'bg-amber-50 ring-2 ring-amber-400 dark:bg-amber-950/30' : ''
         }`}
       >
         {/* drag handle */}

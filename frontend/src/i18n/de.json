@@ -486,6 +486,8 @@
     "filterCategory": "Kategorie",
     "filterPeriod": "Zeitraum",
     "filterClear": "Filter zurücksetzen",
+    "filterSubscribed": "Abonniert",
+    "filterAvoided": "Gemieden",
     "preset3w": "3 Wochen",
     "presetMonth": "Dieser Monat",
     "preset3m": "Letzte 3 Monate",
