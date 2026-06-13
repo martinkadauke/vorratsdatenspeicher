@@ -59,11 +59,13 @@ export function nameRoutes(app: FastifyInstance): void {
    *  name when present, else by ai_guess/name. Returns purchase stats + the
    *  artikel_ids backing each group (for bulk operations). Konto-scoped. */
   app.get('/api/artikel-list', async (req) => {
-    const fq = req.query as { q?: string; category?: string; from?: string; to?: string };
+    const fq = req.query as { q?: string; category?: string; from?: string; to?: string; konto?: string };
     const search = fq.q?.trim() ?? '';
     const catFilter = fq.category ? sql`AND a.category_path LIKE ${fq.category + '%'}` : sql``;
     const fromFilter = fq.from ? sql`AND e.datum >= ${fq.from}` : sql``;
     const toFilter = fq.to ? sql`AND e.datum <= ${fq.to}` : sql``;
+    const kontoId = fq.konto ? parseInt(fq.konto, 10) : null;
+    const kontoFilter = kontoId ? sql`AND e.konto_id = ${kontoId}` : sql``;
     const rows = await sql`
       SELECT
         CASE WHEN a.canonical_name IS NOT NULL THEN 'c:' || a.canonical_name
@@ -85,7 +87,7 @@ export function nameRoutes(app: FastifyInstance): void {
           fields: { kategorie: col(sql`a.category_path`), laden: col(sql`e.roh_ladenname`) },
           nums: { preis: numCol(sql`a.preis`) },
         })}
-        ${catFilter} ${fromFilter} ${toFilter}
+        ${catFilter} ${fromFilter} ${toFilter} ${kontoFilter}
         ${kontoScope(req.user, sql`e.konto_id`)}
       GROUP BY grp
     `;
@@ -122,11 +124,13 @@ export function nameRoutes(app: FastifyInstance): void {
   /** Total spend for the same filters as artikel-list (category + date range +
    *  search). Powers "how much on meat in 3 weeks / Jan–Apr / June". */
   app.get('/api/artikel-spend', async (req) => {
-    const fq = req.query as { q?: string; category?: string; from?: string; to?: string };
+    const fq = req.query as { q?: string; category?: string; from?: string; to?: string; konto?: string };
     const search = fq.q?.trim() ?? '';
     const catFilter = fq.category ? sql`AND a.category_path LIKE ${fq.category + '%'}` : sql``;
     const fromFilter = fq.from ? sql`AND e.datum >= ${fq.from}` : sql``;
     const toFilter = fq.to ? sql`AND e.datum <= ${fq.to}` : sql``;
+    const kontoId = fq.konto ? parseInt(fq.konto, 10) : null;
+    const kontoFilter = kontoId ? sql`AND e.konto_id = ${kontoId}` : sql``;
     const [row] = await sql`
       SELECT COUNT(*)::int AS items,
              COALESCE(SUM(a.preis) FILTER (WHERE a.preis > 0), 0)::numeric(10,2) AS total
@@ -137,7 +141,7 @@ export function nameRoutes(app: FastifyInstance): void {
           fields: { kategorie: col(sql`a.category_path`), laden: col(sql`e.roh_ladenname`) },
           nums: { preis: numCol(sql`a.preis`) },
         })}
-        ${catFilter} ${fromFilter} ${toFilter}
+        ${catFilter} ${fromFilter} ${toFilter} ${kontoFilter}
         ${kontoScope(req.user, sql`e.konto_id`)}
     `;
     return { items: row.items, total: row.total };

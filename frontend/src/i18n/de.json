@@ -236,6 +236,10 @@
     "empty": "Noch keine Angebote. Abonniere Artikel (»Angebote abonnieren«), dann sucht VDS nächtlich nach passenden Angeboten.",
     "until": "bis",
     "source": "Quelle",
+    "refresh": "Angebote holen",
+    "refreshing": "Suche läuft…",
+    "refreshingHint": "VDS sucht gerade nach aktuellen Angeboten für deine Artikel – das dauert einen Moment.",
+    "refreshDone": "Angebote aktualisiert",
     "disclaimer": "Laut Web-Suche — Preise/Gültigkeit bitte vor dem Kauf an der Quelle prüfen."
   },
   "queue": {

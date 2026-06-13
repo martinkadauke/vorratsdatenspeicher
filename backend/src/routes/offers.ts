@@ -34,6 +34,18 @@ export function offerRoutes(app: FastifyInstance): void {
     return debugOfferSearch(q);
   });
 
+  /** Whether an offer search is currently running (for the in-app refresh button). */
+  app.get('/api/offers/status', async () => ({ running: isOfferSearchRunning() }));
+
+  /** Any user can refresh offers for the household's subscriptions from the app.
+   *  Populates offers (no email digest — that's the nightly job's). Read-only
+   *  accounts are blocked by the global write guard. */
+  app.post('/api/offers/refresh', async (req, reply) => {
+    if (isOfferSearchRunning()) return reply.code(409).send({ error: 'Angebotssuche läuft bereits' });
+    void runOfferSearch().catch(err => req.log.error(`offer refresh failed: ${err.message}`));
+    return { ok: true, started: true };
+  });
+
   /** Run the offer web-search now (manual/testing); emails digests after. */
   app.post('/api/offers/search', { preHandler: requireAdmin }, async (_req, reply) => {
     if (isOfferSearchRunning()) return reply.code(409).send({ error: 'Angebotssuche läuft bereits' });

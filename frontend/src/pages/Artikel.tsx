@@ -62,10 +62,12 @@ export function Artikel() {
   const [filterCat, setFilterCat] = useState<string | null>(null);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [kontoFilter, setKontoFilter] = useState<string | null>(null);
   const filterQs = [
     filterCat ? `category=${encodeURIComponent(filterCat)}` : '',
     from ? `from=${from}` : '',
     to ? `to=${to}` : '',
+    kontoFilter ? `konto=${encodeURIComponent(kontoFilter)}` : '',
   ].filter(Boolean).join('&');
   const filterActive = !!(filterCat || from || to);
 
@@ -97,6 +99,11 @@ export function Artikel() {
     staleTime: 60_000,
   });
   const subscribed = useMemo(() => new Set(subsData?.artikel ?? []), [subsData]);
+  const { data: konten } = useQuery({
+    queryKey: ['konten'],
+    queryFn: () => api<{ id: number; name: string }[]>('/api/konten'),
+    staleTime: 60_000,
+  });
   const isSubscribed = (g: ArtikelGroup) => subscribed.has(g.canonical_name ?? g.display);
 
   // membership filters (subscribed / avoided)
@@ -253,6 +260,28 @@ export function Artikel() {
           </button>
         )}
       </div>
+      {konten && konten.length > 1 && (
+        <div className="scrollbar-none -mx-1 flex gap-1.5 overflow-x-auto px-1">
+          <button
+            onClick={() => setKontoFilter(null)}
+            className={cn('shrink-0 rounded-full border px-3 py-1 text-xs font-medium',
+              kontoFilter === null ? 'border-transparent bg-violet-600 text-white' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700')}
+          >
+            {t('receipts.allKonten')}
+          </button>
+          {konten.map(k => (
+            <button
+              key={k.id}
+              onClick={() => setKontoFilter(kontoFilter === String(k.id) ? null : String(k.id))}
+              className={cn('shrink-0 rounded-full border px-3 py-1 text-xs font-medium',
+                kontoFilter === String(k.id) ? 'border-transparent bg-violet-600 text-white' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700')}
+            >
+              {k.name}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="flex items-center gap-2">
         <Select value={sort} onChange={e => setSort(e.target.value as SortMode)} className="min-w-0 flex-1">
           <option value="alpha">{t('artikel.sortAlpha')}</option>

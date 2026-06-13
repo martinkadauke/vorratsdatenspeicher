@@ -236,6 +236,10 @@
     "empty": "No offers yet. Subscribe to items (»Subscribe to offers«) and VDS will search nightly for matching offers.",
     "until": "until",
     "source": "Source",
+    "refresh": "Fetch offers",
+    "refreshing": "Searching…",
+    "refreshingHint": "VDS is searching for current offers for your items – this takes a moment.",
+    "refreshDone": "Offers updated",
     "disclaimer": "Per web search — please verify price/validity at the source before buying."
   },
   "queue": {

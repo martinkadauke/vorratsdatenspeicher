@@ -1,8 +1,11 @@
-import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { ExternalLink, BadgePercent } from 'lucide-react';
+import { ExternalLink, BadgePercent, RefreshCw } from 'lucide-react';
 import { api } from '../api/client';
-import { Card, Spinner, EmptyState, Badge } from '../components/ui';
+import { Card, Spinner, EmptyState, Badge, Button } from '../components/ui';
+import { useAuth } from '../context/auth';
+import { toast } from '../components/Toast';
 import { fmtDate } from '../lib/utils';
 
 interface Offer {
@@ -14,15 +17,47 @@ interface Offer {
 
 export function Offers() {
   const { t, i18n } = useTranslation();
+  const qc = useQueryClient();
+  const { user } = useAuth();
+  const canWrite = user?.can_write !== false;
+  const [busy, setBusy] = useState(false);
   const { data, isLoading } = useQuery({
     queryKey: ['offers-mine'],
     queryFn: () => api<Offer[]>('/api/offers/mine'),
   });
 
+  const refresh = async () => {
+    setBusy(true);
+    try {
+      await api('/api/offers/refresh', { method: 'POST' });
+      // poll until the background search finishes (max ~80s), then reload
+      for (let i = 0; i < 40; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        const s = await api<{ running: boolean }>('/api/offers/status');
+        if (!s.running) break;
+      }
+      await qc.invalidateQueries({ queryKey: ['offers-mine'] });
+      toast(t('offers.refreshDone'), 'success');
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="flex max-w-2xl flex-col gap-3">
-      <h1 className="text-lg font-bold">{t('offers.title')}</h1>
+      <div className="flex items-center justify-between gap-2">
+        <h1 className="text-lg font-bold">{t('offers.title')}</h1>
+        {canWrite && (
+          <Button variant="secondary" onClick={refresh} disabled={busy} className="shrink-0">
+            <RefreshCw size={15} className={busy ? 'animate-spin' : ''} />
+            {busy ? t('offers.refreshing') : t('offers.refresh')}
+          </Button>
+        )}
+      </div>
       <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('offers.hint')}</p>
+      {busy && <p className="text-xs text-emerald-600 dark:text-emerald-500">{t('offers.refreshingHint')}</p>}
 
       {isLoading && <Spinner />}
       {!isLoading && !data?.length && <EmptyState>{t('offers.empty')}</EmptyState>}
