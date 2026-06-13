@@ -145,6 +145,12 @@ export function offerRoutes(app: FastifyInstance): void {
    *  accounts are blocked by the global write guard. */
   app.post('/api/offers/refresh', async (req, reply) => {
     if (isOfferSearchRunning()) return reply.code(409).send({ error: 'Angebotssuche läuft bereits' });
+    // Wipe the caller's offers first so the re-search returns FRESH rows (prospekt
+    // link, validity, chain) instead of being skipped by the cross-run de-dup.
+    const refs = (await sql`
+      SELECT ref FROM offer_subscription WHERE user_id = ${req.user!.id} AND kind IN ('artikel', 'watch')
+    `).map(r => r.ref as string);
+    if (refs.length) await sql`DELETE FROM offer WHERE canonical_name IN ${sql(refs)}`;
     void runOfferSearch().catch(err => req.log.error(`offer refresh failed: ${err.message}`));
     return { ok: true, started: true };
   });

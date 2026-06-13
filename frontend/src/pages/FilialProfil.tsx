@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, MapPin, Clock, FileText, Bell, BellRing, GripVertical } from 'lucide-react';
+import { ArrowLeft, MapPin, Clock, FileText, Bell, BellRing, GripVertical, ExternalLink } from 'lucide-react';
 import {
   DndContext, closestCenter, PointerSensor, KeyboardSensor, useSensor, useSensors, type DragEndEvent,
 } from '@dnd-kit/core';
@@ -24,6 +24,14 @@ interface Branch {
   warengruppen: string[][] | null;
   subscribed: boolean;
   receipts: number; total: string | number; last_visit: string | null;
+}
+
+// marktguru retailer slugs that differ from our normalized chain key.
+const CHAIN_SLUG_ALIASES: Record<string, string> = { aldi: 'aldi-sued', netto: 'netto-marken-discount' };
+/** Human-viewable regional prospectus for a chain key, e.g. lidl → /rp/lidl-prospekte. */
+function marktguruProspektUrl(chainKey: string): string {
+  const slug = CHAIN_SLUG_ALIASES[chainKey] ?? chainKey;
+  return `https://www.marktguru.de/rp/${slug}-prospekte`;
 }
 
 export function FilialProfil() {
@@ -162,12 +170,20 @@ export function FilialProfil() {
         />
       </Card>
 
-      {/* still-WIP profile features */}
-      <Card className="flex flex-col gap-2 p-4 opacity-70">
-        <h2 className="text-sm font-semibold text-zinc-500">{t('filiale.comingSoon')}</h2>
-        <div className="flex flex-wrap gap-2">
-          <WipChip icon={<FileText size={13} />} label={t('filiale.prospectus')} />
+      {/* current prospectus — the regional marktguru flyer for this chain */}
+      <Card className="flex items-center justify-between gap-2 p-4">
+        <div className="flex min-w-0 items-center gap-2 text-sm">
+          <FileText size={15} className="shrink-0 text-zinc-400" />
+          <span className="truncate font-medium">{t('filiale.prospectus')}</span>
         </div>
+        <a
+          href={branch.prospectus_url || marktguruProspektUrl(branch.chain_key)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300"
+        >
+          {t('filiale.viewProspekt')} <ExternalLink size={12} />
+        </a>
       </Card>
 
       {/* sticky save */}
@@ -180,17 +196,6 @@ export function FilialProfil() {
   );
 }
 
-function WipChip({ icon, label }: { icon: React.ReactNode; label: string }) {
-  const { t } = useTranslation();
-  return (
-    <span
-      title={t('filiale.wipHint')}
-      className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-lg border border-dashed border-zinc-300 px-2 py-1 text-xs text-zinc-400 dark:border-zinc-700"
-    >
-      {icon} {label} <span className="rounded bg-zinc-200 px-1 text-[10px] dark:bg-zinc-700">WIP</span>
-    </span>
-  );
-}
 
 /** Ordered tiers; each tier holds 1+ categories treated as parallel/equal.
  *  Reorder tiers with the arrows, add/remove categories via the dropdown/chips. */
