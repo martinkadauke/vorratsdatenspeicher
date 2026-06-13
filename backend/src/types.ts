@@ -4,6 +4,7 @@ export interface User {
   email: string | null;
   is_admin: boolean;
   sees_all_konten: boolean;
+  can_write: boolean;
   prefers_dark: boolean;
   preferred_lang: string;
   has_seen_tour: boolean;

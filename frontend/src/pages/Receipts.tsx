@@ -8,6 +8,7 @@ import type { Receipt } from '../api/types';
 import { Card, Input, Spinner, EmptyState } from '../components/ui';
 import { StoreIcon } from '../components/IconPicker';
 import { CreatePurchaseModal } from '../components/CreatePurchaseModal';
+import { useAuth } from '../context/auth';
 import { cn, eur, fmtDate, monthLabel } from '../lib/utils';
 
 interface Store { key: string; display: string; receipts: number; total: number; raw: string[] }
@@ -29,6 +30,8 @@ const monthKeyOf = (datum: string) => (datum ?? '').slice(0, 7); // "YYYY-MM"
 
 export function Receipts() {
   const { t, i18n } = useTranslation();
+  const { user } = useAuth();
+  const canWrite = user?.can_write !== false;
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const [search, setSearch] = useState('');
@@ -478,15 +481,19 @@ export function Receipts() {
       )}
 
       {/* floating action button — quick manual purchase entry */}
-      <button
-        type="button"
-        onClick={() => setCreateOpen(true)}
-        title={t('createPurchase.title')}
-        className="fixed bottom-20 right-4 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-600 text-white shadow-lg transition hover:bg-emerald-700 active:scale-95 md:bottom-6 md:right-6"
-      >
-        <Plus size={26} />
-      </button>
-      <CreatePurchaseModal open={createOpen} onClose={() => setCreateOpen(false)} />
+      {canWrite && (
+        <>
+          <button
+            type="button"
+            onClick={() => setCreateOpen(true)}
+            title={t('createPurchase.title')}
+            className="fixed bottom-20 right-4 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-600 text-white shadow-lg transition hover:bg-emerald-700 active:scale-95 md:bottom-6 md:right-6"
+          >
+            <Plus size={26} />
+          </button>
+          <CreatePurchaseModal open={createOpen} onClose={() => setCreateOpen(false)} />
+        </>
+      )}
     </div>
   );
 }

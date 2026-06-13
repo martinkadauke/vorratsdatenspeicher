@@ -42,8 +42,9 @@ export async function api<T = unknown>(path: string, opts: ApiOptions = {}): Pro
   if (!res.ok) {
     let message = res.statusText;
     try {
-      const data = await res.json();
-      message = (data as { error?: string }).error ?? message;
+      const data = await res.json() as { error?: string; message?: string };
+      // read-only accounts get a friendly message instead of the raw error code
+      message = data.error === 'read_only' && data.message ? data.message : (data.error ?? message);
     } catch { /* keep statusText */ }
     throw new ApiError(res.status, message);
   }

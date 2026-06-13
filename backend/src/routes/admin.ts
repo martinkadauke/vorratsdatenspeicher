@@ -58,7 +58,7 @@ export function adminRoutes(app: FastifyInstance): void {
   // ── users (invite-only) ─────────────────────────────────────────────────
   app.get('/api/users', { preHandler: requireAdmin }, async () => {
     return sql`
-      SELECT u.id, u.username, u.email, u.is_admin, u.sees_all_konten, u.prefers_dark, u.preferred_lang, u.created_at,
+      SELECT u.id, u.username, u.email, u.is_admin, u.sees_all_konten, u.can_write, u.prefers_dark, u.preferred_lang, u.created_at,
         EXISTS (
           SELECT 1 FROM auth_token t
           WHERE t.user_id = u.id AND t.kind = 'invite' AND t.used_at IS NULL AND t.expires_at > NOW()
@@ -76,7 +76,7 @@ export function adminRoutes(app: FastifyInstance): void {
    *  local-part (collision-suffixed if necessary). Random password is
    *  set under the hood; the invite link lets them choose their own. */
   app.post('/api/users/invite', { preHandler: requireAdmin }, async (req, reply) => {
-    const { email, is_admin } = (req.body ?? {}) as { email?: string; is_admin?: boolean };
+    const { email, is_admin, can_write } = (req.body ?? {}) as { email?: string; is_admin?: boolean; can_write?: boolean };
     if (!email || !email.includes('@')) return reply.code(400).send({ error: 'valid email required' });
 
     const cleaned = email.trim().toLowerCase();
@@ -92,8 +92,8 @@ export function adminRoutes(app: FastifyInstance): void {
     let userId: number;
     try {
       const [row] = await sql`
-        INSERT INTO users (username, email, password_hash, is_admin)
-        VALUES (${username}, ${cleaned}, ${randomHash}, ${is_admin ?? false})
+        INSERT INTO users (username, email, password_hash, is_admin, can_write)
+        VALUES (${username}, ${cleaned}, ${randomHash}, ${is_admin ?? false}, ${can_write ?? true})
         RETURNING id
       `;
       userId = row.id;
@@ -119,16 +119,20 @@ export function adminRoutes(app: FastifyInstance): void {
 
   app.patch('/api/users/:id', { preHandler: requireAdmin }, async (req, reply) => {
     const id = parseInt((req.params as { id: string }).id, 10);
-    const { is_admin, password, email, sees_all_konten } = (req.body ?? {}) as {
-      is_admin?: boolean; password?: string; email?: string; sees_all_konten?: boolean;
+    const { is_admin, password, email, sees_all_konten, can_write } = (req.body ?? {}) as {
+      is_admin?: boolean; password?: string; email?: string; sees_all_konten?: boolean; can_write?: boolean;
     };
 
     if (is_admin === false && id === req.user!.id) {
       return reply.code(400).send({ error: 'cannot demote yourself' });
     }
+    if (can_write === false && id === req.user!.id) {
+      return reply.code(400).send({ error: 'cannot remove your own write access' });
+    }
     const updates: Record<string, unknown> = {};
     if (is_admin !== undefined) updates.is_admin = is_admin;
     if (sees_all_konten !== undefined) updates.sees_all_konten = sees_all_konten;
+    if (can_write !== undefined) updates.can_write = can_write;
     if (password) updates.password_hash = await bcrypt.hash(password, 12);
     if (email !== undefined) updates.email = email || null;
     if (!Object.keys(updates).length) return reply.code(400).send({ error: 'nothing to update' });

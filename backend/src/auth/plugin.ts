@@ -25,11 +25,19 @@ export function registerAuth(app: FastifyInstance): void {
     try {
       const payload = jwt.verify(token, JWT_SECRET) as unknown as { sub: number };
       const rows = await sql`
-        SELECT id, username, email, is_admin, sees_all_konten, prefers_dark, preferred_lang, has_seen_tour
+        SELECT id, username, email, is_admin, sees_all_konten, can_write, prefers_dark, preferred_lang, has_seen_tour
         FROM users WHERE id = ${payload.sub}
       `;
       if (!rows.length) return reply.code(401).send({ error: 'unauthorized' });
       const user = rows[0] as unknown as User;
+
+      // Read-only accounts (can_write = false, non-admin) may not mutate data.
+      // Self-service prefs/own-password (PATCH /api/me) stay allowed.
+      if (!user.is_admin && user.can_write === false
+          && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)
+          && url !== '/api/me') {
+        return reply.code(403).send({ error: 'read_only', message: 'Nur-Lese-Zugang – Änderungen sind für dieses Konto deaktiviert.' });
+      }
       // Accounts this user may see: shared (GKK) + their own personal accounts.
       // Super-admins (sees_all_konten) skip filtering entirely.
       if (!user.sees_all_konten) {

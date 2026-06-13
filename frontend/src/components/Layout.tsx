@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   ReceiptText, ChartPie, ShoppingCart, Package, Tags, ListChecks, Store,
-  Settings, UserCircle, LogOut, MoreHorizontal, BadgePercent,
+  Settings, UserCircle, LogOut, MoreHorizontal, BadgePercent, Eye,
 } from 'lucide-react';
 import { useAuth } from '../context/auth';
 import { NotificationBell } from './NotificationBell';
@@ -99,6 +99,12 @@ export function Layout() {
 
         {/* Content */}
         <main className="min-w-0 flex-1 p-3 pb-24 sm:p-4 md:pb-8">
+          {user && user.can_write === false && !user.is_admin && (
+            <div className="mb-3 flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700/50 dark:bg-amber-950/40 dark:text-amber-300">
+              <Eye size={16} className="shrink-0" />
+              <span>{t('common.readOnlyBanner')}</span>
+            </div>
+          )}
           <Outlet />
         </main>
       </div>

@@ -791,7 +791,7 @@ function UsersSection() {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const { user: me } = useAuth();
-  const [invite, setInvite] = useState({ email: '', is_admin: false });
+  const [invite, setInvite] = useState({ email: '', is_admin: false, can_write: true });
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [createdUsername, setCreatedUsername] = useState<string | null>(null);
 
@@ -805,7 +805,7 @@ function UsersSection() {
     mutationFn: () => api<{ emailed: boolean; invite_link: string; username: string }>('/api/users/invite', { method: 'POST', body: invite }),
     onSuccess: (res) => {
       invalidate();
-      setInvite({ email: '', is_admin: false });
+      setInvite({ email: '', is_admin: false, can_write: true });
       setCreatedUsername(res.username);
       setInviteLink(res.emailed ? null : res.invite_link);
     },
@@ -849,6 +849,14 @@ function UsersSection() {
                 </div>
                 {u.email && <div className="truncate text-xs text-zinc-400">{u.email}</div>}
               </div>
+              <label className="flex shrink-0 items-center gap-1 text-xs text-zinc-500" title={t('admin.canWriteHint')}>
+                <span className="hidden sm:inline">{t('admin.canWrite')}</span>
+                <Switch
+                  checked={u.can_write ?? true}
+                  disabled={isSelf}
+                  onChange={v => patch.mutate({ id: u.id, body: { can_write: v } })}
+                />
+              </label>
               <label className="flex shrink-0 items-center gap-1 text-xs text-zinc-500" title={t('admin.seesAllKonten')}>
                 <span className="hidden sm:inline">{t('admin.seesAll')}</span>
                 <Switch
@@ -933,6 +941,10 @@ function UsersSection() {
               onChange={e => setInvite(p => ({ ...p, email: e.target.value }))}
             />
           </div>
+          <label className="flex shrink-0 items-center gap-1.5 pb-2 text-xs text-zinc-500" title={t('admin.canWriteHint')}>
+            {t('admin.canWrite')}
+            <Switch checked={invite.can_write} onChange={v => setInvite(p => ({ ...p, can_write: v }))} />
+          </label>
           <label className="flex shrink-0 items-center gap-1.5 pb-2 text-xs text-zinc-500">
             {t('admin.isAdmin')}
             <Switch checked={invite.is_admin} onChange={v => setInvite(p => ({ ...p, is_admin: v }))} />
