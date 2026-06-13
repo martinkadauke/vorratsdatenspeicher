@@ -10,6 +10,7 @@ import { rescheduleModelReview } from '../maintenance/modelReview.js';
 import { listOllamaModels, ollamaHealth } from '../llm/ollama.js';
 import { searxngHealth } from '../llm/searxng.js';
 import { sendMail } from '../mailer.js';
+import { inviteEmail } from '../email/templates.js';
 import { createAuthToken } from '../auth/routes.js';
 import { listModelsForProvider, healthForProvider, setTaskAi, type ProviderName, type AiTask } from '../llm/provider.js';
 import { matchExistingCanonical } from '../lib/canonicalMatch.js';
@@ -106,14 +107,8 @@ export function adminRoutes(app: FastifyInstance): void {
 
     let emailed = false;
     try {
-      await sendMail(
-        cleaned,
-        'Einladung zu Vorratsdatenspeicher',
-        `Hallo,\n\n` +
-        `du wurdest zu Vorratsdatenspeicher eingeladen. ` +
-        `Setze über diesen Link dein Passwort (7 Tage gültig):\n\n${link}\n\n` +
-        `Dein Benutzername ist: ${username}\n`,
-      );
+      const mail = inviteEmail({ username, link });
+      await sendMail(cleaned, mail.subject, mail.text, mail.html);
       emailed = true;
     } catch (e) {
       req.log.warn(`invite mail failed: ${(e as Error).message}`);
@@ -152,14 +147,8 @@ export function adminRoutes(app: FastifyInstance): void {
     const link = `${baseUrl}/reset?token=${token}`;
     let emailed = false;
     try {
-      await sendMail(
-        rows[0].email as string,
-        'Einladung zu Vorratsdatenspeicher',
-        `Hallo,\n\n` +
-        `du wurdest zu Vorratsdatenspeicher eingeladen. ` +
-        `Setze über diesen Link dein Passwort (7 Tage gültig):\n\n${link}\n\n` +
-        `Dein Benutzername ist: ${rows[0].username}\n`,
-      );
+      const mail = inviteEmail({ username: rows[0].username as string, link });
+      await sendMail(rows[0].email as string, mail.subject, mail.text, mail.html);
       emailed = true;
     } catch (e) {
       req.log.warn(`resend-invite mail failed: ${(e as Error).message}`);
