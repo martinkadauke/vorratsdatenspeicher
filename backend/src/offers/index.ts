@@ -99,8 +99,8 @@ async function marktguruForProduct(product: string, zip: string): Promise<number
       LIMIT 1`;
     if (dupe.length) continue;
     await sql`
-      INSERT INTO offer (canonical_name, store, price, old_price, valid_until, source_url, confidence, brand, image_url, unit, source)
-      VALUES (${product}, ${store}, ${price}, ${fmtEur(o.oldPrice)}, ${validWindow(o)}, ${o.url}, ${0.95}, ${o.brand ?? null}, ${o.image}, ${o.unit ?? null}, ${'marktguru'})`;
+      INSERT INTO offer (canonical_name, store, price, old_price, valid_until, source_url, confidence, brand, image_url, unit, source, chain_slug)
+      VALUES (${product}, ${store}, ${price}, ${fmtEur(o.oldPrice)}, ${validWindow(o)}, ${o.url}, ${0.95}, ${o.brand ?? null}, ${o.image}, ${o.unit ?? null}, ${'marktguru'}, ${o.chainSlug ?? null})`;
     found++;
   }
   return found;

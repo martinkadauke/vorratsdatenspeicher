@@ -35,6 +35,7 @@ export interface MarktguruOffer {
   name: string;
   brand: string | null;
   retailers: string[];
+  chainSlug: string | null; // marktguru advertiser uniqueName, e.g. "lidl"
   price: number | null;
   oldPrice: number | null;
   unit: string | null;
@@ -48,7 +49,7 @@ export interface MarktguruOffer {
 interface RawOffer {
   id: number; description?: string; price?: number; oldPrice?: number;
   brand?: { name?: string } | null;
-  advertisers?: { name?: string }[];
+  advertisers?: { name?: string; uniqueName?: string }[];
   unit?: { name?: string; shortName?: string } | null;
   validityDates?: { from?: string; to?: string }[];
   product?: { name?: string } | null;
@@ -69,19 +70,23 @@ export async function searchMarktguru(query: string, zipCode: string, limit = 20
   const now = Date.now();
   return (data.results ?? []).map((r): MarktguruOffer => {
     const vd = (r.validityDates ?? [])[0] ?? {};
+    const slug = (r.advertisers ?? [])[0]?.uniqueName ?? null;
     return {
       id: r.id,
       name: r.product?.name ?? r.description ?? '',
       brand: r.brand?.name ?? null,
       retailers: (r.advertisers ?? []).map(a => a.name ?? '').filter(Boolean),
+      chainSlug: slug,
       price: typeof r.price === 'number' ? r.price : null,
       oldPrice: typeof r.oldPrice === 'number' ? r.oldPrice : null,
       unit: r.unit?.shortName ?? r.unit?.name ?? null,
       validFrom: vd.from ?? null,
       validTo: vd.to ?? null,
-      // Marktguru has no public per-offer web URL (externalUrl is always null and
-      // /suche?q= 404s), so link the actual prospectus image as the source.
-      url: r.externalUrl || `https://mg2de.b-cdn.net/api/v1/offers/${r.id}/images/default/0/large.jpg`,
+      // Link the human-viewable retailer prospectus (flipbook) when we know the
+      // chain; else fall back to the offer's prospectus image.
+      url: slug
+        ? `https://www.marktguru.de/rp/${slug}-prospekte`
+        : (r.externalUrl || `https://mg2de.b-cdn.net/api/v1/offers/${r.id}/images/default/0/large.jpg`),
       image: `https://mg2de.b-cdn.net/api/v1/offers/${r.id}/images/default/0/medium.jpg`,
       categories: (r.categories ?? []).map(c => c.name ?? '').filter(Boolean),
     };

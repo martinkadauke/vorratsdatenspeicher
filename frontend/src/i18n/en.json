@@ -179,6 +179,8 @@
     "pickTarget": "Pick",
     "merge": "Merge",
     "openProfile": "Open branch profile",
+    "prospekt": "Flyer",
+    "prospektTitle": "View the current flyer on marktguru ({{count}} of your items on offer)",
     "tab_filialen": "Branches",
     "tab_shops": "Shops",
     "searchShops": "Search shop…",

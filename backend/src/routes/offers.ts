@@ -22,7 +22,7 @@ export function offerRoutes(app: FastifyInstance): void {
     if (!refs.length) return { offers: [], pantry: {} };
 
     const offers = await sql`
-      SELECT id, canonical_name, store, price, old_price, valid_until, source_url, confidence, found_at, brand, image_url, unit, source
+      SELECT id, canonical_name, store, price, old_price, valid_until, source_url, confidence, found_at, brand, image_url, unit, source, chain_slug
       FROM offer
       WHERE canonical_name IN ${sql(refs)} AND found_at > NOW() - INTERVAL '21 days'
       ORDER BY found_at DESC LIMIT 200
@@ -91,6 +91,25 @@ export function offerRoutes(app: FastifyInstance): void {
     const q = ((req.query as { q?: string }).q ?? '').trim();
     if (!q) return { error: 'q required' };
     return debugOfferSearch(q);
+  });
+
+  /** The user's current offers grouped by retailer chain (for the Läden view):
+   *  how many of their subscribed products are on offer at each chain + the
+   *  human-viewable prospectus link. */
+  app.get('/api/offers/by-chain', async (req) => {
+    const refs = (await sql`
+      SELECT ref FROM offer_subscription WHERE user_id = ${req.user!.id} AND kind IN ('artikel', 'watch')
+    `).map(r => r.ref as string);
+    if (!refs.length) return [];
+    return sql`
+      SELECT chain_slug,
+             MAX(store) AS store,
+             COUNT(*)::int AS count,
+             'https://www.marktguru.de/rp/' || chain_slug || '-prospekte' AS prospekt_url
+      FROM offer
+      WHERE canonical_name IN ${sql(refs)} AND found_at > NOW() - INTERVAL '21 days' AND chain_slug IS NOT NULL
+      GROUP BY chain_slug
+      ORDER BY count DESC`;
   });
 
   /** Ad-hoc "watch" products: things the user wants offer-checked even though they
