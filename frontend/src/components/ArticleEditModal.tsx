@@ -32,16 +32,18 @@ const computeEinzel = (mengeStr: string, totalStr: string): string => {
 
 interface NameOption { canonical_name: string; category_path: string | null }
 
-export function ArticleEditModal({ artikel, open, onClose, invalidateKeys }: {
+export function ArticleEditModal({ artikel, open, onClose, invalidateKeys, locked }: {
   artikel: Artikel | null;
   open: boolean;
   onClose: () => void;
   invalidateKeys: unknown[][];
+  /** Receipt is verified+locked → open view-only (no save/delete) until unlocked. */
+  locked?: boolean;
 }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const { user } = useAuth();
-  const canWrite = user?.can_write !== false;
+  const canWrite = user?.can_write !== false && !locked;
 
   const [canonical, setCanonical] = useState('');
   const [category, setCategory] = useState<string | null>(null);
