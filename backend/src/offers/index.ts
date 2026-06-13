@@ -7,7 +7,10 @@ import { getConfig } from '../config.js';
 import { providerForTask } from '../llm/provider.js';
 import { parseLlmJson } from '../llm/ollama.js';
 import { searxngSearchRaw } from '../llm/searxng.js';
+import { searchMarktguru, type MarktguruOffer } from './marktguru.js';
 import { sendMail } from '../mailer.js';
+
+const fold = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
 let running = false;
 export function isOfferSearchRunning(): boolean { return running; }
@@ -56,6 +59,52 @@ async function regionHint(): Promise<string> {
   return addr.split(',').pop()!.trim();
 }
 
+/** 5-digit zip from the household address (Marktguru needs a zip code). */
+async function householdZip(): Promise<string> {
+  const addr = (await getConfig('household.address')).trim();
+  return addr.match(/\b(\d{5})\b/)?.[1] ?? '';
+}
+
+const fmtEur = (n: number | null) => (n == null ? null : `${n.toFixed(2).replace('.', ',')} €`);
+const fmtDay = (iso: string | null) =>
+  iso ? new Date(iso).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) : null;
+function validWindow(o: MarktguruOffer): string | null {
+  const a = fmtDay(o.validFrom), b = fmtDay(o.validTo);
+  if (a && b) return `${a}–${b}`;
+  return b ? `bis ${b}` : a;
+}
+
+/** Does this Marktguru hit plausibly match the subscribed product? (cut noise) */
+function offerMatches(product: string, o: MarktguruOffer): boolean {
+  const hay = fold(`${o.name} ${o.brand ?? ''} ${o.categories.join(' ')}`);
+  const tokens = fold(product).split(/[^a-z0-9]+/).filter(w => w.length >= 3);
+  if (!tokens.length) return true;
+  return tokens.some(t => hay.includes(t));
+}
+
+/** Marktguru structured offers for one product → offer rows. Returns count inserted. */
+async function marktguruForProduct(product: string, zip: string): Promise<number> {
+  const offers = (await searchMarktguru(product, zip, 20)).filter(o => offerMatches(product, o)).slice(0, 6);
+  let found = 0;
+  for (const o of offers) {
+    const store = o.retailers[0] ?? null;
+    const price = fmtEur(o.price);
+    const dupe = await sql`
+      SELECT 1 FROM offer
+      WHERE canonical_name = ${product}
+        AND store IS NOT DISTINCT FROM ${store}
+        AND price IS NOT DISTINCT FROM ${price}
+        AND found_at > NOW() - INTERVAL '6 days'
+      LIMIT 1`;
+    if (dupe.length) continue;
+    await sql`
+      INSERT INTO offer (canonical_name, store, price, old_price, valid_until, source_url, confidence, brand, image_url, unit, source)
+      VALUES (${product}, ${store}, ${price}, ${fmtEur(o.oldPrice)}, ${validWindow(o)}, ${o.url}, ${0.95}, ${o.brand ?? null}, ${o.image}, ${o.unit ?? null}, ${'marktguru'})`;
+    found++;
+  }
+  return found;
+}
+
 /** Search the web for current offers of every subscribed product. Returns stats. */
 export async function runOfferSearch(): Promise<{ checked: number; found: number }> {
   if (running) throw new Error('Angebotssuche läuft bereits');
@@ -63,22 +112,34 @@ export async function runOfferSearch(): Promise<{ checked: number; found: number
   try {
     const products = (await sql`SELECT DISTINCT ref FROM offer_subscription WHERE kind = 'artikel'`).map(r => r.ref as string);
     if (!products.length) return { checked: 0, found: 0 };
-    const llm = await providerForTask('churner_stage2'); // the "interpret web results" model
+    const zip = await householdZip();
     const region = await regionHint();
+    let llm: Awaited<ReturnType<typeof providerForTask>> | null = null; // lazy: only if we fall back
 
     let checked = 0, found = 0;
     for (const product of products) {
       checked++;
       try {
+        // Primary: Marktguru structured offers API (needs a zip code).
+        if (zip) {
+          try {
+            found += await marktguruForProduct(product, zip);
+            await sleep(400);
+            continue;
+          } catch (e) {
+            console.error('[offers] marktguru failed, falling back to web:', product, (e as Error).message);
+          }
+        }
+        // Fallback: SearXNG + LLM web search (price optional, anti-hallucination gate).
         const { hits } = await offerSearchHits(product, region);
         if (!hits.length) continue;
+        llm ??= await providerForTask('churner_stage2');
         const ex = parseLlmJson<OfferExtract>(await llm.chat({
           system: OFFER_PROMPT,
           user: JSON.stringify({ produkt: product, region, suchergebnisse: hits.slice(0, 5) }),
           json: true,
         }));
-        if (!ex.found || (ex.confidence ?? 0) < 0.5 || !ex.source_url) continue; // price optional
-        // de-dup: same product+store+price already seen recently
+        if (!ex.found || (ex.confidence ?? 0) < 0.5 || !ex.source_url) continue;
         const dupe = await sql`
           SELECT 1 FROM offer
           WHERE canonical_name = ${product}
@@ -88,11 +149,11 @@ export async function runOfferSearch(): Promise<{ checked: number; found: number
           LIMIT 1`;
         if (dupe.length) continue;
         await sql`
-          INSERT INTO offer (canonical_name, store, price, valid_until, source_url, confidence)
-          VALUES (${product}, ${ex.store ?? null}, ${ex.price ?? null}, ${ex.valid_until ?? null}, ${ex.source_url}, ${ex.confidence ?? null})`;
+          INSERT INTO offer (canonical_name, store, price, valid_until, source_url, confidence, source)
+          VALUES (${product}, ${ex.store ?? null}, ${ex.price ?? null}, ${ex.valid_until ?? null}, ${ex.source_url}, ${ex.confidence ?? null}, ${'web'})`;
         found++;
+        await sleep(800); // gentle on SearXNG
       } catch { /* skip this product */ }
-      await sleep(800); // gentle on SearXNG
     }
     return { checked, found };
   } finally {
@@ -100,8 +161,20 @@ export async function runOfferSearch(): Promise<{ checked: number; found: number
   }
 }
 
-/** Debug helper: show the raw SearXNG hits + LLM extraction for one product. */
+/** Debug helper: show Marktguru hits (primary) + the SearXNG/LLM fallback for one product. */
 export async function debugOfferSearch(product: string): Promise<unknown> {
+  const zip = await householdZip();
+  let marktguru: { count: number; offers?: MarktguruOffer[]; matched?: number; error?: string } = { count: 0 };
+  if (zip) {
+    try {
+      const all = await searchMarktguru(product, zip, 20);
+      const matched = all.filter(o => offerMatches(product, o));
+      marktguru = { count: all.length, matched: matched.length, offers: matched.slice(0, 8) };
+    } catch (e) { marktguru = { count: 0, error: (e as Error).message }; }
+  } else {
+    marktguru = { count: 0, error: 'no household zip configured' };
+  }
+
   const region = await regionHint();
   let query = '';
   let hits: { title: string; content: string; url: string }[] = [];
@@ -118,16 +191,16 @@ export async function debugOfferSearch(product: string): Promise<unknown> {
     });
     parsed = parseLlmJson<OfferExtract>(llmRaw);
   } catch (e) { error = (e as Error).message; }
-  return { query, region, hitCount: hits.length, hits, llmRaw, parsed, error };
+  return { zip, marktguru, web: { query, region, hitCount: hits.length, hits, llmRaw, parsed, error } };
 }
 
-interface OfferRow { id: number; canonical_name: string; store: string | null; price: string | null; valid_until: string | null; source_url: string | null }
+interface OfferRow { id: number; canonical_name: string; store: string | null; price: string | null; old_price: string | null; valid_until: string | null; source_url: string | null }
 
 /** Email each subscriber a digest of newly-found offers for their products,
  *  then mark those offers notified. */
 export async function sendOfferDigests(): Promise<void> {
   const fresh = await sql`
-    SELECT id, canonical_name, store, price, valid_until, source_url
+    SELECT id, canonical_name, store, price, old_price, valid_until, source_url
     FROM offer WHERE notified = FALSE AND found_at > NOW() - INTERVAL '2 days'
   ` as unknown as OfferRow[];
   if (!fresh.length) return;
@@ -149,7 +222,8 @@ export async function sendOfferDigests(): Promise<void> {
     if (!mine.length) continue;
     const lines = mine.map(o =>
       `• ${o.canonical_name}: ${o.store ?? '?'}${o.price ? ` – ${o.price}` : ''}`
-      + `${o.valid_until ? ` (bis ${o.valid_until})` : ''}\n    Quelle: ${o.source_url}`,
+      + `${o.old_price ? ` (statt ${o.old_price})` : ''}`
+      + `${o.valid_until ? ` (${o.valid_until})` : ''}\n    Quelle: ${o.source_url}`,
     ).join('\n\n');
     try {
       await sendMail(email, 'VDS: Angebote für deine Artikel', `Neue Angebote für deine abonnierten Artikel:\n\n${lines}\n\n(laut Web-Suche – bitte vor dem Kauf prüfen.)`);

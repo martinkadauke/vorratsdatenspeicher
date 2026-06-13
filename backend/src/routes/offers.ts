@@ -11,7 +11,7 @@ export function offerRoutes(app: FastifyInstance): void {
     `).map(r => r.ref as string);
     if (!refs.length) return [];
     return sql`
-      SELECT id, canonical_name, store, price, valid_until, source_url, confidence, found_at
+      SELECT id, canonical_name, store, price, old_price, valid_until, source_url, confidence, found_at, brand, image_url, unit, source
       FROM offer
       WHERE canonical_name IN ${sql(refs)} AND found_at > NOW() - INTERVAL '21 days'
       ORDER BY found_at DESC LIMIT 100
@@ -21,7 +21,7 @@ export function offerRoutes(app: FastifyInstance): void {
   /** All recent offers (admin overview). */
   app.get('/api/offers', { preHandler: requireAdmin }, async () => {
     return sql`
-      SELECT id, canonical_name, store, price, valid_until, source_url, confidence, found_at
+      SELECT id, canonical_name, store, price, old_price, valid_until, source_url, confidence, found_at, brand, image_url, unit, source
       FROM offer WHERE found_at > NOW() - INTERVAL '21 days'
       ORDER BY found_at DESC LIMIT 200
     `;
