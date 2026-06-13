@@ -10,7 +10,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { GripVertical, Copy } from 'lucide-react';
+import { GripVertical, Copy, UserCheck } from 'lucide-react';
 import type { Artikel } from '../api/types';
 import { Card, Badge } from './ui';
 import { ConsumerDots } from './ConsumerChips';
@@ -169,6 +169,11 @@ function SortableRow({ a, onEdit, onDuplicate, highlighted, scrollHere, cursored
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center gap-1.5">
               <span className="truncate font-medium">{a.canonical_name ?? a.ai_guess ?? a.name}</span>
+              {a.user_corrected && (
+                <span title={t('article.userCorrected')} className="shrink-0" aria-label={t('article.userCorrected')}>
+                  <UserCheck size={13} className="text-emerald-500" />
+                </span>
+              )}
               <ConsumerDots ids={a.consumers} />
             </div>
             {a.original_text && (

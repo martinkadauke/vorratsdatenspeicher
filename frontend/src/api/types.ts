@@ -47,6 +47,7 @@ export interface Artikel {
   ai_guess: string | null;
   canonical_name: string | null;
   category_path: string | null;
+  user_corrected?: boolean;
   consumers: number[];
   consumers_exclusive: boolean;
   consumers_source: 'artikel' | 'canonical' | 'none';

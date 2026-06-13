@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Search, X, Rows3, CheckSquare, Square, Users, Ban, Tag, Bell, FolderTree, ReceiptText, SlidersHorizontal } from 'lucide-react';
+import { Search, X, Rows3, CheckSquare, Square, Users, Ban, Tag, Bell, FolderTree, ReceiptText, SlidersHorizontal, UserCheck } from 'lucide-react';
 import { api } from '../api/client';
 import type { CanonicalName } from '../api/types';
 import { Card, Input, Label, Spinner, EmptyState, Badge, Select, Button, Modal } from '../components/ui';
@@ -19,6 +19,7 @@ interface ArtikelGroup {
   key: string;
   display: string;
   has_canonical: boolean;
+  user_corrected: boolean;
   canonical_name: string | null;
   count: number;
   category: string | null;
@@ -394,6 +395,11 @@ export function Artikel() {
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 items-center gap-1.5">
                     <span className={cn('truncate font-medium', !g.has_canonical && 'italic text-zinc-500 dark:text-zinc-400')}>{g.display}</span>
+                    {g.user_corrected && (
+                      <span title={t('article.userCorrected')} className="shrink-0">
+                        <UserCheck size={13} className="text-emerald-500" />
+                      </span>
+                    )}
                     {g.canonical_name && avoided.has(g.canonical_name) && (
                       <Ban size={13} className="shrink-0 text-red-500" aria-label={t('artikel.avoid')} />
                     )}

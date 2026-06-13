@@ -9,7 +9,7 @@ import { kontoScope, canSeeKonto } from '../auth/konto.js';
 import { ocrFromImage } from '../llm/ocr.js';
 import { searchFilter, col, numCol, lk, type Frag } from '../lib/search.js';
 import { matchExistingCanonical } from '../lib/canonicalMatch.js';
-import { ocrKey, loadAliasMap, recordAliases } from '../lib/canonicalAlias.js';
+import { ocrKey, loadAliasMap, loadUserAliasKeys, recordAliases } from '../lib/canonicalAlias.js';
 
 /** Search config for the receipts list/nav: free text hits the store name or
  *  any of the receipt's items; supports laden:/kategorie: and preis> filters.
@@ -75,21 +75,24 @@ async function ocrAndStore(id: number, bildPfad: string): Promise<{ items: numbe
   const existing = (await sql`SELECT DISTINCT canonical_name FROM artikel WHERE canonical_name IS NOT NULL`)
     .map(r => r.canonical_name as string);
   const aliases = await loadAliasMap();
+  const userKeys = await loadUserAliasKeys();
   const learn: [string | null, string][] = [];
   await sql.begin(async tx => {
     await tx`DELETE FROM artikel WHERE einkauf_id = ${id}`;
     await tx`UPDATE einkauf SET datum = ${parsed.datum}, roh_ladenname = ${ladenName}, gesamt_betrag = ${gesamt} WHERE id = ${id}`;
     for (const a of parsed.artikel ?? []) {
-      const fromAlias = aliases.get(ocrKey(a.original_text ?? a.name));
+      const key = ocrKey(a.original_text ?? a.name);
+      const fromAlias = aliases.get(key);
       const canon = fromAlias ?? matchExistingCanonical([a.original_text, a.name, a.ai_guess], existing);
       if (canon && !fromAlias) learn.push([a.original_text ?? a.name ?? null, canon]); // remember new matches
+      const fromUser = !!fromAlias && userKeys.has(key); // inherited a user correction
       await tx`
         INSERT INTO artikel
-          (einkauf_id, name, menge, einheit, preis, kategorie, original_text, ai_guess, canonical_name)
+          (einkauf_id, name, menge, einheit, preis, kategorie, original_text, ai_guess, canonical_name, user_corrected)
         VALUES
           (${id}, ${a.name ?? a.original_text ?? ''}, ${a.menge ?? null}, ${a.einheit ?? ''},
            ${a.preis ?? null}, ${a.kategorie ?? ''}, ${a.original_text ?? a.name ?? ''},
-           ${a.ai_guess ?? a.name ?? ''}, ${canon})
+           ${a.ai_guess ?? a.name ?? ''}, ${canon}, ${fromUser})
       `;
     }
   });
@@ -395,7 +398,7 @@ export function receiptRoutes(app: FastifyInstance): void {
 
     const artikel = await sql`
       SELECT a.id, a.name, a.menge, a.einheit, a.preis, a.original_text,
-             a.ai_guess, a.canonical_name, a.category_path
+             a.ai_guess, a.canonical_name, a.category_path, a.user_corrected
       FROM artikel a WHERE a.einkauf_id = ${id}
       ORDER BY COALESCE(a.sort_order, a.id), a.id
     `;

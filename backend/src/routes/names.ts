@@ -71,6 +71,7 @@ export function nameRoutes(app: FastifyInstance): void {
         CASE WHEN a.canonical_name IS NOT NULL THEN 'c:' || a.canonical_name
              ELSE 'g:' || COALESCE(NULLIF(a.ai_guess, ''), a.name, '?') END AS grp,
         bool_or(a.canonical_name IS NOT NULL) AS has_canonical,
+        bool_or(a.user_corrected) AS user_corrected,
         MAX(a.canonical_name) AS canonical_name,
         COALESCE(MAX(a.canonical_name), MAX(NULLIF(a.ai_guess, '')), MAX(a.name)) AS display,
         COUNT(*)::int AS count,
@@ -109,6 +110,7 @@ export function nameRoutes(app: FastifyInstance): void {
       key: r.grp,
       display: r.display,
       has_canonical: r.has_canonical,
+      user_corrected: r.user_corrected,
       canonical_name: r.canonical_name,
       count: r.count,
       category: r.category,
@@ -181,7 +183,7 @@ export function nameRoutes(app: FastifyInstance): void {
     if (!name) return reply.code(400).send({ error: 'canonical_name required' });
     if (!Array.isArray(artikel_ids) || !artikel_ids.length) return reply.code(400).send({ error: 'artikel_ids required' });
     const rows = await sql`
-      UPDATE artikel a SET canonical_name = ${name}
+      UPDATE artikel a SET canonical_name = ${name}, user_corrected = TRUE
       FROM einkauf e
       WHERE a.einkauf_id = e.id AND a.id IN ${sql(artikel_ids)}
         ${kontoScope(req.user, sql`e.konto_id`)}

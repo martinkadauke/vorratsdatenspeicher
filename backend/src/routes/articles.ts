@@ -76,6 +76,8 @@ export function articleRoutes(app: FastifyInstance): void {
     if (typeof updates.canonical_name === 'string') {
       updates.canonical_name = (updates.canonical_name as string).trim() || null;
     }
+    // A manual canonical edit flags the item as user-corrected (everyone sees it).
+    if ('canonical_name' in updates && updates.canonical_name) updates.user_corrected = true;
     if (!Object.keys(updates).length) return reply.code(400).send({ error: 'no patchable fields' });
 
     const rows = await sql`UPDATE artikel SET ${sql(updates)} WHERE id = ${id} RETURNING id, original_text, name`;
@@ -155,7 +157,7 @@ export function articleRoutes(app: FastifyInstance): void {
     )`;
     const setCat = category_path !== undefined ? sql`, category_path = ${category_path}` : sql``;
     const rows = await sql`
-      UPDATE artikel a SET canonical_name = ${canonical_name} ${setCat}
+      UPDATE artikel a SET canonical_name = ${canonical_name}, user_corrected = TRUE ${setCat}
       FROM einkauf e
       WHERE a.einkauf_id = e.id AND ${idMatch}
         ${kontoScope(req.user, sql`e.konto_id`)}

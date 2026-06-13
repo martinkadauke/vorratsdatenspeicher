@@ -115,6 +115,7 @@
     "edit": "Artikel bearbeiten",
     "originalText": "Original (Kassenbon)",
     "canonical": "Kanonischer Name",
+    "userCorrected": "Nutzerkorrigiert – der Name wurde von einer Person bestätigt",
     "category": "Kategorie",
     "amount": "Menge",
     "unit": "Einheit",

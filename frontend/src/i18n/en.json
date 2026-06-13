@@ -115,6 +115,7 @@
     "edit": "Edit item",
     "originalText": "Original (receipt)",
     "canonical": "Canonical name",
+    "userCorrected": "User-corrected – the name was confirmed by a person",
     "category": "Category",
     "amount": "Amount",
     "unit": "Unit",

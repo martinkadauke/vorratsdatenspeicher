@@ -187,6 +187,7 @@ async function churnWork(eventId: number): Promise<void> {
   `).map(r => r.canonical_name as string);
   const aliases = await loadAliasMap();
   const userAliases = await loadUserAliases(); // authoritative prior corrections, fed to the LLM
+  const userKeys = new Set(userAliases.map(u => u.key)); // OCR keys with a user correction
 
   let autoApplied = 0;
   let queued = 0;
@@ -206,11 +207,14 @@ async function churnWork(eventId: number): Promise<void> {
     try {
       // 1) learned alias memory (exact OCR repeat), 2) deterministic whole-word
       // match — both free + reliable, before the (slow) LLM.
-      const fromAlias = aliases.get(ocrKey(a.original_text ?? a.name));
+      const aKey = ocrKey(a.original_text ?? a.name);
+      const fromAlias = aliases.get(aKey);
       const pre = fromAlias ?? matchExistingCanonical([a.original_text, a.name, a.ai_guess], existing);
       if (pre) {
         if (pre !== a.canonical_name) {
-          await sql`UPDATE artikel SET canonical_name = ${pre} WHERE id = ${a.id}`;
+          // Inherited from a user-confirmed alias → carry the "Nutzerkorrigiert" mark.
+          const fromUser = !!fromAlias && userKeys.has(aKey);
+          await sql`UPDATE artikel SET canonical_name = ${pre}, user_corrected = user_corrected OR ${fromUser} WHERE id = ${a.id}`;
           if (!fromAlias) await recordAlias(a.original_text ?? a.name, pre); // learn deterministic hits
           autoApplied++;
         } else { skipped++; }

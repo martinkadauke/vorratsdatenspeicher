@@ -64,6 +64,13 @@ export async function loadUserAliases(): Promise<{ key: string; canonical: strin
   return rows.map(r => ({ key: r.ocr_key as string, canonical: r.canonical_name as string }));
 }
 
+/** Set of OCR keys that carry a user-confirmed alias — used to flag artikel whose
+ *  canonical was inherited from a manual correction as "Nutzerkorrigiert". */
+export async function loadUserAliasKeys(): Promise<Set<string>> {
+  const rows = await sql`SELECT ocr_key FROM canonical_alias WHERE user_confirmed = TRUE`;
+  return new Set(rows.map(r => r.ocr_key as string));
+}
+
 /** One-time backfill from existing assignments (runs only if the table is empty),
  *  picking the most-frequent canonical per OCR key. */
 export async function backfillAliases(): Promise<void> {
