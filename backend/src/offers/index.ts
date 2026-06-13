@@ -9,6 +9,7 @@ import { parseLlmJson } from '../llm/ollama.js';
 import { searxngSearchRaw } from '../llm/searxng.js';
 import { searchMarktguru, type MarktguruOffer } from './marktguru.js';
 import { sendMail } from '../mailer.js';
+import { offerDigestEmail } from '../email/templates.js';
 
 const fold = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
@@ -194,16 +195,21 @@ export async function debugOfferSearch(product: string): Promise<unknown> {
   return { zip, marktguru, web: { query, region, hitCount: hits.length, hits, llmRaw, parsed, error } };
 }
 
-interface OfferRow { id: number; canonical_name: string; store: string | null; price: string | null; old_price: string | null; valid_until: string | null; source_url: string | null }
+interface OfferRow {
+  id: number; canonical_name: string; store: string | null; price: string | null;
+  old_price: string | null; valid_until: string | null; source_url: string | null;
+  brand: string | null; image_url: string | null; unit: string | null;
+}
 
 /** Email each subscriber a digest of newly-found offers for their products,
  *  then mark those offers notified. */
 export async function sendOfferDigests(): Promise<void> {
   const fresh = await sql`
-    SELECT id, canonical_name, store, price, old_price, valid_until, source_url
+    SELECT id, canonical_name, store, price, old_price, valid_until, source_url, brand, image_url, unit
     FROM offer WHERE notified = FALSE AND found_at > NOW() - INTERVAL '2 days'
   ` as unknown as OfferRow[];
   if (!fresh.length) return;
+  const appUrl = await getConfig('app.base_url');
 
   // user → email, and which canonicals they subscribed to
   const subs = await sql`
@@ -220,13 +226,9 @@ export async function sendOfferDigests(): Promise<void> {
   for (const { email, refs } of byUser.values()) {
     const mine = fresh.filter(o => refs.has(o.canonical_name));
     if (!mine.length) continue;
-    const lines = mine.map(o =>
-      `• ${o.canonical_name}: ${o.store ?? '?'}${o.price ? ` – ${o.price}` : ''}`
-      + `${o.old_price ? ` (statt ${o.old_price})` : ''}`
-      + `${o.valid_until ? ` (${o.valid_until})` : ''}\n    Quelle: ${o.source_url}`,
-    ).join('\n\n');
     try {
-      await sendMail(email, 'VDS: Angebote für deine Artikel', `Neue Angebote für deine abonnierten Artikel:\n\n${lines}\n\n(laut Web-Suche – bitte vor dem Kauf prüfen.)`);
+      const mail = offerDigestEmail({ offers: mine, appUrl });
+      await sendMail(email, mail.subject, mail.text, mail.html);
     } catch (e) { console.error('[offers] digest mail failed:', (e as Error).message); }
   }
 

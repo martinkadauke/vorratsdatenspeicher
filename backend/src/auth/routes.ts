@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import sql from '../db.js';
 import { signToken } from './plugin.js';
 import { sendMail } from '../mailer.js';
+import { resetEmail } from '../email/templates.js';
 import { getConfig } from '../config.js';
 
 export async function createAuthToken(userId: number, kind: 'invite' | 'reset', hours: number): Promise<string> {
@@ -85,14 +86,8 @@ export function authRoutes(app: FastifyInstance): void {
         try {
           const token = await createAuthToken(rows[0].id, 'reset', 2);
           const base = await getConfig('app.base_url');
-          await sendMail(
-            email,
-            'Vorratsdatenspeicher – Passwort zurücksetzen',
-            `Hallo ${rows[0].username},\n\n` +
-            `über diesen Link kannst du dein Passwort zurücksetzen (2 Stunden gültig):\n\n` +
-            `${base}/reset?token=${token}\n\n` +
-            `Wenn du das nicht angefordert hast, ignoriere diese E-Mail.`,
-          );
+          const mail = resetEmail({ username: rows[0].username, link: `${base}/reset?token=${token}`, validity: '2 Stunden' });
+          await sendMail(email, mail.subject, mail.text, mail.html);
         } catch (e) {
           req.log.error(`forgot-password mail failed: ${(e as Error).message}`);
         }

@@ -12,6 +12,7 @@ import {
 } from '../llm/provider.js';
 import { parseLlmJson } from '../llm/ollama.js';
 import { sendMail } from '../mailer.js';
+import { modelReviewEmail } from '../email/templates.js';
 
 let running = false;
 export function isModelReviewRunning(): boolean { return running; }
@@ -125,19 +126,12 @@ async function emailReview(id: number, token: string, proposals: Proposal[]): Pr
   if (!supers.length) { console.warn('[model-review] no super-admin email configured'); return; }
   const base = (await getConfig('app.base_url')).replace(/\/$/, '');
   const link = (action: string) => `${base}/api/model-review/${id}/decide?token=${token}&action=${action}`;
-  const lines = proposals.map(p =>
-    `• ${p.task}  (aktuell: ${p.current_model})\n`
-    + `    API:  ${p.api ? `${p.api.model} [${p.api.provider}] – ${p.api.reason}` : '—'}\n`
-    + `    Open: ${p.open ? `${p.open.model} – ${p.open.reason}` : '—'}`,
-  ).join('\n\n');
-  const body =
-    `Der KI-Modell-Review hat pro Aufgabe je ein API- und ein Open-Weight-Modell vorgeschlagen:\n\n${lines}\n\n`
-    + `Alle API-Modelle übernehmen:\n${link('apply_api')}\n\n`
-    + `Alle Open-Weight-Modelle übernehmen:\n${link('apply_open')}\n\n`
-    + `Ablehnen (nichts ändern):\n${link('reject')}\n\n`
-    + `Du kannst die Modelle auch jederzeit manuell in Admin → KI-Aufgaben ändern.`;
+  const mail = modelReviewEmail({
+    proposals,
+    links: { apply_api: link('apply_api'), apply_open: link('apply_open'), reject: link('reject') },
+  });
   for (const s of supers) {
-    try { await sendMail(s.email as string, 'VDS: KI-Modell-Review – Vorschläge', body); }
+    try { await sendMail(s.email as string, mail.subject, mail.text, mail.html); }
     catch (e) { console.error('[model-review] email failed:', (e as Error).message); }
   }
 }

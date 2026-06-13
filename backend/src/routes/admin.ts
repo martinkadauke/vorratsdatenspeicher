@@ -10,7 +10,7 @@ import { rescheduleModelReview } from '../maintenance/modelReview.js';
 import { listOllamaModels, ollamaHealth } from '../llm/ollama.js';
 import { searxngHealth } from '../llm/searxng.js';
 import { sendMail } from '../mailer.js';
-import { inviteEmail } from '../email/templates.js';
+import { inviteEmail, resetEmail, noticeEmail } from '../email/templates.js';
 import { createAuthToken } from '../auth/routes.js';
 import { listModelsForProvider, healthForProvider, setTaskAi, type ProviderName, type AiTask } from '../llm/provider.js';
 import { matchExistingCanonical } from '../lib/canonicalMatch.js';
@@ -167,11 +167,8 @@ export function adminRoutes(app: FastifyInstance): void {
     let emailed = false;
     if (rows[0].email) {
       try {
-        await sendMail(
-          rows[0].email,
-          'Vorratsdatenspeicher – Passwort zurücksetzen',
-          `Hallo ${rows[0].username},\n\nneues Passwort setzen (24h gültig):\n\n${link}\n`,
-        );
+        const mail = resetEmail({ username: rows[0].username as string, link, validity: '24 Stunden' });
+        await sendMail(rows[0].email as string, mail.subject, mail.text, mail.html);
         emailed = true;
       } catch (e) {
         req.log.warn(`reset mail failed: ${(e as Error).message}`);
@@ -185,7 +182,12 @@ export function adminRoutes(app: FastifyInstance): void {
     const { to } = (req.body ?? {}) as { to?: string };
     if (!to) return reply.code(400).send({ error: 'to required' });
     try {
-      await sendMail(to, 'Vorratsdatenspeicher – SMTP Test', 'SMTP funktioniert! 🎉');
+      const mail = noticeEmail({
+        subject: 'Vorratsdatenspeicher – SMTP-Test',
+        heading: 'SMTP funktioniert 🎉',
+        body: 'Diese Test-E-Mail bestätigt, dass der E-Mail-Versand korrekt eingerichtet ist.',
+      });
+      await sendMail(to, mail.subject, mail.text, mail.html);
       return { ok: true };
     } catch (e) {
       return reply.code(502).send({ error: (e as Error).message });
