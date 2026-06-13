@@ -91,12 +91,12 @@ export function Artikel() {
     staleTime: 60_000,
   });
   const avoided = useMemo(() => new Set(avoidedList ?? []), [avoidedList]);
-  const { data: subsList } = useQuery({
+  const { data: subsData } = useQuery({
     queryKey: ['subscriptions'],
-    queryFn: () => api<{ kind: string; ref: string }[]>('/api/subscriptions'),
+    queryFn: () => api<{ filiale: number[]; artikel: string[] }>('/api/subscriptions'),
     staleTime: 60_000,
   });
-  const subscribed = useMemo(() => new Set((subsList ?? []).filter(s => s.kind === 'artikel').map(s => s.ref)), [subsList]);
+  const subscribed = useMemo(() => new Set(subsData?.artikel ?? []), [subsData]);
   const isSubscribed = (g: ArtikelGroup) => subscribed.has(g.canonical_name ?? g.display);
 
   // membership filters (subscribed / avoided)
