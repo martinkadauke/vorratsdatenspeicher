@@ -1,16 +1,26 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { useQuery } from '@tanstack/react-query';
 import {
   ReceiptText, ChartPie, ShoppingCart, Package, Tags, ListChecks, Store,
   Settings, UserCircle, LogOut, MoreHorizontal, BadgePercent, Eye,
 } from 'lucide-react';
 import { useAuth } from '../context/auth';
+import { api } from '../api/client';
 import { NotificationBell } from './NotificationBell';
 import { Tour } from './Tour';
 import { Toaster } from './Toast';
 import { ConfirmHost } from './Confirm';
 import { cn } from '../lib/utils';
+
+/** Map the deployed git ref to a colour-coded environment badge.
+ *  main → prod, plus stage/dev. Unknown refs (e.g. local vite) show nothing. */
+const ENV_BADGE: Record<string, { label: string; cls: string }> = {
+  main: { label: 'prod', cls: 'bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-400' },
+  stage: { label: 'stage', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-400' },
+  dev: { label: 'dev', cls: 'bg-sky-100 text-sky-700 dark:bg-sky-950/50 dark:text-sky-400' },
+};
 
 const NAV = [
   { to: '/receipts', icon: ReceiptText, key: 'nav.receipts' },
@@ -28,6 +38,14 @@ export function Layout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [tourOpen, setTourOpen] = useState(false);
+
+  // Which environment are we on? (main→prod / stage / dev) — shown next to the brand.
+  const { data: version } = useQuery({
+    queryKey: ['version'],
+    queryFn: () => api<{ ref: string }>('/api/version'),
+    staleTime: Infinity,
+  });
+  const envBadge = version?.ref ? ENV_BADGE[version.ref] : undefined;
 
   // Auto-open tour on first login (after a tiny delay so the UI has settled)
   useEffect(() => {
@@ -72,6 +90,11 @@ export function Layout() {
         <NavLink to="/receipts" className="flex items-center gap-2 text-base font-bold tracking-tight">
           <span className="text-xl">🗄️</span>
           <span>Vorratsdatenspeicher</span>
+          {envBadge && (
+            <span className={cn('rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase leading-none tracking-wide', envBadge.cls)}>
+              {envBadge.label}
+            </span>
+          )}
         </NavLink>
         <div className="flex items-center gap-1">
           <NotificationBell />
