@@ -31,6 +31,35 @@ export function isChurnRunning(): boolean {
   return running;
 }
 
+/** Short store/chain hint from a raw OCR store name (drops street/zip noise). */
+function storeHint(raw: string | null | undefined): string {
+  if (!raw) return '';
+  return raw.split(/[\n,]/)[0].replace(/\d.*$/, '').trim().split(/\s+/).slice(0, 3).join(' ');
+}
+
+/** Web-search disambiguation for a confusing OCR item, biased by the store it was
+ *  bought at — the way a human resolves a cryptic line ("EDEKA BIO BANAN." → Banane).
+ *  Returns a canonical proposal + confidence, or null if nothing usable came back. */
+async function storeAwareLookup(
+  store: string,
+  item: { original_text: string | null; name: string },
+  stage2Llm: Awaited<ReturnType<typeof providerForTask>>,
+): Promise<{ canonical: string; confidence: number; translationEn: string | null; sourceUrl: string | null } | null> {
+  const ocrStr = item.original_text ?? item.name;
+  const query = [store, ocrStr].filter(Boolean).join(' ').trim();
+  if (!query) return null;
+  const hits = await searxngSearch(query);
+  if (!hits.length) return null;
+  const s2 = parseLlmJson<Stage2Result>(await stage2Llm.chat({
+    system: STAGE2_PROMPT,
+    user: JSON.stringify({ original_text: item.original_text, name: item.name, laden: store, suchergebnisse: hits.slice(0, 3) }),
+    json: true,
+  }));
+  const canonical = s2.canonical?.trim();
+  if (!canonical) return null;
+  return { canonical, confidence: s2.confidence ?? 0, translationEn: s2.translation_en ?? null, sourceUrl: hits[0]?.url ?? null };
+}
+
 /** Request cancellation of the running churn (cross-replica via DB flag). */
 export async function requestChurnStop(): Promise<boolean> {
   const rows = await sql`
@@ -126,8 +155,9 @@ async function churnWork(eventId: number): Promise<void> {
   const confidenceGate = await getConfig('churner.confidence');
 
   const candidates = await sql`
-    SELECT a.id, a.name, a.original_text, a.ai_guess, a.canonical_name
+    SELECT a.id, a.name, a.original_text, a.ai_guess, a.canonical_name, e.roh_ladenname AS store_raw
     FROM artikel a
+    LEFT JOIN einkauf e ON e.id = a.einkauf_id
     WHERE a.canonical_name IS NULL
        OR LENGTH(a.canonical_name) > 40
        OR a.canonical_name IN ('Diverse Artikel', 'Backwaren', 'Gemüse', 'Fleisch', 'Gewürze')
@@ -156,6 +186,7 @@ async function churnWork(eventId: number): Promise<void> {
     if (await isCancelled(eventId)) throw new ChurnCancelled();
     await progress.set({ phase: 'canonical', current: processed, total: candidates.length });
     processed++;
+    const store = storeHint(a.store_raw as string | null);
     try {
       // 1) learned alias memory (exact OCR repeat), 2) deterministic whole-word
       // match — both free + reliable, before the (slow) LLM.
@@ -191,13 +222,15 @@ async function churnWork(eventId: number): Promise<void> {
         dropped++;
         continue; // never auto-delete; just leave it alone and count it
       } else if (stage1.action === 'lookup' && stage1.query) {
-        const hits = await searxngSearch(stage1.query);
+        // bias the lookup with the store it was bought at — disambiguates better
+        const hits = await searxngSearch([store, stage1.query].filter(Boolean).join(' '));
         if (hits.length) {
           const stage2 = parseLlmJson<Stage2Result>(await stage2Llm.chat({
             system: STAGE2_PROMPT,
             user: JSON.stringify({
               original_text: a.original_text,
               name: a.name,
+              laden: store,
               suchergebnisse: hits.slice(0, 3),
             }),
             json: true,
@@ -213,6 +246,23 @@ async function churnWork(eventId: number): Promise<void> {
 
       canonical = canonical?.trim() || null;
       if (!canonical) { skipped++; continue; }
+
+      // Low-confidence rescue: if stage1 wasn't confident (and didn't already do a
+      // web lookup), search the web with the STORE + OCR string and let stage2 try
+      // again — exactly how a human cracks a cryptic line. Adopt only if better.
+      if (confidence < confidenceGate && store && stage1.action !== 'lookup') {
+        try {
+          const rescue = await storeAwareLookup(store, { original_text: a.original_text as string | null, name: a.name as string }, stage2Llm);
+          if (rescue && rescue.confidence > confidence) {
+            canonical = rescue.canonical;
+            confidence = rescue.confidence;
+            translationEn = rescue.translationEn ?? translationEn;
+            sourceUrl = rescue.sourceUrl ?? sourceUrl;
+          }
+        } catch (err) {
+          console.warn(`[churner] store-aware rescue failed for ${a.id}:`, (err as Error).message);
+        }
+      }
 
       // Snap near-duplicates to existing canonical names
       const twin = mostSimilar(canonical, existing, 0.85);
