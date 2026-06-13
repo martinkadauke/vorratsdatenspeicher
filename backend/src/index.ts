@@ -66,6 +66,9 @@ async function main(): Promise<void> {
   app.get('/api/version', async () => ({
     sha: process.env.GIT_SHA ?? 'unknown',
     ref: process.env.GIT_REF ?? 'unknown',
+    // Runtime env (prod/stage/dev), injected at deploy time — reliable even when
+    // several branches share a commit SHA (and thus the same baked image/GIT_REF).
+    env: process.env.VDS_ENV ?? null,
     node: process.version,
     started_at: new Date(Date.now() - process.uptime() * 1000).toISOString(),
   }));

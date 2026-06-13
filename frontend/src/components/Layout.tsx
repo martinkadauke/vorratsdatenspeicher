@@ -14,10 +14,10 @@ import { Toaster } from './Toast';
 import { ConfirmHost } from './Confirm';
 import { cn } from '../lib/utils';
 
-/** Map the deployed git ref to a colour-coded environment badge.
- *  main → prod, plus stage/dev. Unknown refs (e.g. local vite) show nothing. */
+/** Colour-coded environment badge keyed on the runtime VDS_ENV (prod/stage/dev),
+ *  which is reliable even when branches share a commit SHA. Unknown → no badge. */
 const ENV_BADGE: Record<string, { label: string; cls: string }> = {
-  main: { label: 'prod', cls: 'bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-400' },
+  prod: { label: 'prod', cls: 'bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-400' },
   stage: { label: 'stage', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-400' },
   dev: { label: 'dev', cls: 'bg-sky-100 text-sky-700 dark:bg-sky-950/50 dark:text-sky-400' },
 };
