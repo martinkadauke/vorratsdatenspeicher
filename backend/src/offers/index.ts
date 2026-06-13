@@ -111,7 +111,7 @@ export async function runOfferSearch(): Promise<{ checked: number; found: number
   if (running) throw new Error('Angebotssuche läuft bereits');
   running = true;
   try {
-    const products = (await sql`SELECT DISTINCT ref FROM offer_subscription WHERE kind = 'artikel'`).map(r => r.ref as string);
+    const products = (await sql`SELECT DISTINCT ref FROM offer_subscription WHERE kind IN ('artikel', 'watch')`).map(r => r.ref as string);
     if (!products.length) return { checked: 0, found: 0 };
     const zip = await householdZip();
     const region = await regionHint();
@@ -215,7 +215,7 @@ export async function sendOfferDigests(): Promise<void> {
   const subs = await sql`
     SELECT s.ref, u.id AS user_id, u.email
     FROM offer_subscription s JOIN users u ON u.id = s.user_id
-    WHERE s.kind = 'artikel' AND u.email IS NOT NULL AND u.email <> ''`;
+    WHERE s.kind IN ('artikel', 'watch') AND u.email IS NOT NULL AND u.email <> ''`;
   const byUser = new Map<number, { email: string; refs: Set<string> }>();
   for (const s of subs) {
     const e = byUser.get(s.user_id as number) ?? { email: s.email as string, refs: new Set<string>() };

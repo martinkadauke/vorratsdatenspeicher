@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
-import { ExternalLink, RefreshCw, ChevronDown, ChevronLeft, ChevronRight, EyeOff, Eye, Pin, ListPlus, Check } from 'lucide-react';
+import { ExternalLink, RefreshCw, ChevronDown, ChevronLeft, ChevronRight, EyeOff, Eye, Pin, ListPlus, Check, X, Search } from 'lucide-react';
 import { api } from '../api/client';
-import { Card, Spinner, EmptyState, Badge, Button } from '../components/ui';
+import { Card, Spinner, EmptyState, Badge, Button, Input } from '../components/ui';
 import { CanonicalIcon } from '../components/IconPicker';
 import { useAuth } from '../context/auth';
 import { toast } from '../components/Toast';
@@ -124,6 +124,30 @@ export function Offers() {
   });
   const onList = useMemo(() => new Set((shopList ?? []).map(r => r.canonical_name)), [shopList]);
 
+  // Ad-hoc "watch" products (things not in the artikel list, e.g. Ben & Jerry's).
+  const [watchInput, setWatchInput] = useState('');
+  const { data: watches } = useQuery({
+    queryKey: ['offers-watches'],
+    queryFn: () => api<string[]>('/api/offers/watches'),
+    staleTime: 60_000,
+  });
+  const addWatch = async () => {
+    const name = watchInput.trim();
+    if (!name) return;
+    try {
+      await api('/api/offers/watches', { method: 'POST', body: { name } });
+      setWatchInput('');
+      await qc.invalidateQueries({ queryKey: ['offers-watches'] });
+      toast(t('offers.watchAdded', { name }), 'success');
+    } catch (e) { toast((e as Error).message, 'error'); }
+  };
+  const removeWatch = async (name: string) => {
+    try {
+      await api('/api/offers/watches', { method: 'DELETE', body: { name } });
+      await qc.invalidateQueries({ queryKey: ['offers-watches'] });
+    } catch (e) { toast((e as Error).message, 'error'); }
+  };
+
   const toggleList = async (c: string) => {
     const adding = !onList.has(c);
     try {
@@ -238,6 +262,32 @@ export function Offers() {
       <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('offers.hint')}</p>
       <FirstVisitHint id="offers" titleKey="hint.offers.title" bodyKey="hint.offers.body" />
       {busy && <p className="text-xs text-emerald-600 dark:text-emerald-500">{t('offers.refreshingHint')}</p>}
+
+      {/* Watch arbitrary products that aren't in your artikel list */}
+      {canWrite && (
+        <div className="flex flex-col gap-1.5 rounded-xl border border-zinc-200 p-2.5 dark:border-zinc-800">
+          <form onSubmit={e => { e.preventDefault(); void addWatch(); }} className="flex gap-2">
+            <div className="relative flex-1">
+              <Search size={15} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+              <Input value={watchInput} onChange={e => setWatchInput(e.target.value)} placeholder={t('offers.watchPlaceholder')} className="pl-8" />
+            </div>
+            <Button type="submit" variant="secondary" disabled={!watchInput.trim()}>{t('common.add')}</Button>
+          </form>
+          {watches && watches.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-xs text-zinc-400">{t('offers.watchLabel')}</span>
+              {watches.map(w => (
+                <span key={w} className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-xs dark:bg-zinc-800">
+                  {w}
+                  <button onClick={() => void removeWatch(w)} className="text-zinc-400 hover:text-red-500" aria-label={t('common.delete')}>
+                    <X size={12} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Kette (chain) picker with scroll arrows, "Deine Läden", and pin toggles */}
       {chains.length > 1 && (

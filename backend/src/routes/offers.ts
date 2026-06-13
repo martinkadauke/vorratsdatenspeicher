@@ -17,7 +17,7 @@ export function offerRoutes(app: FastifyInstance): void {
    *  buy-rhythm ("when is it due again?") and a good-price flag vs. avg paid. */
   app.get('/api/offers/mine', async (req) => {
     const refs = (await sql`
-      SELECT ref FROM offer_subscription WHERE user_id = ${req.user!.id} AND kind = 'artikel'
+      SELECT ref FROM offer_subscription WHERE user_id = ${req.user!.id} AND kind IN ('artikel', 'watch')
     `).map(r => r.ref as string);
     if (!refs.length) return { offers: [], pantry: {} };
 
@@ -91,6 +91,31 @@ export function offerRoutes(app: FastifyInstance): void {
     const q = ((req.query as { q?: string }).q ?? '').trim();
     if (!q) return { error: 'q required' };
     return debugOfferSearch(q);
+  });
+
+  /** Ad-hoc "watch" products: things the user wants offer-checked even though they
+   *  don't buy them (and so aren't in the artikel list). Stored as offer_subscription
+   *  kind='watch'; the offer search and digest include them like artikel subs. */
+  app.get('/api/offers/watches', async (req) =>
+    (await sql`SELECT ref FROM offer_subscription WHERE user_id = ${req.user!.id} AND kind = 'watch' ORDER BY ref`)
+      .map(r => r.ref as string));
+
+  app.post('/api/offers/watches', async (req, reply) => {
+    const name = String((req.body as { name?: string })?.name ?? '').trim();
+    if (!name) return reply.code(400).send({ error: 'name required' });
+    if (name.length > 80) return reply.code(400).send({ error: 'name too long' });
+    await sql`
+      INSERT INTO offer_subscription (user_id, kind, ref)
+      VALUES (${req.user!.id}, 'watch', ${name})
+      ON CONFLICT (user_id, kind, ref) DO NOTHING`;
+    return { ok: true };
+  });
+
+  app.delete('/api/offers/watches', async (req, reply) => {
+    const name = String((req.body as { name?: string })?.name ?? '').trim();
+    if (!name) return reply.code(400).send({ error: 'name required' });
+    await sql`DELETE FROM offer_subscription WHERE user_id = ${req.user!.id} AND kind = 'watch' AND ref = ${name}`;
+    return { ok: true };
   });
 
   /** Whether an offer search is currently running (for the in-app refresh button). */
