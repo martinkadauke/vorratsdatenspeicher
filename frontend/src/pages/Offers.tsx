@@ -1,8 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
-import { ExternalLink, RefreshCw, ChevronDown, EyeOff, Eye } from 'lucide-react';
+import { ExternalLink, RefreshCw, ChevronDown, ChevronLeft, ChevronRight, EyeOff, Eye, Pin, ListPlus } from 'lucide-react';
 import { api } from '../api/client';
 import { Card, Spinner, EmptyState, Badge, Button } from '../components/ui';
 import { CanonicalIcon } from '../components/IconPicker';
@@ -101,10 +101,40 @@ export function Offers() {
   const { user } = useAuth();
   const canWrite = user?.can_write !== false;
   const [busy, setBusy] = useState(false);
-  const [chain, setChain] = useState<string | null>(null);
+  const [chain, setChain] = useState<string | null>(null);   // specific chain filter
+  const [pinnedView, setPinnedView] = useState(false);        // "Deine Läden"
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [hidden, setHidden] = useState<Set<string>>(loadHidden);
   const [showHidden, setShowHidden] = useState(false);
+
+  // Pinned chains ("Deine Läden") — persisted per user via PATCH /api/me.
+  const [pinned, setPinned] = useState<Set<string>>(() => new Set(user?.pinned_chains ?? []));
+  useEffect(() => { setPinned(new Set(user?.pinned_chains ?? [])); }, [user?.pinned_chains]);
+  const togglePin = (c: string) => {
+    const next = new Set(pinned);
+    next.has(c) ? next.delete(c) : next.add(c);
+    setPinned(next);
+    api('/api/me', { method: 'PATCH', body: { pinned_chains: [...next] } }).catch(() => {});
+  };
+
+  const addToList = async (c: string) => {
+    try {
+      await api('/api/shopping-list', { method: 'POST', body: { canonical_name: c } });
+      toast(t('offers.addedToList', { name: c }), 'success');
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    }
+  };
+
+  // horizontal chip scroll arrows (mirrors the receipts overview)
+  const chipsRef = useRef<HTMLDivElement>(null);
+  const [chipScroll, setChipScroll] = useState({ left: false, right: false });
+  const updateChipScroll = useCallback(() => {
+    const el = chipsRef.current;
+    if (!el) return;
+    setChipScroll({ left: el.scrollLeft > 4, right: el.scrollLeft + el.clientWidth < el.scrollWidth - 4 });
+  }, []);
+  const scrollChips = (dir: -1 | 1) => chipsRef.current?.scrollBy({ left: dir * 240, behavior: 'smooth' });
 
   const { data, isLoading } = useQuery({
     queryKey: ['offers-mine'],
@@ -152,11 +182,22 @@ export function Offers() {
     return [...set].sort((a, b) => a.localeCompare(b, lang));
   }, [offers, lang]);
 
-  // chain filter → group by canonical → sort (due first, then name).
+  // re-evaluate the scroll arrows when the chip row renders / resizes
+  useEffect(() => {
+    updateChipScroll();
+    const el = chipsRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(updateChipScroll);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [chains, pinned, updateChipScroll]);
+
+  // chain / "Deine Läden" filter → group by canonical → sort (due first, then name).
   const groups = useMemo(() => {
     const m = new Map<string, Offer[]>();
     for (const o of offers) {
-      if (chain && o.store !== chain) continue;
+      if (pinnedView) { if (!o.store || !pinned.has(o.store)) continue; }
+      else if (chain && o.store !== chain) continue;
       const arr = m.get(o.canonical_name) ?? [];
       arr.push(o); m.set(o.canonical_name, arr);
     }
@@ -164,7 +205,7 @@ export function Offers() {
     const rank = (s?: string | null) => (s === 'overdue' ? 0 : s === 'soon' ? 1 : 2);
     return [...m.entries()].sort((a, b) =>
       rank(pantry[a[0]]?.status) - rank(pantry[b[0]]?.status) || a[0].localeCompare(b[0], lang));
-  }, [offers, chain, pantry, lang]);
+  }, [offers, chain, pinnedView, pinned, pantry, lang]);
 
   const groupVisibleOffers = (arr: Offer[]) => arr.filter(o => showHidden || !hidden.has(`o:${o.id}`));
   const groupHidden = (c: string, arr: Offer[]) =>
@@ -188,26 +229,57 @@ export function Offers() {
       <FirstVisitHint id="offers" titleKey="hint.offers.title" bodyKey="hint.offers.body" />
       {busy && <p className="text-xs text-emerald-600 dark:text-emerald-500">{t('offers.refreshingHint')}</p>}
 
-      {/* Kette (chain) picker */}
+      {/* Kette (chain) picker with scroll arrows, "Deine Läden", and pin toggles */}
       {chains.length > 1 && (
-        <div className="scrollbar-none -mx-1 flex gap-1.5 overflow-x-auto px-1">
-          <button
-            onClick={() => setChain(null)}
-            className={cn('shrink-0 rounded-full border px-3 py-1 text-xs font-medium',
-              chain === null ? 'border-transparent bg-violet-600 text-white' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700')}
-          >
-            {t('offers.allKetten')}
-          </button>
-          {chains.map(c => (
-            <button
-              key={c}
-              onClick={() => setChain(chain === c ? null : c)}
-              className={cn('shrink-0 rounded-full border px-3 py-1 text-xs font-medium',
-                chain === c ? 'border-transparent bg-violet-600 text-white' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700')}
-            >
-              {c}
+        <div className="relative">
+          {chipScroll.left && (
+            <button onClick={() => scrollChips(-1)} title={t('common.scrollLeft')}
+              className="absolute left-0 top-1/2 z-10 hidden -translate-y-1/2 rounded-full border border-zinc-200 bg-white/90 p-1 shadow-sm backdrop-blur hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900/90 dark:hover:bg-zinc-800 sm:block">
+              <ChevronLeft size={16} />
             </button>
-          ))}
+          )}
+          <div ref={chipsRef} onScroll={updateChipScroll} className="scrollbar-none -mx-1 flex gap-1.5 overflow-x-auto px-1">
+            <button
+              onClick={() => { setChain(null); setPinnedView(false); }}
+              className={cn('shrink-0 rounded-full border px-3 py-1 text-xs font-medium',
+                chain === null && !pinnedView ? 'border-transparent bg-violet-600 text-white' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700')}
+            >
+              {t('offers.allKetten')}
+            </button>
+            {pinned.size > 0 && (
+              <button
+                onClick={() => { setPinnedView(true); setChain(null); }}
+                className={cn('inline-flex shrink-0 items-center gap-1 rounded-full border px-3 py-1 text-xs font-medium',
+                  pinnedView ? 'border-transparent bg-violet-600 text-white' : 'border-violet-300 text-violet-600 dark:border-violet-800 dark:text-violet-300')}
+              >
+                <Pin size={12} fill="currentColor" /> {t('offers.deineLaeden')}
+              </button>
+            )}
+            {chains.map(c => {
+              const active = chain === c && !pinnedView;
+              const isPinned = pinned.has(c);
+              return (
+                <div key={c}
+                  className={cn('inline-flex shrink-0 items-center rounded-full border text-xs font-medium',
+                    active ? 'border-transparent bg-violet-600 text-white' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700')}>
+                  <button onClick={() => { setChain(active ? null : c); setPinnedView(false); }} className="py-1 pl-3 pr-1">{c}</button>
+                  <button
+                    onClick={() => togglePin(c)}
+                    title={isPinned ? t('offers.unpin') : t('offers.pin')}
+                    className={cn('py-1 pl-0.5 pr-2', active ? 'text-white/80 hover:text-white' : isPinned ? 'text-violet-500' : 'text-zinc-300 hover:text-violet-500 dark:text-zinc-600')}
+                  >
+                    <Pin size={12} fill={isPinned ? 'currentColor' : 'none'} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          {chipScroll.right && (
+            <button onClick={() => scrollChips(1)} title={t('common.scrollRight')}
+              className="absolute right-0 top-1/2 z-10 hidden -translate-y-1/2 rounded-full border border-zinc-200 bg-white/90 p-1 shadow-sm backdrop-blur hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900/90 dark:hover:bg-zinc-800 sm:block">
+              <ChevronRight size={16} />
+            </button>
+          )}
         </div>
       )}
 
@@ -245,6 +317,12 @@ export function Offers() {
                     {p?.status === 'overdue' && p.interval_days != null && <span className="text-red-500">{t('offers.rhythm', { days: p.interval_days })}</span>}
                   </div>
                 </button>
+                {canWrite && (
+                  <button onClick={() => addToList(c)} title={t('offers.addToList')}
+                          className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-950/30">
+                    <ListPlus size={16} />
+                  </button>
+                )}
                 <button onClick={() => toggleHidden(`c:${c}`)} title={ghidden ? t('offers.unhide') : t('offers.hide')}
                         className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
                   {ghidden ? <Eye size={16} /> : <EyeOff size={16} />}

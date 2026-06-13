@@ -5,13 +5,14 @@ import sql from '../db.js';
 export function meRoutes(app: FastifyInstance): void {
   app.patch('/api/me', async (req, reply) => {
     const userId = req.user!.id;
-    const { prefers_dark, preferred_lang, password, old_password, has_seen_tour } = (req.body ?? {}) as {
-      prefers_dark?: boolean; preferred_lang?: string; password?: string; old_password?: string; has_seen_tour?: boolean;
+    const { prefers_dark, preferred_lang, password, old_password, has_seen_tour, pinned_chains } = (req.body ?? {}) as {
+      prefers_dark?: boolean; preferred_lang?: string; password?: string; old_password?: string; has_seen_tour?: boolean; pinned_chains?: string[];
     };
 
     const updates: Record<string, unknown> = {};
     if (prefers_dark !== undefined) updates.prefers_dark = prefers_dark;
     if (has_seen_tour !== undefined) updates.has_seen_tour = has_seen_tour;
+    if (Array.isArray(pinned_chains)) updates.pinned_chains = pinned_chains.filter(s => typeof s === 'string').slice(0, 50);
     if (preferred_lang !== undefined) {
       if (!['de', 'en'].includes(preferred_lang)) return reply.code(400).send({ error: 'lang must be de or en' });
       updates.preferred_lang = preferred_lang;

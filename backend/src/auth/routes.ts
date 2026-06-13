@@ -49,7 +49,7 @@ export function authRoutes(app: FastifyInstance): void {
     if (!username || !password) return reply.code(400).send({ error: 'missing credentials' });
 
     const rows = await sql`
-      SELECT id, username, password_hash, is_admin, sees_all_konten, can_write, prefers_dark, preferred_lang, email, has_seen_tour
+      SELECT id, username, password_hash, is_admin, sees_all_konten, can_write, prefers_dark, preferred_lang, email, has_seen_tour, pinned_chains
       FROM users
       WHERE LOWER(username) = LOWER(${username}) OR LOWER(email) = LOWER(${username})
     `;
@@ -72,6 +72,7 @@ export function authRoutes(app: FastifyInstance): void {
         preferred_lang: u.preferred_lang,
         email: u.email,
         has_seen_tour: u.has_seen_tour,
+        pinned_chains: u.pinned_chains,
       },
     };
   });

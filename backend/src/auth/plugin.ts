@@ -25,7 +25,7 @@ export function registerAuth(app: FastifyInstance): void {
     try {
       const payload = jwt.verify(token, JWT_SECRET) as unknown as { sub: number };
       const rows = await sql`
-        SELECT id, username, email, is_admin, sees_all_konten, can_write, prefers_dark, preferred_lang, has_seen_tour
+        SELECT id, username, email, is_admin, sees_all_konten, can_write, prefers_dark, preferred_lang, has_seen_tour, pinned_chains
         FROM users WHERE id = ${payload.sub}
       `;
       if (!rows.length) return reply.code(401).send({ error: 'unauthorized' });

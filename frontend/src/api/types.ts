@@ -5,6 +5,7 @@ export interface User {
   is_admin: boolean;
   sees_all_konten?: boolean;
   can_write?: boolean;
+  pinned_chains?: string[];
   prefers_dark: boolean;
   preferred_lang: string;
   has_seen_tour?: boolean;

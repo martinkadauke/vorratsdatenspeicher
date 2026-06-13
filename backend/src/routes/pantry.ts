@@ -11,6 +11,19 @@ export function pantryRoutes(app: FastifyInstance): void {
     `;
   });
 
+  /** Manually put a product on the shopping list (e.g. from an offer). */
+  app.post('/api/shopping-list', async (req, reply) => {
+    const { canonical_name } = (req.body ?? {}) as { canonical_name?: string };
+    const name = canonical_name?.trim();
+    if (!name) return reply.code(400).send({ error: 'canonical_name required' });
+    await sql`
+      INSERT INTO einkaufsliste (canonical_name, added_by)
+      VALUES (${name}, ${req.user!.username})
+      ON CONFLICT (canonical_name) DO NOTHING
+    `;
+    return { ok: true };
+  });
+
   app.get('/api/shopping-list', async () => {
     return sql`
       SELECT el.canonical_name, el.priority, el.added_by, el.added_at,
