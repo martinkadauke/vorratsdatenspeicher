@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import type { TransactionSql } from 'postgres';
 import sql from '../db.js';
 import { kontoScope, canSeeKonto } from '../auth/konto.js';
 import { recordAlias, recordAliases } from '../lib/canonicalAlias.js';
@@ -82,6 +83,55 @@ export function articleRoutes(app: FastifyInstance): void {
     if (!await guardArtikel(req, reply, id)) return;
     await sql`DELETE FROM artikel WHERE id = ${id}`;
     return { ok: true };
+  });
+
+  /** Renumber a receipt's articles to multiples of 10 (current display order),
+   *  so a new row can slot in at +5 without touching its neighbours. */
+  async function gapAfter(tx: TransactionSql, einkaufId: number, afterId: number): Promise<number> {
+    await tx`
+      WITH ordered AS (
+        SELECT id, (ROW_NUMBER() OVER (ORDER BY COALESCE(sort_order, id), id)) * 10 AS rn
+        FROM artikel WHERE einkauf_id = ${einkaufId}
+      )
+      UPDATE artikel a SET sort_order = o.rn FROM ordered o WHERE a.id = o.id
+    `;
+    const [pos] = await tx`SELECT sort_order FROM artikel WHERE id = ${afterId}`;
+    return (pos.sort_order as number) + 5;
+  }
+
+  /** Duplicate an article, placing the copy directly under the original. */
+  app.post('/api/articles/:id/duplicate', async (req, reply) => {
+    const id = parseInt((req.params as { id: string }).id, 10);
+    if (!id) return reply.code(400).send({ error: 'invalid id' });
+    if (!await guardArtikel(req, reply, id)) return;
+    const [src] = await sql`SELECT einkauf_id FROM artikel WHERE id = ${id}`;
+    const newId = await sql.begin(async tx => {
+      const at = await gapAfter(tx, src.einkauf_id as number, id);
+      const [row] = await tx`
+        INSERT INTO artikel (einkauf_id, name, canonical_name, category_path, menge, einheit, preis, ai_guess, original_text, sort_order)
+        SELECT einkauf_id, name, canonical_name, category_path, menge, einheit, preis, ai_guess, original_text, ${at}
+        FROM artikel WHERE id = ${id}
+        RETURNING id`;
+      return row.id as number;
+    });
+    return { ok: true, id: newId };
+  });
+
+  /** Insert a blank article directly under the given one (the gap-divider tap). */
+  app.post('/api/articles/:id/insert-empty', async (req, reply) => {
+    const id = parseInt((req.params as { id: string }).id, 10);
+    if (!id) return reply.code(400).send({ error: 'invalid id' });
+    if (!await guardArtikel(req, reply, id)) return;
+    const [src] = await sql`SELECT einkauf_id FROM artikel WHERE id = ${id}`;
+    const newId = await sql.begin(async tx => {
+      const at = await gapAfter(tx, src.einkauf_id as number, id);
+      const [row] = await tx`
+        INSERT INTO artikel (einkauf_id, name, sort_order)
+        VALUES (${src.einkauf_id}, ${''}, ${at})
+        RETURNING id`;
+      return row.id as number;
+    });
+    return { ok: true, id: newId };
   });
 
   /** Apply a canonical name (and optionally category) to every artikel that

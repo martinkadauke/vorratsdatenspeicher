@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   DndContext, closestCenter, PointerSensor, KeyboardSensor,
   useSensor, useSensors, type DragEndEvent,
@@ -9,7 +10,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { GripVertical } from 'lucide-react';
+import { GripVertical, Copy } from 'lucide-react';
 import type { Artikel } from '../api/types';
 import { Card, Badge } from './ui';
 import { ConsumerDots } from './ConsumerChips';
@@ -18,7 +19,7 @@ import { toast } from './Toast';
 import { api } from '../api/client';
 import { eur } from '../lib/utils';
 
-export function SortableArticleList({ receiptId, artikel, onEdit, highlightIds, scrollToId, keyboardNav, readOnly }: {
+export function SortableArticleList({ receiptId, artikel, onEdit, highlightIds, scrollToId, keyboardNav, readOnly, onDuplicate, onInsertAfter }: {
   receiptId: number;
   artikel: Artikel[];
   onEdit: (a: Artikel) => void;
@@ -26,7 +27,10 @@ export function SortableArticleList({ receiptId, artikel, onEdit, highlightIds, 
   scrollToId?: number | null;
   keyboardNav?: boolean;
   readOnly?: boolean;
+  onDuplicate?: (id: number) => void;
+  onInsertAfter?: (id: number) => void;
 }) {
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const [items, setItems] = useState(artikel);
   // Keyboard navigation: ↑/↓ move a green-outlined cursor, Enter opens the editor.
@@ -92,15 +96,28 @@ export function SortableArticleList({ receiptId, artikel, onEdit, highlightIds, 
       <SortableContext items={items.map(a => a.id)} strategy={verticalListSortingStrategy}>
         <div className="flex min-w-0 flex-col gap-1.5">
           {items.map((a, i) => (
-            <SortableRow
-              key={a.id}
-              a={a}
-              onEdit={() => onEdit(a)}
-              highlighted={highlightIds?.has(a.id) ?? false}
-              scrollHere={scrollToId === a.id}
-              cursored={i === cursor}
-              readOnly={readOnly ?? false}
-            />
+            <Fragment key={a.id}>
+              <SortableRow
+                a={a}
+                onEdit={() => onEdit(a)}
+                onDuplicate={!readOnly && onDuplicate ? () => onDuplicate(a.id) : undefined}
+                highlighted={highlightIds?.has(a.id) ?? false}
+                scrollHere={scrollToId === a.id}
+                cursored={i === cursor}
+                readOnly={readOnly ?? false}
+              />
+              {!readOnly && onInsertAfter && i < items.length - 1 && (
+                <button
+                  type="button"
+                  onClick={() => onInsertAfter(a.id)}
+                  title={t('receiptDetail.insertHere')}
+                  aria-label={t('receiptDetail.insertHere')}
+                  className="group -my-0.5 flex h-3 w-full items-center justify-center"
+                >
+                  <span className="h-px w-[10%] rounded-full bg-zinc-200 transition-all group-hover:w-[30%] group-hover:bg-emerald-400 group-active:bg-emerald-500 dark:bg-zinc-700" />
+                </button>
+              )}
+            </Fragment>
           ))}
         </div>
       </SortableContext>
@@ -108,7 +125,8 @@ export function SortableArticleList({ receiptId, artikel, onEdit, highlightIds, 
   );
 }
 
-function SortableRow({ a, onEdit, highlighted, scrollHere, cursored, readOnly }: { a: Artikel; onEdit: () => void; highlighted: boolean; scrollHere: boolean; cursored: boolean; readOnly: boolean }) {
+function SortableRow({ a, onEdit, onDuplicate, highlighted, scrollHere, cursored, readOnly }: { a: Artikel; onEdit: () => void; onDuplicate?: () => void; highlighted: boolean; scrollHere: boolean; cursored: boolean; readOnly: boolean }) {
+  const { t } = useTranslation();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: a.id });
   const rowRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -161,6 +179,17 @@ function SortableRow({ a, onEdit, highlighted, scrollHere, cursored, readOnly }:
           </div>
           <div className="tabular shrink-0 font-semibold">{eur(a.preis)}</div>
         </button>
+        {onDuplicate && (
+          <button
+            type="button"
+            onClick={onDuplicate}
+            aria-label={t('receiptDetail.duplicate')}
+            title={t('receiptDetail.duplicate')}
+            className="shrink-0 rounded-md p-1.5 text-zinc-300 hover:bg-zinc-100 hover:text-zinc-500 dark:text-zinc-600 dark:hover:bg-zinc-800"
+          >
+            <Copy size={15} />
+          </button>
+        )}
       </Card>
     </div>
   );

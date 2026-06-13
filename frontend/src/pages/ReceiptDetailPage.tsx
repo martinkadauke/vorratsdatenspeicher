@@ -88,6 +88,17 @@ export function ReceiptDetailPage() {
     },
   });
 
+  const dupArticle = useMutation({
+    mutationFn: (aid: number) => api(`/api/articles/${aid}/duplicate`, { method: 'POST' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['receipt', id] }),
+    onError: (e) => toast((e as Error).message, 'error'),
+  });
+  const insertEmpty = useMutation({
+    mutationFn: (aid: number) => api(`/api/articles/${aid}/insert-empty`, { method: 'POST' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['receipt', id] }),
+    onError: (e) => toast((e as Error).message, 'error'),
+  });
+
   const mountedAt = useRef(Date.now());
   const { data, isLoading } = useQuery({
     queryKey: ['receipt', id],
@@ -390,6 +401,8 @@ export function ReceiptDetailPage() {
             scrollToId={scrollToId}
             keyboardNav={canWrite && !editing && !adding && !editReceipt}
             readOnly={!canWrite}
+            onDuplicate={canWrite ? (aid) => dupArticle.mutate(aid) : undefined}
+            onInsertAfter={canWrite ? (aid) => insertEmpty.mutate(aid) : undefined}
           />
           {canWrite && (
             <button

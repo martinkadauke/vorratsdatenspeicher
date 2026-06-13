@@ -102,6 +102,8 @@
     "panOn": "Pan on",
     "panOff": "Pan",
     "addArticle": "Add item",
+    "duplicate": "Duplicate line",
+    "insertHere": "Insert a line here",
     "prev": "Previous receipt",
     "next": "Next receipt",
     "rotate": "Rotate 90° clockwise",
