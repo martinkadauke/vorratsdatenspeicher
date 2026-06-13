@@ -2,7 +2,7 @@ import './env.js';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import path from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import './types.js';
 import sql, { migrate, ensureAdmin } from './db.js';
 import { initSearch } from './lib/search.js';
@@ -94,22 +94,7 @@ async function main(): Promise<void> {
   offerRoutes(app);
   modelReviewRoutes(app);
 
-  // Receipt photos under /receipts/* — served directly by the app so a
-  // single-container install (Unraid CA, docker-compose) doesn't need a
-  // reverse-proxy mount. In our multi-host setup NPM intercepts first
-  // and never reaches the backend, so this is purely additive.
   const receiptsDir = process.env.RECEIPTS_LOCAL_PATH ?? '/receipts';
-  if (existsSync(receiptsDir)) {
-    await app.register(fastifyStatic, {
-      root: receiptsDir,
-      prefix: '/receipts/',
-      decorateReply: false,
-      wildcard: false,
-    });
-    app.log.info(`serving receipt photos from ${receiptsDir}`);
-  } else {
-    app.log.warn(`no receipts dir at ${receiptsDir} — rotation + static serving disabled`);
-  }
 
   // Static SPA. Vite emits content-hashed assets under /assets/* (safe to cache
   // forever), but index.html points at the current hashes and MUST always be
@@ -130,6 +115,27 @@ async function main(): Promise<void> {
         );
       },
     });
+
+    // Receipt photos live at /receipts/<file>.jpg, which shares the path space
+    // with the SPA route /receipts/:id. Serve a photo ONLY when the file really
+    // exists; anything else (e.g. a hard reload of /receipts/98) falls through to
+    // the SPA index.html via the not-found handler below. Reuses the static
+    // plugin's reply.sendFile with a root override (no second decorator).
+    if (existsSync(receiptsDir)) {
+      app.get('/receipts/:file', (req, reply) => {
+        const file = (req.params as { file: string }).file;
+        const full = path.join(receiptsDir, file);
+        if (file.includes('..') || file.includes('/') || file.includes('\\')
+            || !existsSync(full) || !statSync(full).isFile()) {
+          return reply.callNotFound();
+        }
+        return reply.sendFile(file, receiptsDir);
+      });
+      app.log.info(`serving receipt photos from ${receiptsDir}`);
+    } else {
+      app.log.warn(`no receipts dir at ${receiptsDir} — photo serving disabled`);
+    }
+
     app.setNotFoundHandler((req, reply) => {
       if (req.method === 'GET' && !req.url.startsWith('/api/')) {
         void reply.header('Cache-Control', 'no-cache, must-revalidate');
