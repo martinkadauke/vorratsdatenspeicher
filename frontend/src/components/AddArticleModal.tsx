@@ -16,11 +16,13 @@ const fmt = (n: number): string => n.toFixed(2).replace('.', ',');
 /** Lightweight modal for adding a new artikel to an existing einkauf.
  *  Reuses the unit-price / total-price auto-calc UX from ArticleEditModal
  *  but skips the cascade-apply / consumers complexity. */
-export function AddArticleModal({ einkaufId, open, onClose, invalidateKeys }: {
+export function AddArticleModal({ einkaufId, open, onClose, invalidateKeys, afterArtikelId }: {
   einkaufId: number;
   open: boolean;
   onClose: () => void;
   invalidateKeys: unknown[][];
+  /** When set, the new item is inserted directly under this artikel (else appended). */
+  afterArtikelId?: number | null;
 }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
@@ -65,6 +67,7 @@ export function AddArticleModal({ einkaufId, open, onClose, invalidateKeys }: {
       method: 'POST',
       body: {
         einkauf_id: einkaufId,
+        after_artikel_id: afterArtikelId ?? null,
         name: canonical,
         canonical_name: canonical || null,
         category_path: category,

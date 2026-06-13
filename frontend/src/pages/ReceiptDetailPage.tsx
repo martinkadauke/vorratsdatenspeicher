@@ -93,11 +93,9 @@ export function ReceiptDetailPage() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['receipt', id] }),
     onError: (e) => toast((e as Error).message, 'error'),
   });
-  const insertEmpty = useMutation({
-    mutationFn: (aid: number) => api(`/api/articles/${aid}/insert-empty`, { method: 'POST' }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['receipt', id] }),
-    onError: (e) => toast((e as Error).message, 'error'),
-  });
+  // When the user taps a between-items divider we open the add-item modal targeted
+  // at that position (so Cancel leaves nothing behind). null = append (the + button).
+  const [insertAfterId, setInsertAfterId] = useState<number | null>(null);
 
   const mountedAt = useRef(Date.now());
   const { data, isLoading } = useQuery({
@@ -402,12 +400,12 @@ export function ReceiptDetailPage() {
             keyboardNav={canWrite && !editing && !adding && !editReceipt}
             readOnly={!canWrite}
             onDuplicate={canWrite ? (aid) => dupArticle.mutate(aid) : undefined}
-            onInsertAfter={canWrite ? (aid) => insertEmpty.mutate(aid) : undefined}
+            onInsertAfter={canWrite ? (aid) => { setInsertAfterId(aid); setAdding(true); } : undefined}
           />
           {canWrite && (
             <button
               type="button"
-              onClick={() => setAdding(true)}
+              onClick={() => { setInsertAfterId(null); setAdding(true); }}
               className="flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-zinc-300 px-3 py-2 text-sm text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-emerald-500 dark:hover:text-emerald-400"
             >
               <Plus size={16} /> {t('receiptDetail.addArticle')}
@@ -419,7 +417,8 @@ export function ReceiptDetailPage() {
       <AddArticleModal
         einkaufId={data.id}
         open={adding}
-        onClose={() => setAdding(false)}
+        afterArtikelId={insertAfterId}
+        onClose={() => { setAdding(false); setInsertAfterId(null); }}
         invalidateKeys={[['receipt', id], ['receipts']]}
       />
 

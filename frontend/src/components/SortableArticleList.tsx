@@ -107,15 +107,17 @@ export function SortableArticleList({ receiptId, artikel, onEdit, highlightIds, 
                 readOnly={readOnly ?? false}
               />
               {!readOnly && onInsertAfter && i < items.length - 1 && (
-                <button
-                  type="button"
-                  onClick={() => onInsertAfter(a.id)}
-                  title={t('receiptDetail.insertHere')}
-                  aria-label={t('receiptDetail.insertHere')}
-                  className="group -my-0.5 flex h-3 w-full items-center justify-center"
-                >
-                  <span className="h-px w-[10%] rounded-full bg-zinc-200 transition-all group-hover:w-[30%] group-hover:bg-emerald-400 group-active:bg-emerald-500 dark:bg-zinc-700" />
-                </button>
+                <div className="relative -my-[3px] h-0">
+                  <button
+                    type="button"
+                    onClick={() => onInsertAfter(a.id)}
+                    title={t('receiptDetail.insertHere')}
+                    aria-label={t('receiptDetail.insertHere')}
+                    className="group absolute inset-x-0 top-1/2 z-10 flex h-3 -translate-y-1/2 items-center justify-center"
+                  >
+                    <span className="h-px w-[10%] rounded-full bg-zinc-200 transition-all group-hover:w-[30%] group-hover:bg-emerald-400 group-active:bg-emerald-500 dark:bg-zinc-700" />
+                  </button>
+                </div>
               )}
             </Fragment>
           ))}

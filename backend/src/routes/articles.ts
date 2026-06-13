@@ -39,16 +39,26 @@ export function articleRoutes(app: FastifyInstance): void {
     const einheit = body.einheit ? String(body.einheit) : null;
     const canonical = body.canonical_name ? String(body.canonical_name) : null;
     const category = body.category_path ? String(body.category_path) : null;
+    const afterId = body.after_artikel_id ? parseInt(String(body.after_artikel_id), 10) : null;
 
-    const [row] = await sql`
-      INSERT INTO artikel
-        (einkauf_id, name, canonical_name, category_path, menge, einheit, preis, ai_guess, original_text)
-      VALUES
-        (${einkaufId}, ${name || canonical || 'Artikel'}, ${canonical}, ${category},
-         ${menge}, ${einheit}, ${preis}, ${canonical}, ${'manuell hinzugefügt'})
-      RETURNING id
-    `;
-    return { ok: true, id: row.id };
+    const id = await sql.begin(async tx => {
+      // Insert directly under `afterId` when given (the gap-divider flow); else
+      // sort_order stays NULL so COALESCE(sort_order, id) appends by id.
+      let at: number | null = null;
+      if (afterId) {
+        const [chk] = await tx`SELECT id FROM artikel WHERE id = ${afterId} AND einkauf_id = ${einkaufId}`;
+        if (chk) at = await gapAfter(tx, einkaufId, afterId);
+      }
+      const [row] = await tx`
+        INSERT INTO artikel
+          (einkauf_id, name, canonical_name, category_path, menge, einheit, preis, ai_guess, original_text, sort_order)
+        VALUES
+          (${einkaufId}, ${name || canonical || 'Artikel'}, ${canonical}, ${category},
+           ${menge}, ${einheit}, ${preis}, ${canonical}, ${'manuell hinzugefügt'}, ${at})
+        RETURNING id`;
+      return row.id as number;
+    });
+    return { ok: true, id };
   });
 
   app.patch('/api/articles/:id', async (req, reply) => {
@@ -111,23 +121,6 @@ export function articleRoutes(app: FastifyInstance): void {
         INSERT INTO artikel (einkauf_id, name, canonical_name, category_path, menge, einheit, preis, ai_guess, original_text, sort_order)
         SELECT einkauf_id, name, canonical_name, category_path, menge, einheit, preis, ai_guess, original_text, ${at}
         FROM artikel WHERE id = ${id}
-        RETURNING id`;
-      return row.id as number;
-    });
-    return { ok: true, id: newId };
-  });
-
-  /** Insert a blank article directly under the given one (the gap-divider tap). */
-  app.post('/api/articles/:id/insert-empty', async (req, reply) => {
-    const id = parseInt((req.params as { id: string }).id, 10);
-    if (!id) return reply.code(400).send({ error: 'invalid id' });
-    if (!await guardArtikel(req, reply, id)) return;
-    const [src] = await sql`SELECT einkauf_id FROM artikel WHERE id = ${id}`;
-    const newId = await sql.begin(async tx => {
-      const at = await gapAfter(tx, src.einkauf_id as number, id);
-      const [row] = await tx`
-        INSERT INTO artikel (einkauf_id, name, sort_order)
-        VALUES (${src.einkauf_id}, ${''}, ${at})
         RETURNING id`;
       return row.id as number;
     });
