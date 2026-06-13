@@ -8,6 +8,7 @@ import { api } from '../api/client';
 import type { Artikel, Receipt, ReceiptDetail } from '../api/types';
 import { Spinner, Modal, Input, Label, Button, ProgressBar, Select } from '../components/ui';
 import { ArticleEditModal } from '../components/ArticleEditModal';
+import { FirstVisitHint } from '../components/FirstVisitHint';
 import { AddArticleModal } from '../components/AddArticleModal';
 import { SortableArticleList } from '../components/SortableArticleList';
 import { toast } from '../components/Toast';
@@ -283,6 +284,8 @@ export function ReceiptDetailPage() {
           <Trash2 size={18} />
         </button>
       </div>
+
+      <FirstVisitHint id="receiptDetail" titleKey="hint.receiptDetail.title" bodyKey="hint.receiptDetail.body" />
 
       {reocr.isPending && (
         <ProgressBar label={t('receiptDetail.reocrRunning')} />

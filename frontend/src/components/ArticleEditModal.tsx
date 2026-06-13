@@ -6,6 +6,7 @@ import { api } from '../api/client';
 import type { Artikel } from '../api/types';
 import { Button, Input, Label, Modal } from './ui';
 import { CategoryPicker } from './CategoryPicker';
+import { FirstVisitHint } from './FirstVisitHint';
 import { ConsumerChips } from './ConsumerChips';
 import { CanonicalIcon, IconPicker } from './IconPicker';
 import { confirm } from './Confirm';
@@ -156,6 +157,7 @@ export function ArticleEditModal({ artikel, open, onClose, invalidateKeys }: {
   return (
     <Modal open={open} onClose={onClose} title={t('article.edit')}>
       <form className="flex flex-col gap-4" onSubmit={e => { e.preventDefault(); if (!save.isPending) save.mutate(); }}>
+        <FirstVisitHint id="articleEdit" titleKey="hint.articleEdit.title" bodyKey="hint.articleEdit.body" className="mb-1" />
         {artikel.original_text && (
           <div>
             <Label>{t('article.originalText')}</Label>

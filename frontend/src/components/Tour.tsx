@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import {
-  ReceiptText, ChartPie, ShoppingCart, Package, Tags, Users, Sparkles,
+  ReceiptText, ChartPie, ShoppingCart, Package, Tags, Users, Sparkles, BadgePercent,
   ChevronLeft, ChevronRight, X,
 } from 'lucide-react';
 import { api } from '../api/client';
@@ -17,14 +17,15 @@ interface TourStep {
 }
 
 const STEPS: TourStep[] = [
-  { icon: Sparkles,    titleKey: 'tour.welcome.title',  bodyKey: 'tour.welcome.body',  emoji: '👋' },
-  { icon: ReceiptText, titleKey: 'tour.receipts.title', bodyKey: 'tour.receipts.body', emoji: '🧾' },
-  { icon: ChartPie,    titleKey: 'tour.stats.title',    bodyKey: 'tour.stats.body',    emoji: '📊' },
-  { icon: ShoppingCart, titleKey: 'tour.shopping.title', bodyKey: 'tour.shopping.body', emoji: '🛒' },
-  { icon: Package,     titleKey: 'tour.pantry.title',   bodyKey: 'tour.pantry.body',   emoji: '📦' },
-  { icon: Tags,        titleKey: 'tour.names.title',    bodyKey: 'tour.names.body',    emoji: '🏷️' },
-  { icon: Users,       titleKey: 'tour.family.title',   bodyKey: 'tour.family.body',   emoji: '👨‍👩‍👧‍👦' },
-  { icon: Sparkles,    titleKey: 'tour.done.title',     bodyKey: 'tour.done.body',     emoji: '🎉' },
+  { icon: Sparkles,     titleKey: 'tour.welcome.title',  bodyKey: 'tour.welcome.body',  emoji: '👋' },
+  { icon: ReceiptText,  titleKey: 'tour.receipts.title', bodyKey: 'tour.receipts.body', emoji: '🧾' },
+  { icon: Tags,         titleKey: 'tour.names.title',    bodyKey: 'tour.names.body',    emoji: '🏷️' },
+  { icon: BadgePercent, titleKey: 'tour.offers.title',   bodyKey: 'tour.offers.body',   emoji: '🛒' },
+  { icon: ChartPie,     titleKey: 'tour.stats.title',    bodyKey: 'tour.stats.body',    emoji: '📊' },
+  { icon: ShoppingCart, titleKey: 'tour.shopping.title', bodyKey: 'tour.shopping.body', emoji: '🛍️' },
+  { icon: Package,      titleKey: 'tour.pantry.title',   bodyKey: 'tour.pantry.body',   emoji: '📦' },
+  { icon: Users,        titleKey: 'tour.family.title',   bodyKey: 'tour.family.body',   emoji: '👨‍👩‍👧‍👦' },
+  { icon: Sparkles,     titleKey: 'tour.done.title',     bodyKey: 'tour.done.body',     emoji: '🎉' },
 ];
 
 export function Tour({ open, onClose }: { open: boolean; onClose: () => void }) {

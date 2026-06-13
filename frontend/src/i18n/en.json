@@ -242,6 +242,28 @@
     "refreshDone": "Offers updated",
     "disclaimer": "Per web search — please verify price/validity at the source before buying."
   },
+  "hint": {
+    "artikel": {
+      "title": "Tip: your items",
+      "body": "Every purchase grouped under its canonical name. Search with operators (»eggs -organic«), press F for search, C for the category search. Filter by account at the top, and by category + date range (with total spend) via the sliders icon. Select several → subscribe to offers, avoid, set category/member."
+    },
+    "articleEdit": {
+      "title": "Tip: editing an item",
+      "body": "The canonical name is already selected – just start typing. »Apply to all« propagates name + category to all matching items. Quantity / unit price / total compute from each other."
+    },
+    "offers": {
+      "title": "Tip: offers",
+      "body": "Real flyer deals for the items you subscribed to appear here (via Marktguru, by ZIP). Hit »Fetch offers« to refresh now. Subscribe to items from the Items list via »Subscribe to offers«."
+    },
+    "receipts": {
+      "title": "Tip: receipts",
+      "body": "Filter by account, store and source. The green + button adds a cash/card purchase directly – photo optional, the rest runs in the background."
+    },
+    "receiptDetail": {
+      "title": "Tip: fast entry",
+      "body": "Use ↑/↓ to move through items (green outline), Enter opens the item with the canonical name focused. Drag the handle to reorder. When the item sum matches the receipt total, it flashes green."
+    }
+  },
   "queue": {
     "title": "Verification queue",
     "approve": "Approve",
@@ -435,7 +457,7 @@
     },
     "receipts": {
       "title": "Receipts — every shopping trip",
-      "body": "When a receipt is scanned via the Telegram bot it lands here with photo, items, and total. Tap an item to fix the name, category, or price — changes at the canonical-name level cascade to all purchases."
+      "body": "Scan receipts via the Telegram bot, or add a cash/card purchase directly with the green + button (photo optional, OCR runs in the background). Inside a receipt, ↑/↓ jump between items and Enter opens the canonical name right away — when the item sum matches the receipt total, the screen flashes green."
     },
     "stats": {
       "title": "Statistics — where the money goes",
@@ -450,12 +472,16 @@
       "body": "Estimated remaining quantity and days-until-empty for items you buy regularly. Computed from purchase history + typical consumption."
     },
     "names": {
-      "title": "Names — canonical labels",
-      "body": "Manage the product names the system has learned. Tap a name → see all receipts, rename (cascades everywhere), and see which store sells it cheapest."
+      "title": "Items — what you buy",
+      "body": "Every product grouped under its canonical name. Search with operators (»eggs -organic«, »apples, bananas«, laden:lidl, preis>2); press F to jump to search, C to the category search. Filter by category + date range (shows total spend), by account, and by subscribed or avoided items. Select several → set category/member, subscribe to offers, or avoid."
+    },
+    "offers": {
+      "title": "Offers for you 🛒",
+      "body": "Subscribe to items (»Subscribe to offers« in the Items list) and VDS finds real current flyer deals near you via the Marktguru API — with price, store and validity. Hit »Fetch offers« to refresh now; a nightly email digest comes on top."
     },
     "family": {
-      "title": "Family — who eats what",
-      "body": "In Admin you can add family members and tag items (\"only Martin eats tuna\"). Statistics then lets you filter per person to see who's spending on what."
+      "title": "Family & access",
+      "body": "In Admin you add family members and tag them to items (\"only Martin eats tuna\") — then filter Statistics per person. You also invite more users by email there and grant write access: leave it off and someone gets read-only access and can't change or delete anything."
     },
     "done": {
       "title": "You're all set 🎉",
@@ -534,6 +560,7 @@
     "searchOps": "Search operators: “eggs organic” = both · “apples, bananas” = or · “eggs -organic” = without “organic” · \"exact phrase\" · laden:lidl · kategorie:fruit · preis>2 (accent/case-insensitive)",
     "save": "Save",
     "saving": "Saving…",
+    "gotIt": "Got it",
     "readOnlyBanner": "Read-only mode – you can view everything but can't save changes.",
     "saved": "Saved",
     "cancel": "Cancel",

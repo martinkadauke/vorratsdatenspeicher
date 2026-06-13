@@ -242,6 +242,28 @@
     "refreshDone": "Angebote aktualisiert",
     "disclaimer": "Laut Web-Suche — Preise/Gültigkeit bitte vor dem Kauf an der Quelle prüfen."
   },
+  "hint": {
+    "artikel": {
+      "title": "Tipp: deine Artikel",
+      "body": "Alle Käufe unter ihrem kanonischen Namen. Suche mit Operatoren (»eier -bio«), Taste F = Suche, C = Kategorie-Suche. Filtere oben nach Konto, und über das Regler-Symbol nach Kategorie + Zeitraum (mit Ausgabensumme). Mehrere markieren → Angebote abonnieren, vermeiden, Kategorie/Mitglied setzen."
+    },
+    "articleEdit": {
+      "title": "Tipp: Artikel bearbeiten",
+      "body": "Der kanonische Name ist schon ausgewählt – einfach lostippen. »Auf alle anwenden« überträgt Name + Kategorie auf alle gleichen Posten. Menge/Einzelpreis/Gesamt rechnen sich gegenseitig aus."
+    },
+    "offers": {
+      "title": "Tipp: Angebote",
+      "body": "Hier erscheinen echte Prospekt-Angebote für deine abonnierten Artikel (via Marktguru, nach PLZ). Mit »Angebote holen« sofort aktualisieren. Artikel abonnierst du in der Artikel-Liste über »Angebote abonnieren«."
+    },
+    "receipts": {
+      "title": "Tipp: Belege",
+      "body": "Filtere nach Konto, Laden und Quelle. Mit dem grünen +-Knopf legst du direkt einen Bar- oder Karteneinkauf an – Foto optional, der Rest läuft im Hintergrund."
+    },
+    "receiptDetail": {
+      "title": "Tipp: schnelles Erfassen",
+      "body": "Mit ↑/↓ springst du durch die Posten (grün umrandet), Enter öffnet den Artikel mit fokussiertem kanonischen Namen. Posten lassen sich per Griff neu ordnen. Stimmt die Summe mit dem Bon-Total überein, blitzt es grün."
+    }
+  },
   "queue": {
     "title": "Verifikations-Queue",
     "approve": "Übernehmen",
@@ -435,7 +457,7 @@
     },
     "receipts": {
       "title": "Belege — alle deine Einkäufe",
-      "body": "Wenn ein Bon per Telegram-Bot eingescannt wird, landet er hier mit Foto, Artikeln und Gesamtbetrag. Tippe auf einen Artikel um Namen, Kategorie oder Preis zu korrigieren — Änderungen am kanonischen Namen werden auf alle Einkäufe übertragen."
+      "body": "Bons per Telegram-Bot scannen, oder mit dem grünen +-Knopf direkt einen Bar- oder Karteneinkauf anlegen (Foto optional, OCR läuft im Hintergrund). Im Beleg springst du mit ↑/↓ durch die Posten und öffnest mit Enter direkt den kanonischen Namen — passt die Summe der Posten zum Bon-Total, blitzt der Bildschirm kurz grün."
     },
     "stats": {
       "title": "Statistik — wohin geht das Geld",
@@ -450,12 +472,16 @@
       "body": "Geschätzte Restmenge und Tage-bis-leer für jeden Artikel den du regelmäßig kaufst. Berechnet aus Kaufhistorie + typischem Verbrauch."
     },
     "names": {
-      "title": "Namen — kanonische Bezeichnungen",
-      "body": "Hier verwaltest du die Produktnamen die das System gelernt hat. Tippe einen Namen → siehst alle Belege, kannst umbenennen (Änderung wirkt sich überall aus), und siehst in welchem Laden du es am günstigsten kaufst."
+      "title": "Artikel — was du kaufst",
+      "body": "Alle Produkte unter ihrem kanonischen Namen gebündelt. Suche mit Operatoren (»eier -bio«, »äpfel, bananen«, laden:lidl, preis>2), Taste F springt in die Suche, C in die Kategorie-Suche. Filtere nach Kategorie + Zeitraum (zeigt die Ausgabensumme), nach Konto, sowie nach abonnierten und gemiedenen Artikeln. Mehrere markieren → Kategorie/Mitglied setzen, Angebote abonnieren oder vermeiden."
+    },
+    "offers": {
+      "title": "Angebote für dich 🛒",
+      "body": "Abonniere Artikel (in der Artikel-Liste »Angebote abonnieren«), dann findet VDS über die Marktguru-API echte aktuelle Prospekt-Angebote in deiner Nähe — mit Preis, Laden und Gültigkeit. Per »Angebote holen« sofort aktualisieren; nachts kommt zusätzlich ein E-Mail-Digest."
     },
     "family": {
-      "title": "Familie — wer isst was",
-      "body": "Im Admin kannst du Familienmitglieder anlegen und an Artikel taggen („nur Martin isst Thunfisch“). In der Statistik kannst du dann nach Person filtern und sehen wer wofür Geld ausgibt."
+      "title": "Familie & Zugänge",
+      "body": "Im Admin legst du Familienmitglieder an und taggst sie an Artikel („nur Martin isst Thunfisch“) — in der Statistik dann nach Person filterbar. Außerdem lädst du dort per E-Mail weitere Nutzer ein und vergibst Schreibrechte: ohne Häkchen bekommt jemand einen Nur-Lese-Zugang und kann nichts ändern oder löschen."
     },
     "done": {
       "title": "Du bist startklar 🎉",
@@ -534,6 +560,7 @@
     "searchOps": "Suchoperatoren: »eier bio« = beide · »äpfel, bananen« = oder · »eier -bio« = ohne »bio« · \"genaue phrase\" · laden:lidl · kategorie:obst · preis>2 (Akzente/Groß-klein egal)",
     "save": "Speichern",
     "saving": "Speichert…",
+    "gotIt": "Verstanden",
     "readOnlyBanner": "Nur-Lese-Modus – du kannst alles ansehen, aber keine Änderungen speichern.",
     "saved": "Gespeichert",
     "cancel": "Abbrechen",

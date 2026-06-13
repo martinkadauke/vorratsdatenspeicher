@@ -8,6 +8,7 @@ import type { Receipt } from '../api/types';
 import { Card, Input, Spinner, EmptyState } from '../components/ui';
 import { StoreIcon } from '../components/IconPicker';
 import { CreatePurchaseModal } from '../components/CreatePurchaseModal';
+import { FirstVisitHint } from '../components/FirstVisitHint';
 import { useAuth } from '../context/auth';
 import { cn, eur, fmtDate, monthLabel } from '../lib/utils';
 
@@ -226,6 +227,7 @@ export function Receipts() {
 
   return (
     <div className="flex flex-col gap-3">
+      <FirstVisitHint id="receipts" titleKey="hint.receipts.title" bodyKey="hint.receipts.body" />
       {progress && progress.total > 0 && (
         <div className="rounded-2xl border border-zinc-200 bg-white px-3.5 py-3 dark:border-zinc-800 dark:bg-zinc-900">
           <div className="mb-1.5 flex items-center justify-between text-sm">

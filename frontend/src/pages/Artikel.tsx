@@ -7,6 +7,7 @@ import { api } from '../api/client';
 import type { CanonicalName } from '../api/types';
 import { Card, Input, Label, Spinner, EmptyState, Badge, Select, Button, Modal } from '../components/ui';
 import { CategoryPicker } from '../components/CategoryPicker';
+import { FirstVisitHint } from '../components/FirstVisitHint';
 import { CanonicalIcon } from '../components/IconPicker';
 import { ConsumerDots, ConsumerChips } from '../components/ConsumerChips';
 import { toast } from '../components/Toast';
@@ -250,6 +251,7 @@ export function Artikel() {
   return (
     <div className="flex flex-col gap-3 pb-20">
       <h1 className="text-lg font-bold">{t('nav.names')}</h1>
+      <FirstVisitHint id="artikel" titleKey="hint.artikel.title" bodyKey="hint.artikel.body" />
 
       <div className="relative">
         <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />

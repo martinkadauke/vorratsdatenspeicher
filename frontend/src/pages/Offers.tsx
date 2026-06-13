@@ -6,6 +6,7 @@ import { api } from '../api/client';
 import { Card, Spinner, EmptyState, Badge, Button } from '../components/ui';
 import { useAuth } from '../context/auth';
 import { toast } from '../components/Toast';
+import { FirstVisitHint } from '../components/FirstVisitHint';
 import { fmtDate } from '../lib/utils';
 
 interface Offer {
@@ -57,6 +58,7 @@ export function Offers() {
         )}
       </div>
       <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('offers.hint')}</p>
+      <FirstVisitHint id="offers" titleKey="hint.offers.title" bodyKey="hint.offers.body" />
       {busy && <p className="text-xs text-emerald-600 dark:text-emerald-500">{t('offers.refreshingHint')}</p>}
 
       {isLoading && <Spinner />}
