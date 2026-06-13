@@ -206,6 +206,22 @@ export function articleRoutes(app: FastifyInstance): void {
         await tx`UPDATE vorrat_status SET canonical_name = ${new_name} WHERE canonical_name = ${name}`;
         await tx`UPDATE canonical_consumer SET canonical_name = ${new_name} WHERE canonical_name = ${name}`;
         await tx`UPDATE canonical_translation SET canonical_name = ${new_name} WHERE canonical_name = ${name}`;
+        await tx`UPDATE canonical_alias SET canonical_name = ${new_name} WHERE canonical_name = ${name}`;
+        // Offer subscriptions follow the rename too (else "Angebote holen" keeps
+        // searching the old name). Guard the (user_id, kind, ref) uniqueness.
+        await tx`
+          UPDATE offer_subscription s SET ref = ${new_name}
+          WHERE s.kind = 'artikel' AND s.ref = ${name}
+            AND NOT EXISTS (SELECT 1 FROM offer_subscription s2
+                            WHERE s2.user_id = s.user_id AND s2.kind = 'artikel' AND s2.ref = ${new_name})`;
+        await tx`DELETE FROM offer_subscription WHERE kind = 'artikel' AND ref = ${name}`;
+        // Avoid list + product icon (both keyed by canonical_name) — guard PK clash.
+        await tx`UPDATE artikel_ausschluss SET canonical_name = ${new_name}
+                 WHERE canonical_name = ${name} AND NOT EXISTS (SELECT 1 FROM artikel_ausschluss WHERE canonical_name = ${new_name})`;
+        await tx`DELETE FROM artikel_ausschluss WHERE canonical_name = ${name}`;
+        await tx`UPDATE canonical_meta SET canonical_name = ${new_name}
+                 WHERE canonical_name = ${name} AND NOT EXISTS (SELECT 1 FROM canonical_meta WHERE canonical_name = ${new_name})`;
+        await tx`DELETE FROM canonical_meta WHERE canonical_name = ${name}`;
         current = new_name;
       }
       if (category_path !== undefined) {

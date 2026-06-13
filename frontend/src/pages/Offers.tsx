@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
-import { ExternalLink, RefreshCw, ChevronDown, ChevronLeft, ChevronRight, EyeOff, Eye, Pin, ListPlus } from 'lucide-react';
+import { ExternalLink, RefreshCw, ChevronDown, ChevronLeft, ChevronRight, EyeOff, Eye, Pin, ListPlus, Check } from 'lucide-react';
 import { api } from '../api/client';
 import { Card, Spinner, EmptyState, Badge, Button } from '../components/ui';
 import { CanonicalIcon } from '../components/IconPicker';
@@ -117,10 +117,20 @@ export function Offers() {
     api('/api/me', { method: 'PATCH', body: { pinned_chains: [...next] } }).catch(() => {});
   };
 
-  const addToList = async (c: string) => {
+  const { data: shopList } = useQuery({
+    queryKey: ['shopping-list-mini'],
+    queryFn: () => api<{ canonical_name: string }[]>('/api/shopping-list'),
+    staleTime: 30_000,
+  });
+  const onList = useMemo(() => new Set((shopList ?? []).map(r => r.canonical_name)), [shopList]);
+
+  const toggleList = async (c: string) => {
+    const adding = !onList.has(c);
     try {
-      await api('/api/shopping-list', { method: 'POST', body: { canonical_name: c } });
-      toast(t('offers.addedToList', { name: c }), 'success');
+      if (adding) await api('/api/shopping-list', { method: 'POST', body: { canonical_name: c } });
+      else await api('/api/shopping-list/feedback', { method: 'POST', body: { action: 'done', canonical_name: c } });
+      await qc.invalidateQueries({ queryKey: ['shopping-list-mini'] });
+      toast(adding ? t('offers.addedToList', { name: c }) : t('offers.removedFromList', { name: c }), 'success');
     } catch (e) {
       toast((e as Error).message, 'error');
     }
@@ -306,6 +316,11 @@ export function Offers() {
                     <Badge>{arr.length}</Badge>
                     <DueBadge p={p} t={t} />
                     {anyGood && <GoodPrice pct={bestPct || null} t={t} />}
+                    {onList.has(c) && (
+                      <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
+                        <Check size={10} /> {t('offers.onListShort')}
+                      </span>
+                    )}
                   </div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-zinc-400">
                     {best?.price && (
@@ -318,9 +333,11 @@ export function Offers() {
                   </div>
                 </button>
                 {canWrite && (
-                  <button onClick={() => addToList(c)} title={t('offers.addToList')}
-                          className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-950/30">
-                    <ListPlus size={16} />
+                  <button onClick={() => toggleList(c)} title={onList.has(c) ? t('offers.onList') : t('offers.addToList')}
+                          className={cn('shrink-0 rounded-lg p-1.5',
+                            onList.has(c) ? 'text-emerald-600 hover:bg-emerald-50 dark:text-emerald-500 dark:hover:bg-emerald-950/30'
+                              : 'text-zinc-400 hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-950/30')}>
+                    {onList.has(c) ? <Check size={16} /> : <ListPlus size={16} />}
                   </button>
                 )}
                 <button onClick={() => toggleHidden(`c:${c}`)} title={ghidden ? t('offers.unhide') : t('offers.hide')}
