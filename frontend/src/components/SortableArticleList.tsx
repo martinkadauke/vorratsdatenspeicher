@@ -18,13 +18,14 @@ import { toast } from './Toast';
 import { api } from '../api/client';
 import { eur } from '../lib/utils';
 
-export function SortableArticleList({ receiptId, artikel, onEdit, highlightIds, scrollToId, keyboardNav }: {
+export function SortableArticleList({ receiptId, artikel, onEdit, highlightIds, scrollToId, keyboardNav, readOnly }: {
   receiptId: number;
   artikel: Artikel[];
   onEdit: (a: Artikel) => void;
   highlightIds?: Set<number>;
   scrollToId?: number | null;
   keyboardNav?: boolean;
+  readOnly?: boolean;
 }) {
   const qc = useQueryClient();
   const [items, setItems] = useState(artikel);
@@ -98,6 +99,7 @@ export function SortableArticleList({ receiptId, artikel, onEdit, highlightIds, 
               highlighted={highlightIds?.has(a.id) ?? false}
               scrollHere={scrollToId === a.id}
               cursored={i === cursor}
+              readOnly={readOnly ?? false}
             />
           ))}
         </div>
@@ -106,7 +108,7 @@ export function SortableArticleList({ receiptId, artikel, onEdit, highlightIds, 
   );
 }
 
-function SortableRow({ a, onEdit, highlighted, scrollHere, cursored }: { a: Artikel; onEdit: () => void; highlighted: boolean; scrollHere: boolean; cursored: boolean }) {
+function SortableRow({ a, onEdit, highlighted, scrollHere, cursored, readOnly }: { a: Artikel; onEdit: () => void; highlighted: boolean; scrollHere: boolean; cursored: boolean; readOnly: boolean }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: a.id });
   const rowRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -129,16 +131,18 @@ function SortableRow({ a, onEdit, highlighted, scrollHere, cursored }: { a: Arti
               : highlighted ? 'bg-amber-50 ring-2 ring-amber-400 dark:bg-amber-950/30' : ''
         }`}
       >
-        {/* drag handle */}
-        <button
-          type="button"
-          {...attributes}
-          {...listeners}
-          aria-label="Verschieben"
-          className="shrink-0 cursor-grab touch-none rounded-md p-1 text-zinc-300 hover:bg-zinc-100 hover:text-zinc-500 active:cursor-grabbing dark:text-zinc-600 dark:hover:bg-zinc-800"
-        >
-          <GripVertical size={16} />
-        </button>
+        {/* drag handle — hidden for read-only users (no reordering) */}
+        {!readOnly && (
+          <button
+            type="button"
+            {...attributes}
+            {...listeners}
+            aria-label="Verschieben"
+            className="shrink-0 cursor-grab touch-none rounded-md p-1 text-zinc-300 hover:bg-zinc-100 hover:text-zinc-500 active:cursor-grabbing dark:text-zinc-600 dark:hover:bg-zinc-800"
+          >
+            <GripVertical size={16} />
+          </button>
+        )}
         {/* body — tap to edit */}
         <button type="button" onClick={onEdit} className="flex min-w-0 flex-1 items-center gap-2 text-left sm:gap-3">
           {a.canonical_name && <CanonicalIcon name={a.canonical_name} size={32} />}

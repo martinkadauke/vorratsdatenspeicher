@@ -11,6 +11,7 @@ import { ArticleEditModal } from '../components/ArticleEditModal';
 import { FirstVisitHint } from '../components/FirstVisitHint';
 import { AddArticleModal } from '../components/AddArticleModal';
 import { SortableArticleList } from '../components/SortableArticleList';
+import { useAuth } from '../context/auth';
 import { toast } from '../components/Toast';
 import { confirm } from '../components/Confirm';
 import { eur, fmtDate } from '../lib/utils';
@@ -19,6 +20,8 @@ import { searchMatch } from '../lib/search';
 export function ReceiptDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { t, i18n } = useTranslation();
+  const { user } = useAuth();
+  const canWrite = user?.can_write !== false;
   const navigate = useNavigate();
   const location = useLocation();
   const qc = useQueryClient();
@@ -252,37 +255,41 @@ export function ReceiptDetailPage() {
         >
           <ChevronRight size={20} />
         </button>
-        <button
-          onClick={() => rotate.mutate()}
-          disabled={rotate.isPending || !data.bild_pfad}
-          className="shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 disabled:opacity-30 dark:hover:bg-zinc-800"
-          title={t('receiptDetail.rotate')}
-        >
-          <RotateCw size={18} className={rotate.isPending ? 'animate-spin' : ''} />
-        </button>
-        <button
-          onClick={async () => { if (await confirm({ title: t('receiptDetail.reocr'), message: t('receiptDetail.reocrConfirm'), confirmLabel: t('receiptDetail.reocr'), cancelLabel: t('common.cancel') })) reocr.mutate(); }}
-          disabled={reocr.isPending || !data.bild_pfad}
-          className="shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 disabled:opacity-30 dark:hover:bg-zinc-800"
-          title={t('receiptDetail.reocr')}
-        >
-          <ScanLine size={18} className={reocr.isPending ? 'animate-pulse' : ''} />
-        </button>
-        <button
-          onClick={() => setEditReceipt(true)}
-          className="shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-          title={t('receiptEdit.title')}
-        >
-          <Pencil size={18} />
-        </button>
-        <button
-          onClick={async () => { if (await confirm({ title: t('receiptEdit.delete'), message: t('receiptEdit.deleteConfirm'), confirmLabel: t('common.delete'), cancelLabel: t('common.cancel'), danger: true })) deleteReceipt.mutate(); }}
-          disabled={deleteReceipt.isPending}
-          className="shrink-0 rounded-xl p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30"
-          title={t('receiptEdit.delete')}
-        >
-          <Trash2 size={18} />
-        </button>
+        {canWrite && (
+          <>
+            <button
+              onClick={() => rotate.mutate()}
+              disabled={rotate.isPending || !data.bild_pfad}
+              className="shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 disabled:opacity-30 dark:hover:bg-zinc-800"
+              title={t('receiptDetail.rotate')}
+            >
+              <RotateCw size={18} className={rotate.isPending ? 'animate-spin' : ''} />
+            </button>
+            <button
+              onClick={async () => { if (await confirm({ title: t('receiptDetail.reocr'), message: t('receiptDetail.reocrConfirm'), confirmLabel: t('receiptDetail.reocr'), cancelLabel: t('common.cancel') })) reocr.mutate(); }}
+              disabled={reocr.isPending || !data.bild_pfad}
+              className="shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 disabled:opacity-30 dark:hover:bg-zinc-800"
+              title={t('receiptDetail.reocr')}
+            >
+              <ScanLine size={18} className={reocr.isPending ? 'animate-pulse' : ''} />
+            </button>
+            <button
+              onClick={() => setEditReceipt(true)}
+              className="shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+              title={t('receiptEdit.title')}
+            >
+              <Pencil size={18} />
+            </button>
+            <button
+              onClick={async () => { if (await confirm({ title: t('receiptEdit.delete'), message: t('receiptEdit.deleteConfirm'), confirmLabel: t('common.delete'), cancelLabel: t('common.cancel'), danger: true })) deleteReceipt.mutate(); }}
+              disabled={deleteReceipt.isPending}
+              className="shrink-0 rounded-xl p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30"
+              title={t('receiptEdit.delete')}
+            >
+              <Trash2 size={18} />
+            </button>
+          </>
+        )}
       </div>
 
       <FirstVisitHint id="receiptDetail" titleKey="hint.receiptDetail.title" bodyKey="hint.receiptDetail.body" />
@@ -324,9 +331,9 @@ export function ReceiptDetailPage() {
       )}
 
       <button
-        onClick={() => setReviewed.mutate(!data.geprueft)}
-        disabled={setReviewed.isPending}
-        className={`flex items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left text-sm font-medium transition ${
+        onClick={() => canWrite && setReviewed.mutate(!data.geprueft)}
+        disabled={setReviewed.isPending || !canWrite}
+        className={`flex items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left text-sm font-medium transition disabled:cursor-default ${
           data.geprueft
             ? 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700/50 dark:bg-emerald-950/40 dark:text-emerald-300'
             : 'border-zinc-300 bg-white text-zinc-600 hover:border-emerald-300 hover:bg-emerald-50/50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-emerald-700/50'
@@ -381,15 +388,18 @@ export function ReceiptDetailPage() {
             onEdit={setEditing}
             highlightIds={matchIds}
             scrollToId={scrollToId}
-            keyboardNav={!editing && !adding && !editReceipt}
+            keyboardNav={canWrite && !editing && !adding && !editReceipt}
+            readOnly={!canWrite}
           />
-          <button
-            type="button"
-            onClick={() => setAdding(true)}
-            className="flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-zinc-300 px-3 py-2 text-sm text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-emerald-500 dark:hover:text-emerald-400"
-          >
-            <Plus size={16} /> {t('receiptDetail.addArticle')}
-          </button>
+          {canWrite && (
+            <button
+              type="button"
+              onClick={() => setAdding(true)}
+              className="flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-zinc-300 px-3 py-2 text-sm text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-emerald-500 dark:hover:text-emerald-400"
+            >
+              <Plus size={16} /> {t('receiptDetail.addArticle')}
+            </button>
+          )}
         </div>
       </div>
 

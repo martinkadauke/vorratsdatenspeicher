@@ -8,6 +8,7 @@ import type { CanonicalName } from '../api/types';
 import { Card, Input, Label, Spinner, EmptyState, Badge, Select, Button, Modal } from '../components/ui';
 import { CategoryPicker } from '../components/CategoryPicker';
 import { FirstVisitHint } from '../components/FirstVisitHint';
+import { useAuth } from '../context/auth';
 import { CanonicalIcon } from '../components/IconPicker';
 import { ConsumerDots, ConsumerChips } from '../components/ConsumerChips';
 import { toast } from '../components/Toast';
@@ -50,6 +51,8 @@ export function Artikel() {
   const { t, i18n } = useTranslation();
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const canWrite = user?.can_write !== false;
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortMode>('alpha');
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -362,10 +365,12 @@ export function Artikel() {
       )}
 
       <div className="flex items-center justify-between text-xs text-zinc-500">
-        <button onClick={toggleAll} className="flex items-center gap-1.5 rounded-lg px-2 py-1 font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800">
-          {allSelected ? <CheckSquare size={15} className="text-emerald-500" /> : <Square size={15} />}
-          {t('artikel.selectAll')}
-        </button>
+        {canWrite ? (
+          <button onClick={toggleAll} className="flex items-center gap-1.5 rounded-lg px-2 py-1 font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800">
+            {allSelected ? <CheckSquare size={15} className="text-emerald-500" /> : <Square size={15} />}
+            {t('artikel.selectAll')}
+          </button>
+        ) : <span />}
         <span>{visible.length} {t('artikel.items')}</span>
       </div>
 
@@ -377,9 +382,11 @@ export function Artikel() {
           const isSel = selected.has(g.key);
           return (
             <Card key={g.key} className={cn('flex min-w-0 items-center gap-2 px-2.5 py-2', isSel && 'ring-2 ring-emerald-400')}>
-              <button onClick={() => toggleOne(g.key)} className="shrink-0 text-zinc-400 hover:text-emerald-500" aria-label={t('artikel.select')}>
-                {isSel ? <CheckSquare size={18} className="text-emerald-500" /> : <Square size={18} />}
-              </button>
+              {canWrite && (
+                <button onClick={() => toggleOne(g.key)} className="shrink-0 text-zinc-400 hover:text-emerald-500" aria-label={t('artikel.select')}>
+                  {isSel ? <CheckSquare size={18} className="text-emerald-500" /> : <Square size={18} />}
+                </button>
+              )}
               <button onClick={() => openDetail(g)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
                 {g.has_canonical && g.canonical_name
                   ? <CanonicalIcon name={g.canonical_name} size={size.icon} />
@@ -419,7 +426,7 @@ export function Artikel() {
       </div>
 
       {/* selection action bar */}
-      {selected.size > 0 && (
+      {canWrite && selected.size > 0 && (
         <div className="fixed inset-x-0 bottom-16 z-20 mx-auto flex max-w-2xl items-center gap-2 rounded-2xl border border-zinc-200 bg-white/95 px-3 py-2 shadow-lg backdrop-blur dark:border-zinc-700 dark:bg-zinc-900/95 md:bottom-4">
           <span className="text-sm font-medium">{selected.size} {t('artikel.selected')}</span>
           <div className="ml-auto flex flex-wrap justify-end gap-2">

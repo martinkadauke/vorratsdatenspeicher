@@ -8,6 +8,7 @@ import { Button, Input, Label, Modal } from './ui';
 import { CategoryPicker } from './CategoryPicker';
 import { FirstVisitHint } from './FirstVisitHint';
 import { ConsumerChips } from './ConsumerChips';
+import { useAuth } from '../context/auth';
 import { CanonicalIcon, IconPicker } from './IconPicker';
 import { confirm } from './Confirm';
 
@@ -39,6 +40,8 @@ export function ArticleEditModal({ artikel, open, onClose, invalidateKeys }: {
 }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
+  const { user } = useAuth();
+  const canWrite = user?.can_write !== false;
 
   const [canonical, setCanonical] = useState('');
   const [category, setCategory] = useState<string | null>(null);
@@ -156,7 +159,7 @@ export function ArticleEditModal({ artikel, open, onClose, invalidateKeys }: {
 
   return (
     <Modal open={open} onClose={onClose} title={t('article.edit')}>
-      <form className="flex flex-col gap-4" onSubmit={e => { e.preventDefault(); if (!save.isPending) save.mutate(); }}>
+      <form className="flex flex-col gap-4" onSubmit={e => { e.preventDefault(); if (canWrite && !save.isPending) save.mutate(); }}>
         <FirstVisitHint id="articleEdit" titleKey="hint.articleEdit.title" bodyKey="hint.articleEdit.body" className="mb-1" />
         {artikel.original_text && (
           <div>
@@ -248,16 +251,18 @@ export function ArticleEditModal({ artikel, open, onClose, invalidateKeys }: {
         </div>
 
         <div className="flex items-center justify-between gap-2 pt-1">
-          <Button
-            type="button"
-            variant="danger"
-            onClick={async () => { if (await confirm({ title: t('article.delete'), message: t('article.deleteConfirm'), confirmLabel: t('common.delete'), cancelLabel: t('common.cancel'), danger: true })) remove.mutate(); }}
-          >
-            {t('article.delete')}
-          </Button>
+          {canWrite ? (
+            <Button
+              type="button"
+              variant="danger"
+              onClick={async () => { if (await confirm({ title: t('article.delete'), message: t('article.deleteConfirm'), confirmLabel: t('common.delete'), cancelLabel: t('common.cancel'), danger: true })) remove.mutate(); }}
+            >
+              {t('article.delete')}
+            </Button>
+          ) : <span />}
           <div className="flex gap-2">
-            <Button type="button" variant="secondary" onClick={onClose}>{t('article.cancel')}</Button>
-            <Button type="submit" disabled={save.isPending}>{t('article.save')}</Button>
+            <Button type="button" variant="secondary" onClick={onClose}>{canWrite ? t('article.cancel') : t('common.gotIt')}</Button>
+            {canWrite && <Button type="submit" disabled={save.isPending}>{t('article.save')}</Button>}
           </div>
         </div>
       </form>
