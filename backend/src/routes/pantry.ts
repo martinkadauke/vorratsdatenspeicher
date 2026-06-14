@@ -21,18 +21,20 @@ type ScopeUser = Parameters<typeof kontoScope>[0];
  *  /api/pantry and /api/alerts. */
 async function trackedVorrat(user: ScopeUser) {
   const tracked = (await sql`
-    SELECT canonical_name, base_unit, reserve_min::float8 AS reserve_min
+    SELECT canonical_name, base_unit, reserve_min::float8 AS reserve_min, vorrat_sort
     FROM canonical_meta WHERE track_vorrat = TRUE
-  `).map(r => ({ canonical_name: r.canonical_name as string, base_unit: r.base_unit as string | null, reserve_min: r.reserve_min as number | null }));
+  `).map(r => ({ canonical_name: r.canonical_name as string, base_unit: r.base_unit as string | null, reserve_min: r.reserve_min as number | null, vorrat_sort: r.vorrat_sort as number | null }));
   if (!tracked.length) return [];
   const canons = tracked.map(tk => tk.canonical_name);
   const units = await loadUnits();
 
+  // No menge filter: many receipt lines have no quantity — the estimator counts
+  // those as one piece (for count/blank units) and skips them for mass/volume.
   interface PLine { canonical_name: string; menge: string | null; einheit: string | null; datum: string }
   const lines = (await sql`
     SELECT a.canonical_name, a.menge, a.einheit, e.datum::text AS datum
     FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
-    WHERE a.canonical_name IN ${sql(canons)} AND a.menge IS NOT NULL AND a.menge > 0
+    WHERE a.canonical_name IN ${sql(canons)}
       ${kontoScope(user, sql`e.konto_id`)}
   `) as unknown as PLine[];
   const byCanon = new Map<string, PLine[]>();
@@ -57,8 +59,11 @@ async function trackedVorrat(user: ScopeUser) {
       reserve_min: tk.reserve_min,
       reserve_total: reserve?.total ?? 0,
       reserve_charges: reserve?.charges ?? 0,
+      vorrat_sort: tk.vorrat_sort,
     };
-  }).sort((a, b) => (a.days_until_empty ?? 1e9) - (b.days_until_empty ?? 1e9));
+  }).sort((a, b) =>
+    ((b.vorrat_sort ?? -Infinity) - (a.vorrat_sort ?? -Infinity)) ||
+    ((a.days_until_empty ?? 1e9) - (b.days_until_empty ?? 1e9)));
 }
 
 export function pantryRoutes(app: FastifyInstance): void {
@@ -79,6 +84,18 @@ export function pantryRoutes(app: FastifyInstance): void {
   app.delete('/api/pantry/:name/override', async (req) => {
     const name = decodeURIComponent((req.params as { name: string }).name);
     await sql`DELETE FROM vorrat_override WHERE canonical_name = ${name}`;
+    return { ok: true };
+  });
+
+  /** Persist a manual drag order for the Vorrat list (first = top). */
+  app.put('/api/pantry/order', async (req, reply) => {
+    const { order } = (req.body ?? {}) as { order?: string[] };
+    if (!Array.isArray(order)) return reply.code(400).send({ error: 'order array required' });
+    await sql.begin(async tx => {
+      for (let i = 0; i < order.length; i++) {
+        await tx`UPDATE canonical_meta SET vorrat_sort = ${order.length - i} WHERE canonical_name = ${order[i]}`;
+      }
+    });
     return { ok: true };
   });
 
