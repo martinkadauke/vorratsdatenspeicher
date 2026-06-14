@@ -31,33 +31,47 @@ const toNum = (v: string | number | null): number =>
 export function estimateVorrat(
   lines: VorratLine[], baseUnitName: string | null, units: Units, override: VorratOverride | null,
 ): VorratEstimate {
-  const baseKey = groupKey(units, baseUnitName) ?? 'Stück';
+  const buKey = groupKey(units, baseUnitName); // declared base-unit group (may be null)
 
-  // Sum purchased quantity per date, in the base-unit group. Lines in a
-  // different dimension (e.g. base kg but a line in Stück) are not comparable.
-  const perDate = new Map<string, number>();
+  // Bucket every purchase line by its OWN comparison unit (kg/l/Stück…), summed
+  // per date. Empty/unknown units count as pieces (Stück), like the rest of the app.
+  const groups = new Map<string, Map<string, number>>();
+  const groupLines = new Map<string, number>();
   for (const l of lines) {
     const un = normalizeEinheit(l.einheit);
     const u = un ? units.get(un) : undefined;
-    let qty: number | null = null;
+    let key: string;
+    let qty: number;
     if (u) {
-      const k = u.dimension === 'mass' ? 'kg' : u.dimension === 'volume' ? 'l' : u.name;
-      if (k !== baseKey) continue;
+      key = u.dimension === 'mass' ? 'kg' : u.dimension === 'volume' ? 'l' : u.name;
       const m = toNum(l.menge);
-      if (Number.isFinite(m)) qty = m * u.to_base;
-    } else if (baseKey === 'Stück') {
+      if (!Number.isFinite(m)) continue;
+      qty = m * u.to_base;
+    } else {
+      key = 'Stück';
       const m = toNum(l.menge);
-      qty = Number.isFinite(m) ? m : 1;            // unknown unit, counting pieces
+      qty = Number.isFinite(m) ? m : 1;
     }
-    if (qty == null || qty <= 0) continue;
-    perDate.set(l.datum, (perDate.get(l.datum) ?? 0) + qty);
+    if (qty <= 0) continue;
+    if (!groups.has(key)) groups.set(key, new Map());
+    const pd = groups.get(key)!;
+    pd.set(l.datum, (pd.get(l.datum) ?? 0) + qty);
+    groupLines.set(key, (groupLines.get(key) ?? 0) + 1);
   }
 
+  // Effective unit: the declared base_unit when we actually bought in it; else
+  // the unit we most often bought in (so a base_unit of kg with only per-Stück
+  // purchases still shows + counts in Stück); else the declared unit / Stück.
+  let effKey = buKey && groups.has(buKey) ? buKey : null;
+  if (!effKey && groupLines.size) effKey = [...groupLines.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  if (!effKey) effKey = buKey ?? 'Stück';
+
+  const perDate = groups.get(effKey) ?? new Map<string, number>();
   const dates = [...perDate.keys()].sort();
   const n = dates.length;
   const last_bought = n ? dates[n - 1] : null;
   if (!n) {
-    return { base_unit: baseKey, rate_per_day: null, est_remaining: override?.menge ?? null, days_until_empty: null, last_bought: null, override };
+    return { base_unit: effKey, rate_per_day: null, est_remaining: override?.menge ?? null, days_until_empty: null, last_bought: null, override };
   }
 
   // Weighted rate: everything bought before the last purchase is assumed
@@ -84,7 +98,7 @@ export function estimateVorrat(
   const days_until_empty = rate && rate > 0 ? Math.round((est_remaining / rate) * 10) / 10 : null;
 
   return {
-    base_unit: baseKey,
+    base_unit: effKey,
     rate_per_day: rate != null ? Math.round(rate * 1000) / 1000 : null,
     est_remaining,
     days_until_empty,
