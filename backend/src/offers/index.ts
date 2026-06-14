@@ -111,8 +111,8 @@ async function marktguruForProduct(product: string, zip: string): Promise<number
       LIMIT 1`;
     if (dupe.length) continue;
     await sql`
-      INSERT INTO offer (canonical_name, store, price, old_price, ref_price, valid_until, source_url, confidence, brand, image_url, unit, source, chain_slug)
-      VALUES (${product}, ${store}, ${price}, ${fmtEur(o.oldPrice)}, ${o.referencePrice ?? null}, ${validWindow(o)}, ${o.url}, ${0.95}, ${o.brand ?? null}, ${o.image}, ${o.unit ?? null}, ${'marktguru'}, ${o.chainSlug ?? null})`;
+      INSERT INTO offer (canonical_name, store, price, old_price, ref_price, valid_until, valid_from, valid_to, source_url, confidence, brand, image_url, unit, source, chain_slug)
+      VALUES (${product}, ${store}, ${price}, ${fmtEur(o.oldPrice)}, ${o.referencePrice ?? null}, ${validWindow(o)}, ${o.validFrom ? o.validFrom.slice(0, 10) : null}, ${o.validTo ? o.validTo.slice(0, 10) : null}, ${o.url}, ${0.95}, ${o.brand ?? null}, ${o.image}, ${o.unit ?? null}, ${'marktguru'}, ${o.chainSlug ?? null})`;
     found++;
   }
   return found;

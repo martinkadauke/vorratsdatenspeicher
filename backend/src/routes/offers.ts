@@ -24,7 +24,7 @@ export function offerRoutes(app: FastifyInstance): void {
     if (!refs.length) return { offers: [], pantry: {} };
 
     const offers = await sql`
-      SELECT id, canonical_name, store, price, old_price, ref_price, valid_until, source_url, confidence, found_at, brand, image_url, unit, source, chain_slug
+      SELECT id, canonical_name, store, price, old_price, ref_price, valid_until, valid_from::text, valid_to::text, source_url, confidence, found_at, brand, image_url, unit, source, chain_slug
       FROM offer
       WHERE canonical_name IN ${sql(refs)} AND found_at > NOW() - INTERVAL '21 days'
       ORDER BY found_at DESC LIMIT 200
