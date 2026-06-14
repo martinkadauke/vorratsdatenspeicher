@@ -431,6 +431,26 @@ export function ReceiptDetailPage() {
               <Plus size={16} /> {t('receiptDetail.addArticle')}
             </button>
           )}
+          {/* Running sum of the line items, at the very bottom. Shows a green
+              check when it matches the printed Bon total, or the signed gap. */}
+          {data.artikel.length > 0 && (
+            <div className="mt-1 flex items-center justify-between rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-900">
+              <span className="text-sm font-medium text-zinc-500 dark:text-zinc-400">
+                {t('receiptDetail.itemsTotal')}
+                <span className="ml-1 text-zinc-400 dark:text-zinc-500">({data.artikel.length})</span>
+              </span>
+              <span className="flex items-center gap-2">
+                {totalKnown && (mismatch ? (
+                  <span className="tabular text-xs font-semibold text-amber-600 dark:text-amber-400" title={`${t('receiptDetail.printedLabel')} ${eur(printedTotal)}`}>
+                    {diff > 0 ? '+' : ''}{eur(diff)}
+                  </span>
+                ) : (
+                  <Check size={16} className="text-emerald-600 dark:text-emerald-500" />
+                ))}
+                <span className="tabular text-base font-bold">{eur(itemSum)}</span>
+              </span>
+            </div>
+          )}
         </div>
       </div>
 

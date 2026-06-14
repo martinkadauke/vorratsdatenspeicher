@@ -13,7 +13,8 @@ import { cn, fmtDate } from '../lib/utils';
 
 interface Offer {
   id: number; canonical_name: string; store: string | null; price: string | null;
-  old_price: string | null; valid_until: string | null; source_url: string | null;
+  old_price: string | null; valid_until: string | null;
+  valid_from: string | null; valid_to: string | null; source_url: string | null;
   confidence: number | null; found_at: string;
   brand: string | null; image_url: string | null; unit: string | null; source: string | null;
   good_price: boolean; discount_pct: number | null;
@@ -30,6 +31,13 @@ const priceNum = (s: string | null): number | null => {
   if (!s) return null;
   const n = parseFloat(s.replace(/[^\d.,]/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.'));
   return Number.isFinite(n) ? n : null;
+};
+
+/** Short "day.month" for compact offer-validity ranges (no year). */
+const fmtDay = (iso: string | null, lang: string): string | null => {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : new Intl.DateTimeFormat(lang, { day: '2-digit', month: '2-digit' }).format(d);
 };
 
 const HIDDEN_KEY = 'vds.offers.hidden';
@@ -62,6 +70,15 @@ function GoodPrice({ pct, t }: { pct: number | null; t: TFunction }) {
 function OfferRow({ o, isHidden, onHide, t, lang }: {
   o: Offer; isHidden: boolean; onHide: () => void; t: TFunction; lang: string;
 }) {
+  // Validity window: prefer the structured valid_from/valid_to dates; fall back
+  // to Marktguru's free-text valid_until (already a range → no "bis" prefix).
+  const vFrom = fmtDay(o.valid_from, lang);
+  const vTo = fmtDay(o.valid_to, lang);
+  const validity = vFrom && vTo ? `${t('offers.valid')} ${vFrom}–${vTo}`
+    : vTo ? `${t('offers.until')} ${vTo}`
+    : vFrom ? `${t('offers.from')} ${vFrom}`
+    : o.valid_until ? (/[-–]/.test(o.valid_until) ? `${t('offers.valid')} ${o.valid_until.trim()}` : `${t('offers.until')} ${o.valid_until.trim()}`)
+    : null;
   return (
     <div className={cn('flex items-center gap-2.5 px-3 py-2', isHidden && 'opacity-40')}>
       {o.image_url
@@ -80,8 +97,8 @@ function OfferRow({ o, isHidden, onHide, t, lang }: {
           {o.good_price && <GoodPrice pct={o.discount_pct} t={t} />}
         </div>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-zinc-400">
-          {o.valid_until && <span>{t('offers.until')} {o.valid_until}</span>}
-          <span>· {fmtDate(o.found_at, lang)}</span>
+          {validity && <span className="font-medium text-zinc-500 dark:text-zinc-400">{validity}</span>}
+          <span title={t('offers.asOfHint')}>· {t('offers.asOf')} {fmtDate(o.found_at, lang)}</span>
         </div>
       </div>
       {o.source_url && (
