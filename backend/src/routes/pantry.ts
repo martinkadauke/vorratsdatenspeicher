@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import sql from '../db.js';
 import { kontoScope } from '../auth/konto.js';
-import { loadUnits, normalizeEinheit, comparisonGroups, type PriceLine } from '../lib/units.js';
+import { loadUnits, comparisonGroups, type PriceLine } from '../lib/units.js';
 
 type Units = Awaited<ReturnType<typeof loadUnits>>;
 
@@ -71,14 +71,8 @@ export function pantryRoutes(app: FastifyInstance): void {
       const cn = it.canonical_name as string | null;
       const avg = cn ? avgByCanon.get(cn) : undefined;
       const menge = it.menge as number | null;
-      let expected: number | null = null;
-      if (avg && menge != null) {
-        const un = normalizeEinheit(it.einheit as string | null);
-        const u = un ? units.get(un) : undefined;
-        const itemKey = u ? (u.dimension === 'mass' ? 'kg' : u.dimension === 'volume' ? 'l' : u.name) : null;
-        if (u && itemKey === avg.unit) expected = Math.round(menge * u.to_base * avg.price * 100) / 100;
-        else if (!it.einheit) expected = Math.round(menge * avg.price * 100) / 100; // no unit given → assume per-unit
-      }
+      // menge is expressed in the product's base unit (= avg_unit) → straight multiply.
+      const expected = (avg && menge != null) ? Math.round(menge * avg.price * 100) / 100 : null;
       const vrt = cn ? vorratByCanon.get(cn) : undefined;
       return {
         ...it,
@@ -98,16 +92,17 @@ export function pantryRoutes(app: FastifyInstance): void {
     const canonical = b.canonical_name?.trim() || null;
     const title = (b.title?.trim() || canonical) ?? null;
     if (!title) return reply.code(400).send({ error: 'title or canonical_name required' });
+    const prio = sql`(SELECT COALESCE(MAX(priority), 0) + 1 FROM einkaufsliste_item)`; // new items to the top
     if (canonical) {
       await sql`
-        INSERT INTO einkaufsliste_item (canonical_name, title, menge, einheit, added_by)
-        VALUES (${canonical}, ${title}, ${b.menge ?? null}, ${b.einheit ?? null}, ${req.user!.username})
+        INSERT INTO einkaufsliste_item (canonical_name, title, menge, einheit, added_by, priority)
+        VALUES (${canonical}, ${title}, ${b.menge ?? null}, ${b.einheit ?? null}, ${req.user!.username}, ${prio})
         ON CONFLICT (canonical_name) WHERE canonical_name IS NOT NULL DO NOTHING
       `;
     } else {
       await sql`
-        INSERT INTO einkaufsliste_item (canonical_name, title, menge, einheit, added_by)
-        VALUES (NULL, ${title}, ${b.menge ?? null}, ${b.einheit ?? null}, ${req.user!.username})
+        INSERT INTO einkaufsliste_item (canonical_name, title, menge, einheit, added_by, priority)
+        VALUES (NULL, ${title}, ${b.menge ?? null}, ${b.einheit ?? null}, ${req.user!.username}, ${prio})
       `;
     }
     return { ok: true };
@@ -134,6 +129,20 @@ export function pantryRoutes(app: FastifyInstance): void {
     const id = parseInt((req.params as { id: string }).id, 10);
     if (!id) return reply.code(400).send({ error: 'id required' });
     await sql`DELETE FROM einkaufsliste_item WHERE id = ${id}`;
+    return { ok: true };
+  });
+
+  /** Persist a manual drag order (first id = top → highest priority). */
+  app.put('/api/shopping-list/order', async (req, reply) => {
+    const { order } = (req.body ?? {}) as { order?: number[] };
+    if (!Array.isArray(order) || !order.every(n => Number.isInteger(n))) {
+      return reply.code(400).send({ error: 'order array of ids required' });
+    }
+    await sql.begin(async tx => {
+      for (let i = 0; i < order.length; i++) {
+        await tx`UPDATE einkaufsliste_item SET priority = ${order.length - i} WHERE id = ${order[i]}`;
+      }
+    });
     return { ok: true };
   });
 
