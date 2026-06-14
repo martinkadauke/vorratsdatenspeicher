@@ -110,9 +110,20 @@ async function marktguruForProduct(product: string, zip: string): Promise<number
 export async function runOfferSearch(): Promise<{ checked: number; found: number }> {
   if (running) throw new Error('Angebotssuche läuft bereits');
   running = true;
+  // Track the run in a maintenance_event so /api/offers/status is reliable across
+  // replicas — the in-memory `running` flag only reflects the replica that started
+  // the search, so a status poll hitting another replica would wrongly report done.
+  const [event] = await sql`
+    INSERT INTO maintenance_event (kind, status, progress)
+    VALUES ('offer_search.run', 'running', ${sql.json({ phase: 'offers', current: 0, total: 0, ts: Date.now() })})
+    RETURNING id`;
+  const eventId = event.id as number;
   try {
     const products = (await sql`SELECT DISTINCT ref FROM offer_subscription WHERE kind IN ('artikel', 'watch')`).map(r => r.ref as string);
-    if (!products.length) return { checked: 0, found: 0 };
+    if (!products.length) {
+      await sql`UPDATE maintenance_event SET status = 'success', ended_at = NOW(), summary = ${sql.json({ checked: 0, found: 0 })} WHERE id = ${eventId}`;
+      return { checked: 0, found: 0 };
+    }
     const zip = await householdZip();
     const region = await regionHint();
     let llm: Awaited<ReturnType<typeof providerForTask>> | null = null; // lazy: only if we fall back
@@ -120,6 +131,8 @@ export async function runOfferSearch(): Promise<{ checked: number; found: number
     let checked = 0, found = 0;
     for (const product of products) {
       checked++;
+      // heartbeat so the status endpoint can tell a live run from a crashed one
+      await sql`UPDATE maintenance_event SET progress = ${sql.json({ phase: 'offers', current: checked, total: products.length, ts: Date.now() })} WHERE id = ${eventId}`;
       try {
         // Primary: Marktguru structured offers API (needs a zip code).
         if (zip) {
@@ -156,7 +169,11 @@ export async function runOfferSearch(): Promise<{ checked: number; found: number
         await sleep(800); // gentle on SearXNG
       } catch { /* skip this product */ }
     }
+    await sql`UPDATE maintenance_event SET status = 'success', ended_at = NOW(), summary = ${sql.json({ checked, found })} WHERE id = ${eventId}`;
     return { checked, found };
+  } catch (e) {
+    await sql`UPDATE maintenance_event SET status = 'error', ended_at = NOW(), summary = ${sql.json({ error: (e as Error).message })} WHERE id = ${eventId}`;
+    throw e;
   } finally {
     running = false;
   }

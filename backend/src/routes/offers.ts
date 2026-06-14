@@ -4,6 +4,7 @@ import { requireAdmin } from '../auth/plugin.js';
 import { kontoScope } from '../auth/konto.js';
 import { runOfferSearch, sendOfferDigests, isOfferSearchRunning, debugOfferSearch } from '../offers/index.js';
 import { loadUnits, normalizeEinheit, comparisonGroups, type PriceLine } from '../lib/units.js';
+import { PROGRESS_FRESH_MS } from '../maintenance/progress.js';
 
 /** "0,99 €" / "1.299,00 €" → 0.99 / 1299.00. null if unparseable. */
 function parsePrice(s: string | null): number | null {
@@ -189,8 +190,15 @@ export function offerRoutes(app: FastifyInstance): void {
     return { ok: true };
   });
 
-  /** Whether an offer search is currently running (for the in-app refresh button). */
-  app.get('/api/offers/status', async () => ({ running: isOfferSearchRunning() }));
+  /** Whether an offer search is currently running (for the in-app refresh button).
+   *  DB-backed so it's correct across replicas (the in-memory flag only reflects
+   *  the replica that started the run). */
+  app.get('/api/offers/status', async () => {
+    const [ev] = await sql`SELECT status, progress FROM maintenance_event WHERE kind = 'offer_search.run' ORDER BY id DESC LIMIT 1`;
+    const ts = (ev?.progress as { ts?: number } | null)?.ts ?? 0;
+    const dbRunning = !!ev && ev.status === 'running' && ts >= Date.now() - PROGRESS_FRESH_MS;
+    return { running: isOfferSearchRunning() || dbRunning };
+  });
 
   /** Any user can refresh offers for the household's subscriptions from the app.
    *  Populates offers (no email digest — that's the nightly job's). Read-only

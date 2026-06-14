@@ -198,7 +198,10 @@ export function Offers() {
     setBusy(true);
     try {
       await api('/api/offers/refresh', { method: 'POST' });
-      for (let i = 0; i < 40; i++) {
+      // Poll the (now DB-backed, cross-replica) status until the search finishes.
+      // Give the run a moment to register before the first check.
+      await new Promise(r => setTimeout(r, 1500));
+      for (let i = 0; i < 90; i++) {
         await new Promise(r => setTimeout(r, 2000));
         const s = await api<{ running: boolean }>('/api/offers/status');
         if (!s.running) break;
@@ -239,7 +242,9 @@ export function Offers() {
       const arr = m.get(o.canonical_name) ?? [];
       arr.push(o); m.set(o.canonical_name, arr);
     }
-    for (const arr of m.values()) arr.sort((a, b) => (priceNum(a.price) ?? 1e9) - (priceNum(b.price) ?? 1e9));
+    // Sort by the real comparison price (Grundpreis €/kg), not the teaser price.
+    const cmp = (o: Offer) => o.grundpreis ?? priceNum(o.price) ?? 1e9;
+    for (const arr of m.values()) arr.sort((a, b) => cmp(a) - cmp(b));
     const rank = (s?: string | null) => (s === 'overdue' ? 0 : s === 'soon' ? 1 : 2);
     return [...m.entries()].sort((a, b) =>
       rank(pantry[a[0]]?.status) - rank(pantry[b[0]]?.status) || a[0].localeCompare(b[0], lang));
@@ -379,7 +384,9 @@ export function Offers() {
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-zinc-400">
                     {best?.price && (
                       <span className="font-semibold text-emerald-600 dark:text-emerald-500">
-                        {t('offers.from')} {best.price}{best.unit ? `/${best.unit}` : ''}
+                        {t('offers.from')} {best.grundpreis != null && best.grundpreis_unit
+                          ? `${best.grundpreis.toFixed(2).replace('.', ',')} €/${best.grundpreis_unit}`
+                          : best.price}
                       </span>
                     )}
                     {stores.size > 0 && <span>@ {[...stores].slice(0, 2).join(', ')}{stores.size > 2 ? ` +${stores.size - 2}` : ''}</span>}
