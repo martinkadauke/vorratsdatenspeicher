@@ -10,6 +10,7 @@ import { CategoryPicker } from '../components/CategoryPicker';
 import { UnitSelect } from '../components/UnitSelect';
 import { ConsumerChips, ConsumerDots } from '../components/ConsumerChips';
 import { CanonicalIcon, IconPicker } from '../components/IconPicker';
+import { toast } from '../components/Toast';
 import { fmtDate, eur } from '../lib/utils';
 
 interface PriceHistory {
@@ -130,8 +131,10 @@ export function NameEditModal({ name, onClose }: { name: CanonicalName | null; o
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['names'] });
       void qc.invalidateQueries({ queryKey: ['artikel-list'] });
+      toast(t('common.saved'), 'success');
       onClose();
     },
+    onError: (e) => toast((e as Error).message, 'error'),
   });
 
   if (!name) return null;

@@ -197,10 +197,24 @@ export function articleRoutes(app: FastifyInstance): void {
       let current = name;
       if (new_name && new_name !== name) {
         await tx`UPDATE artikel SET canonical_name = ${new_name} WHERE canonical_name = ${name}`;
-        await tx`UPDATE einkaufsliste SET canonical_name = ${new_name} WHERE canonical_name = ${name}`;
-        await tx`UPDATE vorrat_status SET canonical_name = ${new_name} WHERE canonical_name = ${name}`;
-        await tx`UPDATE canonical_consumer SET canonical_name = ${new_name} WHERE canonical_name = ${name}`;
-        await tx`UPDATE canonical_translation SET canonical_name = ${new_name} WHERE canonical_name = ${name}`;
+        // Tables keyed by canonical_name (PK) — when renaming INTO an existing
+        // canonical (a merge), a plain UPDATE would hit a duplicate-key error and
+        // roll back the whole rename. Guard each: move the source row only if the
+        // target has none, then drop any leftovers.
+        await tx`UPDATE einkaufsliste SET canonical_name = ${new_name}
+                 WHERE canonical_name = ${name} AND NOT EXISTS (SELECT 1 FROM einkaufsliste WHERE canonical_name = ${new_name})`;
+        await tx`DELETE FROM einkaufsliste WHERE canonical_name = ${name}`;
+        await tx`UPDATE vorrat_status SET canonical_name = ${new_name}
+                 WHERE canonical_name = ${name} AND NOT EXISTS (SELECT 1 FROM vorrat_status WHERE canonical_name = ${new_name})`;
+        await tx`DELETE FROM vorrat_status WHERE canonical_name = ${name}`;
+        await tx`UPDATE canonical_consumer c SET canonical_name = ${new_name}
+                 WHERE c.canonical_name = ${name} AND NOT EXISTS (
+                   SELECT 1 FROM canonical_consumer c2 WHERE c2.canonical_name = ${new_name} AND c2.family_member_id = c.family_member_id)`;
+        await tx`DELETE FROM canonical_consumer WHERE canonical_name = ${name}`;
+        await tx`UPDATE canonical_translation t SET canonical_name = ${new_name}
+                 WHERE t.canonical_name = ${name} AND NOT EXISTS (
+                   SELECT 1 FROM canonical_translation t2 WHERE t2.canonical_name = ${new_name} AND t2.lang = t.lang)`;
+        await tx`DELETE FROM canonical_translation WHERE canonical_name = ${name}`;
         await tx`UPDATE canonical_alias SET canonical_name = ${new_name} WHERE canonical_name = ${name}`;
         // Offer subscriptions follow the rename too (else "Angebote holen" keeps
         // searching the old name). Guard the (user_id, kind, ref) uniqueness.
