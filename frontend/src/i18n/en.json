@@ -205,7 +205,10 @@
     "byStore": "By store",
     "noStores": "No matching stores — those items aren't sold there.",
     "noPrice": "no price",
-    "src": { "offer": "offer", "store_avg": "store avg", "global_avg": "overall avg" }
+    "src": { "offer": "offer", "store_avg": "store avg", "global_avg": "overall avg" },
+    "send": "Send",
+    "sent": "Emailed {{count}} + notified",
+    "sentNoSmtp": "Notified {{count}} (SMTP not set → no email)"
   },
   "stores": {
     "title": "Stores",
@@ -375,7 +378,8 @@
     "churnerApplied": "Churner: \"{{old}}\" → \"{{new}}\"",
     "churnerQueued": "Churner proposal: \"{{name}}\" for review",
     "churnerSummary": "Churner run: {{applied}} changed, {{queued}} queued",
-    "recategorized": "Categorization done: {{updated}} items"
+    "recategorized": "Categorization done: {{updated}} items",
+    "shoppingShared": "{{by}} shared the shopping list ({{count}} items)"
   },
   "admin": {
     "title": "Admin",

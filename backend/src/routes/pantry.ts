@@ -3,6 +3,8 @@ import sql from '../db.js';
 import { kontoScope } from '../auth/konto.js';
 import { loadUnits, normalizeEinheit, comparisonGroups, type PriceLine } from '../lib/units.js';
 import { estimateVorrat } from '../lib/vorrat.js';
+import { sendMail, smtpConfigured } from '../mailer.js';
+import { notify } from '../notify.js';
 
 /** "LIDL", "Lidl GmbH" → "lidl" (mirrors routes/stores.ts normalizeStore). */
 function normalizeStore(raw: string): string {
@@ -430,6 +432,37 @@ export function pantryRoutes(app: FastifyInstance): void {
     }
     chains.sort((a, b) => b.item_count - a.item_count || a.total - b.total);
     return { chains };
+  });
+
+  /** Share the list: email it to every household user that has an email address,
+   *  and drop an in-app notification for everyone else. */
+  app.post('/api/shopping-list/send', async (req, reply) => {
+    const items = (await sql`SELECT title, menge::float8 AS menge FROM einkaufsliste_item ORDER BY priority DESC, added_at DESC`) as unknown as { title: string; menge: number | null }[];
+    if (!items.length) return reply.code(400).send({ error: 'Liste ist leer' });
+    const fq = (n: number | null) => n == null ? '' : (Number.isInteger(n) ? String(n) : n.toFixed(1).replace('.', ','));
+    const line = (i: { title: string; menge: number | null }) => `${i.menge != null ? fq(i.menge) + '× ' : ''}${i.title}`;
+    const by = req.user!.username;
+    const subject = `🛒 Einkaufsliste (${items.length})`;
+    const text = `${by} hat die Einkaufsliste geteilt:\n\n${items.map(i => '• ' + line(i)).join('\n')}`;
+    const html = `<p><b>${by}</b> hat die Einkaufsliste geteilt:</p><ul>${items.map(i => `<li>${line(i)}</li>`).join('')}</ul>`;
+
+    const users = await sql`SELECT id, email FROM users`;
+    let emailed = 0;
+    const smtp = await smtpConfigured();
+    if (smtp) {
+      for (const u of users) {
+        const email = (u.email as string | null)?.trim();
+        if (!email) continue;
+        try { await sendMail(email, subject, text, html); emailed++; } catch { /* skip one bad address */ }
+      }
+    }
+    let notified = 0;
+    for (const u of users) {
+      if ((u.id as number) === req.user!.id) continue; // notify the recipients, not the sender
+      await notify('shopping.shared', { by, count: items.length }, u.id as number);
+      notified++;
+    }
+    return { ok: true, emailed, notified, smtp };
   });
 
   /** Canonical-keyed feedback (used by the offers "on list" toggle). */

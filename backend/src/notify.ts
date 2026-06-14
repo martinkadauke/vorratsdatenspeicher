@@ -5,7 +5,8 @@ export type NotificationType =
   | 'churner.queued'
   | 'churner.run.summary'
   | 'recategorize.done'
-  | 'seed_units.done';
+  | 'seed_units.done'
+  | 'shopping.shared';
 
 /** user_id NULL = broadcast (visible to all admins). */
 export async function notify(type: NotificationType, payload: Record<string, unknown>, userId?: number): Promise<void> {

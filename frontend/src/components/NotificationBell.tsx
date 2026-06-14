@@ -18,6 +18,8 @@ function notificationText(n: Notification, t: (k: string, o?: Record<string, unk
       return t('bell.churnerSummary', { applied: p.auto_applied ?? 0, queued: p.queued ?? 0 });
     case 'recategorize.done':
       return t('bell.recategorized', { updated: p.updated ?? 0 });
+    case 'shopping.shared':
+      return t('bell.shoppingShared', { by: p.by ?? '?', count: p.count ?? 0 });
     default:
       return n.type;
   }
@@ -27,6 +29,7 @@ function targetFor(n: Notification): string {
   switch (n.type) {
     case 'churner.queued': return '/queue';
     case 'churner.auto_applied': return '/names';
+    case 'shopping.shared': return '/shopping';
     default: return '/admin';
   }
 }

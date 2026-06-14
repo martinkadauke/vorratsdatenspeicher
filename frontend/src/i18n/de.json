@@ -205,7 +205,10 @@
     "byStore": "Pro Laden",
     "noStores": "Keine passenden Läden — die Artikel werden dort nicht geführt.",
     "noPrice": "kein Preis",
-    "src": { "offer": "Angebot", "store_avg": "Ø Laden", "global_avg": "Ø gesamt" }
+    "src": { "offer": "Angebot", "store_avg": "Ø Laden", "global_avg": "Ø gesamt" },
+    "send": "Senden",
+    "sent": "Per E-Mail an {{count}} gesendet + benachrichtigt",
+    "sentNoSmtp": "{{count}} benachrichtigt (SMTP nicht konfiguriert → keine E-Mail)"
   },
   "stores": {
     "title": "Läden",
@@ -375,7 +378,8 @@
     "churnerApplied": "Churner: „{{old}}“ → „{{new}}“",
     "churnerQueued": "Churner-Vorschlag: „{{name}}“ zur Prüfung",
     "churnerSummary": "Churner-Lauf: {{applied}} geändert, {{queued}} zur Prüfung",
-    "recategorized": "Kategorisierung fertig: {{updated}} Artikel"
+    "recategorized": "Kategorisierung fertig: {{updated}} Artikel",
+    "shoppingShared": "{{by}} hat die Einkaufsliste geteilt ({{count}} Artikel)"
   },
   "admin": {
     "title": "Admin",

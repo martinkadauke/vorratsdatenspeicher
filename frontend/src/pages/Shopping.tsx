@@ -11,7 +11,7 @@ import {
   verticalListSortingStrategy, useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { GripVertical, Minus, Plus, Trash2, Search, Sparkles, BarChart3 } from 'lucide-react';
+import { GripVertical, Minus, Plus, Trash2, Search, Sparkles, BarChart3, Send } from 'lucide-react';
 import { api } from '../api/client';
 import type { ShoppingItem } from '../api/types';
 import { Card, Spinner, EmptyState, Button, Input, Badge } from '../components/ui';
@@ -103,6 +103,12 @@ export function Shopping() {
     } catch (e) { toast((e as Error).message, 'error'); }
     finally { setComparing(false); }
   };
+
+  const send = useMutation({
+    mutationFn: () => api<{ emailed: number; notified: number; smtp: boolean }>('/api/shopping-list/send', { method: 'POST' }),
+    onSuccess: (r) => toast(r.smtp ? t('shopping.sent', { count: r.emailed }) : t('shopping.sentNoSmtp', { count: r.notified }), 'success'),
+    onError: (e: Error) => toast(e.message, 'error'),
+  });
   const persistOrder = useMutation({
     mutationFn: (order: number[]) => api('/api/shopping-list/order', { method: 'PUT', body: { order } }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['shopping'] }),
@@ -138,6 +144,9 @@ export function Shopping() {
           </Button>
           <Button variant="secondary" onClick={runCompare} disabled={comparing} className="shrink-0">
             <BarChart3 size={15} /> {comparing ? t('shopping.comparing') : t('shopping.compareOffers')}
+          </Button>
+          <Button variant="secondary" onClick={() => send.mutate()} disabled={send.isPending} className="shrink-0">
+            <Send size={15} /> {t('shopping.send')}
           </Button>
         </div>
       </div>
