@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Search, X, Rows3, CheckSquare, Square, Users, Ban, Tag, Bell, FolderTree, ReceiptText, SlidersHorizontal, UserCheck, Eye, EyeOff, Scale } from 'lucide-react';
+import { Search, X, Rows3, CheckSquare, Square, Users, Ban, Tag, Bell, FolderTree, ReceiptText, SlidersHorizontal, UserCheck, Eye, EyeOff, Scale, Boxes } from 'lucide-react';
 import { api } from '../api/client';
 import type { CanonicalName } from '../api/types';
 import { Card, Input, Label, Spinner, EmptyState, Badge, Select, Button, Modal } from '../components/ui';
@@ -31,6 +31,7 @@ interface ArtikelGroup {
   consumers: number[];
   base_unit: string | null;
   hidden: boolean;
+  track_vorrat: boolean;
   comparison: { unit: string; avg: number } | null;
   needs_weight: boolean;
 }
@@ -248,6 +249,20 @@ export function Artikel() {
     onError: (e) => toast((e as Error).message, 'error'),
   });
 
+  // "Vorrat verfolgen": only canonical products can be tracked.
+  const trackNames = selectedGroups.map(g => g.canonical_name).filter(Boolean) as string[];
+  const allSelectedTracked = selectedGroups.length > 0 && selectedGroups.every(g => g.track_vorrat);
+  const trackVorratBulk = useMutation({
+    mutationFn: (track: boolean) => api<{ count: number }>('/api/names/track-vorrat/bulk', { method: 'POST', body: { names: trackNames, track } }),
+    onSuccess: (_r, track) => {
+      void qc.invalidateQueries({ queryKey: ['artikel-list'] });
+      void qc.invalidateQueries({ queryKey: ['pantry'] });
+      setSelected(new Set());
+      toast(track ? t('artikel.tracked', { count: trackNames.length }) : t('artikel.untracked'), 'success');
+    },
+    onError: (e) => toast((e as Error).message, 'error'),
+  });
+
   // "Vermeiden": only canonical groups can be avoided (the list keys on canonical_name).
   const avoidNames = selectedGroups.map(g => g.canonical_name).filter(Boolean) as string[];
   const allAvoided = avoidNames.length > 0 && avoidNames.every(n => avoided.has(n));
@@ -450,6 +465,9 @@ export function Artikel() {
                     {isSubscribed(g) && (
                       <Bell size={13} className="shrink-0 text-emerald-500" aria-label={t('artikel.filterSubscribed')} />
                     )}
+                    {g.track_vorrat && (
+                      <Boxes size={13} className="shrink-0 text-violet-500" aria-label={t('artikel.trackVorrat')} />
+                    )}
                     {g.needs_weight && (
                       <span title={t('artikel.needsWeight')} className="shrink-0">
                         <Scale size={13} className="text-amber-500" />
@@ -516,6 +534,14 @@ export function Artikel() {
               title={!avoidNames.length ? t('artikel.avoidNeedsCanonical') : ''}
             >
               <Ban size={15} /> {allAvoided ? t('artikel.unavoid') : t('artikel.avoid')}
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => trackVorratBulk.mutate(!allSelectedTracked)}
+              disabled={!trackNames.length || trackVorratBulk.isPending}
+              title={!trackNames.length ? t('artikel.avoidNeedsCanonical') : ''}
+            >
+              <Boxes size={15} /> {allSelectedTracked ? t('artikel.untrackVorrat') : t('artikel.trackVorrat')}
             </Button>
             <Button variant="ghost" onClick={() => setSelected(new Set())}>
               <X size={15} />

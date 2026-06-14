@@ -196,6 +196,21 @@ export function nameRoutes(app: FastifyInstance): void {
     return { ok: true };
   });
 
+  /** Bulk set track_vorrat for several canonicals (the Artikel-list toggle). */
+  app.post('/api/names/track-vorrat/bulk', async (req, reply) => {
+    const { names, track } = (req.body ?? {}) as { names?: string[]; track?: boolean };
+    if (!Array.isArray(names) || !names.length) return reply.code(400).send({ error: 'names required' });
+    await sql.begin(async tx => {
+      for (const n of names) {
+        await tx`
+          INSERT INTO canonical_meta (canonical_name, track_vorrat, updated_at, updated_by)
+          VALUES (${n}, ${!!track}, NOW(), ${req.user!.id})
+          ON CONFLICT (canonical_name) DO UPDATE SET track_vorrat = EXCLUDED.track_vorrat, updated_at = NOW(), updated_by = EXCLUDED.updated_by`;
+      }
+    });
+    return { ok: true, count: names.length };
+  });
+
   /** Total spend for the same filters as artikel-list (category + date range +
    *  search). Powers "how much on meat in 3 weeks / Jan–Apr / June". */
   app.get('/api/artikel-spend', async (req) => {
