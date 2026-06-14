@@ -4,7 +4,8 @@ export type NotificationType =
   | 'churner.auto_applied'
   | 'churner.queued'
   | 'churner.run.summary'
-  | 'recategorize.done';
+  | 'recategorize.done'
+  | 'seed_units.done';
 
 /** user_id NULL = broadcast (visible to all admins). */
 export async function notify(type: NotificationType, payload: Record<string, unknown>, userId?: number): Promise<void> {

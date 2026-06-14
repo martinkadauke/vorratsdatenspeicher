@@ -3,6 +3,7 @@ import sql from '../db.js';
 import { requireAdmin } from '../auth/plugin.js';
 import { runChurn, isChurnRunning, requestChurnStop, runIconFetch } from '../churner/index.js';
 import { runRecategorize, isRecategorizeRunning, recategorizeOne } from '../maintenance/recategorize.js';
+import { runSeedBaseUnits, isSeedUnitsRunning } from '../maintenance/seedUnits.js';
 import { runSupermarketInfo, isSupermarketRunning } from '../supermarket/info.js';
 import { getConfig } from '../config.js';
 import { PROGRESS_FRESH_MS, type JobProgress } from '../maintenance/progress.js';
@@ -38,6 +39,18 @@ export function maintenanceRoutes(app: FastifyInstance): void {
     const { only_missing } = (req.body ?? {}) as { only_missing?: boolean };
     try {
       const eventId = await runRecategorize(only_missing ?? false);
+      return { ok: true, event_id: eventId };
+    } catch (e) {
+      return reply.code(409).send({ error: (e as Error).message });
+    }
+  });
+
+  /** One-time: AI-assign a base_unit (Stück/Packung/kg/l) to every product. */
+  app.post('/api/maintenance/seed-base-units', { preHandler: requireAdmin }, async (req, reply) => {
+    const { only_missing } = (req.body ?? {}) as { only_missing?: boolean };
+    if (isSeedUnitsRunning()) return reply.code(409).send({ error: 'Einheiten-Zuordnung läuft bereits' });
+    try {
+      const eventId = await runSeedBaseUnits(only_missing ?? false);
       return { ok: true, event_id: eventId };
     } catch (e) {
       return reply.code(409).send({ error: (e as Error).message });
