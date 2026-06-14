@@ -173,7 +173,13 @@
     "realQty": "Actual qty",
     "corrected": "corrected",
     "resetOverride": "Reset correction",
-    "belowReserve": "below minimum"
+    "belowReserve": "below minimum",
+    "reserve": "Iron reserve",
+    "reserveMin": "Minimum",
+    "boughtOn": "Bought on",
+    "expiresOn": "expires",
+    "noCharges": "No batches",
+    "qty": "Qty"
   },
   "shopping": {
     "title": "Shopping list",

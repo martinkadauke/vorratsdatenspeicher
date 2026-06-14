@@ -173,7 +173,13 @@
     "realQty": "Ist-Menge",
     "corrected": "korrigiert",
     "resetOverride": "Korrektur zurücksetzen",
-    "belowReserve": "unter Mindestbestand"
+    "belowReserve": "unter Mindestbestand",
+    "reserve": "Eiserner Vorrat",
+    "reserveMin": "Mindestbestand",
+    "boughtOn": "Gekauft am",
+    "expiresOn": "läuft ab",
+    "noCharges": "Keine Chargen",
+    "qty": "Menge"
   },
   "shopping": {
     "title": "Einkaufsliste",
