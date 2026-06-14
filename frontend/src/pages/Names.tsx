@@ -14,7 +14,8 @@ import { fmtDate, eur } from '../lib/utils';
 
 interface PriceHistory {
   canonical: string;
-  stores: { key: string; display: string; avg_eur: number; points: unknown[] }[];
+  base_unit: string | null;
+  stores: { key: string; display: string; avg_eur: number; unit: string | null; groups: { unit: string; avg: number; min: number; n: number }[] }[];
   cheapest: { key: string; display: string; avg_eur: number } | null;
 }
 
@@ -199,7 +200,9 @@ export function NameEditModal({ name, onClose }: { name: CanonicalName | null; o
                       {s.display}
                       {isCheapest && <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400">{t('names.cheapest')}</Badge>}
                     </span>
-                    <span className="tabular font-medium">Ø {eur(s.avg_eur)}</span>
+                    <span className="tabular text-right text-xs font-medium">
+                      {s.groups.map(g => `${g.avg.toFixed(2).replace('.', ',')} €/${g.unit}`).join(' · ')}
+                    </span>
                   </div>
                 );
               })}

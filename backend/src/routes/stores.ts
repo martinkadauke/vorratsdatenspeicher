@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import sql from '../db.js';
 import { kontoScope } from '../auth/konto.js';
+import { loadUnits, comparisonGroups, type PriceLine } from '../lib/units.js';
 
 /** Normalize free-text store name into a stable key for grouping.
  *  "LIDL", "Lidl", "Lidl GmbH" → "lidl". */
@@ -219,49 +220,49 @@ export function storeRoutes(app: FastifyInstance): void {
     return { ok: true, updated: result.length };
   });
 
-  /** Price history of a canonical_name per store.
-   *  Returns avg price per (store, month) plus the cheapest store overall. */
+  /** Price history of a canonical_name per store, as unit-aware comparison
+   *  prices (€/kg, €/l, €/Stück). The headline `avg_eur`/`unit` per store is the
+   *  product's base_unit group (falls back to the most-used group). */
   app.get('/api/stores/price-history', async (req, reply) => {
     const name = (req.query as { canonical?: string }).canonical;
     if (!name) return reply.code(400).send({ error: 'canonical required' });
 
+    const units = await loadUnits();
+    const [meta] = await sql`SELECT base_unit FROM canonical_meta WHERE canonical_name = ${name}`;
+    const baseUnit = (meta?.base_unit as string | null) ?? null;
+    const keyFor = (n: string | null): string | null => {
+      if (!n) return null;
+      const u = units.get(n);
+      return u ? (u.dimension === 'mass' ? 'kg' : u.dimension === 'volume' ? 'l' : u.name) : null;
+    };
+    const buKey = keyFor(baseUnit);
+
     const rows = await sql`
-      SELECT
-        e.roh_ladenname AS store,
-        to_char(e.datum, 'YYYY-MM') AS ym,
-        AVG(COALESCE(a.preis / NULLIF(a.menge, 0), a.preis))::numeric(10,2) AS avg_eur,
-        MIN(COALESCE(a.preis / NULLIF(a.menge, 0), a.preis))::numeric(10,2) AS min_eur,
-        COUNT(*)::int AS n
+      SELECT e.roh_ladenname AS store, a.preis, a.menge, a.einheit
       FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
-      WHERE a.canonical_name = ${name}
-        AND a.preis IS NOT NULL
-        AND a.preis > 0
+      WHERE a.canonical_name = ${name} AND a.preis IS NOT NULL AND a.preis > 0
         ${kontoScope(req.user, sql`e.konto_id`)}
-      GROUP BY e.roh_ladenname, ym
-      ORDER BY ym DESC, store
     `;
 
-    // group by normalized store key
-    const byStore = new Map<string, { display: string; points: { ym: string; avg: number; min: number; n: number }[] }>();
+    const byStore = new Map<string, { display: string; lines: PriceLine[] }>();
     for (const r of rows) {
       const key = normalizeStore(r.store as string);
       if (!key) continue;
-      const e = byStore.get(key) ?? { display: r.store as string, points: [] };
-      e.points.push({ ym: r.ym as string, avg: Number(r.avg_eur), min: Number(r.min_eur), n: r.n });
+      const e = byStore.get(key) ?? { display: r.store as string, lines: [] };
+      e.lines.push(r as unknown as PriceLine);
       byStore.set(key, e);
     }
 
     const stores = [...byStore.entries()].map(([key, v]) => {
-      const avgPrice = v.points.reduce((s, p) => s + p.avg * p.n, 0) /
-                       v.points.reduce((s, p) => s + p.n, 0);
-      return { key, display: v.display, avg_eur: round2(avgPrice), points: v.points };
-    });
+      const groups = comparisonGroups(v.lines, units);
+      const headline = (buKey ? groups.find(g => g.unit === buKey) : undefined) ?? groups[0] ?? null;
+      return { key, display: v.display, avg_eur: headline?.avg ?? 0, unit: headline?.unit ?? null, groups };
+    }).filter(s => s.groups.length);
 
-    const cheapest = [...stores].sort((a, b) => a.avg_eur - b.avg_eur)[0] ?? null;
-    return { canonical: name, stores, cheapest };
+    // Cheapest compared within the base_unit group (only stores that have it).
+    const buAvg = (s: typeof stores[number]) =>
+      (buKey ? s.groups.find(g => g.unit === buKey)?.avg : s.avg_eur) ?? Infinity;
+    const cheapest = [...stores].sort((a, b) => buAvg(a) - buAvg(b)).find(s => Number.isFinite(buAvg(s))) ?? null;
+    return { canonical: name, base_unit: baseUnit, stores, cheapest };
   });
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
 }
