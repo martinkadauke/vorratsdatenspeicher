@@ -10,6 +10,15 @@ const KINDS: SubKind[] = ['filiale', 'artikel'];
 export function subscriptionRoutes(app: FastifyInstance): void {
   /** All of the caller's subscriptions, grouped by kind. */
   app.get('/api/subscriptions', async (req) => {
+    // Self-heal: drop orphaned artikel subscriptions whose product no longer
+    // exists (renamed/merged away, or subscribed from a loose item that has since
+    // gained a canonical name). Otherwise the "Abonniert N" badge counts subs the
+    // user can't reach in the list to remove.
+    await sql`
+      DELETE FROM offer_subscription
+      WHERE user_id = ${req.user!.id} AND kind = 'artikel'
+        AND ref NOT IN (SELECT DISTINCT canonical_name FROM artikel WHERE canonical_name IS NOT NULL)
+    `;
     const rows = await sql`
       SELECT kind, ref FROM offer_subscription WHERE user_id = ${req.user!.id}
     `;

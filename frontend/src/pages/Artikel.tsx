@@ -233,7 +233,9 @@ export function Artikel() {
   const allSelectedSubscribed = selectedGroups.length > 0 && selectedGroups.every(g => isSubscribed(g));
   const subscribeOffers = useMutation({
     mutationFn: (mode: 'subscribe' | 'unsubscribe') => {
-      const refs = selectedGroups.map(g => g.canonical_name ?? g.display).filter(Boolean);
+      // Only canonical products — subscribing loose items by their display text
+      // creates orphan subscriptions that can't be managed in the list.
+      const refs = selectedGroups.map(g => g.canonical_name).filter(Boolean);
       return api<{ subscribed?: number; unsubscribed?: number }>('/api/subscriptions/bulk', { method: 'POST', body: { kind: 'artikel', refs, mode } });
     },
     onSuccess: (r, mode) => {
