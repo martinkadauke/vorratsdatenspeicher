@@ -95,7 +95,7 @@ export function AddArticleModal({ einkaufId, open, onClose, invalidateKeys, afte
 
   return (
     <Modal open={open} onClose={onClose} title={t('receiptDetail.addArticle')}>
-      <div className="flex flex-col gap-4">
+      <form className="flex flex-col gap-4" onSubmit={e => { e.preventDefault(); if (canonical && !save.isPending) save.mutate(); }}>
         <div>
           <Label>{t('article.canonical')}</Label>
           <Input list="canonical-names-add" value={canonical} onChange={e => onCanonicalChange(e.target.value)} autoFocus />
@@ -130,10 +130,10 @@ export function AddArticleModal({ einkaufId, open, onClose, invalidateKeys, afte
 
         {save.isError && <p className="text-sm text-red-500">{(save.error as Error).message}</p>}
         <div className="flex justify-end gap-2 pt-1">
-          <Button variant="secondary" onClick={onClose}>{t('common.cancel')}</Button>
-          <Button onClick={() => save.mutate()} disabled={!canonical || save.isPending}>{t('common.add')}</Button>
+          <Button type="button" variant="secondary" onClick={onClose}>{t('common.cancel')}</Button>
+          <Button type="submit" disabled={!canonical || save.isPending}>{t('common.add')}</Button>
         </div>
-      </div>
+      </form>
     </Modal>
   );
 }
