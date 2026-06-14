@@ -229,8 +229,8 @@ export function storeRoutes(app: FastifyInstance): void {
       SELECT
         e.roh_ladenname AS store,
         to_char(e.datum, 'YYYY-MM') AS ym,
-        AVG(a.preis)::numeric(10,2) AS avg_eur,
-        MIN(a.preis)::numeric(10,2) AS min_eur,
+        AVG(COALESCE(a.preis / NULLIF(a.menge, 0), a.preis))::numeric(10,2) AS avg_eur,
+        MIN(COALESCE(a.preis / NULLIF(a.menge, 0), a.preis))::numeric(10,2) AS min_eur,
         COUNT(*)::int AS n
       FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
       WHERE a.canonical_name = ${name}

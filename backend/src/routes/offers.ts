@@ -32,7 +32,7 @@ export function offerRoutes(app: FastifyInstance): void {
     const offered = [...new Set(offers.map(o => o.canonical_name as string))];
     const hist = offered.length ? await sql`
       SELECT a.canonical_name,
-             ROUND(AVG(a.preis) FILTER (WHERE a.preis > 0), 2)::float8 AS avg_paid,
+             ROUND(AVG(COALESCE(a.preis / NULLIF(a.menge, 0), a.preis)) FILTER (WHERE a.preis > 0), 2)::float8 AS avg_paid,
              COUNT(*)::int AS n,
              MIN(e.datum)::text AS first_bought,
              MAX(e.datum)::text AS last_bought

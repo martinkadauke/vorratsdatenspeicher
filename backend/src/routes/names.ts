@@ -77,7 +77,7 @@ export function nameRoutes(app: FastifyInstance): void {
         COUNT(*)::int AS count,
         mode() WITHIN GROUP (ORDER BY a.category_path) AS category,
         MAX(e.datum)::text AS last_bought,
-        ROUND(AVG(a.preis) FILTER (WHERE a.preis > 0), 2) AS avg_price,
+        ROUND(AVG(COALESCE(a.preis / NULLIF(a.menge, 0), a.preis)) FILTER (WHERE a.preis > 0), 2) AS avg_price,
         array_agg(a.id) AS artikel_ids,
         (array_agg(a.einkauf_id ORDER BY e.datum DESC, a.id DESC))[1] AS einkauf_id,
         (array_agg(a.id ORDER BY e.datum DESC, a.id DESC))[1] AS sample_artikel_id
