@@ -85,7 +85,19 @@ function offerMatches(product: string, o: MarktguruOffer): boolean {
 
 /** Marktguru structured offers for one product → offer rows. Returns count inserted. */
 async function marktguruForProduct(product: string, zip: string): Promise<number> {
-  const offers = (await searchMarktguru(product, zip, 20)).filter(o => offerMatches(product, o)).slice(0, 6);
+  const matched = (await searchMarktguru(product, zip, 40)).filter(o => offerMatches(product, o));
+  // Keep the cheapest offer per chain (by Grundpreis) so every retailer with a
+  // match is represented — a plain first-6 slice let big chains (Lidl/Edeka/Penny)
+  // crowd out smaller ones like Kaufland.
+  const val = (x: MarktguruOffer) => x.referencePrice ?? x.price ?? Infinity;
+  const bestPerChain = new Map<string, MarktguruOffer>();
+  for (const o of matched) {
+    const key = (o.retailers[0] ?? '').toLowerCase();
+    if (!key) continue;
+    const cur = bestPerChain.get(key);
+    if (!cur || val(o) < val(cur)) bestPerChain.set(key, o);
+  }
+  const offers = [...bestPerChain.values()].slice(0, 12);
   let found = 0;
   for (const o of offers) {
     const store = o.retailers[0] ?? null;
