@@ -23,7 +23,7 @@ export function offerRoutes(app: FastifyInstance): void {
     if (!refs.length) return { offers: [], pantry: {} };
 
     const offers = await sql`
-      SELECT id, canonical_name, store, price, old_price, valid_until, source_url, confidence, found_at, brand, image_url, unit, source, chain_slug
+      SELECT id, canonical_name, store, price, old_price, ref_price, valid_until, source_url, confidence, found_at, brand, image_url, unit, source, chain_slug
       FROM offer
       WHERE canonical_name IN ${sql(refs)} AND found_at > NOW() - INTERVAL '21 days'
       ORDER BY found_at DESC LIMIT 200
@@ -99,21 +99,31 @@ export function offerRoutes(app: FastifyInstance): void {
     const enriched = offers.map(o => {
       const c = o.canonical_name as string;
       const groups = groupsByCanon.get(c) ?? [];
-      const p = parsePrice(o.price as string | null);
+      const unitName = normalizeEinheit(o.unit as string | null);
+      const u = unitName ? units.get(unitName) : undefined;
+      // `price` is Marktguru's teaser (often per sub-portion); `ref_price` is the
+      // real Grundpreis in `unit` (e.g. 11.10 €/kg) — prefer it. Normalise to the
+      // group base (€/kg, €/l) by dividing out the unit's to_base factor.
+      const raw = o.ref_price != null ? Number(o.ref_price) : parsePrice(o.price as string | null);
+      const grundpreis = raw != null && Number.isFinite(raw) && u ? raw / u.to_base : (raw ?? null);
+      const offerKey = u ? (u.dimension === 'mass' ? 'kg' : u.dimension === 'volume' ? 'l' : u.name) : null;
       const buKey = keyFor(baseUnit.get(c) ?? null);
-      const offerKey = keyFor(normalizeEinheit(o.unit as string | null));
       // Only judge an offer in the product's declared comparison unit (base_unit).
-      // If the offer is in a different unit (e.g. Marktguru gives Thunfisch per kg
-      // but we track it per Stück) we can't convert reliably → no good-price flag,
-      // rather than comparing against a meaningless group.
+      // If the offer's unit differs (e.g. Marktguru gives Thunfisch per kg but we
+      // track it per Stück) we can't convert reliably → no good-price flag.
       const targetKey = buKey ? (offerKey === buKey ? buKey : null) : offerKey;
       const grp = targetKey ? groups.find(g => g.unit === targetKey) : null;
       let good_price = false, discount_pct: number | null = null;
-      if (p != null && grp && grp.n >= 2 && grp.avg > 0 && p <= grp.avg * 0.85) {
+      if (grundpreis != null && grp && grp.n >= 2 && grp.avg > 0 && grundpreis <= grp.avg * 0.85) {
         good_price = true;
-        discount_pct = Math.round((1 - p / grp.avg) * 100);
+        discount_pct = Math.round((1 - grundpreis / grp.avg) * 100);
       }
-      return { ...o, good_price, discount_pct, compare_unit: grp?.unit ?? null, avg_compare: grp?.avg ?? null };
+      return {
+        ...o, good_price, discount_pct,
+        compare_unit: grp?.unit ?? null, avg_compare: grp?.avg ?? null,
+        grundpreis: grundpreis != null ? Math.round(grundpreis * 100) / 100 : null,
+        grundpreis_unit: offerKey,
+      };
     });
 
     return { offers: enriched, pantry };

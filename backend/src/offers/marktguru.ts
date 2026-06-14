@@ -36,9 +36,10 @@ export interface MarktguruOffer {
   brand: string | null;
   retailers: string[];
   chainSlug: string | null; // marktguru advertiser uniqueName, e.g. "lidl"
-  price: number | null;
+  price: number | null;       // advertised/teaser price (may be per sub-portion)
   oldPrice: number | null;
-  unit: string | null;
+  referencePrice: number | null; // normalised Grundpreis, in `unit` (e.g. €/kg)
+  unit: string | null;        // the unit of referencePrice (kg / l / Stück …)
   validFrom: string | null; // ISO
   validTo: string | null;   // ISO
   url: string;
@@ -47,7 +48,7 @@ export interface MarktguruOffer {
 }
 
 interface RawOffer {
-  id: number; description?: string; price?: number; oldPrice?: number;
+  id: number; description?: string; price?: number; oldPrice?: number; referencePrice?: number;
   brand?: { name?: string } | null;
   advertisers?: { name?: string; uniqueName?: string }[];
   unit?: { name?: string; shortName?: string } | null;
@@ -79,6 +80,7 @@ export async function searchMarktguru(query: string, zipCode: string, limit = 20
       chainSlug: slug,
       price: typeof r.price === 'number' ? r.price : null,
       oldPrice: typeof r.oldPrice === 'number' ? r.oldPrice : null,
+      referencePrice: typeof r.referencePrice === 'number' ? r.referencePrice : null,
       unit: r.unit?.shortName ?? r.unit?.name ?? null,
       validFrom: vd.from ?? null,
       validTo: vd.to ?? null,

@@ -17,6 +17,7 @@ interface Offer {
   confidence: number | null; found_at: string;
   brand: string | null; image_url: string | null; unit: string | null; source: string | null;
   good_price: boolean; discount_pct: number | null;
+  ref_price: string | null; grundpreis: number | null; grundpreis_unit: string | null;
 }
 interface PantryInfo {
   avg_paid: number | null; last_bought: string | null;
@@ -71,7 +72,10 @@ function OfferRow({ o, isHidden, onHide, t, lang }: {
         <div className="flex flex-wrap items-baseline gap-x-1.5">
           <span className="text-sm font-medium">{o.store ?? '?'}</span>
           {o.brand && <span className="text-xs text-zinc-400">{o.brand}</span>}
-          {o.price && <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-500">{o.price}{o.unit ? `/${o.unit}` : ''}</span>}
+          {o.price && <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-500">{o.price}</span>}
+          {o.grundpreis != null && o.grundpreis_unit && (
+            <span className="text-xs text-zinc-500 dark:text-zinc-400">({o.grundpreis.toFixed(2).replace('.', ',')} €/{o.grundpreis_unit})</span>
+          )}
           {o.old_price && <span className="text-xs text-zinc-400 line-through">{o.old_price}</span>}
           {o.good_price && <GoodPrice pct={o.discount_pct} t={t} />}
         </div>
