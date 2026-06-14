@@ -599,7 +599,9 @@
     "avoidNeedsCanonical": "Nur Artikel mit kanonischem Namen können vermieden werden.",
     "avoidWip": "»Vermeiden« kommt bald: markierte Artikel werden dann beim Kauf angemahnt.",
     "subscribeOffers": "Angebote abonnieren",
-    "subscribed": "{{count}} Artikel für Angebote abonniert"
+    "unsubscribeOffers": "Abonnement beenden",
+    "subscribed": "{{count}} Artikel für Angebote abonniert",
+    "unsubscribed": "{{count}} Abonnement(s) beendet"
   },
   "common": {
     "searchOps": "Suchoperatoren: »eier bio« = beide · »äpfel, bananen« = oder · »eier -bio« = ohne »bio« · \"genaue phrase\" · laden:lidl · kategorie:obst · preis>2 (Akzente/Groß-klein egal)",

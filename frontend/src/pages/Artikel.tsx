@@ -224,15 +224,20 @@ export function Artikel() {
     onError: (e) => toast((e as Error).message, 'error'),
   });
 
+  // All selected already subscribed → offer "end subscription"; otherwise "subscribe"
+  // (subscribe is idempotent, so a mixed selection ends up fully subscribed).
+  const allSelectedSubscribed = selectedGroups.length > 0 && selectedGroups.every(g => isSubscribed(g));
   const subscribeOffers = useMutation({
-    mutationFn: () => {
+    mutationFn: (mode: 'subscribe' | 'unsubscribe') => {
       const refs = selectedGroups.map(g => g.canonical_name ?? g.display).filter(Boolean);
-      return api<{ subscribed: number }>('/api/subscriptions/bulk', { method: 'POST', body: { kind: 'artikel', refs } });
+      return api<{ subscribed?: number; unsubscribed?: number }>('/api/subscriptions/bulk', { method: 'POST', body: { kind: 'artikel', refs, mode } });
     },
-    onSuccess: (r) => {
+    onSuccess: (r, mode) => {
       void qc.invalidateQueries({ queryKey: ['subscriptions'] });
       setSelected(new Set());
-      toast(t('artikel.subscribed', { count: r.subscribed }), 'success');
+      toast(mode === 'unsubscribe'
+        ? t('artikel.unsubscribed', { count: r.unsubscribed ?? 0 })
+        : t('artikel.subscribed', { count: r.subscribed ?? 0 }), 'success');
     },
     onError: (e) => toast((e as Error).message, 'error'),
   });
@@ -479,8 +484,8 @@ export function Artikel() {
             <Button variant="secondary" onClick={() => setAssignOpen(true)}>
               <Users size={15} /> {t('artikel.assignMembers')}
             </Button>
-            <Button variant="secondary" onClick={() => subscribeOffers.mutate()} disabled={subscribeOffers.isPending}>
-              <Bell size={15} /> {t('artikel.subscribeOffers')}
+            <Button variant="secondary" onClick={() => subscribeOffers.mutate(allSelectedSubscribed ? 'unsubscribe' : 'subscribe')} disabled={subscribeOffers.isPending}>
+              <Bell size={15} /> {allSelectedSubscribed ? t('artikel.unsubscribeOffers') : t('artikel.subscribeOffers')}
             </Button>
             <Button
               variant="secondary"

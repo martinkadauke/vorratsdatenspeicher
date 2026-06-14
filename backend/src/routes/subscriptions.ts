@@ -42,21 +42,33 @@ export function subscriptionRoutes(app: FastifyInstance): void {
     return { subscribed: true };
   });
 
-  /** Bulk-subscribe several refs at once (used by the Artikel multi-select). */
+  /** Bulk subscribe/unsubscribe several refs at once (Artikel multi-select).
+   *  mode 'unsubscribe' removes them; default 'subscribe' adds (idempotent), so a
+   *  mixed selection ends up fully subscribed. */
   app.post('/api/subscriptions/bulk', async (req, reply) => {
-    const { kind, refs } = (req.body ?? {}) as { kind?: SubKind; refs?: (string | number)[] };
+    const { kind, refs, mode } = (req.body ?? {}) as {
+      kind?: SubKind; refs?: (string | number)[]; mode?: 'subscribe' | 'unsubscribe';
+    };
     if (!kind || !KINDS.includes(kind) || !Array.isArray(refs) || !refs.length) {
       return reply.code(400).send({ error: 'kind and refs[] required' });
     }
+    const refStrs = refs.map(String);
+    if (mode === 'unsubscribe') {
+      await sql`
+        DELETE FROM offer_subscription
+        WHERE user_id = ${req.user!.id} AND kind = ${kind} AND ref IN ${sql(refStrs)}
+      `;
+      return { ok: true, unsubscribed: refStrs.length };
+    }
     await sql.begin(async tx => {
-      for (const ref of refs) {
+      for (const ref of refStrs) {
         await tx`
           INSERT INTO offer_subscription (user_id, kind, ref)
-          VALUES (${req.user!.id}, ${kind}, ${String(ref)})
+          VALUES (${req.user!.id}, ${kind}, ${ref})
           ON CONFLICT (user_id, kind, ref) DO NOTHING
         `;
       }
     });
-    return { ok: true, subscribed: refs.length };
+    return { ok: true, subscribed: refStrs.length };
   });
 }

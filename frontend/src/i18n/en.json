@@ -599,7 +599,9 @@
     "avoidNeedsCanonical": "Only items with a canonical name can be avoided.",
     "avoidWip": "\"Avoid\" is coming soon: flagged items will warn you when bought.",
     "subscribeOffers": "Subscribe to offers",
-    "subscribed": "Subscribed {{count}} items to offers"
+    "unsubscribeOffers": "End subscription",
+    "subscribed": "Subscribed {{count}} items to offers",
+    "unsubscribed": "Ended {{count}} subscription(s)"
   },
   "common": {
     "searchOps": "Search operators: “eggs organic” = both · “apples, bananas” = or · “eggs -organic” = without “organic” · \"exact phrase\" · laden:lidl · kategorie:fruit · preis>2 (accent/case-insensitive)",
