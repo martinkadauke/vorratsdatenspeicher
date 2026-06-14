@@ -33,7 +33,8 @@ export function SortableArticleList({ receiptId, artikel, onEdit, highlightIds, 
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [items, setItems] = useState(artikel);
-  // Keyboard navigation: ↑/↓ move a green-outlined cursor, Enter opens the editor.
+  // Keyboard navigation: ↑/↓ move a green-outlined cursor, Enter opens the editor
+  // (name field), P opens it focused on the price field.
   const [cursor, setCursor] = useState(-1);
   useEffect(() => { setCursor(c => (c >= items.length ? items.length - 1 : c)); }, [items.length]);
   useEffect(() => {
@@ -45,6 +46,9 @@ export function SortableArticleList({ receiptId, artikel, onEdit, highlightIds, 
       else if (e.key === 'ArrowUp') { e.preventDefault(); setCursor(i => (i <= 0 ? 0 : i - 1)); }
       else if (e.key === 'Enter') {
         if (cursor >= 0 && cursor < items.length) { e.preventDefault(); onEdit(items[cursor]); }
+      }
+      else if (e.key === 'p' || e.key === 'P') {
+        if (cursor >= 0 && cursor < items.length) { e.preventDefault(); onEdit(items[cursor], 'price'); }
       }
     };
     window.addEventListener('keydown', onKey);
