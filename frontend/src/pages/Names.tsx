@@ -74,6 +74,7 @@ export function NameEditModal({ name, onClose }: { name: CanonicalName | null; o
   const [consumers, setConsumers] = useState<number[]>([]);
   const [exclusive, setExclusive] = useState(false);
   const [baseUnit, setBaseUnit] = useState<string | null>(null);
+  const [trackVorrat, setTrackVorrat] = useState(false);
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
 
   // Reset local form state whenever a different name is opened
@@ -85,6 +86,7 @@ export function NameEditModal({ name, onClose }: { name: CanonicalName | null; o
     setConsumers(name.consumers);
     setExclusive(name.consumers_exclusive);
     setBaseUnit(name.base_unit ?? null);
+    setTrackVorrat(!!name.track_vorrat);
   }, [name?.canonical_name]);
 
   const { data: receipts } = useQuery({
@@ -125,6 +127,12 @@ export function NameEditModal({ name, onClose }: { name: CanonicalName | null; o
         await api(`/api/names/${encodeURIComponent(effective)}/meta`, {
           method: 'PATCH',
           body: { base_unit: baseUnit },
+        });
+      }
+      if (trackVorrat !== !!name.track_vorrat) {
+        await api(`/api/names/${encodeURIComponent(effective)}/meta`, {
+          method: 'PATCH',
+          body: { track_vorrat: trackVorrat },
         });
       }
     },
@@ -179,6 +187,21 @@ export function NameEditModal({ name, onClose }: { name: CanonicalName | null; o
           <Label>{t('names.baseUnit')}</Label>
           <UnitSelect value={baseUnit} onChange={setBaseUnit} allowEmpty />
           <p className="mt-1 text-xs text-zinc-400">{t('names.baseUnitHint')}</p>
+        </div>
+        <div>
+          <Label>{t('names.trackVorrat')}</Label>
+          <button
+            type="button"
+            onClick={() => setTrackVorrat(v => !v)}
+            className={`mt-1 inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm ${
+              trackVorrat
+                ? 'border-emerald-500 bg-emerald-50 font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400'
+                : 'border-zinc-300 text-zinc-500 dark:border-zinc-700'
+            }`}
+          >
+            {trackVorrat ? t('names.trackVorratOn') : t('names.trackVorratOff')}
+          </button>
+          <p className="mt-1 text-xs text-zinc-400">{t('names.trackVorratHint')}</p>
         </div>
         <div>
           <Label>{t('article.consumers')}</Label>

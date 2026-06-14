@@ -167,7 +167,13 @@
     "daysLeft": "days left",
     "remaining": "Remaining",
     "lastBought": "Last bought",
-    "empty": "No pantry data"
+    "empty": "No pantry data",
+    "emptyTracked": "No items tracked yet. Mark items in the article master with “Track stock”.",
+    "correct": "Correct stock",
+    "realQty": "Actual qty",
+    "corrected": "corrected",
+    "resetOverride": "Reset correction",
+    "belowReserve": "below minimum"
   },
   "shopping": {
     "title": "Shopping list",
@@ -248,7 +254,11 @@
     "changeIcon": "Change icon",
     "changeIconHint": "Tap to pick from image search",
     "baseUnit": "Pricing unit (base price)",
-    "baseUnitHint": "Unit the price is compared in (e.g. kg, l, piece)"
+    "baseUnitHint": "Unit the price is compared in (e.g. kg, l, piece)",
+    "trackVorrat": "Track stock",
+    "trackVorratOn": "Tracked in pantry",
+    "trackVorratOff": "Not tracked",
+    "trackVorratHint": "Shows this item in the Pantry with an estimated remaining quantity."
   },
   "units": {
     "addNew": "+ new unit…",

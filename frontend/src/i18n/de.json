@@ -167,7 +167,13 @@
     "daysLeft": "Tage übrig",
     "remaining": "Restmenge",
     "lastBought": "Zuletzt gekauft",
-    "empty": "Keine Vorratsdaten"
+    "empty": "Keine Vorratsdaten",
+    "emptyTracked": "Noch keine Artikel im Vorrat. Markiere Artikel im Artikelstamm mit „Vorrat verfolgen“.",
+    "correct": "Bestand korrigieren",
+    "realQty": "Ist-Menge",
+    "corrected": "korrigiert",
+    "resetOverride": "Korrektur zurücksetzen",
+    "belowReserve": "unter Mindestbestand"
   },
   "shopping": {
     "title": "Einkaufsliste",
@@ -248,7 +254,11 @@
     "changeIcon": "Icon ändern",
     "changeIconHint": "Klick um aus Bildersuche zu wählen",
     "baseUnit": "Berechnungseinheit (Grundpreis)",
-    "baseUnitHint": "Einheit, in der der Preis verglichen wird (z. B. kg, l, Stück)"
+    "baseUnitHint": "Einheit, in der der Preis verglichen wird (z. B. kg, l, Stück)",
+    "trackVorrat": "Vorrat verfolgen",
+    "trackVorratOn": "Wird im Vorrat verfolgt",
+    "trackVorratOff": "Nicht im Vorrat",
+    "trackVorratHint": "Zeigt diesen Artikel im Vorrat-Menü mit geschätzter Restmenge."
   },
   "units": {
     "addNew": "+ neue Einheit…",

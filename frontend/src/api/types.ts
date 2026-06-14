@@ -107,6 +107,7 @@ export interface CanonicalName {
   artikel_count: number;
   category_path: string | null;
   base_unit?: string | null;
+  track_vorrat?: boolean | null;
   last_bought: string | null;
   translation_en: string | null;
   consumers: number[];
@@ -137,14 +138,15 @@ export interface Notification {
 
 export interface PantryItem {
   canonical_name: string;
-  einheit: string | null;
-  avg_daily: string | null;
-  last_qty: string | null;
+  base_unit: string | null;
+  rate_per_day: number | null;
+  est_remaining: number | null;
+  days_until_empty: number | null;
   last_bought: string | null;
-  est_remaining: string | null;
-  days_until_empty: string | null;
-  purchase_count: number | null;
-  updated_at: string | null;
+  override: { menge: number; gesetzt_am: string } | null;
+  reserve_min: number | null;
+  reserve_total: number;
+  reserve_charges: number;
 }
 
 export interface ShoppingItem {

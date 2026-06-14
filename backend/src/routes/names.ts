@@ -13,6 +13,7 @@ export function nameRoutes(app: FastifyInstance): void {
              COUNT(*)::int AS artikel_count,
              mode() WITHIN GROUP (ORDER BY a.category_path) AS category_path,
              MAX(cm.base_unit) AS base_unit,
+             bool_or(cm.track_vorrat) AS track_vorrat,
              MAX(e.datum)::text AS last_bought
       FROM artikel a
       LEFT JOIN einkauf e ON e.id = a.einkauf_id
@@ -112,7 +113,7 @@ export function nameRoutes(app: FastifyInstance): void {
     // Per-product base_unit + hidden flag, and a unit-aware comparison price
     // (€/kg, €/l, €/Stück) built from all of the product's purchases (konto-scoped).
     const meta = canonicals.length ? await sql`
-      SELECT canonical_name, base_unit, hidden FROM canonical_meta WHERE canonical_name IN ${sql(canonicals)}
+      SELECT canonical_name, base_unit, hidden, track_vorrat FROM canonical_meta WHERE canonical_name IN ${sql(canonicals)}
     ` : [];
     const metaMap = new Map(meta.map(m => [m.canonical_name as string, m]));
     const units = await loadUnits();
@@ -155,6 +156,7 @@ export function nameRoutes(app: FastifyInstance): void {
         avg_price: r.avg_price,
         base_unit: baseUnit,
         hidden: (m?.hidden as boolean | undefined) ?? false,
+        track_vorrat: (m?.track_vorrat as boolean | undefined) ?? false,
         comparison: comparison ? { unit: comparison.unit, avg: comparison.avg } : null,
         needs_weight,
         groups,
@@ -169,8 +171,8 @@ export function nameRoutes(app: FastifyInstance): void {
   /** Set per-product metadata: base_unit (Grundpreis-Einheit) and/or hidden. */
   app.patch('/api/names/:name/meta', async (req, reply) => {
     const name = decodeURIComponent((req.params as { name: string }).name);
-    const body = (req.body ?? {}) as { base_unit?: string | null; hidden?: boolean };
-    if (!('base_unit' in body) && !('hidden' in body)) {
+    const body = (req.body ?? {}) as { base_unit?: string | null; hidden?: boolean; track_vorrat?: boolean };
+    if (!('base_unit' in body) && !('hidden' in body) && !('track_vorrat' in body)) {
       return reply.code(400).send({ error: 'nothing to update' });
     }
     if ('base_unit' in body) {
@@ -184,6 +186,12 @@ export function nameRoutes(app: FastifyInstance): void {
         INSERT INTO canonical_meta (canonical_name, hidden, updated_at, updated_by)
         VALUES (${name}, ${!!body.hidden}, NOW(), ${req.user!.id})
         ON CONFLICT (canonical_name) DO UPDATE SET hidden = EXCLUDED.hidden, updated_at = NOW(), updated_by = EXCLUDED.updated_by`;
+    }
+    if ('track_vorrat' in body) {
+      await sql`
+        INSERT INTO canonical_meta (canonical_name, track_vorrat, updated_at, updated_by)
+        VALUES (${name}, ${!!body.track_vorrat}, NOW(), ${req.user!.id})
+        ON CONFLICT (canonical_name) DO UPDATE SET track_vorrat = EXCLUDED.track_vorrat, updated_at = NOW(), updated_by = EXCLUDED.updated_by`;
     }
     return { ok: true };
   });
