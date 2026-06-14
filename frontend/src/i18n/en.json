@@ -174,7 +174,14 @@
     "done": "Done",
     "snooze": "Later",
     "exclude": "Never",
-    "empty": "List is empty 🎉"
+    "empty": "List is empty 🎉",
+    "addPlaceholder": "Add item… (type for suggestions)",
+    "qty": "Qty",
+    "unit": "Unit",
+    "remove": "Remove from list",
+    "freeText": "free",
+    "suggested": "suggested",
+    "expectedTotal": "Expected total"
   },
   "stores": {
     "title": "Stores",

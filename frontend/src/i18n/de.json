@@ -174,7 +174,14 @@
     "done": "Erledigt",
     "snooze": "Später",
     "exclude": "Nie wieder",
-    "empty": "Liste ist leer 🎉"
+    "empty": "Liste ist leer 🎉",
+    "addPlaceholder": "Artikel hinzufügen… (tippen für Vorschläge)",
+    "qty": "Menge",
+    "unit": "Einh.",
+    "remove": "Von der Liste entfernen",
+    "freeText": "frei",
+    "suggested": "Vorschlag",
+    "expectedTotal": "Erwartete Summe"
   },
   "stores": {
     "title": "Läden",

@@ -148,14 +148,21 @@ export interface PantryItem {
 }
 
 export interface ShoppingItem {
-  canonical_name: string;
+  id: number;
+  canonical_name: string | null;
+  title: string;
+  menge: number | null;
+  einheit: string | null;
+  source: string;
+  done: boolean;
   priority: number;
   added_by: string | null;
   added_at: string | null;
-  days_until_empty: string | null;
-  est_remaining: string | null;
-  einheit: string | null;
-  last_qty: string | null;
+  avg_price: number | null;
+  avg_unit: string | null;
+  expected_price: number | null;
+  days_until_empty: number | null;
+  est_remaining: number | null;
 }
 
 export interface MaintenanceEvent {
