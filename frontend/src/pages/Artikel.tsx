@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Search, X, Rows3, CheckSquare, Square, Users, Ban, Tag, Bell, FolderTree, ReceiptText, SlidersHorizontal, UserCheck, Eye, EyeOff } from 'lucide-react';
+import { Search, X, Rows3, CheckSquare, Square, Users, Ban, Tag, Bell, FolderTree, ReceiptText, SlidersHorizontal, UserCheck, Eye, EyeOff, Scale } from 'lucide-react';
 import { api } from '../api/client';
 import type { CanonicalName } from '../api/types';
 import { Card, Input, Label, Spinner, EmptyState, Badge, Select, Button, Modal } from '../components/ui';
@@ -32,6 +32,7 @@ interface ArtikelGroup {
   base_unit: string | null;
   hidden: boolean;
   comparison: { unit: string; avg: number } | null;
+  needs_weight: boolean;
 }
 
 type SortMode = 'alpha' | 'date' | 'category' | 'count';
@@ -117,7 +118,9 @@ export function Artikel() {
   // membership filters (subscribed / avoided)
   const [onlySub, setOnlySub] = useState(false);
   const [onlyAvoided, setOnlyAvoided] = useState(false);
+  const [onlyNeedsWeight, setOnlyNeedsWeight] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
+  const hasNeedsWeight = useMemo(() => (data ?? []).some(g => g.needs_weight), [data]);
 
   const setHidden = useMutation({
     mutationFn: ({ name, hidden }: { name: string; hidden: boolean }) =>
@@ -158,14 +161,15 @@ export function Artikel() {
   }, [data, sort, i18n.language, showHidden]);
 
   const visible = useMemo(() => {
-    if (!onlySub && !onlyAvoided) return sorted;
+    if (!onlySub && !onlyAvoided && !onlyNeedsWeight) return sorted;
     return sorted.filter(g => {
       const sub = onlySub && isSubscribed(g);
       const av = onlyAvoided && !!g.canonical_name && avoided.has(g.canonical_name);
-      return sub || av;
+      const nw = onlyNeedsWeight && g.needs_weight;
+      return sub || av || nw;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sorted, onlySub, onlyAvoided, subscribed, avoided]);
+  }, [sorted, onlySub, onlyAvoided, onlyNeedsWeight, subscribed, avoided]);
 
   const allSelected = visible.length > 0 && visible.every(r => selected.has(r.key));
   const toggleAll = () => {
@@ -326,7 +330,7 @@ export function Artikel() {
         </div>
       </div>
 
-      {(subscribed.size > 0 || avoided.size > 0 || onlySub || onlyAvoided) && (
+      {(subscribed.size > 0 || avoided.size > 0 || onlySub || onlyAvoided || hasNeedsWeight || onlyNeedsWeight) && (
         <div className="flex flex-wrap items-center gap-1.5">
           <button
             type="button"
@@ -346,6 +350,17 @@ export function Artikel() {
           >
             <Ban size={13} /> {t('artikel.filterAvoided')} <span className="text-zinc-400">{avoided.size}</span>
           </button>
+          {(hasNeedsWeight || onlyNeedsWeight) && (
+            <button
+              type="button"
+              onClick={() => setOnlyNeedsWeight(v => !v)}
+              className={cn('flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium',
+                onlyNeedsWeight ? 'border-amber-400 bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'
+                  : 'border-zinc-200 text-zinc-500 dark:border-zinc-700')}
+            >
+              <Scale size={13} /> {t('artikel.filterNeedsWeight')}
+            </button>
+          )}
         </div>
       )}
 
@@ -432,6 +447,11 @@ export function Artikel() {
                     )}
                     {isSubscribed(g) && (
                       <Bell size={13} className="shrink-0 text-emerald-500" aria-label={t('artikel.filterSubscribed')} />
+                    )}
+                    {g.needs_weight && (
+                      <span title={t('artikel.needsWeight')} className="shrink-0">
+                        <Scale size={13} className="text-amber-500" />
+                      </span>
                     )}
                     <ConsumerDots ids={g.consumers} />
                   </div>

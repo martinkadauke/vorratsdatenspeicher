@@ -140,6 +140,9 @@ export function nameRoutes(app: FastifyInstance): void {
       const groups = cn ? comparisonGroups(linesByCanon.get(cn) ?? [], units) : [];
       const buKey = keyFor(baseUnit);
       const comparison = (buKey ? groups.find(g => g.unit === buKey) : undefined) ?? groups[0] ?? null;
+      // Product is meant to be compared per kg/l (Grundpreis), but we have no
+      // purchase line in that dimension → can't compute €/kg (weights missing).
+      const needs_weight = (buKey === 'kg' || buKey === 'l') && !groups.some(g => g.unit === buKey);
       return {
         key: r.grp,
         display: r.display,
@@ -153,6 +156,7 @@ export function nameRoutes(app: FastifyInstance): void {
         base_unit: baseUnit,
         hidden: (m?.hidden as boolean | undefined) ?? false,
         comparison: comparison ? { unit: comparison.unit, avg: comparison.avg } : null,
+        needs_weight,
         groups,
         artikel_ids: r.artikel_ids,
         einkauf_id: r.einkauf_id,
