@@ -5,17 +5,19 @@ import { notify } from '../notify.js';
 
 const ALLOWED = ['Stück', 'Packung', 'kg', 'l'] as const;
 
-const PROMPT = `Du bestimmst die natürliche PREIS-Einheit eines Lebensmittel-/Haushaltsprodukts —
-also worin man den Preis sinnvoll vergleicht.
+const PROMPT = `Du bestimmst die VERGLEICHS-Einheit eines Produkts — also die Einheit, in der der
+Preis im Laden ausgezeichnet und bei Marktguru angegeben wird (der "Grundpreis"),
+NICHT das Gebinde, in dem man es kauft.
 
 Erlaubte Werte (genau einer pro Produkt): "Stück", "Packung", "kg", "l".
 
-Leitregeln:
-- Zähl-/Stückware (Konserven & Dosen wie Thunfisch, Gläser, Joghurtbecher, einzelne Flaschen, Tafel Schokolade, Hygieneartikel, Eier) → "Stück".
-- Lose/gewogene Ware (Käse, Wurst, Fleisch, Obst, Gemüse, Nüsse) → "kg".
-- Flüssigkeiten in Gebinden (Milch, Saft, Öl, Limo, Wasser) → "l".
-- Klare Mehrfach-/Großgebinde ohne sinnvolle Einzel-/Gewichts-/Volumenbasis → "Packung".
-Die "erfasste_einheit" ist ein Hinweis aus echten Bons, aber oft ungenau — entscheide nach dem Produkt.
+Wichtig — es zählt der Grundpreis, auch wenn man es als Becher/Packung kauft:
+- Milchprodukte mit kg-Grundpreis (Joghurt, Quark, Sahne, Frischkäse, Butter, Margarine) → "kg".
+- Käse, Wurst, Aufschnitt, Fleisch, Obst, Gemüse, Nüsse (lose oder verpackt, pro kg ausgezeichnet) → "kg".
+- Getränke/Flüssigkeiten (Milch, Saft, Öl, Limo, Wasser, Essig) → "l".
+- Pro Stück ausgezeichnete Ware: Konserven & Dosen (Thunfisch, Mais, Bohnen), Eier, Drogerie-/Hygieneartikel, Tafel Schokolade, einzelne Fertiggerichte → "Stück".
+- Mehrfach-/Großgebinde ohne kg-/l-Grundpreis → "Packung".
+Die "erfasste_einheit" ist ein Hinweis aus echten Bons, oft ungenau — entscheide nach dem Produkt und seinem üblichen Grundpreis.
 
 Antworte AUSSCHLIESSLICH mit JSON-Array (keine Code-Fences):
 [{"canonical":"<name>","base_unit":"Stück|Packung|kg|l"}]`;
