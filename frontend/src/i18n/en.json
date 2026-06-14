@@ -179,7 +179,9 @@
     "boughtOn": "Bought on",
     "expiresOn": "expires",
     "noCharges": "No batches",
-    "qty": "Qty"
+    "qty": "Qty",
+    "buyNext": "Buy next time",
+    "onList": "On the shopping list"
   },
   "shopping": {
     "title": "Shopping list",

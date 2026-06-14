@@ -11,9 +11,9 @@ import {
   verticalListSortingStrategy, useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { TriangleAlert, Pencil, RotateCcw, Check, X, ChevronDown, Shield, Plus, Trash2, GripVertical } from 'lucide-react';
+import { TriangleAlert, Pencil, RotateCcw, Check, X, ChevronDown, Shield, Plus, Trash2, GripVertical, ShoppingCart } from 'lucide-react';
 import { api } from '../api/client';
-import type { PantryItem } from '../api/types';
+import type { PantryItem, ShoppingItem } from '../api/types';
 import { Card, Spinner, EmptyState, Badge, Input, Button } from '../components/ui';
 import { CanonicalIcon } from '../components/IconPicker';
 import { toast } from '../components/Toast';
@@ -58,6 +58,17 @@ export function Pantry() {
     onError: (e: Error) => toast(e.message, 'error'),
   });
 
+  // "Beim nächsten Mal kaufen": toggle the item on/off the shopping list.
+  const { data: shopList } = useQuery({ queryKey: ['shopping-list-mini'], queryFn: () => api<ShoppingItem[]>('/api/shopping-list'), staleTime: 30_000 });
+  const onListSet = new Set((shopList ?? []).map(s => s.canonical_name).filter((c): c is string => !!c));
+  const toggleList = useMutation({
+    mutationFn: ({ name, add }: { name: string; add: boolean }) => add
+      ? api('/api/shopping-list', { method: 'POST', body: { canonical_name: name } })
+      : api('/api/shopping-list/feedback', { method: 'POST', body: { action: 'done', canonical_name: name } }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['shopping-list-mini'] }),
+    onError: (e: Error) => toast(e.message, 'error'),
+  });
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -84,6 +95,8 @@ export function Pantry() {
             {items.map(p => (
               <VorratRow
                 key={p.canonical_name} p={p} t={t} lang={i18n.language}
+                onList={onListSet.has(p.canonical_name)}
+                onToggleList={() => toggleList.mutate({ name: p.canonical_name, add: !onListSet.has(p.canonical_name) })}
                 onSetOverride={(menge) => setOverride.mutate({ name: p.canonical_name, menge })}
                 onClearOverride={() => clearOverride.mutate(p.canonical_name)}
                 onReserveChanged={() => void qc.invalidateQueries({ queryKey: ['pantry'] })}
@@ -96,8 +109,8 @@ export function Pantry() {
   );
 }
 
-function VorratRow({ p, t, lang, onSetOverride, onClearOverride, onReserveChanged }: {
-  p: PantryItem; t: TFunction; lang: string;
+function VorratRow({ p, t, lang, onList, onToggleList, onSetOverride, onClearOverride, onReserveChanged }: {
+  p: PantryItem; t: TFunction; lang: string; onList: boolean; onToggleList: () => void;
   onSetOverride: (menge: number) => void; onClearOverride: () => void; onReserveChanged: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: p.canonical_name });
@@ -168,6 +181,14 @@ function VorratRow({ p, t, lang, onSetOverride, onClearOverride, onReserveChange
           </div>
           {!editing && (
             <div className="flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                onClick={onToggleList}
+                title={onList ? t('pantry.onList') : t('pantry.buyNext')}
+                className={cn('rounded-lg p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800', onList ? 'text-emerald-600 dark:text-emerald-500' : 'text-zinc-400 hover:text-zinc-600')}
+              >
+                <ShoppingCart size={15} />
+              </button>
               <button
                 type="button"
                 onClick={() => { setDraft(remaining != null ? fmtQty(remaining) : ''); setEditing(true); }}

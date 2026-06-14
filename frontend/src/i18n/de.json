@@ -179,7 +179,9 @@
     "boughtOn": "Gekauft am",
     "expiresOn": "läuft ab",
     "noCharges": "Keine Chargen",
-    "qty": "Menge"
+    "qty": "Menge",
+    "buyNext": "Beim nächsten Mal kaufen",
+    "onList": "Auf der Einkaufsliste"
   },
   "shopping": {
     "title": "Einkaufsliste",

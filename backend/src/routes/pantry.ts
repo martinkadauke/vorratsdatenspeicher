@@ -277,9 +277,10 @@ export function pantryRoutes(app: FastifyInstance): void {
 
     await sql.begin(async tx => {
       for (const p of toAdd) {
+        const m = p.typ_qty != null && p.typ_qty > 0 ? Math.round(p.typ_qty * 10) / 10 : 1; // typical bought qty
         await tx`
           INSERT INTO einkaufsliste_item (canonical_name, title, menge, source, priority, added_by)
-          VALUES (${p.canonical_name}, ${p.canonical_name}, 1, 'suggested',
+          VALUES (${p.canonical_name}, ${p.canonical_name}, ${m}, 'suggested',
                   (SELECT COALESCE(MAX(priority), 0) + 1 FROM einkaufsliste_item), ${req.user!.username})
           ON CONFLICT (canonical_name) WHERE canonical_name IS NOT NULL DO NOTHING`;
       }

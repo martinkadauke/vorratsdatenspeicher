@@ -258,7 +258,7 @@ function ShoppingRow({ s, t, onMenge, onRemove }: {
           <div className="flex min-w-0 items-center gap-1.5">
             <span className="truncate font-medium">{s.title}</span>
             {s.canonical_name == null && <Badge>{t('shopping.freeText')}</Badge>}
-            {s.source === 'suggested' && <Badge>{t('shopping.suggested')}</Badge>}
+            {s.source === 'suggested' && <Sparkles size={12} className="shrink-0 text-amber-500" aria-label={t('shopping.suggested')} />}
           </div>
           <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-zinc-500 dark:text-zinc-400">
             {s.avg_price != null && s.avg_unit && <span>Ø {eur(s.avg_price)}/{s.avg_unit}</span>}

@@ -15,6 +15,7 @@ export interface VorratEstimate {
   est_remaining: number | null;   // base unit; may be < 0 (= overdue)
   days_until_empty: number | null;
   last_bought: string | null;
+  typ_qty: number | null;         // typical (median) quantity per purchase, base unit
   override: VorratOverride | null;
 }
 
@@ -71,8 +72,11 @@ export function estimateVorrat(
   const n = dates.length;
   const last_bought = n ? dates[n - 1] : null;
   if (!n) {
-    return { base_unit: effKey, rate_per_day: null, est_remaining: override?.menge ?? null, days_until_empty: null, last_bought: null, override };
+    return { base_unit: effKey, rate_per_day: null, est_remaining: override?.menge ?? null, days_until_empty: null, last_bought: null, typ_qty: null, override };
   }
+
+  const qtys = [...perDate.values()].sort((a, b) => a - b);
+  const typ_qty = qtys.length ? Math.round(qtys[Math.floor(qtys.length / 2)] * 100) / 100 : null;
 
   // Weighted rate: everything bought before the last purchase is assumed
   // consumed by the last-purchase date.
@@ -103,6 +107,7 @@ export function estimateVorrat(
     est_remaining,
     days_until_empty,
     last_bought,
+    typ_qty,
     override,
   };
 }
