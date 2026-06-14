@@ -70,9 +70,9 @@ export function pantryRoutes(app: FastifyInstance): void {
     return items.map(it => {
       const cn = it.canonical_name as string | null;
       const avg = cn ? avgByCanon.get(cn) : undefined;
-      const menge = it.menge as number | null;
-      // menge is expressed in the product's base unit (= avg_unit) → straight multiply.
-      const expected = (avg && menge != null) ? Math.round(menge * avg.price * 100) / 100 : null;
+      // menge is in the product's base unit; default one package (1) when unset.
+      const menge = (it.menge as number | null) ?? 1;
+      const expected = avg ? Math.round(menge * avg.price * 100) / 100 : null;
       const vrt = cn ? vorratByCanon.get(cn) : undefined;
       return {
         ...it,
@@ -96,13 +96,13 @@ export function pantryRoutes(app: FastifyInstance): void {
     if (canonical) {
       await sql`
         INSERT INTO einkaufsliste_item (canonical_name, title, menge, einheit, added_by, priority)
-        VALUES (${canonical}, ${title}, ${b.menge ?? null}, ${b.einheit ?? null}, ${req.user!.username}, ${prio})
+        VALUES (${canonical}, ${title}, ${b.menge ?? 1}, ${b.einheit ?? null}, ${req.user!.username}, ${prio})
         ON CONFLICT (canonical_name) WHERE canonical_name IS NOT NULL DO NOTHING
       `;
     } else {
       await sql`
         INSERT INTO einkaufsliste_item (canonical_name, title, menge, einheit, added_by, priority)
-        VALUES (NULL, ${title}, ${b.menge ?? null}, ${b.einheit ?? null}, ${req.user!.username}, ${prio})
+        VALUES (NULL, ${title}, ${b.menge ?? 1}, ${b.einheit ?? null}, ${req.user!.username}, ${prio})
       `;
     }
     return { ok: true };
@@ -116,7 +116,7 @@ export function pantryRoutes(app: FastifyInstance): void {
     await sql`
       UPDATE einkaufsliste_item SET
         title    = COALESCE(${b.title ?? null}::text, title),
-        menge    = COALESCE(${b.menge ?? null}::numeric, menge),
+        menge    = COALESCE(${b.menge ?? 1}::numeric, menge),
         einheit  = COALESCE(${b.einheit ?? null}::text, einheit),
         done     = COALESCE(${b.done ?? null}::boolean, done),
         priority = COALESCE(${b.priority ?? null}::int, priority)

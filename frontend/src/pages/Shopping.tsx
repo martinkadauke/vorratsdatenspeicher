@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -11,7 +11,7 @@ import {
   verticalListSortingStrategy, useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { GripVertical, Plus, Trash2, Search } from 'lucide-react';
+import { GripVertical, Minus, Plus, Trash2, Search } from 'lucide-react';
 import { api } from '../api/client';
 import type { ShoppingItem } from '../api/types';
 import { Card, Spinner, EmptyState, Button, Input, Badge } from '../components/ui';
@@ -22,6 +22,7 @@ const num = (s: string): number | null => {
   const n = parseFloat(s.replace(',', '.'));
   return Number.isFinite(n) ? n : null;
 };
+const fmt = (n: number): string => (Number.isInteger(n) ? String(n) : String(n).replace('.', ','));
 
 export function Shopping() {
   const { t } = useTranslation();
@@ -40,7 +41,6 @@ export function Shopping() {
   const nameSet = new Set((names ?? []).map(n => n.canonical_name));
 
   const [title, setTitle] = useState('');
-  const [menge, setMenge] = useState('');
   // Local order preserved across refetches (so a drag isn't undone by a refresh).
   const [items, setItems] = useState<ShoppingItem[]>([]);
   useEffect(() => {
@@ -64,10 +64,10 @@ export function Shopping() {
       const ti = title.trim();
       return api('/api/shopping-list', {
         method: 'POST',
-        body: { canonical_name: nameSet.has(ti) ? ti : null, title: ti, menge: menge.trim() ? num(menge) : null },
+        body: { canonical_name: nameSet.has(ti) ? ti : null, title: ti },
       });
     },
-    onSuccess: () => { setTitle(''); setMenge(''); invalidate(); },
+    onSuccess: () => { setTitle(''); invalidate(); },
     onError: (e: Error) => toast(e.message, 'error'),
   });
 
@@ -127,9 +127,6 @@ export function Shopping() {
             {(names ?? []).map(n => <option key={n.canonical_name} value={n.canonical_name} />)}
           </datalist>
         </div>
-        <div className="w-20 shrink-0">
-          <Input inputMode="decimal" value={menge} onChange={e => setMenge(e.target.value)} placeholder={t('shopping.qty')} />
-        </div>
         <Button type="submit" disabled={!canAdd} className="shrink-0"><Plus size={16} /></Button>
       </form>
 
@@ -162,7 +159,7 @@ export function Shopping() {
 }
 
 function ShoppingRow({ s, t, onMenge, onRemove }: {
-  s: ShoppingItem; t: TFunction; onMenge: (m: number | null) => void; onRemove: () => void;
+  s: ShoppingItem; t: TFunction; onMenge: (m: number) => void; onRemove: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: s.id });
   const style = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 10 : undefined };
@@ -193,23 +190,7 @@ function ShoppingRow({ s, t, onMenge, onRemove }: {
             )}
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <div className="w-16">
-            <Input
-              key={`m${s.id}`}
-              className="text-right"
-              inputMode="decimal"
-              defaultValue={s.menge ?? ''}
-              placeholder={t('shopping.qty')}
-              onBlur={e => {
-                const raw = e.target.value.trim();
-                const v = num(raw);
-                if (raw && v !== s.menge) onMenge(v);
-              }}
-            />
-          </div>
-          {s.avg_unit && <span className="w-8 shrink-0 text-xs text-zinc-400">{s.avg_unit}</span>}
-        </div>
+        <MengeStepper value={s.menge ?? 1} unit={s.avg_unit} onChange={onMenge} t={t} />
         <button
           type="button"
           onClick={onRemove}
@@ -219,6 +200,62 @@ function ShoppingRow({ s, t, onMenge, onRemove }: {
           <Trash2 size={16} />
         </button>
       </Card>
+    </div>
+  );
+}
+
+/** Quantity stepper: − / value / + (step 1, floor 0). Long-press a button — or
+ *  tap the value — to type an exact amount (e.g. 1,5). Defaults to one base-unit
+ *  package; `unit` (kg/l/Stück) is shown next to the number. */
+function MengeStepper({ value, unit, onChange, t }: {
+  value: number; unit: string | null; onChange: (m: number) => void; t: TFunction;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const held = useRef(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  const openEdit = () => { setDraft(fmt(value)); setEditing(true); };
+  const startHold = () => { held.current = false; timer.current = setTimeout(() => { held.current = true; openEdit(); }, 450); };
+  const cancelHold = () => { if (timer.current) { clearTimeout(timer.current); timer.current = undefined; } };
+  const step = (delta: number) => () => {
+    if (held.current) { held.current = false; return; } // long-press already opened the editor
+    onChange(Math.max(0, Math.round((value + delta) * 100) / 100));
+  };
+  const commit = () => { setEditing(false); const n = num(draft); if (n != null && n !== value) onChange(Math.max(0, n)); };
+
+  if (editing) {
+    return (
+      <div className="w-24 shrink-0">
+        <Input
+          autoFocus
+          className="text-center"
+          inputMode="decimal"
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commit(); } if (e.key === 'Escape') setEditing(false); }}
+        />
+      </div>
+    );
+  }
+  const btn = 'touch-none px-2 py-1.5 text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800';
+  return (
+    <div className="flex shrink-0 select-none items-center rounded-lg border border-zinc-200 dark:border-zinc-700">
+      <button type="button" aria-label="−" title={t('shopping.holdToType')}
+        onPointerDown={startHold} onPointerUp={cancelHold} onPointerLeave={cancelHold}
+        onClick={step(-1)} onContextMenu={e => e.preventDefault()} className={cn(btn, 'rounded-l-lg')}>
+        <Minus size={14} />
+      </button>
+      <button type="button" onClick={openEdit} onContextMenu={e => e.preventDefault()} title={t('shopping.holdToType')}
+        className="tabular min-w-[3rem] px-1 py-1.5 text-center text-sm font-medium">
+        {fmt(value)}{unit && <span className="ml-0.5 text-xs font-normal text-zinc-400">{unit}</span>}
+      </button>
+      <button type="button" aria-label="+" title={t('shopping.holdToType')}
+        onPointerDown={startHold} onPointerUp={cancelHold} onPointerLeave={cancelHold}
+        onClick={step(1)} onContextMenu={e => e.preventDefault()} className={cn(btn, 'rounded-r-lg')}>
+        <Plus size={14} />
+      </button>
     </div>
   );
 }

@@ -181,7 +181,8 @@
     "remove": "Remove from list",
     "freeText": "free",
     "suggested": "suggested",
-    "expectedTotal": "Expected total"
+    "expectedTotal": "Expected total",
+    "holdToType": "Hold to type a value"
   },
   "stores": {
     "title": "Stores",

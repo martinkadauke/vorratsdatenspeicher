@@ -181,7 +181,8 @@
     "remove": "Von der Liste entfernen",
     "freeText": "frei",
     "suggested": "Vorschlag",
-    "expectedTotal": "Erwartete Summe"
+    "expectedTotal": "Erwartete Summe",
+    "holdToType": "Lange drücken zum Eintippen"
   },
   "stores": {
     "title": "Läden",
