@@ -29,6 +29,7 @@ export function ReceiptDetailPage() {
   // within the filtered set.
   const filterQs = location.search;
   const [editing, setEditing] = useState<Artikel | null>(null);
+  const [editFocus, setEditFocus] = useState<'name' | 'price'>('name'); // which field to focus when the editor opens
   const [editReceipt, setEditReceipt] = useState(false);
   const [adding, setAdding] = useState(false);
   const [imgVersion, setImgVersion] = useState(0); // cache-buster after rotate
@@ -413,7 +414,7 @@ export function ReceiptDetailPage() {
           <SortableArticleList
             receiptId={data.id}
             artikel={data.artikel}
-            onEdit={setEditing}
+            onEdit={(a, focus) => { setEditFocus(focus ?? 'name'); setEditing(a); }}
             highlightIds={matchIds}
             scrollToId={scrollToId}
             keyboardNav={editable && !editing && !adding && !editReceipt}
@@ -444,6 +445,7 @@ export function ReceiptDetailPage() {
       <ArticleEditModal
         artikel={editing}
         open={!!editing}
+        focusField={editFocus}
         locked={locked}
         onClose={() => setEditing(null)}
         invalidateKeys={[['receipt', id], ['receipts']]}

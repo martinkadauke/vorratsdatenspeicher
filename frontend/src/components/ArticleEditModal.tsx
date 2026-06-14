@@ -33,13 +33,15 @@ const computeEinzel = (mengeStr: string, totalStr: string): string => {
 
 interface NameOption { canonical_name: string; category_path: string | null }
 
-export function ArticleEditModal({ artikel, open, onClose, invalidateKeys, locked }: {
+export function ArticleEditModal({ artikel, open, onClose, invalidateKeys, locked, focusField = 'name' }: {
   artikel: Artikel | null;
   open: boolean;
   onClose: () => void;
   invalidateKeys: unknown[][];
   /** Receipt is verified+locked → open view-only (no save/delete) until unlocked. */
   locked?: boolean;
+  /** Which field to auto-focus on open: 'name' (canonical) or 'price' (Gesamtpreis). */
+  focusField?: 'name' | 'price';
 }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
@@ -59,6 +61,7 @@ export function ArticleEditModal({ artikel, open, onClose, invalidateKeys, locke
   const [nameCategory, setNameCategory] = useState<Map<string, string | null>>(new Map());
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const canonRef = useRef<HTMLInputElement>(null);
+  const preisRef = useRef<HTMLInputElement>(null);
 
   // Typing/picking an existing canonical name prefills its category.
   const onCanonicalChange = (v: string) => {
@@ -71,10 +74,14 @@ export function ArticleEditModal({ artikel, open, onClose, invalidateKeys, locke
   // (e.g. arriving here via Enter from the receipt's keyboard navigation).
   useEffect(() => {
     if (open && artikel) {
-      const id = setTimeout(() => { canonRef.current?.focus(); canonRef.current?.select(); }, 40);
+      const id = setTimeout(() => {
+        const ref = focusField === 'price' ? preisRef : canonRef;
+        ref.current?.focus();
+        ref.current?.select();
+      }, 40);
       return () => clearTimeout(id);
     }
-  }, [open, artikel]);
+  }, [open, artikel, focusField]);
 
   useEffect(() => {
     if (!artikel) return;
@@ -230,7 +237,7 @@ export function ArticleEditModal({ artikel, open, onClose, invalidateKeys, locke
           </div>
           <div>
             <Label>{t('article.totalPrice')} (€)</Label>
-            <Input inputMode="decimal" value={preis} onChange={e => onPreisChange(e.target.value)} />
+            <Input ref={preisRef} inputMode="decimal" value={preis} onChange={e => onPreisChange(e.target.value)} />
           </div>
         </div>
 

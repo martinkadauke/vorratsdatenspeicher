@@ -22,7 +22,7 @@ import { eur } from '../lib/utils';
 export function SortableArticleList({ receiptId, artikel, onEdit, highlightIds, scrollToId, keyboardNav, readOnly, onDuplicate, onInsertAfter }: {
   receiptId: number;
   artikel: Artikel[];
-  onEdit: (a: Artikel) => void;
+  onEdit: (a: Artikel, focus?: 'name' | 'price') => void;
   highlightIds?: Set<number>;
   scrollToId?: number | null;
   keyboardNav?: boolean;
@@ -99,7 +99,7 @@ export function SortableArticleList({ receiptId, artikel, onEdit, highlightIds, 
             <Fragment key={a.id}>
               <SortableRow
                 a={a}
-                onEdit={() => onEdit(a)}
+                onEdit={(focus) => onEdit(a, focus)}
                 onDuplicate={!readOnly && onDuplicate ? () => onDuplicate(a.id) : undefined}
                 highlighted={highlightIds?.has(a.id) ?? false}
                 scrollHere={scrollToId === a.id}
@@ -127,7 +127,7 @@ export function SortableArticleList({ receiptId, artikel, onEdit, highlightIds, 
   );
 }
 
-function SortableRow({ a, onEdit, onDuplicate, highlighted, scrollHere, cursored, readOnly }: { a: Artikel; onEdit: () => void; onDuplicate?: () => void; highlighted: boolean; scrollHere: boolean; cursored: boolean; readOnly: boolean }) {
+function SortableRow({ a, onEdit, onDuplicate, highlighted, scrollHere, cursored, readOnly }: { a: Artikel; onEdit: (focus?: 'name' | 'price') => void; onDuplicate?: () => void; highlighted: boolean; scrollHere: boolean; cursored: boolean; readOnly: boolean }) {
   const { t } = useTranslation();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: a.id });
   const rowRef = useRef<HTMLDivElement | null>(null);
@@ -163,8 +163,8 @@ function SortableRow({ a, onEdit, onDuplicate, highlighted, scrollHere, cursored
             <GripVertical size={16} />
           </button>
         )}
-        {/* body — tap to edit */}
-        <button type="button" onClick={onEdit} className="flex min-w-0 flex-1 items-center gap-2 text-left sm:gap-3">
+        {/* body — tap to edit the name (jumps to the canonical-name field) */}
+        <button type="button" onClick={() => onEdit('name')} className="flex min-w-0 flex-1 items-center gap-2 text-left sm:gap-3">
           {a.canonical_name && <CanonicalIcon name={a.canonical_name} size={32} />}
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center gap-1.5">
@@ -184,7 +184,15 @@ function SortableRow({ a, onEdit, onDuplicate, highlighted, scrollHere, cursored
               {a.menge && <span className="text-xs text-zinc-400">{a.menge} {a.einheit ?? ''}</span>}
             </div>
           </div>
-          <div className="tabular shrink-0 font-semibold">{eur(a.preis)}</div>
+        </button>
+        {/* price — tap to edit the total price directly (jumps to the Gesamtpreis field) */}
+        <button
+          type="button"
+          onClick={() => onEdit('price')}
+          title={t('article.totalPrice')}
+          className="tabular shrink-0 rounded-md px-1.5 py-1 font-semibold hover:bg-zinc-100 dark:hover:bg-zinc-800"
+        >
+          {eur(a.preis)}
         </button>
         {onDuplicate && (
           <button
