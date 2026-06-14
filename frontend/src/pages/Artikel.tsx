@@ -55,7 +55,7 @@ export function Artikel() {
   const { user } = useAuth();
   const canWrite = user?.can_write !== false;
   const [search, setSearch] = useState('');
-  const [sort, setSort] = useState<SortMode>('alpha');
+  const [sort, setSort] = useState<SortMode>('count');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [detail, setDetail] = useState<CanonicalName | null>(null);
   const [assignOpen, setAssignOpen] = useState(false);
@@ -135,7 +135,9 @@ export function Artikel() {
   }, []);
 
   const sorted = useMemo(() => {
-    const rows = [...(data ?? [])];
+    // Meta/* (Pfand, Preisvorteil/Rabatt) are bookkeeping, not products → keep them
+    // out of the article list.
+    const rows = (data ?? []).filter(g => !(g.category ?? '').startsWith('Meta'));
     rows.sort((a, b) => {
       if (sort === 'count') return b.count - a.count;
       if (sort === 'date') return (b.last_bought ?? '').localeCompare(a.last_bought ?? '');
