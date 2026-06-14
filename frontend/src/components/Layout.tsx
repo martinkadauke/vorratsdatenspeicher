@@ -39,13 +39,14 @@ export function Layout() {
   const navigate = useNavigate();
   const [tourOpen, setTourOpen] = useState(false);
 
-  // Which environment are we on? (main→prod / stage / dev) — shown next to the brand.
+  // Which environment are we on? Use the runtime VDS_ENV (prod/stage/dev) — NOT
+  // the git ref, which collides across branches that share a commit SHA.
   const { data: version } = useQuery({
     queryKey: ['version'],
-    queryFn: () => api<{ ref: string }>('/api/version'),
+    queryFn: () => api<{ ref: string; env: string | null }>('/api/version'),
     staleTime: Infinity,
   });
-  const envBadge = version?.ref ? ENV_BADGE[version.ref] : undefined;
+  const envBadge = version?.env ? ENV_BADGE[version.env] : undefined;
 
   // Auto-open tour on first login (after a tiny delay so the UI has settled)
   useEffect(() => {
