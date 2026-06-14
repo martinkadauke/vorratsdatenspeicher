@@ -2,14 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
-import { ExternalLink, RefreshCw, ChevronDown, ChevronLeft, ChevronRight, EyeOff, Eye, Pin, ListPlus, Check, X, Search } from 'lucide-react';
+import { ExternalLink, RefreshCw, ChevronDown, ChevronLeft, ChevronRight, EyeOff, Eye, Pin, ListPlus, Check, X, Search, Sparkles } from 'lucide-react';
 import { api } from '../api/client';
 import { Card, Spinner, EmptyState, Badge, Button, Input } from '../components/ui';
 import { CanonicalIcon } from '../components/IconPicker';
 import { useAuth } from '../context/auth';
 import { toast } from '../components/Toast';
 import { FirstVisitHint } from '../components/FirstVisitHint';
-import { cn, fmtDate } from '../lib/utils';
+import { cn, fmtDate, eur } from '../lib/utils';
 
 interface Offer {
   id: number; canonical_name: string; store: string | null; price: string | null;
@@ -19,11 +19,12 @@ interface Offer {
   brand: string | null; image_url: string | null; unit: string | null; source: string | null;
   good_price: boolean; discount_pct: number | null;
   ref_price: string | null; grundpreis: number | null; grundpreis_unit: string | null;
+  compare_unit: string | null; avg_compare: number | null;
 }
 interface PantryInfo {
   avg_paid: number | null; last_bought: string | null;
   interval_days: number | null; due_in_days: number | null;
-  status: 'overdue' | 'soon' | 'ok' | null;
+  status: 'overdue' | 'soon' | 'ok' | null; typ_qty: number | null;
 }
 interface OffersResponse { offers: Offer[]; pantry: Record<string, PantryInfo> }
 
@@ -111,6 +112,153 @@ function OfferRow({ o, isHidden, onHide, t, lang }: {
               className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
         {isHidden ? <Eye size={14} /> : <EyeOff size={14} />}
       </button>
+    </div>
+  );
+}
+
+// ---- Recommendation engine (client-side over /api/offers/mine) --------------
+// "What should I buy where this week?" = the user's offers that are due to
+// re-buy AND/OR a good price, ranked, then rolled up per chain. Pure
+// presentation over data the page already has — no extra request.
+const DAY_MS = 86_400_000;
+const dms = (iso: string | null): number => (iso ? Date.parse(iso) : NaN);
+
+interface RecPick {
+  canonical: string; offer: Offer; status: 'overdue' | 'soon' | 'ok' | null;
+  savings: number | null; expiringSoon: boolean; startsFuture: boolean; score: number;
+}
+interface ChainRec {
+  store: string; picks: RecPick[]; dueCount: number; goodCount: number;
+  savings: number; soonestValidTo: string | null; score: number;
+}
+
+function buildRecommendations(offers: Offer[], pantry: Record<string, PantryInfo>, pinned: Set<string>, nowMs: number) {
+  const SOON = 3 * DAY_MS;
+  const cmp = (x: Offer) => x.grundpreis ?? priceNum(x.price) ?? 1e9;
+  // cheapest still-valid offer per product+store
+  const best = new Map<string, Offer>();
+  for (const o of offers) {
+    if (!o.store) continue;
+    const vt = dms(o.valid_to);
+    if (Number.isFinite(vt) && vt < nowMs - DAY_MS) continue; // already expired
+    const key = `${o.canonical_name}@@${o.store}`;
+    const cur = best.get(key);
+    if (!cur || cmp(o) < cmp(cur)) best.set(key, o);
+  }
+  const picks: RecPick[] = [];
+  for (const o of best.values()) {
+    const p = pantry[o.canonical_name];
+    const status = p?.status ?? null;
+    const due = status === 'overdue' || status === 'soon';
+    if (!due && !o.good_price) continue; // recommend only due and/or good-price
+    const savings = (o.avg_compare != null && o.grundpreis != null && p?.typ_qty != null && o.avg_compare > o.grundpreis)
+      ? Math.round((o.avg_compare - o.grundpreis) * p.typ_qty * 100) / 100 : null;
+    const vt = dms(o.valid_to), vf = dms(o.valid_from);
+    const expiringSoon = Number.isFinite(vt) && vt >= nowMs && vt - nowMs <= SOON;
+    const startsFuture = Number.isFinite(vf) && vf > nowMs;
+    let score = 0;
+    if (status === 'overdue') score += 4; else if (status === 'soon') score += 2;
+    if (o.good_price) score += 2 + (o.discount_pct ?? 0) / 50;
+    if (expiringSoon) score += 1;
+    if (o.store && pinned.has(o.store)) score += 0.5;
+    if (startsFuture) score -= 1; // not actionable yet → rank lower
+    picks.push({ canonical: o.canonical_name, offer: o, status, savings, expiringSoon, startsFuture, score });
+  }
+  picks.sort((a, b) => b.score - a.score);
+
+  const chainMap = new Map<string, ChainRec>();
+  for (const pk of picks) {
+    const store = pk.offer.store as string;
+    let cr = chainMap.get(store);
+    if (!cr) { cr = { store, picks: [], dueCount: 0, goodCount: 0, savings: 0, soonestValidTo: null, score: 0 }; chainMap.set(store, cr); }
+    cr.picks.push(pk);
+    if (pk.status === 'overdue' || pk.status === 'soon') cr.dueCount++;
+    if (pk.offer.good_price) cr.goodCount++;
+    if (pk.savings) cr.savings += pk.savings;
+    const vt = pk.offer.valid_to;
+    if (vt && !pk.startsFuture && (!cr.soonestValidTo || vt < cr.soonestValidTo)) cr.soonestValidTo = vt;
+  }
+  const chains = [...chainMap.values()];
+  for (const cr of chains) cr.score = cr.dueCount * 2 + cr.goodCount + cr.savings / 5 + (pinned.has(cr.store) ? 1 : 0);
+  chains.sort((a, b) => b.score - a.score);
+  return { picks, chains };
+}
+
+function RecPickRow({ pk, onList, toggleList, canWrite, t, lang }: {
+  pk: RecPick; onList: Set<string>; toggleList: (c: string) => void; canWrite: boolean; t: TFunction; lang: string;
+}) {
+  const o = pk.offer;
+  const vFrom = fmtDay(o.valid_from, lang), vTo = fmtDay(o.valid_to, lang);
+  const validity = pk.startsFuture && vFrom ? `${t('offers.from')} ${vFrom}`
+    : pk.expiringSoon && vTo ? t('offers.recExpiring', { date: vTo })
+    : vTo ? `${t('offers.until')} ${vTo}` : null;
+  return (
+    <div className="flex items-center gap-2 py-1.5">
+      <CanonicalIcon name={pk.canonical} size={28} />
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-baseline gap-x-1.5">
+          <span className="truncate text-sm font-medium">{pk.canonical}</span>
+          <span className="text-xs text-zinc-400">@ {o.store}</span>
+          {o.grundpreis != null && o.grundpreis_unit && (
+            <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-500">
+              {o.grundpreis.toFixed(2).replace('.', ',')} €/{o.grundpreis_unit}
+            </span>
+          )}
+          {pk.status === 'overdue' && (
+            <span className="shrink-0 rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-950/60 dark:text-red-300">{t('offers.dueOverdue')}</span>
+          )}
+          {pk.status === 'soon' && (
+            <span className="shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-950/60 dark:text-amber-300">{t('offers.dueSoon')}</span>
+          )}
+          {o.good_price && (
+            <span className="shrink-0 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
+              {t('offers.goodPrice')}{o.discount_pct ? ` −${o.discount_pct}%` : ''}
+            </span>
+          )}
+        </div>
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-zinc-400">
+          {validity && <span className={cn(pk.expiringSoon && 'font-semibold text-red-500 dark:text-red-400')}>{validity}</span>}
+          {pk.savings != null && pk.savings > 0 && <span>· {t('offers.recSave', { amount: eur(pk.savings) })}</span>}
+        </div>
+      </div>
+      {canWrite && (
+        <button onClick={() => toggleList(pk.canonical)} title={onList.has(pk.canonical) ? t('offers.onList') : t('offers.addToList')}
+          className={cn('shrink-0 rounded-lg p-1.5', onList.has(pk.canonical)
+            ? 'text-emerald-600 hover:bg-emerald-50 dark:text-emerald-500 dark:hover:bg-emerald-950/30'
+            : 'text-zinc-400 hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-950/30')}>
+          {onList.has(pk.canonical) ? <Check size={15} /> : <ListPlus size={15} />}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function RecommendationSection({ offers, pantry, pinned, onList, toggleList, canWrite, t, lang }: {
+  offers: Offer[]; pantry: Record<string, PantryInfo>; pinned: Set<string>;
+  onList: Set<string>; toggleList: (c: string) => void; canWrite: boolean; t: TFunction; lang: string;
+}) {
+  const rec = useMemo(() => buildRecommendations(offers, pantry, pinned, Date.now()), [offers, pantry, pinned]);
+  if (!rec.picks.length) return null;
+  const topChain = rec.chains[0];
+  return (
+    <div className="flex flex-col gap-2 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-3 dark:border-emerald-900/50 dark:bg-emerald-950/20">
+      <div className="flex items-center gap-2">
+        <Sparkles size={16} className="text-emerald-600 dark:text-emerald-400" />
+        <h2 className="text-sm font-bold">{t('offers.recTitle')}</h2>
+      </div>
+      {topChain && (topChain.dueCount + topChain.goodCount) > 0 && (
+        <div className="text-xs text-zinc-600 dark:text-zinc-300">
+          <span className="font-semibold">{t('offers.recBestStore')}: {topChain.store}</span>
+          {' — '}{t('offers.recBestStoreSummary', { count: topChain.picks.length })}
+          {topChain.savings > 0 && <> · {t('offers.recSaveAbout', { amount: eur(topChain.savings) })}</>}
+          {topChain.soonestValidTo && <> · {t('offers.until')} {fmtDay(topChain.soonestValidTo, lang)}</>}
+        </div>
+      )}
+      <div className="flex flex-col divide-y divide-emerald-100 dark:divide-emerald-900/40">
+        {rec.picks.slice(0, 6).map(pk => (
+          <RecPickRow key={pk.offer.id} pk={pk} onList={onList} toggleList={toggleList} canWrite={canWrite} t={t} lang={lang} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -288,6 +436,10 @@ export function Offers() {
       <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('offers.hint')}</p>
       <FirstVisitHint id="offers" titleKey="hint.offers.title" bodyKey="hint.offers.body" />
       {busy && <p className="text-xs text-emerald-600 dark:text-emerald-500">{t('offers.refreshingHint')}</p>}
+
+      {!isLoading && (
+        <RecommendationSection offers={offers} pantry={pantry} pinned={pinned} onList={onList} toggleList={toggleList} canWrite={canWrite} t={t} lang={lang} />
+      )}
 
       {/* Watch arbitrary products that aren't in your artikel list */}
       {canWrite && (

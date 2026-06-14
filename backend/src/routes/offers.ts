@@ -68,7 +68,7 @@ export function offerRoutes(app: FastifyInstance): void {
     const pantry: Record<string, {
       avg_paid: number | null; base_unit: string | null; groups: Group[];
       last_bought: string | null; interval_days: number | null; due_in_days: number | null;
-      status: 'overdue' | 'soon' | 'ok' | null;
+      status: 'overdue' | 'soon' | 'ok' | null; typ_qty: number | null;
     }> = {};
     const groupsByCanon = new Map<string, Group[]>();
 
@@ -91,9 +91,24 @@ export function offerRoutes(app: FastifyInstance): void {
         due_in_days = interval_days - daysSince;
         status = due_in_days <= 0 ? 'overdue' : due_in_days <= 7 ? 'soon' : 'ok';
       }
+      // Typical purchase quantity in the headline group's base unit (median) →
+      // lets the client turn a €/unit discount into € saved per typical buy.
+      let typ_qty: number | null = null;
+      if (headline) {
+        const qtys: number[] = [];
+        for (const r of rows) {
+          const un = normalizeEinheit(r.einheit);
+          if (keyFor(un) !== headline.unit) continue;
+          const u = un ? units.get(un) : undefined;
+          const m = parseFloat((r.menge ?? '').toString().replace(',', '.'));
+          const qty = (Number.isFinite(m) ? m : 1) * (u ? u.to_base : 1);
+          if (qty > 0) qtys.push(qty);
+        }
+        if (qtys.length) { qtys.sort((a, b) => a - b); typ_qty = qtys[Math.floor(qtys.length / 2)]; }
+      }
       pantry[c] = {
         avg_paid: headline?.avg ?? null, base_unit: bu, groups,
-        last_bought: lastStr, interval_days, due_in_days, status,
+        last_bought: lastStr, interval_days, due_in_days, status, typ_qty,
       };
     }
 
