@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, Plus, ChevronLeft, ChevronRight, RotateCw, Check, Hand, Wallet, X, Search, Ban, Lock } from 'lucide-react';
+import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, ChevronLeft, ChevronRight, RotateCw, Check, Hand, Wallet, X, Search, Ban, Lock } from 'lucide-react';
 import { TransformWrapper, TransformComponent, useControls } from 'react-zoom-pan-pinch';
 import { api } from '../api/client';
 import type { Artikel, Receipt, ReceiptDetail } from '../api/types';
@@ -422,15 +422,6 @@ export function ReceiptDetailPage() {
             onDuplicate={editable ? (aid) => dupArticle.mutate(aid) : undefined}
             onInsertAfter={editable ? (aid) => { setInsertAfterId(aid); setAdding(true); } : undefined}
           />
-          {editable && (
-            <button
-              type="button"
-              onClick={() => { setInsertAfterId(null); setAdding(true); }}
-              className="flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-zinc-300 px-3 py-2 text-sm text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-emerald-500 dark:hover:text-emerald-400"
-            >
-              <Plus size={16} /> {t('receiptDetail.addArticle')}
-            </button>
-          )}
           {/* Running sum of the line items, at the very bottom. Shows a green
               check when it matches the printed Bon total, or the signed gap. */}
           {data.artikel.length > 0 && (
