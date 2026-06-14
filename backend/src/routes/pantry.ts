@@ -14,50 +14,56 @@ function unitKey(units: Units, name: string | null | undefined): string | null {
   return u.dimension === 'mass' ? 'kg' : u.dimension === 'volume' ? 'l' : u.name;
 }
 
+type ScopeUser = Parameters<typeof kontoScope>[0];
+
+/** Live stock estimate for every product opted into tracking (track_vorrat),
+ *  computed in-app from purchase history + any manual override. Shared by
+ *  /api/pantry and /api/alerts. */
+async function trackedVorrat(user: ScopeUser) {
+  const tracked = (await sql`
+    SELECT canonical_name, base_unit, reserve_min::float8 AS reserve_min
+    FROM canonical_meta WHERE track_vorrat = TRUE
+  `).map(r => ({ canonical_name: r.canonical_name as string, base_unit: r.base_unit as string | null, reserve_min: r.reserve_min as number | null }));
+  if (!tracked.length) return [];
+  const canons = tracked.map(tk => tk.canonical_name);
+  const units = await loadUnits();
+
+  interface PLine { canonical_name: string; menge: string | null; einheit: string | null; datum: string }
+  const lines = (await sql`
+    SELECT a.canonical_name, a.menge, a.einheit, e.datum::text AS datum
+    FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
+    WHERE a.canonical_name IN ${sql(canons)} AND a.menge IS NOT NULL AND a.menge > 0
+      ${kontoScope(user, sql`e.konto_id`)}
+  `) as unknown as PLine[];
+  const byCanon = new Map<string, PLine[]>();
+  for (const l of lines) { const arr = byCanon.get(l.canonical_name) ?? []; arr.push(l); byCanon.set(l.canonical_name, arr); }
+
+  const ov = await sql`
+    SELECT canonical_name, menge::float8 AS menge, gesetzt_am::text AS gesetzt_am
+    FROM vorrat_override WHERE canonical_name IN ${sql(canons)}`;
+  const ovMap = new Map(ov.map(o => [o.canonical_name as string, { menge: o.menge as number, gesetzt_am: o.gesetzt_am as string }]));
+
+  const res = await sql`
+    SELECT canonical_name, COALESCE(SUM(menge), 0)::float8 AS total, COUNT(*)::int AS charges
+    FROM reserve_charge WHERE canonical_name IN ${sql(canons)} GROUP BY canonical_name`;
+  const resMap = new Map(res.map(r => [r.canonical_name as string, { total: r.total as number, charges: r.charges as number }]));
+
+  return tracked.map(tk => {
+    const est = estimateVorrat(byCanon.get(tk.canonical_name) ?? [], tk.base_unit, units, ovMap.get(tk.canonical_name) ?? null);
+    const reserve = resMap.get(tk.canonical_name);
+    return {
+      canonical_name: tk.canonical_name,
+      ...est,
+      reserve_min: tk.reserve_min,
+      reserve_total: reserve?.total ?? 0,
+      reserve_charges: reserve?.charges ?? 0,
+    };
+  }).sort((a, b) => (a.days_until_empty ?? 1e9) - (b.days_until_empty ?? 1e9));
+}
+
 export function pantryRoutes(app: FastifyInstance): void {
-  /** Live stock estimate for the products opted into tracking (track_vorrat),
-   *  computed in-app from purchase history + any manual override. */
-  app.get('/api/pantry', async (req) => {
-    const tracked = (await sql`
-      SELECT canonical_name, base_unit, reserve_min::float8 AS reserve_min
-      FROM canonical_meta WHERE track_vorrat = TRUE
-    `).map(r => ({ canonical_name: r.canonical_name as string, base_unit: r.base_unit as string | null, reserve_min: r.reserve_min as number | null }));
-    if (!tracked.length) return [];
-    const canons = tracked.map(tk => tk.canonical_name);
-    const units = await loadUnits();
-
-    interface PLine { canonical_name: string; menge: string | null; einheit: string | null; datum: string }
-    const lines = (await sql`
-      SELECT a.canonical_name, a.menge, a.einheit, e.datum::text AS datum
-      FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
-      WHERE a.canonical_name IN ${sql(canons)} AND a.menge IS NOT NULL AND a.menge > 0
-        ${kontoScope(req.user, sql`e.konto_id`)}
-    `) as unknown as PLine[];
-    const byCanon = new Map<string, PLine[]>();
-    for (const l of lines) { const arr = byCanon.get(l.canonical_name) ?? []; arr.push(l); byCanon.set(l.canonical_name, arr); }
-
-    const ov = await sql`
-      SELECT canonical_name, menge::float8 AS menge, gesetzt_am::text AS gesetzt_am
-      FROM vorrat_override WHERE canonical_name IN ${sql(canons)}`;
-    const ovMap = new Map(ov.map(o => [o.canonical_name as string, { menge: o.menge as number, gesetzt_am: o.gesetzt_am as string }]));
-
-    const res = await sql`
-      SELECT canonical_name, COALESCE(SUM(menge), 0)::float8 AS total, COUNT(*)::int AS charges
-      FROM reserve_charge WHERE canonical_name IN ${sql(canons)} GROUP BY canonical_name`;
-    const resMap = new Map(res.map(r => [r.canonical_name as string, { total: r.total as number, charges: r.charges as number }]));
-
-    return tracked.map(tk => {
-      const est = estimateVorrat(byCanon.get(tk.canonical_name) ?? [], tk.base_unit, units, ovMap.get(tk.canonical_name) ?? null);
-      const reserve = resMap.get(tk.canonical_name);
-      return {
-        canonical_name: tk.canonical_name,
-        ...est,
-        reserve_min: tk.reserve_min,
-        reserve_total: reserve?.total ?? 0,
-        reserve_charges: reserve?.charges ?? 0,
-      };
-    }).sort((a, b) => (a.days_until_empty ?? 1e9) - (b.days_until_empty ?? 1e9));
-  });
+  /** Live stock estimate for the products opted into tracking (track_vorrat). */
+  app.get('/api/pantry', async (req) => trackedVorrat(req.user));
 
   /** Manual "we actually have N" override — becomes the estimate's anchor. */
   app.put('/api/pantry/:name/override', async (req, reply) => {
@@ -73,6 +79,31 @@ export function pantryRoutes(app: FastifyInstance): void {
   app.delete('/api/pantry/:name/override', async (req) => {
     const name = decodeURIComponent((req.params as { name: string }).name);
     await sql`DELETE FROM vorrat_override WHERE canonical_name = ${name}`;
+    return { ok: true };
+  });
+
+  /** Iron-reserve charges (batches with their own expiry) for a product. */
+  app.get('/api/reserve/:name', async (req) => {
+    const name = decodeURIComponent((req.params as { name: string }).name);
+    return sql`
+      SELECT id, gekauft_am::text AS gekauft_am, ablauf_am::text AS ablauf_am,
+             menge::float8 AS menge, einheit, notiz
+      FROM reserve_charge WHERE canonical_name = ${name}
+      ORDER BY ablauf_am ASC NULLS LAST, id`;
+  });
+  app.post('/api/reserve', async (req, reply) => {
+    const b = (req.body ?? {}) as { canonical_name?: string; gekauft_am?: string | null; ablauf_am?: string | null; menge?: number | null; einheit?: string | null; notiz?: string | null };
+    const name = b.canonical_name?.trim();
+    if (!name) return reply.code(400).send({ error: 'canonical_name required' });
+    await sql`
+      INSERT INTO reserve_charge (canonical_name, gekauft_am, ablauf_am, menge, einheit, notiz)
+      VALUES (${name}, ${b.gekauft_am || null}, ${b.ablauf_am || null}, ${b.menge ?? null}, ${b.einheit || null}, ${b.notiz || null})`;
+    return { ok: true };
+  });
+  app.delete('/api/reserve/:id', async (req, reply) => {
+    const id = parseInt((req.params as { id: string }).id, 10);
+    if (!id) return reply.code(400).send({ error: 'id required' });
+    await sql`DELETE FROM reserve_charge WHERE id = ${id}`;
     return { ok: true };
   });
 
@@ -229,14 +260,11 @@ export function pantryRoutes(app: FastifyInstance): void {
     return { ok: true };
   });
 
-  app.get('/api/alerts', async () => {
-    return sql`
-      SELECT canonical_name, einheit, est_remaining, days_until_empty, last_bought
-      FROM vorrat_status
-      WHERE avg_daily IS NOT NULL
-        AND (days_until_empty <= 3 OR est_remaining <= 0)
-      ORDER BY days_until_empty ASC NULLS FIRST
-      LIMIT 20
-    `;
+  app.get('/api/alerts', async (req) => {
+    const all = await trackedVorrat(req.user);
+    return all.filter(p =>
+      (p.days_until_empty != null && p.days_until_empty <= 3) ||
+      (p.est_remaining != null && p.est_remaining <= 0) ||
+      (p.reserve_min != null && p.est_remaining != null && p.est_remaining <= p.reserve_min));
   });
 }

@@ -514,37 +514,37 @@ export function Artikel() {
       {canWrite && selected.size > 0 && (
         <div className="fixed inset-x-0 bottom-16 z-20 mx-auto flex max-w-2xl items-center gap-2 rounded-2xl border border-zinc-200 bg-white/95 px-3 py-2 shadow-lg backdrop-blur dark:border-zinc-700 dark:bg-zinc-900/95 md:bottom-4">
           <span className="text-sm font-medium">{selected.size} {t('artikel.selected')}</span>
-          <div className="ml-auto flex flex-wrap justify-end gap-2">
-            <Button variant="secondary" onClick={() => setCanonicalOpen(true)}>
-              <Tag size={15} /> {t('artikel.setCanonical')}
+          {/* compact: icon-only with tooltips; toggles colour when active */}
+          <div className="ml-auto flex flex-wrap justify-end gap-1.5">
+            <Button variant="secondary" className="px-2.5" title={t('artikel.setCanonical')} aria-label={t('artikel.setCanonical')} onClick={() => setCanonicalOpen(true)}>
+              <Tag size={16} />
             </Button>
-            <Button variant="secondary" onClick={() => { setPickedCategory(null); setCategoryOpen(true); }}>
-              <FolderTree size={15} /> {t('artikel.setCategory')}
+            <Button variant="secondary" className="px-2.5" title={t('artikel.setCategory')} aria-label={t('artikel.setCategory')} onClick={() => { setPickedCategory(null); setCategoryOpen(true); }}>
+              <FolderTree size={16} />
             </Button>
-            <Button variant="secondary" onClick={() => setAssignOpen(true)}>
-              <Users size={15} /> {t('artikel.assignMembers')}
+            <Button variant="secondary" className="px-2.5" title={t('artikel.assignMembers')} aria-label={t('artikel.assignMembers')} onClick={() => setAssignOpen(true)}>
+              <Users size={16} />
             </Button>
-            <Button variant="secondary" onClick={() => subscribeOffers.mutate(allSelectedSubscribed ? 'unsubscribe' : 'subscribe')} disabled={subscribeOffers.isPending}>
-              <Bell size={15} /> {allSelectedSubscribed ? t('artikel.unsubscribeOffers') : t('artikel.subscribeOffers')}
+            <Button variant="secondary" className="px-2.5"
+              title={allSelectedSubscribed ? t('artikel.unsubscribeOffers') : t('artikel.subscribeOffers')}
+              aria-label={allSelectedSubscribed ? t('artikel.unsubscribeOffers') : t('artikel.subscribeOffers')}
+              onClick={() => subscribeOffers.mutate(allSelectedSubscribed ? 'unsubscribe' : 'subscribe')} disabled={subscribeOffers.isPending}>
+              <Bell size={16} className={allSelectedSubscribed ? 'text-emerald-600 dark:text-emerald-400' : ''} />
             </Button>
-            <Button
-              variant="secondary"
-              onClick={() => toggleAvoid.mutate()}
-              disabled={!avoidNames.length || toggleAvoid.isPending}
-              title={!avoidNames.length ? t('artikel.avoidNeedsCanonical') : ''}
-            >
-              <Ban size={15} /> {allAvoided ? t('artikel.unavoid') : t('artikel.avoid')}
+            <Button variant="secondary" className="px-2.5"
+              title={!avoidNames.length ? t('artikel.avoidNeedsCanonical') : (allAvoided ? t('artikel.unavoid') : t('artikel.avoid'))}
+              aria-label={allAvoided ? t('artikel.unavoid') : t('artikel.avoid')}
+              onClick={() => toggleAvoid.mutate()} disabled={!avoidNames.length || toggleAvoid.isPending}>
+              <Ban size={16} className={allAvoided ? 'text-red-500' : ''} />
             </Button>
-            <Button
-              variant="secondary"
-              onClick={() => trackVorratBulk.mutate(!allSelectedTracked)}
-              disabled={!trackNames.length || trackVorratBulk.isPending}
-              title={!trackNames.length ? t('artikel.avoidNeedsCanonical') : ''}
-            >
-              <Boxes size={15} /> {allSelectedTracked ? t('artikel.untrackVorrat') : t('artikel.trackVorrat')}
+            <Button variant="secondary" className="px-2.5"
+              title={!trackNames.length ? t('artikel.avoidNeedsCanonical') : (allSelectedTracked ? t('artikel.untrackVorrat') : t('artikel.trackVorrat'))}
+              aria-label={allSelectedTracked ? t('artikel.untrackVorrat') : t('artikel.trackVorrat')}
+              onClick={() => trackVorratBulk.mutate(!allSelectedTracked)} disabled={!trackNames.length || trackVorratBulk.isPending}>
+              <Boxes size={16} className={allSelectedTracked ? 'text-violet-500' : ''} />
             </Button>
-            <Button variant="ghost" onClick={() => setSelected(new Set())}>
-              <X size={15} />
+            <Button variant="ghost" className="px-2.5" title={t('common.cancel')} aria-label={t('common.cancel')} onClick={() => setSelected(new Set())}>
+              <X size={16} />
             </Button>
           </div>
         </div>
