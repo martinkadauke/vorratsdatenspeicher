@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, MapPin, Clock, FileText, Bell, BellRing, GripVertical, ExternalLink } from 'lucide-react';
+import { ArrowLeft, MapPin, Clock, FileText, GripVertical, ExternalLink, Image as ImageIcon } from 'lucide-react';
 import {
   DndContext, closestCenter, PointerSensor, KeyboardSensor, useSensor, useSensors, type DragEndEvent,
 } from '@dnd-kit/core';
@@ -13,6 +13,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { api } from '../api/client';
 import { Card, Button, Input, Label, Spinner, Badge } from '../components/ui';
 import { CategoryPicker, useCategories } from '../components/CategoryPicker';
+import { StoreIcon, IconPicker } from '../components/IconPicker';
 import { eur, fmtDate } from '../lib/utils';
 import { toast } from '../components/Toast';
 
@@ -44,20 +45,7 @@ export function FilialProfil() {
     queryFn: () => api<Branch>(`/api/filialen/${id}`),
     enabled: !!id,
   });
-  const { data: subs } = useQuery({
-    queryKey: ['subscriptions'],
-    queryFn: () => api<{ filiale: number[]; artikel: string[] }>('/api/subscriptions'),
-  });
-  const subscribed = !!subs?.filiale.includes(Number(id));
-  const toggleSub = useMutation({
-    mutationFn: () => api<{ subscribed: boolean }>('/api/subscriptions/toggle', { method: 'POST', body: { kind: 'filiale', ref: Number(id) } }),
-    onSuccess: (r) => {
-      toast(r.subscribed ? t('filiale.subscribed') : t('filiale.unsubscribed'), 'success');
-      void qc.invalidateQueries({ queryKey: ['subscriptions'] });
-    },
-    onError: (e) => toast((e as Error).message, 'error'),
-  });
-
+  const [iconOpen, setIconOpen] = useState(false);
   const [address, setAddress] = useState('');
   const [hours, setHours] = useState('');
   const [tiers, setTiers] = useState<string[][]>([]);
@@ -95,6 +83,18 @@ export function FilialProfil() {
         <Link to="/stores" className="shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
           <ArrowLeft size={18} />
         </Link>
+        {/* Tapping the logo edits the CHAIN image (shared by every branch of this chain). */}
+        <button
+          type="button"
+          onClick={() => setIconOpen(true)}
+          title={t('filiale.changeChainImage')}
+          className="group relative shrink-0"
+        >
+          <StoreIcon storeKey={branch.chain_key} size={40} fallback={branch.name[0]?.toUpperCase()} />
+          <span className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/0 opacity-0 transition group-hover:bg-black/35 group-hover:opacity-100">
+            <ImageIcon size={15} className="text-white" />
+          </span>
+        </button>
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-lg font-bold">{branch.name}</h1>
           <div className="flex items-center gap-2 text-xs text-zinc-400">
@@ -139,25 +139,6 @@ export function FilialProfil() {
         <TierEditor tiers={tiers} onChange={mark(setTiers)} />
       </Card>
 
-      {/* offer subscription — active; the notification itself is still WIP */}
-      <Card className="flex flex-col gap-2 p-4">
-        <div className="flex items-center justify-between gap-2">
-          <div className="min-w-0">
-            <h2 className="text-base font-semibold">{t('filiale.subscribe')}</h2>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('filiale.subscribeHint')}</p>
-          </div>
-          <Button
-            variant={subscribed ? 'secondary' : 'primary'}
-            onClick={() => toggleSub.mutate()}
-            disabled={toggleSub.isPending}
-            className="shrink-0"
-          >
-            {subscribed ? <BellRing size={15} /> : <Bell size={15} />}
-            {subscribed ? t('filiale.subscribed') : t('filiale.subscribeAction')}
-          </Button>
-        </div>
-      </Card>
-
       {/* opening hours — manual entry now; a weekly cron can auto-fill later */}
       <Card className="flex flex-col gap-2 p-4">
         <Label className="flex items-center gap-1.5"><Clock size={14} /> {t('filiale.openingHours')}</Label>
@@ -192,6 +173,16 @@ export function FilialProfil() {
           {save.isPending ? t('common.saving') : t('common.save')}
         </Button>
       </div>
+
+      {iconOpen && (
+        <IconPicker
+          entity="store"
+          canonicalName={branch.chain_key}
+          searchSeed={`${branch.chain_key} logo`}
+          open={iconOpen}
+          onClose={() => setIconOpen(false)}
+        />
+      )}
     </div>
   );
 }

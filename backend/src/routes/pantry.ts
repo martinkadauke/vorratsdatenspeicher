@@ -345,7 +345,7 @@ export function pantryRoutes(app: FastifyInstance): void {
       push(allByCanon, l.canonical_name, l as unknown as PriceLine);
       const chain = normalizeStore(l.store);
       if (!chain) continue;
-      const k = `${l.canonical_name} ${chain}`;
+      const k = `${l.canonical_name} ${chain}`;
       push(byCanonChain, k, l as unknown as PriceLine);
       carried.add(k);
     }
@@ -357,7 +357,7 @@ export function pantryRoutes(app: FastifyInstance): void {
     }
     const chainAvg = (canon: string, chain: string): number | null => {
       const r = resolved.get(canon); if (!r) return null;
-      const g = comparisonGroups(byCanonChain.get(`${canon} ${chain}`) ?? [], units).find(x => x.unit === r.unit);
+      const g = comparisonGroups(byCanonChain.get(`${canon} ${chain}`) ?? [], units).find(x => x.unit === r.unit);
       return g && g.avg > 0 ? g.avg : null;
     };
 
@@ -373,7 +373,7 @@ export function pantryRoutes(app: FastifyInstance): void {
       const ogroup = u ? (u.dimension === 'mass' ? 'kg' : u.dimension === 'volume' ? 'l' : u.name) : null;
       if (!ogroup) continue;
       const grundpreis = Math.round((u ? raw / u.to_base : raw) * 100) / 100;
-      const k = `${o.canonical_name} ${o.chain_slug}`;
+      const k = `${o.canonical_name} ${o.chain_slug}`;
       const cur = offerMap.get(k);
       if (!cur || grundpreis < cur.grundpreis) offerMap.set(k, { grundpreis, unit: ogroup });
     }
@@ -392,46 +392,70 @@ export function pantryRoutes(app: FastifyInstance): void {
       return best;
     };
 
-    const chains = [];
+    const shortBranch = (name: string): string => {
+      if (!name.includes(',')) return name; // already short ("LIDL Tübingen")
+      const town = (name.split(',').pop() ?? '').replace(/\b\d{4,5}\b/, '').trim();
+      return town ? `${name.split(/\s+/)[0]} ${town}` : name.split(/\s+/)[0]; // "ALDI Gomaringen"
+    };
+    interface OutItem { id: number; canonical_name: string | null; title: string; menge: number; category: string | null; price: number | null; unit: string | null; source: string | null; expected: number | null; carried: boolean; cheapest: boolean; _sort: number }
+    const chains: { chain_key: string; store: string; item_count: number; total: number; items: OutItem[] }[] = [];
     for (const ch of chainRows) {
       const chainKey = ch.chain_key as string;
+      // Gate: ≥25% of the list must have been bought at this chain before (history
+      // only — VDS can't know a store's full assortment; this keeps a pharmacy out).
+      const historyCount = items.filter(it => it.canonical_name && carried.has(`${it.canonical_name} ${chainKey}`)).length;
+      if (historyCount < items.length * 0.25) continue;
       const wg = ch.warengruppen ? (typeof ch.warengruppen === 'string' ? JSON.parse(ch.warengruppen) : ch.warengruppen) as string[][] : null;
-      const out: { id: number; canonical_name: string | null; title: string; menge: number; category: string | null; price: number | null; unit: string | null; source: string | null; expected: number | null; _sort: number }[] = [];
+      const out: OutItem[] = [];
       for (const it of items) {
         const menge = it.menge ?? 1;
-        let price: number | null = null, unit: string | null = null, source: string | null = null, cat: string | null = null, include = false;
+        let price: number | null = null, unit: string | null = null, source: string | null = null, cat: string | null = null, isCarried = false;
         if (it.canonical_name) {
           cat = catMap.get(it.canonical_name) ?? null;
           const r = resolved.get(it.canonical_name);
           unit = r?.unit ?? null;
-          const off = offerMap.get(`${it.canonical_name} ${chainKey}`);
-          const hasHistory = carried.has(`${it.canonical_name} ${chainKey}`);
-          if (!hasHistory && !off) continue; // chain doesn't carry it
-          if (off && (!unit || off.unit === unit)) { price = off.grundpreis; unit = off.unit; source = 'offer'; }
-          else {
-            const ca = chainAvg(it.canonical_name, chainKey);
-            if (ca != null) { price = ca; source = 'store_avg'; }
-            else if (r) { price = r.globalAvg; source = 'global_avg'; }
-            else if (off) { price = off.grundpreis; unit = off.unit; source = 'offer'; }
+          const off = offerMap.get(`${it.canonical_name} ${chainKey}`);
+          // Carried = active offer here, or we've bought it here before. VDS can't
+          // know a store's full assortment, so never-bought + no-offer ⇒ treat as
+          // "führt die Kette nicht" (shown greyed in the UI).
+          isCarried = carried.has(`${it.canonical_name} ${chainKey}`) || !!off;
+          if (isCarried) {
+            if (off && (!unit || off.unit === unit)) { price = off.grundpreis; unit = off.unit; source = 'offer'; }
+            else {
+              const ca = chainAvg(it.canonical_name, chainKey);
+              if (ca != null) { price = ca; source = 'store_avg'; }
+              else if (r) { price = r.globalAvg; source = 'global_avg'; }
+              else if (off) { price = off.grundpreis; unit = off.unit; source = 'offer'; }
+            }
           }
-          include = true;
         } else {
-          const off = offerMap.get(`${it.title} ${chainKey}`);
+          const off = offerMap.get(`${it.title} ${chainKey}`);
           if (off) { price = off.grundpreis; unit = off.unit; source = 'offer'; }
-          include = true; // free-text: buy it somewhere
+          isCarried = true; // free-text: assume buyable somewhere
         }
-        if (!include) continue;
-        const ti = tierIndex(wg, cat);
-        const _sort = ti != null ? ti : (cat != null && sortOrder.has(cat) ? 1000 + (sortOrder.get(cat) ?? 0) : 1e6);
-        out.push({ id: it.id, canonical_name: it.canonical_name, title: it.title, menge, category: cat, price, unit, source, expected: price != null ? Math.round(menge * price * 100) / 100 : null, _sort });
+        const ti = isCarried ? tierIndex(wg, cat) : null;
+        const base = ti != null ? ti : (cat != null && sortOrder.has(cat) ? 1000 + (sortOrder.get(cat) ?? 0) : 1e6);
+        const _sort = isCarried ? base : 2e6 + base; // not-carried items sink to the bottom
+        out.push({ id: it.id, canonical_name: it.canonical_name, title: it.title, menge, category: cat, price, unit, source, expected: price != null ? Math.round(menge * price * 100) / 100 : null, carried: isCarried, cheapest: false, _sort });
       }
-      if (!out.length) continue;
       out.sort((a, b) => a._sort - b._sort);
-      const total = Math.round(out.reduce((s, x) => s + (x.expected ?? 0), 0) * 100) / 100;
-      chains.push({ chain_key: chainKey, store: ch.name as string, item_count: out.length, total, items: out.map(({ _sort, ...x }) => x) });
+      const carriedItems = out.filter(x => x.carried);
+      const total = Math.round(carriedItems.reduce((s, x) => s + (x.expected ?? 0), 0) * 100) / 100;
+      chains.push({ chain_key: chainKey, store: shortBranch(ch.name as string), item_count: carriedItems.length, total, items: out });
+    }
+    // Mark, per list item, the chain(s) where its carried price is lowest — only
+    // when ≥2 chains carry it (otherwise "cheapest" says nothing vs. others).
+    for (const it of items) {
+      const key = it.canonical_name ?? it.title;
+      const priced = chains
+        .map(ch => ch.items.find(x => (x.canonical_name ?? x.title) === key))
+        .filter((r): r is OutItem => !!r && r.carried && r.price != null);
+      if (priced.length < 2) continue;
+      const min = Math.min(...priced.map(r => r.price as number));
+      for (const r of priced) if (Math.abs((r.price as number) - min) < 0.005) r.cheapest = true;
     }
     chains.sort((a, b) => b.item_count - a.item_count || a.total - b.total);
-    return { chains };
+    return { chains: chains.map(c => ({ ...c, items: c.items.map(({ _sort, ...x }) => x) })) };
   });
 
   /** Share the list: email it to every household user that has an email address,

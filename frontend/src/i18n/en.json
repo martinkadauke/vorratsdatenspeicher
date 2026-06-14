@@ -205,6 +205,8 @@
     "byStore": "By store",
     "noStores": "No matching stores — those items aren't sold there.",
     "noPrice": "no price",
+    "notCarried": "not carried here",
+    "cheapest": "cheapest",
     "src": { "offer": "offer", "store_avg": "store avg", "global_avg": "overall avg" },
     "send": "Send",
     "sent": "Emailed {{count}} + notified",
@@ -258,6 +260,7 @@
     "openingHoursPlaceholder": "e.g. Mon–Sat 7am–8pm, Sun closed",
     "prospectus": "Offer leaflet",
     "viewProspekt": "View current flyer",
+    "changeChainImage": "Change chain image",
     "subscribe": "Subscribe to offers",
     "wipHint": "Work in progress — coming in a later update."
   },

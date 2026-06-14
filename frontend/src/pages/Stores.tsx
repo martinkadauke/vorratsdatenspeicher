@@ -2,10 +2,10 @@ import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Search, ArrowRightLeft, Image as ImageIcon, ChevronRight, ChevronDown, Store as StoreIco, SlidersHorizontal, BadgePercent } from 'lucide-react';
+import { Search, ArrowRightLeft, ChevronRight, ChevronDown, Store as StoreIco, SlidersHorizontal } from 'lucide-react';
 import { api } from '../api/client';
 import { Card, Input, Button, Label, Modal, Spinner, EmptyState, Badge, Select } from '../components/ui';
-import { IconPicker, StoreIcon } from '../components/IconPicker';
+import { StoreIcon } from '../components/IconPicker';
 import { eur } from '../lib/utils';
 import { searchMatch } from '../lib/search';
 
@@ -25,7 +25,6 @@ export function Stores() {
   const [search, setSearch] = useState('');
   const [view, setView] = useState<'filialen' | 'shops'>('filialen');
   const [editing, setEditing] = useState<StoreRow | null>(null);
-  const [iconPickerFor, setIconPickerFor] = useState<StoreRow | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggleExpand = (key: string) => setExpanded(prev => {
     const next = new Set(prev);
@@ -93,17 +92,33 @@ export function Stores() {
         {filtered.map(s => {
           const multi = (s.filialen?.length ?? s.raw.length) > 1;
           const isOpen = expanded.has(s.key);
+          const ch = chainFor(s.key);
           return (
             <Card key={s.key} className="flex min-w-0 flex-col px-3 py-2.5">
               <div className="flex min-w-0 items-stretch gap-3">
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); setIconPickerFor(s); }}
-                  className="group shrink-0 self-center"
-                  title={t('stores.changeIcon')}
-                >
-                  <StoreIcon storeKey={s.key} size={36} fallback={s.display[0]?.toUpperCase()} />
-                </button>
+                {/* Store image links straight to the chain's prospectus (offer flyer);
+                    a corner badge hints how many subscribed items are on offer. */}
+                {ch ? (
+                  <a
+                    href={ch.prospekt_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={e => e.stopPropagation()}
+                    title={t('stores.prospektTitle', { count: ch.count })}
+                    className="group relative shrink-0 self-center"
+                  >
+                    <StoreIcon storeKey={s.key} size={36} fallback={s.display[0]?.toUpperCase()} />
+                    {ch.count > 0 && (
+                      <span className="absolute -right-1 -top-1 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-emerald-600 px-0.5 text-[9px] font-bold text-white ring-2 ring-white dark:ring-zinc-900">
+                        {ch.count}
+                      </span>
+                    )}
+                  </a>
+                ) : (
+                  <span className="shrink-0 self-center">
+                    <StoreIcon storeKey={s.key} size={36} fallback={s.display[0]?.toUpperCase()} />
+                  </span>
+                )}
                 <div className="min-w-0 flex-1 cursor-pointer self-center" onClick={() => setEditing(s)}>
                   <div className="flex min-w-0 items-center gap-1.5">
                     <span className="truncate font-medium">{s.display}</span>
@@ -131,21 +146,6 @@ export function Stores() {
                     <SlidersHorizontal size={16} />
                   </button>
                 )}
-                {(() => {
-                  const ch = chainFor(s.key);
-                  return ch ? (
-                    <a
-                      href={ch.prospekt_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={e => e.stopPropagation()}
-                      title={t('stores.prospektTitle', { count: ch.count })}
-                      className="flex shrink-0 items-center gap-1 self-center rounded-lg bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300"
-                    >
-                      <BadgePercent size={13} /> {ch.count} · {t('stores.prospekt')}
-                    </a>
-                  ) : null;
-                })()}
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); navigate(`/receipts?store=${encodeURIComponent(s.key)}`); }}
@@ -193,16 +193,6 @@ export function Stores() {
       </div>
 
       <StoreEditModal store={editing} allStores={data ?? []} onClose={() => setEditing(null)} />
-
-      {iconPickerFor && (
-        <IconPicker
-          entity="store"
-          canonicalName={iconPickerFor.key}
-          searchSeed={`${iconPickerFor.display} logo`}
-          open={!!iconPickerFor}
-          onClose={() => setIconPickerFor(null)}
-        />
-      )}
       </>
       )}
     </div>

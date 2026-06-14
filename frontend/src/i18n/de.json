@@ -205,6 +205,8 @@
     "byStore": "Pro Laden",
     "noStores": "Keine passenden Läden — die Artikel werden dort nicht geführt.",
     "noPrice": "kein Preis",
+    "notCarried": "führt die Kette nicht",
+    "cheapest": "günstigste",
     "src": { "offer": "Angebot", "store_avg": "Ø Laden", "global_avg": "Ø gesamt" },
     "send": "Senden",
     "sent": "Per E-Mail an {{count}} gesendet + benachrichtigt",
@@ -258,6 +260,7 @@
     "openingHoursPlaceholder": "z.B. Mo–Sa 7–20 Uhr, So geschlossen",
     "prospectus": "Angebotsprospekt",
     "viewProspekt": "Aktuellen Prospekt ansehen",
+    "changeChainImage": "Kettenbild ändern",
     "subscribe": "Angebote abonnieren",
     "wipHint": "In Arbeit — kommt in einem späteren Update."
   },

@@ -11,7 +11,7 @@ import {
   verticalListSortingStrategy, useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { GripVertical, Minus, Plus, Trash2, Search, Sparkles, BarChart3, Send } from 'lucide-react';
+import { GripVertical, Minus, Plus, Trash2, Search, Sparkles, BarChart3, Send, TrendingDown } from 'lucide-react';
 import { api } from '../api/client';
 import type { ShoppingItem } from '../api/types';
 import { Card, Spinner, EmptyState, Button, Input, Badge } from '../components/ui';
@@ -19,7 +19,7 @@ import { CanonicalIcon } from '../components/IconPicker';
 import { toast } from '../components/Toast';
 import { cn, eur } from '../lib/utils';
 
-interface StoreItem { id: number; canonical_name: string | null; title: string; menge: number; category: string | null; price: number | null; unit: string | null; source: string | null; expected: number | null }
+interface StoreItem { id: number; canonical_name: string | null; title: string; menge: number; category: string | null; price: number | null; unit: string | null; source: string | null; expected: number | null; carried: boolean; cheapest: boolean }
 interface StoreList { chain_key: string; store: string; item_count: number; total: number; items: StoreItem[] }
 
 const num = (s: string): number | null => {
@@ -217,18 +217,31 @@ export function Shopping() {
               {byStore.filter(c => c.chain_key === activeChain).map(c => (
                 <Card key={c.chain_key} className="flex flex-col divide-y divide-zinc-100 p-0 dark:divide-zinc-800">
                   {c.items.map(it => (
-                    <div key={it.id} className="flex items-center gap-2 px-3 py-2">
+                    <div key={it.id} className={cn('flex items-center gap-2 px-3 py-2', !it.carried && 'opacity-45')}>
                       {it.canonical_name ? <CanonicalIcon name={it.canonical_name} size={26} /> : <span className="h-[26px] w-[26px] shrink-0" />}
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-medium">{fmt(it.menge)}× {it.title}</div>
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          <span className="truncate text-sm font-medium">{fmt(it.menge)}× {it.title}</span>
+                          {it.carried && it.cheapest && (
+                            <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400" aria-label={t('shopping.cheapest')}>
+                              <TrendingDown size={11} />{t('shopping.cheapest')}
+                            </span>
+                          )}
+                        </div>
                         <div className="flex flex-wrap items-center gap-x-1.5 text-xs text-zinc-400">
-                          {it.category && <span>{it.category.split('/').pop()}</span>}
-                          {it.source && <span>· {t(`shopping.src.${it.source}`)}</span>}
+                          {it.carried
+                            ? <>
+                                {it.category && <span>{it.category.split('/').pop()}</span>}
+                                {it.source && <span>· {t(`shopping.src.${it.source}`)}</span>}
+                              </>
+                            : <span className="italic">{t('shopping.notCarried')}</span>}
                         </div>
                       </div>
-                      {it.expected != null
-                        ? <span className="tabular shrink-0 text-sm font-semibold">{eur(it.expected)}</span>
-                        : <span className="shrink-0 text-xs text-zinc-400">{t('shopping.noPrice')}</span>}
+                      {!it.carried
+                        ? <span className="shrink-0 text-base text-zinc-300 dark:text-zinc-600">—</span>
+                        : it.expected != null
+                          ? <span className="tabular shrink-0 text-sm font-semibold">{eur(it.expected)}</span>
+                          : <span className="shrink-0 text-xs text-zinc-400">{t('shopping.noPrice')}</span>}
                     </div>
                   ))}
                   <div className="flex items-center justify-between px-3 py-2.5 text-sm font-bold">
