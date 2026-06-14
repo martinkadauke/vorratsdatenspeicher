@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 import {
   ReceiptText, ChartPie, ShoppingCart, Package, Tags, ListChecks, Store,
-  Settings, UserCircle, LogOut, MoreHorizontal, BadgePercent, Eye,
+  Settings, UserCircle, LogOut, MoreHorizontal, BadgePercent, Eye, Target,
 } from 'lucide-react';
 import { useAuth } from '../context/auth';
 import { api } from '../api/client';
@@ -30,6 +30,7 @@ const NAV = [
   { to: '/names', icon: Tags, key: 'nav.names' },
   { to: '/stores', icon: Store, key: 'nav.stores' },
   { to: '/offers', icon: BadgePercent, key: 'nav.offers' },
+  { to: '/ziele', icon: Target, key: 'nav.ziele' },
   { to: '/queue', icon: ListChecks, key: 'nav.queue' },
 ] as const;
 

@@ -7,11 +7,16 @@
     "names": "Items",
     "stores": "Stores",
     "offers": "Offers",
+    "ziele": "Goals",
     "queue": "Review",
     "admin": "Admin",
     "profile": "Profile",
     "more": "More",
     "logout": "Log out"
+  },
+  "ziele": {
+    "wipTitle": "Work in progress",
+    "wipBody": "This section is still under development (WIP). Your goals will live here."
   },
   "login": {
     "title": "Vorratsdatenspeicher",
@@ -328,6 +333,10 @@
   },
   "admin": {
     "title": "Admin",
+    "webshopEmail": {
+      "title": "Webshop receipts via email",
+      "wip": "Work in progress: here you'll later configure forwarding webshop order/receipt emails to VDS (for you & your wife) so VDS processes those receipts too."
+    },
     "searchPlaceholder": "Search settings…",
     "searchNoResults": "No matching settings found.",
     "expandAll": "Expand all",

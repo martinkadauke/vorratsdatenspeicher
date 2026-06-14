@@ -129,6 +129,16 @@ export function Admin() {
           );
         })
       )}
+
+      {!query && (
+        <Card className="min-w-0 p-3 sm:p-4">
+          <div className="mb-1 flex items-center gap-2">
+            <h2 className="text-base font-semibold">{t('admin.webshopEmail.title')}</h2>
+            <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700 dark:bg-amber-950/50 dark:text-amber-400">WIP</span>
+          </div>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">{t('admin.webshopEmail.wip')}</p>
+        </Card>
+      )}
     </div>
   );
 }
