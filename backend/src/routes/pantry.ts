@@ -332,10 +332,13 @@ export function pantryRoutes(app: FastifyInstance): void {
     const buMap = new Map(buRows.map(r => [r.canonical_name as string, (r.base_unit as string | null) ?? null]));
 
     interface Line { canonical_name: string; preis: string | null; menge: string | null; einheit: string | null; store: string }
+    // No price filter: a purchase with a missing/zero price still proves the chain
+    // carries the item (feeds the carried set + the ≥25% gate). comparisonGroups
+    // skips non-positive prices internally, so the averages stay clean.
     const lines = canons.length ? (await sql`
       SELECT a.canonical_name, a.preis, a.menge, a.einheit, e.roh_ladenname AS store
       FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
-      WHERE a.canonical_name IN ${sql(canons)} AND a.preis IS NOT NULL AND a.preis > 0
+      WHERE a.canonical_name IN ${sql(canons)}
         ${kontoScope(req.user, sql`e.konto_id`)}`) as unknown as Line[] : [];
     const allByCanon = new Map<string, PriceLine[]>();
     const byCanonChain = new Map<string, PriceLine[]>();
@@ -361,11 +364,27 @@ export function pantryRoutes(app: FastifyInstance): void {
       return g && g.avg > 0 ? g.avg : null;
     };
 
+    const chainRows = await sql`
+      SELECT f.chain_key, MAX(f.name) AS name,
+             (array_agg(f.warengruppen) FILTER (WHERE f.warengruppen IS NOT NULL))[1] AS warengruppen
+      FROM store_branch f LEFT JOIN einkauf e ON e.branch_id = f.id ${kontoScope(req.user, sql`e.konto_id`)}
+      WHERE f.kind = 'filiale'
+      GROUP BY f.chain_key HAVING COUNT(e.id) > 0 ORDER BY COUNT(e.id) DESC`;
+    const chainKeys = chainRows.map(c => c.chain_key as string);
+    // Marktguru advertiser slugs differ from our chain_key for some chains
+    // ("aldi-sued" vs "aldi", "netto-marken-discount" vs "netto"). Resolve each
+    // offer slug to a visited chain_key with the same tolerant match used in
+    // routes/offers.ts, so ALDI/Netto offers aren't silently dropped here.
+    const slugToChainKey = (slug: string): string | null =>
+      chainKeys.find(ck => ck === slug || slug.startsWith(ck) || ck.startsWith(slug)) ?? null;
+
     const offRows = offerKeys.length ? await sql`
       SELECT canonical_name, chain_slug, ref_price, price, unit FROM offer
       WHERE canonical_name IN ${sql(offerKeys)} AND chain_slug IS NOT NULL AND found_at > NOW() - INTERVAL '21 days'` : [];
     const offerMap = new Map<string, { grundpreis: number; unit: string }>();
     for (const o of offRows) {
+      const ck = slugToChainKey(o.chain_slug as string);
+      if (!ck) continue; // offer for a chain the household never visited → irrelevant here
       const un = normalizeEinheit(o.unit as string | null);
       const u = un ? units.get(un) : undefined;
       const raw = o.ref_price != null ? Number(o.ref_price) : parsePrice(o.price as string | null);
@@ -373,17 +392,10 @@ export function pantryRoutes(app: FastifyInstance): void {
       const ogroup = u ? (u.dimension === 'mass' ? 'kg' : u.dimension === 'volume' ? 'l' : u.name) : null;
       if (!ogroup) continue;
       const grundpreis = Math.round((u ? raw / u.to_base : raw) * 100) / 100;
-      const k = `${o.canonical_name} ${o.chain_slug}`;
+      const k = `${o.canonical_name} ${ck}`;
       const cur = offerMap.get(k);
       if (!cur || grundpreis < cur.grundpreis) offerMap.set(k, { grundpreis, unit: ogroup });
     }
-
-    const chainRows = await sql`
-      SELECT f.chain_key, MAX(f.name) AS name,
-             (array_agg(f.warengruppen) FILTER (WHERE f.warengruppen IS NOT NULL))[1] AS warengruppen
-      FROM store_branch f LEFT JOIN einkauf e ON e.branch_id = f.id ${kontoScope(req.user, sql`e.konto_id`)}
-      WHERE f.kind = 'filiale'
-      GROUP BY f.chain_key HAVING COUNT(e.id) > 0 ORDER BY COUNT(e.id) DESC`;
     const sortOrder = new Map((await sql`SELECT path, sort_order FROM category`).map(r => [r.path as string, r.sort_order as number]));
     const tierIndex = (wg: string[][] | null, cat: string | null): number | null => {
       if (!wg || !cat) return null;

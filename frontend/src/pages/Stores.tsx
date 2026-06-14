@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Search, ArrowRightLeft, ChevronRight, ChevronDown, Store as StoreIco, SlidersHorizontal } from 'lucide-react';
 import { api } from '../api/client';
-import { Card, Input, Button, Label, Modal, Spinner, EmptyState, Badge, Select } from '../components/ui';
+import { Card, Input, Button, Label, Modal, Spinner, EmptyState, Select } from '../components/ui';
 import { StoreIcon } from '../components/IconPicker';
 import { eur } from '../lib/utils';
 import { searchMatch } from '../lib/search';
@@ -38,7 +38,7 @@ export function Stores() {
   });
 
   // Offers for the user's subscribed products, grouped by retailer chain — used to
-  // show "N im Angebot · Prospekt" per store row.
+  // turn each store image into a prospectus link with an offer-count badge.
   const { data: offerChains } = useQuery({
     queryKey: ['offers-by-chain'],
     queryFn: () => api<{ chain_slug: string; store: string; count: number; prospekt_url: string }[]>('/api/offers/by-chain'),
