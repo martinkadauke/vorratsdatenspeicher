@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, Plus, ChevronLeft, ChevronRight, RotateCw, CheckCircle2, Circle, Hand, Wallet, X, Search, Ban, Lock, LockOpen } from 'lucide-react';
+import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, Plus, ChevronLeft, ChevronRight, RotateCw, Check, Hand, Wallet, X, Search, Ban, Lock } from 'lucide-react';
 import { TransformWrapper, TransformComponent, useControls } from 'react-zoom-pan-pinch';
 import { api } from '../api/client';
 import type { Artikel, Receipt, ReceiptDetail } from '../api/types';
@@ -30,7 +30,6 @@ export function ReceiptDetailPage() {
   const filterQs = location.search;
   const [editing, setEditing] = useState<Artikel | null>(null);
   const [editReceipt, setEditReceipt] = useState(false);
-  const [unlocked, setUnlocked] = useState(false); // temporarily editing a locked (verified) receipt
   const [adding, setAdding] = useState(false);
   const [imgVersion, setImgVersion] = useState(0); // cache-buster after rotate
   const [panEnabled, setPanEnabled] = useState(false); // mobile: image pan active?
@@ -200,11 +199,10 @@ export function ReceiptDetailPage() {
   const diff = totalKnown ? itemSum - printedTotal : 0;
   const mismatch = totalKnown && Math.abs(diff) > 0.01;
 
-  // Verification lock: a fully-reviewed receipt with matching sums is locked against
-  // edits until the user explicitly unlocks it (per session). Read-only users never
-  // gain edit rights regardless.
-  const lockable = !!data.geprueft && !mismatch;
-  const locked = lockable && !unlocked;
+  // Single verification control (header icon): locked === geprueft. To edit a
+  // locked receipt you unlock it (clears geprueft); re-lock when done. Read-only
+  // users never gain edit rights regardless.
+  const locked = !!data.geprueft;
   const editable = canWrite && !locked;
 
   // Which line items to spotlight. Supports the shared search operators
@@ -272,6 +270,34 @@ export function ReceiptDetailPage() {
         >
           <ChevronRight size={20} />
         </button>
+        {/* Verification status, single control: red check (sums differ) → green check
+            (sums match) → click to lock → red lock → click to unlock. */}
+        {locked ? (
+          <button
+            onClick={() => { if (canWrite && !setReviewed.isPending) setReviewed.mutate(false); }}
+            disabled={!canWrite || setReviewed.isPending}
+            className={cn('shrink-0 rounded-xl p-2 text-red-500 hover:bg-red-50 disabled:cursor-default disabled:opacity-60 dark:hover:bg-red-950/30')}
+            title={t('receiptDetail.lockedHint')}
+          >
+            <Lock size={18} />
+          </button>
+        ) : mismatch ? (
+          <span
+            className={cn('shrink-0 rounded-xl p-2 text-red-500')}
+            title={t('receiptDetail.mismatchHint')}
+          >
+            <Check size={18} />
+          </span>
+        ) : (
+          <button
+            onClick={() => { if (canWrite && !setReviewed.isPending) setReviewed.mutate(true); }}
+            disabled={!canWrite || setReviewed.isPending}
+            className={cn('shrink-0 rounded-xl p-2 text-emerald-600 hover:bg-emerald-50 disabled:cursor-default disabled:opacity-60 dark:text-emerald-500 dark:hover:bg-emerald-950/30')}
+            title={t('receiptDetail.verifyHint')}
+          >
+            <Check size={18} />
+          </button>
+        )}
         {editable && (
           <>
             <button
@@ -346,38 +372,6 @@ export function ReceiptDetailPage() {
           </div>
         </div>
       )}
-
-      {lockable && (
-        <button
-          type="button"
-          onClick={() => setUnlocked(u => !u)}
-          className={cn('flex items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left text-sm font-medium transition',
-            locked
-              ? 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700/50 dark:bg-emerald-950/40 dark:text-emerald-300'
-              : 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-700/50 dark:bg-amber-950/40 dark:text-amber-300')}
-        >
-          {locked ? <Lock size={18} className="shrink-0" /> : <LockOpen size={18} className="shrink-0" />}
-          <span className="min-w-0 flex-1">{locked ? t('receiptDetail.locked') : t('receiptDetail.unlockedActive')}</span>
-          <span className="shrink-0 rounded-lg border border-current/30 px-2 py-0.5 text-xs">
-            {locked ? t('receiptDetail.unlock') : t('receiptDetail.relock')}
-          </span>
-        </button>
-      )}
-
-      <button
-        onClick={() => editable && setReviewed.mutate(!data.geprueft)}
-        disabled={setReviewed.isPending || !editable}
-        className={`flex items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left text-sm font-medium transition disabled:cursor-default ${
-          data.geprueft
-            ? 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700/50 dark:bg-emerald-950/40 dark:text-emerald-300'
-            : 'border-zinc-300 bg-white text-zinc-600 hover:border-emerald-300 hover:bg-emerald-50/50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-emerald-700/50'
-        }`}
-      >
-        {data.geprueft
-          ? <CheckCircle2 size={20} className="shrink-0 text-emerald-600 dark:text-emerald-500" />
-          : <Circle size={20} className="shrink-0 text-zinc-400" />}
-        <span>{data.geprueft ? t('receiptDetail.reviewedYes') : t('receiptDetail.reviewedNo')}</span>
-      </button>
 
       <ReceiptEditModal receipt={data} open={editReceipt} onClose={() => setEditReceipt(false)} />
 

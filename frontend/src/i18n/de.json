@@ -91,6 +91,8 @@
     "ocrPending": "Beleg wird ausgelesen … die Positionen erscheinen gleich.",
     "mismatch": "Summe der Positionen weicht vom Bon-Gesamtbetrag ab",
     "mismatchHint": "Eine Position fehlt, ist doppelt oder hat falschen Preis",
+    "verifyHint": "Summen stimmen — zum Sperren als geprüft klicken",
+    "lockedHint": "Beleg gesperrt — zum Entsperren klicken",
     "sumLabel": "Σ Positionen:",
     "printedLabel": "· Bon:",
     "reocr": "OCR erneut ausführen",
