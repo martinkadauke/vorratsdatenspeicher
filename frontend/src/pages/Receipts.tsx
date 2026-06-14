@@ -228,7 +228,7 @@ export function Receipts() {
   return (
     <div className="flex flex-col gap-3">
       <FirstVisitHint id="receipts" titleKey="hint.receipts.title" bodyKey="hint.receipts.body" />
-      {progress && progress.total > 0 && (
+      {progress && progress.total > 0 && progress.reviewed < progress.total && (
         <div className="rounded-2xl border border-zinc-200 bg-white px-3.5 py-3 dark:border-zinc-800 dark:bg-zinc-900">
           <div className="mb-1.5 flex items-center justify-between text-sm">
             <span className="flex items-center gap-1.5 font-medium">
