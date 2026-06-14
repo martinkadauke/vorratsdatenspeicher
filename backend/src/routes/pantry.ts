@@ -1,8 +1,19 @@
 import type { FastifyInstance } from 'fastify';
 import sql from '../db.js';
 import { kontoScope } from '../auth/konto.js';
-import { loadUnits, comparisonGroups, type PriceLine } from '../lib/units.js';
+import { loadUnits, normalizeEinheit, comparisonGroups, type PriceLine } from '../lib/units.js';
 import { estimateVorrat } from '../lib/vorrat.js';
+
+/** "LIDL", "Lidl GmbH" → "lidl" (mirrors routes/stores.ts normalizeStore). */
+function normalizeStore(raw: string): string {
+  return (raw ?? '').toLowerCase().replace(/gmbh|kg|ag|co\.?|&|\bservice\b/gi, '').replace(/[^a-z0-9äöüß]+/g, ' ').trim().split(/\s+/)[0] ?? '';
+}
+/** "0,99 €" / "1.299,00 €" → 0.99 / 1299 (mirrors routes/offers.ts parsePrice). */
+function parsePrice(s: string | null): number | null {
+  if (!s) return null;
+  const n = parseFloat(s.replace(/[^\d.,]/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.'));
+  return Number.isFinite(n) ? n : null;
+}
 
 type Units = Awaited<ReturnType<typeof loadUnits>>;
 
@@ -274,6 +285,150 @@ export function pantryRoutes(app: FastifyInstance): void {
       }
     });
     return { ok: true, added: toAdd.length };
+  });
+
+  /** Register the list's products as offer "watches" so the next refresh fetches
+   *  offers for them (the frontend then POSTs /api/offers/refresh + polls). */
+  app.post('/api/shopping-list/compare', async (req) => {
+    const rows = await sql`SELECT canonical_name, title FROM einkaufsliste_item`;
+    const names = [...new Set(rows.map(r => (r.canonical_name as string | null) ?? (r.title as string)).filter(Boolean))];
+    if (names.length) {
+      await sql.begin(async tx => {
+        for (const n of names) {
+          await tx`INSERT INTO offer_subscription (user_id, kind, ref) VALUES (${req.user!.id}, 'watch', ${n}) ON CONFLICT (user_id, kind, ref) DO NOTHING`;
+        }
+      });
+    }
+    return { ok: true, watched: names.length };
+  });
+
+  /** Per-chain shopping lists. For each visited chain: the list items that chain
+   *  carries (purchase history OR a current offer — so no "bread at a pharmacy"),
+   *  ordered by the chain's category order (warengruppen tiers → else global
+   *  sort_order), priced offer → chain-average → global-average. */
+  app.get('/api/shopping-list/by-store', async (req) => {
+    const items = (await sql`
+      SELECT id, canonical_name, title, menge::float8 AS menge
+      FROM einkaufsliste_item ORDER BY priority DESC, added_at DESC
+    `) as unknown as { id: number; canonical_name: string | null; title: string; menge: number | null }[];
+    if (!items.length) return { chains: [] };
+    const canons = [...new Set(items.map(i => i.canonical_name).filter((c): c is string => !!c))];
+    const offerKeys = [...new Set([...canons, ...items.filter(i => !i.canonical_name).map(i => i.title)])];
+
+    const units = await loadUnits();
+    const keyFor = (n: string | null | undefined): string | null => {
+      if (!n) return null; const u = units.get(n);
+      return u ? (u.dimension === 'mass' ? 'kg' : u.dimension === 'volume' ? 'l' : u.name) : null;
+    };
+
+    const catRows = canons.length ? await sql`
+      SELECT canonical_name, mode() WITHIN GROUP (ORDER BY category_path) AS cat
+      FROM artikel WHERE canonical_name IN ${sql(canons)} GROUP BY canonical_name` : [];
+    const catMap = new Map(catRows.map(r => [r.canonical_name as string, (r.cat as string | null) ?? null]));
+    const buRows = canons.length ? await sql`SELECT canonical_name, base_unit FROM canonical_meta WHERE canonical_name IN ${sql(canons)}` : [];
+    const buMap = new Map(buRows.map(r => [r.canonical_name as string, (r.base_unit as string | null) ?? null]));
+
+    interface Line { canonical_name: string; preis: string | null; menge: string | null; einheit: string | null; store: string }
+    const lines = canons.length ? (await sql`
+      SELECT a.canonical_name, a.preis, a.menge, a.einheit, e.roh_ladenname AS store
+      FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
+      WHERE a.canonical_name IN ${sql(canons)} AND a.preis IS NOT NULL AND a.preis > 0
+        ${kontoScope(req.user, sql`e.konto_id`)}`) as unknown as Line[] : [];
+    const allByCanon = new Map<string, PriceLine[]>();
+    const byCanonChain = new Map<string, PriceLine[]>();
+    const carried = new Set<string>();
+    const push = (m: Map<string, PriceLine[]>, k: string, v: PriceLine) => { let a = m.get(k); if (!a) { a = []; m.set(k, a); } a.push(v); };
+    for (const l of lines) {
+      push(allByCanon, l.canonical_name, l as unknown as PriceLine);
+      const chain = normalizeStore(l.store);
+      if (!chain) continue;
+      const k = `${l.canonical_name} ${chain}`;
+      push(byCanonChain, k, l as unknown as PriceLine);
+      carried.add(k);
+    }
+    const resolved = new Map<string, { unit: string; globalAvg: number }>();
+    for (const c of canons) {
+      const groups = comparisonGroups(allByCanon.get(c) ?? [], units);
+      const h = (keyFor(buMap.get(c)) ? groups.find(g => g.unit === keyFor(buMap.get(c))) : undefined) ?? groups[0];
+      if (h && h.avg > 0) resolved.set(c, { unit: h.unit, globalAvg: h.avg });
+    }
+    const chainAvg = (canon: string, chain: string): number | null => {
+      const r = resolved.get(canon); if (!r) return null;
+      const g = comparisonGroups(byCanonChain.get(`${canon} ${chain}`) ?? [], units).find(x => x.unit === r.unit);
+      return g && g.avg > 0 ? g.avg : null;
+    };
+
+    const offRows = offerKeys.length ? await sql`
+      SELECT canonical_name, chain_slug, ref_price, price, unit FROM offer
+      WHERE canonical_name IN ${sql(offerKeys)} AND chain_slug IS NOT NULL AND found_at > NOW() - INTERVAL '21 days'` : [];
+    const offerMap = new Map<string, { grundpreis: number; unit: string }>();
+    for (const o of offRows) {
+      const un = normalizeEinheit(o.unit as string | null);
+      const u = un ? units.get(un) : undefined;
+      const raw = o.ref_price != null ? Number(o.ref_price) : parsePrice(o.price as string | null);
+      if (raw == null || !Number.isFinite(raw)) continue;
+      const ogroup = u ? (u.dimension === 'mass' ? 'kg' : u.dimension === 'volume' ? 'l' : u.name) : null;
+      if (!ogroup) continue;
+      const grundpreis = Math.round((u ? raw / u.to_base : raw) * 100) / 100;
+      const k = `${o.canonical_name} ${o.chain_slug}`;
+      const cur = offerMap.get(k);
+      if (!cur || grundpreis < cur.grundpreis) offerMap.set(k, { grundpreis, unit: ogroup });
+    }
+
+    const chainRows = await sql`
+      SELECT f.chain_key, MAX(f.name) AS name,
+             (array_agg(f.warengruppen) FILTER (WHERE f.warengruppen IS NOT NULL))[1] AS warengruppen
+      FROM store_branch f LEFT JOIN einkauf e ON e.branch_id = f.id ${kontoScope(req.user, sql`e.konto_id`)}
+      WHERE f.kind = 'filiale'
+      GROUP BY f.chain_key HAVING COUNT(e.id) > 0 ORDER BY COUNT(e.id) DESC`;
+    const sortOrder = new Map((await sql`SELECT path, sort_order FROM category`).map(r => [r.path as string, r.sort_order as number]));
+    const tierIndex = (wg: string[][] | null, cat: string | null): number | null => {
+      if (!wg || !cat) return null;
+      let best: number | null = null; let bestLen = -1;
+      wg.forEach((tier, i) => { for (const path of tier) if ((cat === path || cat.startsWith(path + '/')) && path.length > bestLen) { best = i; bestLen = path.length; } });
+      return best;
+    };
+
+    const chains = [];
+    for (const ch of chainRows) {
+      const chainKey = ch.chain_key as string;
+      const wg = ch.warengruppen ? (typeof ch.warengruppen === 'string' ? JSON.parse(ch.warengruppen) : ch.warengruppen) as string[][] : null;
+      const out: { id: number; canonical_name: string | null; title: string; menge: number; category: string | null; price: number | null; unit: string | null; source: string | null; expected: number | null; _sort: number }[] = [];
+      for (const it of items) {
+        const menge = it.menge ?? 1;
+        let price: number | null = null, unit: string | null = null, source: string | null = null, cat: string | null = null, include = false;
+        if (it.canonical_name) {
+          cat = catMap.get(it.canonical_name) ?? null;
+          const r = resolved.get(it.canonical_name);
+          unit = r?.unit ?? null;
+          const off = offerMap.get(`${it.canonical_name} ${chainKey}`);
+          const hasHistory = carried.has(`${it.canonical_name} ${chainKey}`);
+          if (!hasHistory && !off) continue; // chain doesn't carry it
+          if (off && (!unit || off.unit === unit)) { price = off.grundpreis; unit = off.unit; source = 'offer'; }
+          else {
+            const ca = chainAvg(it.canonical_name, chainKey);
+            if (ca != null) { price = ca; source = 'store_avg'; }
+            else if (r) { price = r.globalAvg; source = 'global_avg'; }
+            else if (off) { price = off.grundpreis; unit = off.unit; source = 'offer'; }
+          }
+          include = true;
+        } else {
+          const off = offerMap.get(`${it.title} ${chainKey}`);
+          if (off) { price = off.grundpreis; unit = off.unit; source = 'offer'; }
+          include = true; // free-text: buy it somewhere
+        }
+        if (!include) continue;
+        const ti = tierIndex(wg, cat);
+        const _sort = ti != null ? ti : (cat != null && sortOrder.has(cat) ? 1000 + (sortOrder.get(cat) ?? 0) : 1e6);
+        out.push({ id: it.id, canonical_name: it.canonical_name, title: it.title, menge, category: cat, price, unit, source, expected: price != null ? Math.round(menge * price * 100) / 100 : null, _sort });
+      }
+      if (!out.length) continue;
+      out.sort((a, b) => a._sort - b._sort);
+      const total = Math.round(out.reduce((s, x) => s + (x.expected ?? 0), 0) * 100) / 100;
+      chains.push({ chain_key: chainKey, store: ch.name as string, item_count: out.length, total, items: out.map(({ _sort, ...x }) => x) });
+    }
+    chains.sort((a, b) => b.item_count - a.item_count || a.total - b.total);
+    return { chains };
   });
 
   /** Canonical-keyed feedback (used by the offers "on list" toggle). */
