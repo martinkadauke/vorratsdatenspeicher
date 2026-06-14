@@ -197,7 +197,13 @@
     "holdToType": "Lange drücken zum Eintippen",
     "getSuggestions": "Vorschläge holen",
     "suggestionsAdded": "{{count}} Vorschläge hinzugefügt",
-    "noSuggestions": "Keine fälligen Artikel im Vorrat"
+    "noSuggestions": "Keine fälligen Artikel im Vorrat",
+    "compareOffers": "Angebote vergleichen",
+    "comparing": "Vergleiche…",
+    "byStore": "Pro Laden",
+    "noStores": "Keine passenden Läden — die Artikel werden dort nicht geführt.",
+    "noPrice": "kein Preis",
+    "src": { "offer": "Angebot", "store_avg": "Ø Laden", "global_avg": "Ø gesamt" }
   },
   "stores": {
     "title": "Läden",

@@ -197,7 +197,13 @@
     "holdToType": "Hold to type a value",
     "getSuggestions": "Get suggestions",
     "suggestionsAdded": "{{count}} suggestions added",
-    "noSuggestions": "No tracked items running low"
+    "noSuggestions": "No tracked items running low",
+    "compareOffers": "Compare offers",
+    "comparing": "Comparing…",
+    "byStore": "By store",
+    "noStores": "No matching stores — those items aren't sold there.",
+    "noPrice": "no price",
+    "src": { "offer": "offer", "store_avg": "store avg", "global_avg": "overall avg" }
   },
   "stores": {
     "title": "Stores",

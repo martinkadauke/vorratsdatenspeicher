@@ -11,12 +11,16 @@ import {
   verticalListSortingStrategy, useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { GripVertical, Minus, Plus, Trash2, Search, Sparkles } from 'lucide-react';
+import { GripVertical, Minus, Plus, Trash2, Search, Sparkles, BarChart3 } from 'lucide-react';
 import { api } from '../api/client';
 import type { ShoppingItem } from '../api/types';
 import { Card, Spinner, EmptyState, Button, Input, Badge } from '../components/ui';
+import { CanonicalIcon } from '../components/IconPicker';
 import { toast } from '../components/Toast';
 import { cn, eur } from '../lib/utils';
+
+interface StoreItem { id: number; canonical_name: string | null; title: string; menge: number; category: string | null; price: number | null; unit: string | null; source: string | null; expected: number | null }
+interface StoreList { chain_key: string; store: string; item_count: number; total: number; items: StoreItem[] }
 
 const num = (s: string): number | null => {
   const n = parseFloat(s.replace(',', '.'));
@@ -85,6 +89,20 @@ export function Shopping() {
     onSuccess: (r) => { invalidate(); toast(r.added ? t('shopping.suggestionsAdded', { count: r.added }) : t('shopping.noSuggestions'), 'success'); },
     onError: (e: Error) => toast(e.message, 'error'),
   });
+
+  const [comparing, setComparing] = useState(false);
+  const [byStore, setByStore] = useState<StoreList[] | null>(null);
+  const [activeChain, setActiveChain] = useState<string | null>(null);
+  const runCompare = async () => {
+    setComparing(true);
+    try {
+      await api('/api/shopping-list/compare', { method: 'POST' }); // register watches for the next offer refresh
+      const res = await api<{ chains: StoreList[] }>('/api/shopping-list/by-store');
+      setByStore(res.chains);
+      setActiveChain(res.chains[0]?.chain_key ?? null);
+    } catch (e) { toast((e as Error).message, 'error'); }
+    finally { setComparing(false); }
+  };
   const persistOrder = useMutation({
     mutationFn: (order: number[]) => api('/api/shopping-list/order', { method: 'PUT', body: { order } }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['shopping'] }),
@@ -112,11 +130,16 @@ export function Shopping() {
 
   return (
     <div className="flex max-w-2xl flex-col gap-3">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-lg font-bold">{t('shopping.title')}</h1>
-        <Button variant="secondary" onClick={() => suggest.mutate()} disabled={suggest.isPending} className="shrink-0">
-          <Sparkles size={15} /> {t('shopping.getSuggestions')}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" onClick={() => suggest.mutate()} disabled={suggest.isPending} className="shrink-0">
+            <Sparkles size={15} /> {t('shopping.getSuggestions')}
+          </Button>
+          <Button variant="secondary" onClick={runCompare} disabled={comparing} className="shrink-0">
+            <BarChart3 size={15} /> {comparing ? t('shopping.comparing') : t('shopping.compareOffers')}
+          </Button>
+        </div>
       </div>
 
       {/* Add: title (typeahead + free-text) · optional menge */}
@@ -162,6 +185,50 @@ export function Shopping() {
         <div className="flex items-center justify-between rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-sm dark:border-zinc-800 dark:bg-zinc-900">
           <span className="font-medium text-zinc-500 dark:text-zinc-400">{t('shopping.expectedTotal')}</span>
           <span className="tabular text-base font-bold">{eur(total)}</span>
+        </div>
+      )}
+
+      {byStore && (
+        <div className="mt-1 flex flex-col gap-2 border-t border-zinc-200 pt-3 dark:border-zinc-800">
+          <div className="flex items-center gap-2"><BarChart3 size={16} className="text-violet-500" /><h2 className="text-sm font-bold">{t('shopping.byStore')}</h2></div>
+          {!byStore.length && <EmptyState>{t('shopping.noStores')}</EmptyState>}
+          {byStore.length > 0 && (
+            <>
+              <div className="flex flex-wrap gap-1.5">
+                {byStore.map(c => (
+                  <button
+                    key={c.chain_key} type="button" onClick={() => setActiveChain(c.chain_key)}
+                    className={cn('rounded-full border px-3 py-1 text-xs font-medium',
+                      c.chain_key === activeChain ? 'border-transparent bg-violet-600 text-white' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700')}
+                  >
+                    {c.store} · {c.item_count} · {eur(c.total)}
+                  </button>
+                ))}
+              </div>
+              {byStore.filter(c => c.chain_key === activeChain).map(c => (
+                <Card key={c.chain_key} className="flex flex-col divide-y divide-zinc-100 p-0 dark:divide-zinc-800">
+                  {c.items.map(it => (
+                    <div key={it.id} className="flex items-center gap-2 px-3 py-2">
+                      {it.canonical_name ? <CanonicalIcon name={it.canonical_name} size={26} /> : <span className="h-[26px] w-[26px] shrink-0" />}
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-medium">{fmt(it.menge)}× {it.title}</div>
+                        <div className="flex flex-wrap items-center gap-x-1.5 text-xs text-zinc-400">
+                          {it.category && <span>{it.category.split('/').pop()}</span>}
+                          {it.source && <span>· {t(`shopping.src.${it.source}`)}</span>}
+                        </div>
+                      </div>
+                      {it.expected != null
+                        ? <span className="tabular shrink-0 text-sm font-semibold">{eur(it.expected)}</span>
+                        : <span className="shrink-0 text-xs text-zinc-400">{t('shopping.noPrice')}</span>}
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-between px-3 py-2.5 text-sm font-bold">
+                    <span>{t('shopping.expectedTotal')}</span><span className="tabular">{eur(c.total)}</span>
+                  </div>
+                </Card>
+              ))}
+            </>
+          )}
         </div>
       )}
     </div>
