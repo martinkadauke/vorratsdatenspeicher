@@ -268,6 +268,7 @@
     "recSaveAbout": "~{{amount}} sparen",
     "recSave": "~{{amount}} sparen",
     "recExpiring": "nur noch bis {{date}}",
+    "nearestBranch": "nächste Filiale: {{name}}, ~{{km}} km",
     "source": "Quelle",
     "refresh": "Angebote holen",
     "refreshing": "Suche läuft…",

@@ -5,6 +5,8 @@ import { kontoScope } from '../auth/konto.js';
 import { runOfferSearch, sendOfferDigests, isOfferSearchRunning, debugOfferSearch } from '../offers/index.js';
 import { loadUnits, normalizeEinheit, comparisonGroups, type PriceLine } from '../lib/units.js';
 import { PROGRESS_FRESH_MS } from '../maintenance/progress.js';
+import { haversineKm } from '../lib/geo.js';
+import { getConfig } from '../config.js';
 
 /** "0,99 €" / "1.299,00 €" → 0.99 / 1299.00. null if unparseable. */
 function parsePrice(s: string | null): number | null {
@@ -142,7 +144,33 @@ export function offerRoutes(app: FastifyInstance): void {
       };
     });
 
-    return { offers: enriched, pantry };
+    // Nearest physical branch per chain (from the household) → "nächste Filiale".
+    // Chain-level offers join store_branch by the normalized chain key
+    // (chain_key == offer.chain_slug for the common chains; tolerate slug suffixes).
+    const slugs = [...new Set(offers.map(o => o.chain_slug as string | null).filter((s): s is string => !!s))];
+    const hLat = await getConfig('household.lat');
+    const hLon = await getConfig('household.lon');
+    const chains: Record<string, { branch_id: number; name: string; address: string | null; distance_km: number }> = {};
+    if (hLat != null && hLon != null && slugs.length) {
+      const branches = await sql`
+        SELECT chain_key, id, name, address, lat, lon FROM store_branch
+        WHERE kind = 'filiale' AND lat IS NOT NULL AND lon IS NOT NULL
+      `;
+      for (const slug of slugs) {
+        let best: { branch_id: number; name: string; address: string | null; distance_km: number } | null = null;
+        for (const b of branches) {
+          const ck = b.chain_key as string;
+          if (!(ck === slug || slug.startsWith(ck) || ck.startsWith(slug))) continue;
+          const d = haversineKm(hLat, hLon, Number(b.lat), Number(b.lon));
+          if (!best || d < best.distance_km) {
+            best = { branch_id: b.id as number, name: b.name as string, address: (b.address as string | null) ?? null, distance_km: Math.round(d * 10) / 10 };
+          }
+        }
+        if (best) chains[slug] = best;
+      }
+    }
+
+    return { offers: enriched, pantry, chains };
   });
 
   /** All recent offers (admin overview). */

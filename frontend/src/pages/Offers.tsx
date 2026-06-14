@@ -16,7 +16,7 @@ interface Offer {
   old_price: string | null; valid_until: string | null;
   valid_from: string | null; valid_to: string | null; source_url: string | null;
   confidence: number | null; found_at: string;
-  brand: string | null; image_url: string | null; unit: string | null; source: string | null;
+  brand: string | null; image_url: string | null; unit: string | null; source: string | null; chain_slug: string | null;
   good_price: boolean; discount_pct: number | null;
   ref_price: string | null; grundpreis: number | null; grundpreis_unit: string | null;
   compare_unit: string | null; avg_compare: number | null;
@@ -26,7 +26,8 @@ interface PantryInfo {
   interval_days: number | null; due_in_days: number | null;
   status: 'overdue' | 'soon' | 'ok' | null; typ_qty: number | null;
 }
-interface OffersResponse { offers: Offer[]; pantry: Record<string, PantryInfo> }
+interface NearestBranch { branch_id: number; name: string; address: string | null; distance_km: number }
+interface OffersResponse { offers: Offer[]; pantry: Record<string, PantryInfo>; chains?: Record<string, NearestBranch> }
 
 const priceNum = (s: string | null): number | null => {
   if (!s) return null;
@@ -128,7 +129,7 @@ interface RecPick {
   savings: number | null; expiringSoon: boolean; startsFuture: boolean; score: number;
 }
 interface ChainRec {
-  store: string; picks: RecPick[]; dueCount: number; goodCount: number;
+  store: string; chain_slug: string | null; picks: RecPick[]; dueCount: number; goodCount: number;
   savings: number; soonestValidTo: string | null; score: number;
 }
 
@@ -170,7 +171,7 @@ function buildRecommendations(offers: Offer[], pantry: Record<string, PantryInfo
   for (const pk of picks) {
     const store = pk.offer.store as string;
     let cr = chainMap.get(store);
-    if (!cr) { cr = { store, picks: [], dueCount: 0, goodCount: 0, savings: 0, soonestValidTo: null, score: 0 }; chainMap.set(store, cr); }
+    if (!cr) { cr = { store, chain_slug: pk.offer.chain_slug, picks: [], dueCount: 0, goodCount: 0, savings: 0, soonestValidTo: null, score: 0 }; chainMap.set(store, cr); }
     cr.picks.push(pk);
     if (pk.status === 'overdue' || pk.status === 'soon') cr.dueCount++;
     if (pk.offer.good_price) cr.goodCount++;
@@ -233,13 +234,15 @@ function RecPickRow({ pk, onList, toggleList, canWrite, t, lang }: {
   );
 }
 
-function RecommendationSection({ offers, pantry, pinned, onList, toggleList, canWrite, t, lang }: {
+function RecommendationSection({ offers, pantry, pinned, chains, onList, toggleList, canWrite, t, lang }: {
   offers: Offer[]; pantry: Record<string, PantryInfo>; pinned: Set<string>;
+  chains?: Record<string, NearestBranch>;
   onList: Set<string>; toggleList: (c: string) => void; canWrite: boolean; t: TFunction; lang: string;
 }) {
   const rec = useMemo(() => buildRecommendations(offers, pantry, pinned, Date.now()), [offers, pantry, pinned]);
   if (!rec.picks.length) return null;
   const topChain = rec.chains[0];
+  const nb = topChain?.chain_slug ? chains?.[topChain.chain_slug] : undefined;
   return (
     <div className="flex flex-col gap-2 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-3 dark:border-emerald-900/50 dark:bg-emerald-950/20">
       <div className="flex items-center gap-2">
@@ -252,6 +255,7 @@ function RecommendationSection({ offers, pantry, pinned, onList, toggleList, can
           {' — '}{t('offers.recBestStoreSummary', { count: topChain.picks.length })}
           {topChain.savings > 0 && <> · {t('offers.recSaveAbout', { amount: eur(topChain.savings) })}</>}
           {topChain.soonestValidTo && <> · {t('offers.until')} {fmtDay(topChain.soonestValidTo, lang)}</>}
+          {nb && <> · {t('offers.nearestBranch', { name: nb.name, km: nb.distance_km.toFixed(1).replace('.', ',') })}</>}
         </div>
       )}
       <div className="flex flex-col divide-y divide-emerald-100 dark:divide-emerald-900/40">
@@ -438,7 +442,7 @@ export function Offers() {
       {busy && <p className="text-xs text-emerald-600 dark:text-emerald-500">{t('offers.refreshingHint')}</p>}
 
       {!isLoading && (
-        <RecommendationSection offers={offers} pantry={pantry} pinned={pinned} onList={onList} toggleList={toggleList} canWrite={canWrite} t={t} lang={lang} />
+        <RecommendationSection offers={offers} pantry={pantry} pinned={pinned} chains={data?.chains} onList={onList} toggleList={toggleList} canWrite={canWrite} t={t} lang={lang} />
       )}
 
       {/* Watch arbitrary products that aren't in your artikel list */}

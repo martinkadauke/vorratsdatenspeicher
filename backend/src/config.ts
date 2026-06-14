@@ -38,6 +38,8 @@ export interface AppConfig {
   'smtp.from': string;
   // household + offer-radius (the geo prospectus search itself is still WIP)
   'household.address': string;
+  'household.lat': number | null;
+  'household.lon': number | null;
   'offers.radius_enabled': boolean;
   'offers.radius_km': number;
   'offers.extra_categories': string[];
@@ -82,6 +84,8 @@ const DEFAULTS: AppConfig = {
   'smtp.pass': '',
   'smtp.from': 'Vorratsdatenspeicher <vds@localhost>',
   'household.address': '',
+  'household.lat': null,
+  'household.lon': null,
   'offers.radius_enabled': false,
   'offers.radius_km': 10,
   'offers.extra_categories': [],
