@@ -29,6 +29,7 @@ import { storeRoutes } from './routes/stores.js';
 import { trendsRoutes } from './routes/trends.js';
 import { iconRoutes } from './routes/icons.js';
 import { kontoRoutes } from './routes/konten.js';
+import { unitRoutes } from './routes/units.js';
 import { subscriptionRoutes } from './routes/subscriptions.js';
 import { offerRoutes } from './routes/offers.js';
 import { rescheduleChurner } from './churner/scheduler.js';
@@ -93,6 +94,7 @@ async function main(): Promise<void> {
   trendsRoutes(app);
   iconRoutes(app);
   kontoRoutes(app);
+  unitRoutes(app);
   subscriptionRoutes(app);
   offerRoutes(app);
   modelReviewRoutes(app);

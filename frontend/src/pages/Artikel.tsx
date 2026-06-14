@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Search, X, Rows3, CheckSquare, Square, Users, Ban, Tag, Bell, FolderTree, ReceiptText, SlidersHorizontal, UserCheck } from 'lucide-react';
+import { Search, X, Rows3, CheckSquare, Square, Users, Ban, Tag, Bell, FolderTree, ReceiptText, SlidersHorizontal, UserCheck, Eye, EyeOff } from 'lucide-react';
 import { api } from '../api/client';
 import type { CanonicalName } from '../api/types';
 import { Card, Input, Label, Spinner, EmptyState, Badge, Select, Button, Modal } from '../components/ui';
@@ -29,6 +29,9 @@ interface ArtikelGroup {
   einkauf_id: number | null;
   sample_artikel_id: number | null;
   consumers: number[];
+  base_unit: string | null;
+  hidden: boolean;
+  comparison: { unit: string; avg: number } | null;
 }
 
 type SortMode = 'alpha' | 'date' | 'category' | 'count';
@@ -114,6 +117,13 @@ export function Artikel() {
   // membership filters (subscribed / avoided)
   const [onlySub, setOnlySub] = useState(false);
   const [onlyAvoided, setOnlyAvoided] = useState(false);
+  const [showHidden, setShowHidden] = useState(false);
+
+  const setHidden = useMutation({
+    mutationFn: ({ name, hidden }: { name: string; hidden: boolean }) =>
+      api(`/api/names/${encodeURIComponent(name)}/meta`, { method: 'PATCH', body: { hidden } }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['artikel-list'] }),
+  });
 
   // keyboard: F → jump to search, C → open filters & jump to category search
   useEffect(() => {
@@ -136,8 +146,8 @@ export function Artikel() {
 
   const sorted = useMemo(() => {
     // Meta/* (Pfand, Preisvorteil/Rabatt) are bookkeeping, not products → keep them
-    // out of the article list.
-    const rows = (data ?? []).filter(g => !(g.category ?? '').startsWith('Meta'));
+    // out of the article list. Hidden products are filtered unless "show hidden".
+    const rows = (data ?? []).filter(g => !(g.category ?? '').startsWith('Meta') && (showHidden || !g.hidden));
     rows.sort((a, b) => {
       if (sort === 'count') return b.count - a.count;
       if (sort === 'date') return (b.last_bought ?? '').localeCompare(a.last_bought ?? '');
@@ -145,7 +155,7 @@ export function Artikel() {
       return a.display.localeCompare(b.display, i18n.language);
     });
     return rows;
-  }, [data, sort, i18n.language]);
+  }, [data, sort, i18n.language, showHidden]);
 
   const visible = useMemo(() => {
     if (!onlySub && !onlyAvoided) return sorted;
@@ -374,7 +384,16 @@ export function Artikel() {
             {t('artikel.selectAll')}
           </button>
         ) : <span />}
-        <span>{visible.length} {t('artikel.items')}</span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowHidden(v => !v)}
+            className={cn('flex items-center gap-1 rounded-lg px-2 py-1 font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800',
+              showHidden && 'text-emerald-600')}
+          >
+            {showHidden ? <Eye size={13} /> : <EyeOff size={13} />} {showHidden ? t('artikel.hideHidden') : t('artikel.showHidden')}
+          </button>
+          <span>{visible.length} {t('artikel.items')}</span>
+        </div>
       </div>
 
       {isLoading && <Spinner />}
@@ -413,11 +432,23 @@ export function Artikel() {
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-zinc-400">
                     <Badge>{g.count}×</Badge>
                     {g.category && <Badge className="max-w-[40vw] truncate sm:max-w-none">{g.category.split('/').pop()}</Badge>}
-                    {g.avg_price && <span>Ø {eur(g.avg_price)}</span>}
+                    {g.comparison
+                      ? <span>Ø {g.comparison.avg.toFixed(2).replace('.', ',')} €/{g.comparison.unit}</span>
+                      : g.avg_price && <span>Ø {eur(g.avg_price)}</span>}
                     {g.last_bought && <span>· {fmtDate(g.last_bought, i18n.language)}</span>}
                   </div>
                 </div>
               </button>
+              {/* hide / unhide this product from the list (canonical groups only) */}
+              {canWrite && g.canonical_name && (
+                <button
+                  onClick={() => setHidden.mutate({ name: g.canonical_name!, hidden: !g.hidden })}
+                  title={g.hidden ? t('artikel.unhide') : t('artikel.hide')}
+                  className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                >
+                  {g.hidden ? <Eye size={16} /> : <EyeOff size={16} />}
+                </button>
+              )}
               {/* loose items (no canonical name): jump to the source receipt */}
               {!g.has_canonical && g.einkauf_id != null && (
                 <button

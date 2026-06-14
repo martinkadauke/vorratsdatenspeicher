@@ -3,6 +3,7 @@ import sql from '../db.js';
 import { kontoScope } from '../auth/konto.js';
 import { searchFilter, col, numCol, lk } from '../lib/search.js';
 import { recordAliases } from '../lib/canonicalAlias.js';
+import { loadUnits, comparisonGroups, type PriceLine } from '../lib/units.js';
 
 export function nameRoutes(app: FastifyInstance): void {
   app.get('/api/names', async (req) => {
@@ -106,21 +107,79 @@ export function nameRoutes(app: FastifyInstance): void {
       coMap.set(c.canonical_name as string, arr);
     }
 
-    return rows.map(r => ({
-      key: r.grp,
-      display: r.display,
-      has_canonical: r.has_canonical,
-      user_corrected: r.user_corrected,
-      canonical_name: r.canonical_name,
-      count: r.count,
-      category: r.category,
-      last_bought: r.last_bought,
-      avg_price: r.avg_price,
-      artikel_ids: r.artikel_ids,
-      einkauf_id: r.einkauf_id,
-      sample_artikel_id: r.sample_artikel_id,
-      consumers: r.canonical_name ? (coMap.get(r.canonical_name as string) ?? []) : [],
-    }));
+    // Per-product base_unit + hidden flag, and a unit-aware comparison price
+    // (€/kg, €/l, €/Stück) built from all of the product's purchases (konto-scoped).
+    const meta = canonicals.length ? await sql`
+      SELECT canonical_name, base_unit, hidden FROM canonical_meta WHERE canonical_name IN ${sql(canonicals)}
+    ` : [];
+    const metaMap = new Map(meta.map(m => [m.canonical_name as string, m]));
+    const units = await loadUnits();
+    const keyFor = (n: string | null | undefined): string | null => {
+      if (!n) return null;
+      const u = units.get(n);
+      return u ? (u.dimension === 'mass' ? 'kg' : u.dimension === 'volume' ? 'l' : u.name) : null;
+    };
+    const lineRows = canonicals.length ? await sql`
+      SELECT a.canonical_name, a.preis, a.menge, a.einheit
+      FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
+      WHERE a.canonical_name IN ${sql(canonicals)} ${kontoScope(req.user, sql`e.konto_id`)}
+    ` : [];
+    const linesByCanon = new Map<string, PriceLine[]>();
+    for (const l of lineRows as unknown as (PriceLine & { canonical_name: string })[]) {
+      const arr = linesByCanon.get(l.canonical_name) ?? [];
+      arr.push(l);
+      linesByCanon.set(l.canonical_name, arr);
+    }
+
+    return rows.map(r => {
+      const cn = r.canonical_name as string | null;
+      const m = cn ? metaMap.get(cn) : undefined;
+      const baseUnit = (m?.base_unit as string | null) ?? null;
+      const groups = cn ? comparisonGroups(linesByCanon.get(cn) ?? [], units) : [];
+      const buKey = keyFor(baseUnit);
+      const comparison = (buKey ? groups.find(g => g.unit === buKey) : undefined) ?? groups[0] ?? null;
+      return {
+        key: r.grp,
+        display: r.display,
+        has_canonical: r.has_canonical,
+        user_corrected: r.user_corrected,
+        canonical_name: cn,
+        count: r.count,
+        category: r.category,
+        last_bought: r.last_bought,
+        avg_price: r.avg_price,
+        base_unit: baseUnit,
+        hidden: (m?.hidden as boolean | undefined) ?? false,
+        comparison: comparison ? { unit: comparison.unit, avg: comparison.avg } : null,
+        groups,
+        artikel_ids: r.artikel_ids,
+        einkauf_id: r.einkauf_id,
+        sample_artikel_id: r.sample_artikel_id,
+        consumers: cn ? (coMap.get(cn) ?? []) : [],
+      };
+    });
+  });
+
+  /** Set per-product metadata: base_unit (Grundpreis-Einheit) and/or hidden. */
+  app.patch('/api/names/:name/meta', async (req, reply) => {
+    const name = decodeURIComponent((req.params as { name: string }).name);
+    const body = (req.body ?? {}) as { base_unit?: string | null; hidden?: boolean };
+    if (!('base_unit' in body) && !('hidden' in body)) {
+      return reply.code(400).send({ error: 'nothing to update' });
+    }
+    if ('base_unit' in body) {
+      await sql`
+        INSERT INTO canonical_meta (canonical_name, base_unit, updated_at, updated_by)
+        VALUES (${name}, ${body.base_unit ?? null}, NOW(), ${req.user!.id})
+        ON CONFLICT (canonical_name) DO UPDATE SET base_unit = EXCLUDED.base_unit, updated_at = NOW(), updated_by = EXCLUDED.updated_by`;
+    }
+    if ('hidden' in body) {
+      await sql`
+        INSERT INTO canonical_meta (canonical_name, hidden, updated_at, updated_by)
+        VALUES (${name}, ${!!body.hidden}, NOW(), ${req.user!.id})
+        ON CONFLICT (canonical_name) DO UPDATE SET hidden = EXCLUDED.hidden, updated_at = NOW(), updated_by = EXCLUDED.updated_by`;
+    }
+    return { ok: true };
   });
 
   /** Total spend for the same filters as artikel-list (category + date range +
