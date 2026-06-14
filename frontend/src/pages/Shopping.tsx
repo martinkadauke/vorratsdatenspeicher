@@ -11,7 +11,7 @@ import {
   verticalListSortingStrategy, useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { GripVertical, Minus, Plus, Trash2, Search } from 'lucide-react';
+import { GripVertical, Minus, Plus, Trash2, Search, Sparkles } from 'lucide-react';
 import { api } from '../api/client';
 import type { ShoppingItem } from '../api/types';
 import { Card, Spinner, EmptyState, Button, Input, Badge } from '../components/ui';
@@ -80,6 +80,11 @@ export function Shopping() {
     mutationFn: (id: number) => api(`/api/shopping-list/${id}`, { method: 'DELETE' }),
     onSuccess: invalidate,
   });
+  const suggest = useMutation({
+    mutationFn: () => api<{ added: number }>('/api/shopping-list/suggest', { method: 'POST' }),
+    onSuccess: (r) => { invalidate(); toast(r.added ? t('shopping.suggestionsAdded', { count: r.added }) : t('shopping.noSuggestions'), 'success'); },
+    onError: (e: Error) => toast(e.message, 'error'),
+  });
   const persistOrder = useMutation({
     mutationFn: (order: number[]) => api('/api/shopping-list/order', { method: 'PUT', body: { order } }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['shopping'] }),
@@ -107,7 +112,12 @@ export function Shopping() {
 
   return (
     <div className="flex max-w-2xl flex-col gap-3">
-      <h1 className="text-lg font-bold">{t('shopping.title')}</h1>
+      <div className="flex items-center justify-between gap-2">
+        <h1 className="text-lg font-bold">{t('shopping.title')}</h1>
+        <Button variant="secondary" onClick={() => suggest.mutate()} disabled={suggest.isPending} className="shrink-0">
+          <Sparkles size={15} /> {t('shopping.getSuggestions')}
+        </Button>
+      </div>
 
       {/* Add: title (typeahead + free-text) · optional menge */}
       <form

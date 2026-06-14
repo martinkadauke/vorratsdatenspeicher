@@ -194,7 +194,10 @@
     "freeText": "free",
     "suggested": "suggested",
     "expectedTotal": "Expected total",
-    "holdToType": "Hold to type a value"
+    "holdToType": "Hold to type a value",
+    "getSuggestions": "Get suggestions",
+    "suggestionsAdded": "{{count}} suggestions added",
+    "noSuggestions": "No tracked items running low"
   },
   "stores": {
     "title": "Stores",

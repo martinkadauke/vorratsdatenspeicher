@@ -247,6 +247,35 @@ export function pantryRoutes(app: FastifyInstance): void {
     return { ok: true };
   });
 
+  /** Auto-fill the list from tracked products whose live estimate is running low
+   *  (out / ≤5 days / below the iron-reserve minimum), skipping anything already
+   *  on the list, snoozed, or excluded. Adds them as 'suggested'. */
+  app.post('/api/shopping-list/suggest', async (req) => {
+    const all = await trackedVorrat(req.user);
+    const due = all.filter(p =>
+      (p.est_remaining != null && p.est_remaining <= 0) ||
+      (p.days_until_empty != null && p.days_until_empty <= 5) ||
+      (p.reserve_min != null && p.est_remaining != null && p.est_remaining <= p.reserve_min));
+    if (!due.length) return { ok: true, added: 0 };
+
+    const onList = new Set((await sql`SELECT canonical_name FROM einkaufsliste_item WHERE canonical_name IS NOT NULL`).map(r => r.canonical_name as string));
+    const snoozed = new Set((await sql`SELECT canonical_name FROM vorschlag_snooze WHERE snooze_bis > CURRENT_DATE`).map(r => r.canonical_name as string));
+    const excluded = new Set((await sql`SELECT canonical_name FROM artikel_ausschluss`).map(r => r.canonical_name as string));
+    const toAdd = due.filter(p => !onList.has(p.canonical_name) && !snoozed.has(p.canonical_name) && !excluded.has(p.canonical_name));
+    if (!toAdd.length) return { ok: true, added: 0 };
+
+    await sql.begin(async tx => {
+      for (const p of toAdd) {
+        await tx`
+          INSERT INTO einkaufsliste_item (canonical_name, title, menge, source, priority, added_by)
+          VALUES (${p.canonical_name}, ${p.canonical_name}, 1, 'suggested',
+                  (SELECT COALESCE(MAX(priority), 0) + 1 FROM einkaufsliste_item), ${req.user!.username})
+          ON CONFLICT (canonical_name) WHERE canonical_name IS NOT NULL DO NOTHING`;
+      }
+    });
+    return { ok: true, added: toAdd.length };
+  });
+
   /** Canonical-keyed feedback (used by the offers "on list" toggle). */
   app.post('/api/shopping-list/feedback', async (req, reply) => {
     const { action, canonical_name, snooze_days } = (req.body ?? {}) as {

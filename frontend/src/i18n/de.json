@@ -194,7 +194,10 @@
     "freeText": "frei",
     "suggested": "Vorschlag",
     "expectedTotal": "Erwartete Summe",
-    "holdToType": "Lange drücken zum Eintippen"
+    "holdToType": "Lange drücken zum Eintippen",
+    "getSuggestions": "Vorschläge holen",
+    "suggestionsAdded": "{{count}} Vorschläge hinzugefügt",
+    "noSuggestions": "Keine fälligen Artikel im Vorrat"
   },
   "stores": {
     "title": "Läden",
