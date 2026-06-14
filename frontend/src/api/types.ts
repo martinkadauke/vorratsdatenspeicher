@@ -106,6 +106,7 @@ export interface CanonicalName {
   canonical_name: string;
   artikel_count: number;
   category_path: string | null;
+  base_unit?: string | null;
   last_bought: string | null;
   translation_en: string | null;
   consumers: number[];

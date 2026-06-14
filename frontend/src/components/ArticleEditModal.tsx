@@ -6,6 +6,7 @@ import { api } from '../api/client';
 import type { Artikel } from '../api/types';
 import { Button, Input, Label, Modal } from './ui';
 import { CategoryPicker } from './CategoryPicker';
+import { UnitSelect } from './UnitSelect';
 import { FirstVisitHint } from './FirstVisitHint';
 import { ConsumerChips } from './ConsumerChips';
 import { useAuth } from '../context/auth';
@@ -221,7 +222,7 @@ export function ArticleEditModal({ artikel, open, onClose, invalidateKeys, locke
           </div>
           <div>
             <Label>{t('article.unit')}</Label>
-            <Input value={einheit} onChange={e => setEinheit(e.target.value)} />
+            <UnitSelect value={einheit || null} onChange={v => setEinheit(v ?? '')} />
           </div>
           <div>
             <Label>{t('article.unitPrice')} (€)</Label>

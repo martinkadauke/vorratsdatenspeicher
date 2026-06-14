@@ -12,9 +12,11 @@ export function nameRoutes(app: FastifyInstance): void {
       SELECT a.canonical_name,
              COUNT(*)::int AS artikel_count,
              mode() WITHIN GROUP (ORDER BY a.category_path) AS category_path,
+             MAX(cm.base_unit) AS base_unit,
              MAX(e.datum)::text AS last_bought
       FROM artikel a
       LEFT JOIN einkauf e ON e.id = a.einkauf_id
+      LEFT JOIN canonical_meta cm ON cm.canonical_name = a.canonical_name
       WHERE a.canonical_name IS NOT NULL
         ${searchFilter(q, {
           text: [

@@ -232,7 +232,13 @@
     "byStore": "Preis pro Laden",
     "cheapest": "günstigster",
     "changeIcon": "Icon ändern",
-    "changeIconHint": "Klick um aus Bildersuche zu wählen"
+    "changeIconHint": "Klick um aus Bildersuche zu wählen",
+    "baseUnit": "Berechnungseinheit (Grundpreis)",
+    "baseUnitHint": "Einheit, in der der Preis verglichen wird (z. B. kg, l, Stück)"
+  },
+  "units": {
+    "addNew": "+ neue Einheit…",
+    "addPrompt": "Name der neuen Einheit:"
   },
   "iconPicker": {
     "title": "Icon wählen",

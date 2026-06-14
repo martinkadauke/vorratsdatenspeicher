@@ -232,7 +232,13 @@
     "byStore": "Price per store",
     "cheapest": "cheapest",
     "changeIcon": "Change icon",
-    "changeIconHint": "Tap to pick from image search"
+    "changeIconHint": "Tap to pick from image search",
+    "baseUnit": "Pricing unit (base price)",
+    "baseUnitHint": "Unit the price is compared in (e.g. kg, l, piece)"
+  },
+  "units": {
+    "addNew": "+ new unit…",
+    "addPrompt": "Name of the new unit:"
   },
   "iconPicker": {
     "title": "Pick icon",

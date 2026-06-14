@@ -257,6 +257,7 @@ export function Artikel() {
       canonical_name: g.canonical_name,
       artikel_count: g.count,
       category_path: g.category,
+      base_unit: g.base_unit,
       last_bought: g.last_bought,
       translation_en: null,
       consumers: g.consumers,

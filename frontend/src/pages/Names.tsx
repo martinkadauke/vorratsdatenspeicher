@@ -7,6 +7,7 @@ import { api } from '../api/client';
 import type { CanonicalName, Receipt } from '../api/types';
 import { Card, Input, Spinner, EmptyState, Badge, Modal, Button, Label } from '../components/ui';
 import { CategoryPicker } from '../components/CategoryPicker';
+import { UnitSelect } from '../components/UnitSelect';
 import { ConsumerChips, ConsumerDots } from '../components/ConsumerChips';
 import { CanonicalIcon, IconPicker } from '../components/IconPicker';
 import { fmtDate, eur } from '../lib/utils';
@@ -70,6 +71,7 @@ export function NameEditModal({ name, onClose }: { name: CanonicalName | null; o
   const [translation, setTranslation] = useState('');
   const [consumers, setConsumers] = useState<number[]>([]);
   const [exclusive, setExclusive] = useState(false);
+  const [baseUnit, setBaseUnit] = useState<string | null>(null);
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
 
   // Reset local form state whenever a different name is opened
@@ -80,6 +82,7 @@ export function NameEditModal({ name, onClose }: { name: CanonicalName | null; o
     setTranslation(name.translation_en ?? '');
     setConsumers(name.consumers);
     setExclusive(name.consumers_exclusive);
+    setBaseUnit(name.base_unit ?? null);
   }, [name?.canonical_name]);
 
   const { data: receipts } = useQuery({
@@ -116,9 +119,16 @@ export function NameEditModal({ name, onClose }: { name: CanonicalName | null; o
           body: { lang: 'en', translated: translation },
         });
       }
+      if (baseUnit !== (name.base_unit ?? null)) {
+        await api(`/api/names/${encodeURIComponent(effective)}/meta`, {
+          method: 'PATCH',
+          body: { base_unit: baseUnit },
+        });
+      }
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['names'] });
+      void qc.invalidateQueries({ queryKey: ['artikel-list'] });
       onClose();
     },
   });
@@ -160,6 +170,11 @@ export function NameEditModal({ name, onClose }: { name: CanonicalName | null; o
         <div>
           <Label>{t('article.category')}</Label>
           <CategoryPicker value={category} onChange={setCategory} />
+        </div>
+        <div>
+          <Label>{t('names.baseUnit')}</Label>
+          <UnitSelect value={baseUnit} onChange={setBaseUnit} allowEmpty />
+          <p className="mt-1 text-xs text-zinc-400">{t('names.baseUnitHint')}</p>
         </div>
         <div>
           <Label>{t('article.consumers')}</Label>
