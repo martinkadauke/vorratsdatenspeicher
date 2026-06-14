@@ -3,6 +3,7 @@ import sql from '../db.js';
 import { requireAdmin } from '../auth/plugin.js';
 import { kontoScope } from '../auth/konto.js';
 import { runOfferSearch, sendOfferDigests, isOfferSearchRunning, debugOfferSearch } from '../offers/index.js';
+import { loadUnits, normalizeEinheit, comparisonGroups, type PriceLine } from '../lib/units.js';
 
 /** "0,99 €" / "1.299,00 €" → 0.99 / 1299.00. null if unparseable. */
 function parsePrice(s: string | null): number | null {
@@ -28,50 +29,91 @@ export function offerRoutes(app: FastifyInstance): void {
       ORDER BY found_at DESC LIMIT 200
     `;
 
-    // Per offered canonical: avg paid price + purchase rhythm (konto-scoped to the user).
+    // Per offered canonical: raw purchase lines (konto-scoped) → per-unit
+    // comparison prices (€/kg, €/l, €/Stück …) + buy rhythm. Offers are matched
+    // against the comparison price in the SAME unit (Grundpreis), so a €/kg offer
+    // is judged against our €/kg history — not a mixed average.
     const offered = [...new Set(offers.map(o => o.canonical_name as string))];
-    const hist = offered.length ? await sql`
-      SELECT a.canonical_name,
-             ROUND(AVG(COALESCE(a.preis / NULLIF(a.menge, 0), a.preis)) FILTER (WHERE a.preis > 0), 2)::float8 AS avg_paid,
-             COUNT(*)::int AS n,
-             MIN(e.datum)::text AS first_bought,
-             MAX(e.datum)::text AS last_bought
+    const units = await loadUnits();
+    const lines = offered.length ? await sql`
+      SELECT a.canonical_name, a.preis, a.menge, a.einheit, e.datum::text AS datum
       FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
       WHERE a.canonical_name IN ${sql(offered)} ${kontoScope(req.user, sql`e.konto_id`)}
-      GROUP BY a.canonical_name
     ` : [];
+    const metaRows = offered.length ? await sql`
+      SELECT canonical_name, base_unit FROM canonical_meta WHERE canonical_name IN ${sql(offered)}
+    ` : [];
+    const baseUnit = new Map(metaRows.map(m => [m.canonical_name as string, (m.base_unit as string | null) ?? null]));
+
+    // The comparison-group key for a unit name: mass→'kg', volume→'l', count→itself.
+    const keyFor = (unitName: string | null | undefined): string | null => {
+      if (!unitName) return null;
+      const u = units.get(unitName);
+      if (!u) return null;
+      return u.dimension === 'mass' ? 'kg' : u.dimension === 'volume' ? 'l' : u.name;
+    };
+
+    interface Line { canonical_name: string; preis: string | null; menge: string | null; einheit: string | null; datum: string }
+    const byCanon = new Map<string, Line[]>();
+    for (const l of lines as unknown as Line[]) {
+      const arr = byCanon.get(l.canonical_name) ?? [];
+      arr.push(l);
+      byCanon.set(l.canonical_name, arr);
+    }
 
     const DAY = 86_400_000;
     const today = Date.now();
+    type Group = ReturnType<typeof comparisonGroups>[number];
     const pantry: Record<string, {
-      avg_paid: number | null; last_bought: string | null;
-      interval_days: number | null; due_in_days: number | null;
+      avg_paid: number | null; base_unit: string | null; groups: Group[];
+      last_bought: string | null; interval_days: number | null; due_in_days: number | null;
       status: 'overdue' | 'soon' | 'ok' | null;
     }> = {};
-    for (const h of hist) {
-      const first = h.first_bought ? Date.parse(h.first_bought as string) : null;
-      const last = h.last_bought ? Date.parse(h.last_bought as string) : null;
-      const n = h.n as number;
+    const groupsByCanon = new Map<string, Group[]>();
+
+    for (const c of offered) {
+      const rows = byCanon.get(c) ?? [];
+      const groups = comparisonGroups(rows as unknown as PriceLine[], units);
+      groupsByCanon.set(c, groups);
+      const bu = baseUnit.get(c) ?? null;
+      const buKey = keyFor(bu);
+      const headline = (buKey ? groups.find(g => g.unit === buKey) : undefined) ?? groups[0] ?? null;
+      const dateStrs = rows.map(r => r.datum).filter(Boolean).sort();
+      const n = dateStrs.length;
+      const firstStr = n ? dateStrs[0] : null;
+      const lastStr = n ? dateStrs[n - 1] : null;
       let interval_days: number | null = null, due_in_days: number | null = null;
       let status: 'overdue' | 'soon' | 'ok' | null = null;
-      if (n >= 2 && first != null && last != null && last > first) {
-        interval_days = Math.round((last - first) / DAY / (n - 1));
-        const daysSince = Math.round((today - last) / DAY);
+      if (n >= 2 && firstStr && lastStr && lastStr > firstStr) {
+        interval_days = Math.round((Date.parse(lastStr) - Date.parse(firstStr)) / DAY / (n - 1));
+        const daysSince = Math.round((today - Date.parse(lastStr)) / DAY);
         due_in_days = interval_days - daysSince;
         status = due_in_days <= 0 ? 'overdue' : due_in_days <= 7 ? 'soon' : 'ok';
       }
-      pantry[h.canonical_name as string] = { avg_paid: h.avg_paid as number | null, last_bought: h.last_bought as string | null, interval_days, due_in_days, status };
+      pantry[c] = {
+        avg_paid: headline?.avg ?? null, base_unit: bu, groups,
+        last_bought: lastStr, interval_days, due_in_days, status,
+      };
     }
 
     const enriched = offers.map(o => {
+      const c = o.canonical_name as string;
+      const groups = groupsByCanon.get(c) ?? [];
       const p = parsePrice(o.price as string | null);
-      const avg = pantry[o.canonical_name as string]?.avg_paid ?? null;
+      const buKey = keyFor(baseUnit.get(c) ?? null);
+      const offerKey = keyFor(normalizeEinheit(o.unit as string | null));
+      // Only judge an offer in the product's declared comparison unit (base_unit).
+      // If the offer is in a different unit (e.g. Marktguru gives Thunfisch per kg
+      // but we track it per Stück) we can't convert reliably → no good-price flag,
+      // rather than comparing against a meaningless group.
+      const targetKey = buKey ? (offerKey === buKey ? buKey : null) : offerKey;
+      const grp = targetKey ? groups.find(g => g.unit === targetKey) : null;
       let good_price = false, discount_pct: number | null = null;
-      if (p != null && avg != null && avg > 0 && p <= avg * 0.85) {
+      if (p != null && grp && grp.n >= 2 && grp.avg > 0 && p <= grp.avg * 0.85) {
         good_price = true;
-        discount_pct = Math.round((1 - p / avg) * 100);
+        discount_pct = Math.round((1 - p / grp.avg) * 100);
       }
-      return { ...o, good_price, discount_pct };
+      return { ...o, good_price, discount_pct, compare_unit: grp?.unit ?? null, avg_compare: grp?.avg ?? null };
     });
 
     return { offers: enriched, pantry };
