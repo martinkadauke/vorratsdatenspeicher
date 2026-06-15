@@ -15,6 +15,22 @@ import {
 const MAX_ROWS = 1000;
 const DEFAULT_ROWS = 200;
 
+// Runtime validators — the route accepts untrusted JSON, and TypeScript types are
+// erased at runtime, so every value must be checked before it reaches SQL. Bad
+// input throws AnalyticsError → 400 (not a 500 from a Postgres coercion error).
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+function asDate(v: unknown, field: string): string {
+  if (typeof v !== 'string' || !DATE_RE.test(v) || Number.isNaN(Date.parse(v))) {
+    throw new AnalyticsError(`invalid ${field} (expected date YYYY-MM-DD)`);
+  }
+  return v;
+}
+function asNum(v: unknown, field: string): number {
+  const n = typeof v === 'number' ? v : Number(v);
+  if (!Number.isFinite(n)) throw new AnalyticsError(`invalid ${field} (expected number)`);
+  return n;
+}
+
 /** Replicate kontoScope() as bound params (analyticsRead takes raw text + params). */
 function kontoWhere(user: User | undefined, params: unknown[]): string | null {
   if (!user || user.sees_all_konten) return null;
@@ -47,15 +63,15 @@ export function buildAnalyticsSql(q: AnalyticsQuery, user: User | undefined): Bu
   if (ks) where.push(ks);
 
   const f = q.filters ?? {};
-  if (f.from) where.push(`t.datum >= $${params.push(f.from)}`);
-  if (f.to) where.push(`t.datum <= $${params.push(f.to)}`);
+  if (f.from) where.push(`t.datum >= $${params.push(asDate(f.from, 'from'))}`);
+  if (f.to) where.push(`t.datum <= $${params.push(asDate(f.to, 'to'))}`);
   if (f.direction) {
     if (f.direction !== 'expense' && f.direction !== 'income') throw new AnalyticsError('bad direction');
     where.push(`t.direction = $${params.push(f.direction)}`);
   }
   if (f.category) {
-    const a = params.push(f.category);
-    const b = params.push(`${f.category}/%`);
+    const a = params.push(String(f.category));
+    const b = params.push(`${String(f.category)}/%`);
     where.push(`(t.category_path = $${a} OR t.category_path LIKE $${b})`);
   }
   if (f.source?.length) {
@@ -63,13 +79,20 @@ export function buildAnalyticsSql(q: AnalyticsQuery, user: User | undefined): Bu
     where.push(`t.source IN (${ph})`);
   }
   if (f.konto_id?.length) {
-    const ph = f.konto_id.map(id => `$${params.push(Number(id))}`).join(', ');
+    const ids = f.konto_id.map(id => asNum(id, 'konto_id'));
+    // Defense in depth: a non-super-admin may only filter to accounts they can
+    // already see (kontoScope also intersects, but fail loudly on an over-ask).
+    if (user && !user.sees_all_konten) {
+      const allowed = new Set(user.konto_ids ?? []);
+      if (ids.some(id => !allowed.has(id))) throw new AnalyticsError('konto not accessible');
+    }
+    const ph = ids.map(id => `$${params.push(id)}`).join(', ');
     where.push(`t.konto_id IN (${ph})`);
   }
-  if (f.merchant) where.push(`t.counterparty ILIKE $${params.push(`%${f.merchant}%`)}`);
-  if (f.product) where.push(`t.canonical_name ILIKE $${params.push(`%${f.product}%`)}`);
-  if (f.min_amount != null) where.push(`ABS(t.amount) >= $${params.push(Number(f.min_amount))}`);
-  if (f.max_amount != null) where.push(`ABS(t.amount) <= $${params.push(Number(f.max_amount))}`);
+  if (f.merchant) where.push(`t.counterparty ILIKE $${params.push(`%${String(f.merchant)}%`)}`);
+  if (f.product) where.push(`t.canonical_name ILIKE $${params.push(`%${String(f.product)}%`)}`);
+  if (f.min_amount != null) where.push(`ABS(t.amount) >= $${params.push(asNum(f.min_amount, 'min_amount'))}`);
+  if (f.max_amount != null) where.push(`ABS(t.amount) <= $${params.push(asNum(f.max_amount, 'max_amount'))}`);
 
   const excludeMeta = f.exclude_meta !== false;        // default on (matches existing spend stats)
   const needKontoJoin = dims.some(d => d.needsKontoJoin);
@@ -90,7 +113,9 @@ export function buildAnalyticsSql(q: AnalyticsQuery, user: User | undefined): Bu
   if (needKontoJoin) text += ` LEFT JOIN konto k ON k.id = t.konto_id`;
   if (excludeMeta) {
     text += ` LEFT JOIN category c ON c.path = t.category_path`;
-    where.push(`(c.is_meta IS NOT TRUE)`);   // income/fixed have no category row → kept
+    // Meta (Pfand/Rabatt) only applies to receipt line items. Guard on source_table
+    // so a future meta-tagged income/fixed row is never silently dropped.
+    where.push(`(t.source_table <> 'artikel' OR c.is_meta IS NOT TRUE)`);
   }
   if (where.length) text += ` WHERE ${where.join(' AND ')}`;
   if (groupExprs.length) text += ` GROUP BY ${groupExprs.join(', ')}`;
@@ -98,14 +123,14 @@ export function buildAnalyticsSql(q: AnalyticsQuery, user: User | undefined): Bu
   if (grain) text += ` ORDER BY bucket ASC`;
   else if (dims.length) text += ` ORDER BY value ${q.order === 'asc' ? 'ASC' : 'DESC'}`;
 
-  const cap = Math.min(Math.max(1, Math.floor(q.limit ?? DEFAULT_ROWS)), MAX_ROWS);
+  const cap = Math.min(Math.max(1, Math.floor(q.limit != null ? asNum(q.limit, 'limit') : DEFAULT_ROWS)), MAX_ROWS);
   text += ` LIMIT ${cap}`;
 
   return { text, params, columns };
 }
 
 export interface AnalyticsRow { bucket?: string; dims: (string | null)[]; value: number }
-export interface AnalyticsResult { rows: AnalyticsRow[]; columns: ColumnMeta; sql: string; params: unknown[] }
+export interface AnalyticsResult { rows: AnalyticsRow[]; columns: ColumnMeta; sql: string }
 
 export async function runAnalyticsQuery(q: AnalyticsQuery, user: User | undefined): Promise<AnalyticsResult> {
   const { text, params, columns } = buildAnalyticsSql(q, user);
@@ -115,5 +140,7 @@ export async function runAnalyticsQuery(q: AnalyticsQuery, user: User | undefine
     dims: columns.dims.map((_, i) => (r[`d${i}`] == null ? null : String(r[`d${i}`]))),
     value: r.value == null ? 0 : Number(r.value),
   }));
-  return { rows, columns, sql: text, params };
+  // Note: `params` (which includes the user's konto_ids) intentionally NOT returned
+  // — the displayed `sql` keeps $n placeholders; values stay server-side.
+  return { rows, columns, sql: text };
 }

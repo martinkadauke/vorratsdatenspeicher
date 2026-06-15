@@ -16,6 +16,16 @@ import type { User } from '../types.js';
 const TILE_TYPES = ['kpi', 'line', 'area', 'bar', 'pie', 'table'] as const;
 type TileType = (typeof TILE_TYPES)[number];
 
+/** Force the chart type to match the query shape so the LLM can't pick a chart
+ *  that renders nonsense (pie over a time series, line without a time grain …). */
+function coerceTileType(req: TileType, q: AnalyticsQuery): TileType {
+  const dims = q.dimensions?.length ?? 0;
+  const grain = q.grain ?? null;
+  if (req === 'pie') return dims === 1 && !grain ? 'pie' : grain ? 'line' : 'bar';
+  if (req === 'line' || req === 'area') return grain ? req : 'bar';
+  return req; // kpi / bar / table render for any shape
+}
+
 interface SpecTile { type?: string; title?: string; query: AnalyticsQuery }
 interface AgentSpec { clarify?: string | null; title?: string; summary?: string; tiles?: SpecTile[] }
 
@@ -140,7 +150,8 @@ export async function askAnalytics(question: string, user: User | undefined, lan
   const tiles: DashboardTile[] = [];
   let dropped = 0;
   for (const t of (spec.tiles ?? []).slice(0, 6)) {
-    const type: TileType = (TILE_TYPES as readonly string[]).includes(t.type ?? '') ? (t.type as TileType) : 'table';
+    const reqType: TileType = (TILE_TYPES as readonly string[]).includes(t.type ?? '') ? (t.type as TileType) : 'table';
+    const type = coerceTileType(reqType, t.query);
     try {
       buildAnalyticsSql(t.query, user);              // validate against the catalog (throws on bad keys)
       const res = await runAnalyticsQuery(t.query, user);

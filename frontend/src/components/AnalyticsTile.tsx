@@ -98,7 +98,9 @@ function renderBody(type: TileType, data: { x: string; value: number }[], unit: 
     );
   }
 
-  if (type === 'pie') {
+  // Recharts pie can't render negative slices (e.g. a negative "net"); fall back
+  // to a bar chart so the data is still shown correctly rather than corrupted.
+  if (type === 'pie' && !data.some(d => d.value < 0)) {
     return (
       <ResponsiveContainer width="100%" height={220}>
         <PieChart>
