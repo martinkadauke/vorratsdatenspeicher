@@ -23,6 +23,8 @@ export interface AppConfig {
   'ai.churner_stage2.model': string;
   'ai.model_review.provider': string;
   'ai.model_review.model': string;
+  'ai.nlanalytics.provider': string;
+  'ai.nlanalytics.model': string;
   'churner.enabled': boolean;
   'churner.cron': string;
   'churner.confidence': number;
@@ -70,6 +72,9 @@ const DEFAULTS: AppConfig = {
   'ai.churner_stage2.model': 'qwen2.5:14b',
   'ai.model_review.provider': 'ollama',
   'ai.model_review.model': 'qwen2.5:14b',
+  // Analytics agent: strong reasoning matters for correct intent → defaults to Claude.
+  'ai.nlanalytics.provider': 'anthropic',
+  'ai.nlanalytics.model': 'claude-sonnet-4-5',
   'churner.enabled': true,
   'churner.cron': '0 3 * * *',
   'churner.confidence': 0.85,
