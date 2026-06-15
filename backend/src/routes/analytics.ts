@@ -40,13 +40,16 @@ export function analyticsRoutes(app: FastifyInstance): void {
   // Natural-language question → validated, read-only dashboard. The LLM only
   // emits a spec of catalog keys; every number is computed by the backend.
   app.post('/api/analytics/ask', async (req, reply) => {
-    const body = (req.body ?? {}) as { question?: unknown; lang?: unknown };
+    const body = (req.body ?? {}) as { question?: unknown; lang?: unknown; prior?: { question?: unknown; clarify?: unknown } };
     const question = typeof body.question === 'string' ? body.question.trim() : '';
     if (!question) return reply.code(400).send({ error: 'question required' });
     if (question.length > 1000) return reply.code(400).send({ error: 'question too long' });
     const lang = body.lang === 'en' ? 'en' : 'de';
+    const prior = body.prior && typeof body.prior.question === 'string' && typeof body.prior.clarify === 'string'
+      ? { question: body.prior.question.slice(0, 1000), clarify: body.prior.clarify.slice(0, 1000) }
+      : undefined;
     try {
-      return await askAnalytics(question, req.user, lang);
+      return await askAnalytics(question, req.user, lang, prior);
     } catch (e) {
       req.log.error(e);
       return reply.code(502).send({ error: 'analytics agent unavailable' });

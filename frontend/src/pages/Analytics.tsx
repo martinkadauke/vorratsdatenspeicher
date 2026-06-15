@@ -8,7 +8,7 @@ import { AnalyticsTile, type TileType, type TileData, type AnalyticsResult } fro
 import { toast } from '../components/Toast';
 import { cn } from '../lib/utils';
 
-interface AskResult { clarify?: string | null; title?: string; summary?: string; tiles: TileData[]; dropped: number }
+interface AskResult { clarify?: string | null; options?: string[]; title?: string; summary?: string; tiles: TileData[]; dropped: number }
 interface Catalog {
   sources: { key: string; label: string }[];
   konten: { id: number; name: string; is_shared: boolean }[];
@@ -79,6 +79,8 @@ export function Analytics() {
   const [ask, setAsk] = useState<AskResult | null>(null);
   const [askErr, setAskErr] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [originalQuestion, setOriginalQuestion] = useState('');
+  const [clarifyAnswer, setClarifyAnswer] = useState('');
 
   const { data: catalog } = useQuery({
     queryKey: ['analytics-catalog'],
@@ -94,21 +96,27 @@ export function Analytics() {
   };
   const activeFilters = (direction ? 1 : 0) + (sources.length ? 1 : 0) + (konto !== '' ? 1 : 0);
 
-  const runAsk = async () => {
-    const q = question.trim();
-    if (!q) return;
+  const doAsk = async (q: string, prior?: { question: string; clarify: string }) => {
+    const text = q.trim();
+    if (!text) return;
     setAsking(true); setAskErr(null);
+    if (!prior) setOriginalQuestion(text);   // start of a new thread
     try {
       const res = await api<AskResult>('/api/analytics/ask', {
         method: 'POST',
-        body: { question: q, lang: i18n.language === 'en' ? 'en' : 'de' },
+        body: { question: text, lang: i18n.language === 'en' ? 'en' : 'de', ...(prior ? { prior } : {}) },
       });
       setAsk(res);
+      setClarifyAnswer('');
+      if (!res.clarify) setQuestion('');
     } catch (e) {
       setAskErr((e as Error).message);
     } finally {
       setAsking(false);
     }
+  };
+  const answerClarify = (a: string) => {
+    if (ask?.clarify) void doAsk(a, { question: originalQuestion, clarify: ask.clarify });
   };
 
   const sendReport = async () => {
@@ -152,10 +160,10 @@ export function Analytics() {
               placeholder="Frag deine Daten …"
               value={question}
               onChange={e => setQuestion(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') void runAsk(); }}
+              onKeyDown={e => { if (e.key === 'Enter') void doAsk(question); }}
             />
           </div>
-          <Button onClick={() => void runAsk()} disabled={asking || !question.trim()} className="shrink-0">
+          <Button onClick={() => void doAsk(question)} disabled={asking || !question.trim()} className="shrink-0">
             {asking ? <Spinner /> : <Send size={16} />}
           </Button>
         </div>
@@ -187,7 +195,30 @@ export function Analytics() {
             </button>
           </div>
           {ask.clarify
-            ? <Card className="p-3 text-sm text-zinc-600 dark:text-zinc-300">{ask.clarify}</Card>
+            ? (
+              <Card className="flex flex-col gap-2.5 p-3">
+                <p className="text-sm text-zinc-700 dark:text-zinc-200">{ask.clarify}</p>
+                {!!ask.options?.length && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {ask.options.map(o => (
+                      <button key={o} type="button" disabled={asking} onClick={() => answerClarify(o)} className={chip(false)}>{o}</button>
+                    ))}
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Antwort eingeben …"
+                    value={clarifyAnswer}
+                    disabled={asking}
+                    onChange={e => setClarifyAnswer(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') answerClarify(clarifyAnswer); }}
+                  />
+                  <Button onClick={() => answerClarify(clarifyAnswer)} disabled={asking || !clarifyAnswer.trim()} className="shrink-0">
+                    {asking ? <Spinner /> : <Send size={16} />}
+                  </Button>
+                </div>
+              </Card>
+            )
             : (
               <div className="grid gap-3 sm:grid-cols-2">
                 {ask.tiles.map((tile, i) => (

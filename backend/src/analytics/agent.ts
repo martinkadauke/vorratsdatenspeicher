@@ -27,7 +27,7 @@ function coerceTileType(req: TileType, q: AnalyticsQuery): TileType {
 }
 
 interface SpecTile { type?: string; title?: string; query: AnalyticsQuery }
-interface AgentSpec { clarify?: string | null; title?: string; summary?: string; tiles?: SpecTile[] }
+interface AgentSpec { clarify?: string | null; options?: string[]; title?: string; summary?: string; tiles?: SpecTile[] }
 
 export interface DashboardTile {
   type: TileType; title: string;
@@ -35,11 +35,13 @@ export interface DashboardTile {
 }
 export interface AskResult {
   clarify?: string | null;
+  options?: string[];          // clickable answer choices for a clarify (yes/no, a list …)
   title?: string;
   summary?: string;
   tiles: DashboardTile[];
   dropped: number;
 }
+export interface PriorTurn { question: string; clarify: string }
 
 function catalogText(): string {
   const metrics = Object.values(METRICS).map(m => `  - ${m.key}: ${m.label} (${m.unit})`).join('\n');
@@ -62,8 +64,10 @@ HARTE REGELN (oberste Priorität):
 - Schreibe NIEMALS SQL.
 - Nenne NIEMALS konkrete Zahlen oder Beträge. Das System berechnet und rendert alle Werte. Das Feld "summary" ist nur eine kurze, neutrale Einordnung OHNE Zahlen.
 - Ist die Frage mehrdeutig oder mit dem Katalog nicht beantwortbar: setze "clarify" auf eine kurze Rückfrage und lass "tiles" leer.
+- Wenn du eine Rückfrage stellst und es eine Ja/Nein-Frage oder eine Auswahl ist (z.B. ein Familienmitglied, ein Zeitraum, "Ausgaben"/"Einnahmen"), gib ZUSÄTZLICH "options" an: 2–5 kurze, anklickbare Antworten als Strings. Bei einer wirklich freien Rückfrage lass "options" weg.
 
 Vorzeichen: Ausgaben negativ, Einnahmen positiv. Metrik "spend" = positive Ausgabensumme, "income" = positive Einnahmen, "net" = Saldo (Einnahmen − Ausgaben).
+Dimension "family_member" = Ausgaben pro Person (der Artikelpreis wird auf die zugeordneten Personen aufgeteilt) — nur mit Metrik "spend" sinnvoll, kombinierbar mit category/product/Zeitraster.
 
 ${catalogText()}
 
@@ -81,17 +85,24 @@ FILTER (Feld "filters", alle optional):
 TILE-TYPEN (Feld "type"): kpi (Einzelwert, ohne grain/dimensions), line/area (Zeitreihe, braucht grain), bar/pie (nach genau 1 dimension), table (beliebig).
 
 Antworte mit GENAU diesem JSON (keine Erklärung drumherum):
-{"clarify": null, "title": "...", "summary": "...", "tiles": [{"type":"kpi","title":"...","query":{"metric":"spend","grain":"month","dimensions":["category"],"filters":{"from":"2026-01-01"},"limit":12}}]}
+{"clarify": null, "options": null, "title": "...", "summary": "...", "tiles": [{"type":"kpi","title":"...","query":{"metric":"spend","grain":"month","dimensions":["category"],"filters":{"from":"2026-01-01"},"limit":12}}]}
 
 Sprache der Texte (title/summary/clarify): ${lang === 'en' ? 'Englisch' : 'Deutsch'}. Baue 1–5 sinnvolle, sich ergänzende Tiles (z.B. KPI-Summe + Zeitreihe + Breakdown).`;
 }
 
-interface Ctx { today: string; lo: string | null; hi: string | null; categories: string[]; konten: string[] }
+interface Ctx { today: string; lo: string | null; hi: string | null; categories: string[]; konten: string[]; members: string[] }
 
-function userPrompt(question: string, ctx: Ctx): string {
-  return `Heute: ${ctx.today}. Verfügbarer Datenbereich: ${ctx.lo ?? '—'} bis ${ctx.hi ?? '—'}.
+function userPrompt(question: string, ctx: Ctx, prior?: PriorTurn): string {
+  const head = `Heute: ${ctx.today}. Verfügbarer Datenbereich: ${ctx.lo ?? '—'} bis ${ctx.hi ?? '—'}.
 Oberste Kategorien: ${ctx.categories.join(', ') || '—'}.
 Konten: ${ctx.konten.join(', ') || '—'}.
+Familienmitglieder: ${ctx.members.join(', ') || '—'}.`;
+  if (prior) {
+    return `${head}
+
+Dies ist eine Folgeantwort. Ursprüngliche Frage: "${prior.question}". Deine Rückfrage war: "${prior.clarify}". Der Nutzer antwortet jetzt: "${question}". Baue daraus die Dashboard-Spezifikation — frage nur erneut nach, wenn es WIRKLICH noch unklar ist.`;
+  }
+  return `${head}
 
 Frage: "${question}"`;
 }
@@ -105,12 +116,14 @@ async function loadContext(user: User | undefined): Promise<Ctx> {
   const konten = user?.sees_all_konten
     ? await sql`SELECT name FROM konto ORDER BY sort_order, id`
     : await sql`SELECT name FROM konto WHERE is_shared = TRUE OR user_id = ${user?.id ?? -1} ORDER BY sort_order, id`;
+  const members = await sql`SELECT name FROM family_member ORDER BY sort_order, name`;
   return {
     today: new Date().toISOString().slice(0, 10),
     lo: (range?.lo as string | null) ?? null,
     hi: (range?.hi as string | null) ?? null,
     categories: cats.map(c => c.display as string),
     konten: konten.map(k => k.name as string),
+    members: members.map(m => m.name as string),
   };
 }
 
@@ -124,10 +137,10 @@ async function logAsk(
   } catch { /* observability only — never break the request */ }
 }
 
-export async function askAnalytics(question: string, user: User | undefined, lang = 'de'): Promise<AskResult> {
+export async function askAnalytics(question: string, user: User | undefined, lang = 'de', prior?: PriorTurn): Promise<AskResult> {
   const ctx = await loadContext(user);
   const provider = await providerForTask('nlanalytics');
-  const raw = await provider.chat({ system: systemPrompt(lang), user: userPrompt(question, ctx), json: true });
+  const raw = await provider.chat({ system: systemPrompt(lang), user: userPrompt(question, ctx, prior), json: true });
 
   let spec: AgentSpec;
   try {
@@ -144,7 +157,10 @@ export async function askAnalytics(question: string, user: User | undefined, lan
 
   if (spec.clarify) {
     await logAsk(user, question, spec, true, null);
-    return { clarify: spec.clarify, tiles: [], dropped: 0 };
+    const options = Array.isArray(spec.options)
+      ? spec.options.filter(o => typeof o === 'string' && o.trim()).slice(0, 6)
+      : undefined;
+    return { clarify: spec.clarify, options: options?.length ? options : undefined, tiles: [], dropped: 0 };
   }
 
   const tiles: DashboardTile[] = [];

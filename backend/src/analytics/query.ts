@@ -8,7 +8,7 @@
 import { analyticsRead } from '../db.js';
 import type { User } from '../types.js';
 import {
-  METRICS, DIMENSIONS, GRAINS, grainExpr,
+  METRICS, DIMENSIONS, GRAINS, grainExpr, MEMBER_DIM,
   type AnalyticsQuery, type ColumnMeta, AnalyticsError,
 } from './catalog.js';
 
@@ -43,6 +43,9 @@ function kontoWhere(user: User | undefined, params: unknown[]): string | null {
 export interface BuiltQuery { text: string; params: unknown[]; columns: ColumnMeta }
 
 export function buildAnalyticsSql(q: AnalyticsQuery, user: User | undefined): BuiltQuery {
+  // Per-person spending uses a different base (price split across taggers).
+  if ((q.dimensions ?? []).includes(MEMBER_DIM)) return buildMemberSql(q, user);
+
   const metric = METRICS[q.metric];
   if (!metric) throw new AnalyticsError(`unknown metric "${q.metric}"`);
 
@@ -126,6 +129,70 @@ export function buildAnalyticsSql(q: AnalyticsQuery, user: User | undefined): Bu
   const cap = Math.min(Math.max(1, Math.floor(q.limit != null ? asNum(q.limit, 'limit') : DEFAULT_ROWS)), MAX_ROWS);
   text += ` LIMIT ${cap}`;
 
+  return { text, params, columns };
+}
+
+// Per-member spending over v_member_spend. Only `spend` makes sense here (each
+// row is already a positive spend share); supports family_member + category /
+// product / time dims and date/category/konto/product filters.
+function buildMemberSql(q: AnalyticsQuery, user: User | undefined): BuiltQuery {
+  const dims = (q.dimensions ?? []).map(key => {
+    if (key === MEMBER_DIM) return { key, label: DIMENSIONS.family_member.label, expr: `t.family_member` };
+    if (key === 'category') return { key, label: DIMENSIONS.category.label, expr: `COALESCE(NULLIF(split_part(t.category_path, '/', 1), ''), 'Sonstiges')` };
+    if (key === 'category_full') return { key, label: DIMENSIONS.category_full.label, expr: `COALESCE(t.category_path, 'Sonstiges')` };
+    if (key === 'product') return { key, label: DIMENSIONS.product.label, expr: `COALESCE(t.canonical_name, '—')` };
+    throw new AnalyticsError(`dimension "${key}" is not available per family member`);
+  });
+  if (dims.length > 3) throw new AnalyticsError('at most 3 dimensions');
+  const grain = q.grain ?? null;
+  if (grain && !GRAINS.includes(grain)) throw new AnalyticsError(`unknown grain "${grain}"`);
+
+  const params: unknown[] = [];
+  const where: string[] = [];
+  const ks = kontoWhere(user, params);          // v_member_spend has konto_id
+  if (ks) where.push(ks);
+
+  const f = q.filters ?? {};
+  if (f.from) where.push(`t.datum >= $${params.push(asDate(f.from, 'from'))}`);
+  if (f.to) where.push(`t.datum <= $${params.push(asDate(f.to, 'to'))}`);
+  if (f.category) {
+    const a = params.push(String(f.category));
+    const b = params.push(`${String(f.category)}/%`);
+    where.push(`(t.category_path = $${a} OR t.category_path LIKE $${b})`);
+  }
+  if (f.konto_id?.length) {
+    const ids = f.konto_id.map(id => asNum(id, 'konto_id'));
+    if (user && !user.sees_all_konten) {
+      const allowed = new Set(user.konto_ids ?? []);
+      if (ids.some(id => !allowed.has(id))) throw new AnalyticsError('konto not accessible');
+    }
+    where.push(`t.konto_id IN (${ids.map(id => `$${params.push(id)}`).join(', ')})`);
+  }
+  if (f.product) where.push(`t.canonical_name ILIKE $${params.push(`%${String(f.product)}%`)}`);
+  const excludeMeta = f.exclude_meta !== false;
+
+  const select: string[] = [];
+  const groupExprs: string[] = [];
+  const columns: ColumnMeta = {
+    time: grain,
+    dims: dims.map(d => ({ key: d.key, label: d.label })),
+    value: { key: 'spend', label: METRICS.spend.label, unit: 'eur' },
+  };
+  if (grain) { select.push(`${grainExpr(grain)} AS bucket`); groupExprs.push(grainExpr(grain)); }
+  dims.forEach((d, i) => { select.push(`${d.expr} AS d${i}`); groupExprs.push(d.expr); });
+  select.push(`SUM(t.amount) AS value`);
+
+  let text = `SELECT ${select.join(', ')} FROM v_member_spend t`;
+  if (excludeMeta) {
+    text += ` LEFT JOIN category c ON c.path = t.category_path`;
+    where.push(`(c.is_meta IS NOT TRUE)`);
+  }
+  if (where.length) text += ` WHERE ${where.join(' AND ')}`;
+  if (groupExprs.length) text += ` GROUP BY ${groupExprs.join(', ')}`;
+  if (grain) text += ` ORDER BY bucket ASC`;
+  else if (dims.length) text += ` ORDER BY value ${q.order === 'asc' ? 'ASC' : 'DESC'}`;
+  const cap = Math.min(Math.max(1, Math.floor(q.limit != null ? asNum(q.limit, 'limit') : DEFAULT_ROWS)), MAX_ROWS);
+  text += ` LIMIT ${cap}`;
   return { text, params, columns };
 }
 

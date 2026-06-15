@@ -88,7 +88,16 @@ export const DIMENSIONS: Record<string, DimensionDef> = {
     key: 'product', label: 'Produkt', label_en: 'Product',
     expr: `COALESCE(t.canonical_name, '—')`,
   },
+  // Special: per-person spending. Routed to v_member_spend (price split across
+  // tagged members), so it only combines with spend and a subset of dims/filters.
+  family_member: {
+    key: 'family_member', label: 'Familienmitglied', label_en: 'Family member',
+    expr: `t.family_member`,
+  },
 };
+
+/** Dimensions that force the member-spend code path (price split per person). */
+export const MEMBER_DIM = 'family_member';
 
 /** Source-channel values that appear in v_transactions.source, with labels. */
 export const SOURCES: Record<string, { label: string; label_en: string }> = {
