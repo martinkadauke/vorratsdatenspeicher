@@ -6,6 +6,7 @@ import { Reset } from './pages/Reset';
 import { Receipts } from './pages/Receipts';
 import { ReceiptDetailPage } from './pages/ReceiptDetailPage';
 import { Stats } from './pages/Stats';
+import { Analytics } from './pages/Analytics';
 import { Pantry } from './pages/Pantry';
 import { Shopping } from './pages/Shopping';
 import { Artikel } from './pages/Artikel';
@@ -40,7 +41,8 @@ export function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/reset" element={<Reset />} />
         <Route element={<Protected><Layout /></Protected>}>
-          <Route path="/" element={<Navigate to="/receipts" replace />} />
+          <Route path="/" element={<Navigate to="/analytics" replace />} />
+          <Route path="/analytics" element={<Analytics />} />
           <Route path="/receipts" element={<Receipts />} />
           <Route path="/receipts/:id" element={<ReceiptDetailPage />} />
           <Route path="/stats" element={<Stats />} />

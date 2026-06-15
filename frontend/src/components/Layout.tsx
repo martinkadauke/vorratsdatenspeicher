@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 import {
   ReceiptText, ChartPie, ShoppingCart, Package, Tags, ListChecks, Store,
-  Settings, UserCircle, LogOut, MoreHorizontal, BadgePercent, Eye, Target,
+  Settings, UserCircle, LogOut, MoreHorizontal, BadgePercent, Eye, Target, LayoutDashboard,
 } from 'lucide-react';
 import { useAuth } from '../context/auth';
 import { api } from '../api/client';
@@ -23,6 +23,7 @@ const ENV_BADGE: Record<string, { label: string; cls: string }> = {
 };
 
 const NAV = [
+  { to: '/analytics', icon: LayoutDashboard, key: 'nav.analytics' },
   { to: '/receipts', icon: ReceiptText, key: 'nav.receipts' },
   { to: '/stats', icon: ChartPie, key: 'nav.stats' },
   { to: '/shopping', icon: ShoppingCart, key: 'nav.shopping' },
@@ -89,7 +90,7 @@ export function Layout() {
     <div className="min-h-dvh overflow-x-clip">
       {/* Header */}
       <header className="sticky top-0 z-30 flex items-center justify-between border-b border-zinc-200 bg-white/80 px-3 py-2.5 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/80 sm:px-4">
-        <NavLink to="/receipts" className="flex items-center gap-2 text-base font-bold tracking-tight">
+        <NavLink to="/analytics" className="flex items-center gap-2 text-base font-bold tracking-tight">
           <span className="text-xl">🗄️</span>
           <span>Vorratsdatenspeicher</span>
           {envBadge && (
