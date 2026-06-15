@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { api } from '../api/client';
 import { Button, Input, Label, Card, Spinner } from '../components/ui';
+import { EmojiPicker } from '../components/EmojiPicker';
 
 interface TokenInfo { valid: boolean; kind?: 'invite' | 'reset'; username?: string }
 
@@ -15,8 +16,10 @@ export function Reset() {
   const [info, setInfo] = useState<TokenInfo | null>(null);
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  const [emoji, setEmoji] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const isInvite = info?.kind === 'invite';
 
   useEffect(() => {
     api<TokenInfo>(`/api/auth/token-info?token=${encodeURIComponent(token)}`)
@@ -30,7 +33,7 @@ export function Reset() {
     setBusy(true);
     setError('');
     try {
-      await api('/api/auth/reset', { method: 'POST', body: { token, password } });
+      await api('/api/auth/reset', { method: 'POST', body: { token, password, emoji: emoji || undefined } });
       navigate('/login', { replace: true });
     } catch (err) {
       setError((err as Error).message);
@@ -68,8 +71,14 @@ export function Reset() {
               <Label>{t('reset.confirm')}</Label>
               <Input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} />
             </div>
+            {isInvite && (
+              <div>
+                <Label>{t('reset.pickEmoji')}</Label>
+                <EmojiPicker value={emoji} onChange={setEmoji} />
+              </div>
+            )}
             {error && <p className="text-sm text-red-500">{error}</p>}
-            <Button type="submit" disabled={busy || password.length < 8 || !confirm}>
+            <Button type="submit" disabled={busy || password.length < 8 || !confirm || (isInvite && !emoji)}>
               {t('reset.submit')}
             </Button>
             {password.length > 0 && password.length < 8 && (

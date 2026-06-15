@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import sql from '../db.js';
-import { signToken } from './plugin.js';
+import { signToken, resolvedEmoji } from './plugin.js';
 import { sendMail } from '../mailer.js';
 import { resetEmail } from '../email/templates.js';
 import { getConfig } from '../config.js';
@@ -49,9 +49,10 @@ export function authRoutes(app: FastifyInstance): void {
     if (!username || !password) return reply.code(400).send({ error: 'missing credentials' });
 
     const rows = await sql`
-      SELECT id, username, password_hash, is_admin, sees_all_konten, can_write, prefers_dark, preferred_lang, email, has_seen_tour, pinned_chains
-      FROM users
-      WHERE LOWER(username) = LOWER(${username}) OR LOWER(email) = LOWER(${username})
+      SELECT u.id, u.username, u.password_hash, u.is_admin, u.sees_all_konten, u.can_write, u.prefers_dark, u.preferred_lang, u.email, u.has_seen_tour, u.pinned_chains, u.emoji,
+             (SELECT emoji FROM family_member WHERE user_id = u.id AND emoji IS NOT NULL ORDER BY sort_order LIMIT 1) AS member_emoji
+      FROM users u
+      WHERE LOWER(u.username) = LOWER(${username}) OR LOWER(u.email) = LOWER(${username})
     `;
     if (!rows.length || !(await bcrypt.compare(password, rows[0].password_hash))) {
       const blocked = trackFailure(ip);
@@ -72,6 +73,7 @@ export function authRoutes(app: FastifyInstance): void {
         preferred_lang: u.preferred_lang,
         email: u.email,
         has_seen_tour: u.has_seen_tour,
+        emoji: resolvedEmoji(u.emoji, u.member_emoji, u.is_admin),
         pinned_chains: u.pinned_chains,
       },
     };
@@ -110,11 +112,12 @@ export function authRoutes(app: FastifyInstance): void {
     return { valid: true, kind: rows[0].kind, username: rows[0].username };
   });
 
-  /** Set a new password via invite/reset token. */
+  /** Set a new password via invite/reset token (and, on invite, the chosen emoji). */
   app.post('/api/auth/reset', async (req, reply) => {
-    const { token, password } = (req.body ?? {}) as { token?: string; password?: string };
+    const { token, password, emoji } = (req.body ?? {}) as { token?: string; password?: string; emoji?: string };
     if (!token || !password) return reply.code(400).send({ error: 'token and password required' });
     if (password.length < 8) return reply.code(400).send({ error: 'password too short (min 8)' });
+    const cleanEmoji = typeof emoji === 'string' && emoji.trim() ? emoji.trim().slice(0, 16) : null;
 
     const rows = await sql`
       SELECT id, user_id FROM auth_token
@@ -125,6 +128,7 @@ export function authRoutes(app: FastifyInstance): void {
     const hash = await bcrypt.hash(password, 12);
     await sql.begin(async tx => {
       await tx`UPDATE users SET password_hash = ${hash} WHERE id = ${rows[0].user_id}`;
+      if (cleanEmoji) await tx`UPDATE users SET emoji = ${cleanEmoji} WHERE id = ${rows[0].user_id}`;
       await tx`UPDATE auth_token SET used_at = NOW() WHERE id = ${rows[0].id}`;
     });
     return { ok: true };

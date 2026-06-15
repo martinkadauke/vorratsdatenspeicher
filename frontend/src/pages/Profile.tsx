@@ -7,6 +7,7 @@ import { api } from '../api/client';
 import { useAuth } from '../context/auth';
 import { setLanguage } from '../i18n';
 import { Card, Button, Input, Label, Select, Switch } from '../components/ui';
+import { EmojiPicker } from '../components/EmojiPicker';
 
 export function Profile() {
   const { t } = useTranslation();
@@ -34,13 +35,18 @@ export function Profile() {
 
       <Card className="flex flex-col gap-4 p-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-xl font-bold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400">
-            {user.username[0]?.toUpperCase()}
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-2xl font-bold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400">
+            {user.emoji ? <span aria-hidden>{user.emoji}</span> : user.username[0]?.toUpperCase()}
           </div>
           <div>
             <div className="font-semibold">{user.username}</div>
             {user.is_admin && <div className="text-xs text-emerald-600 dark:text-emerald-500">Admin</div>}
           </div>
+        </div>
+
+        <div>
+          <Label>{t('profile.emoji')}</Label>
+          <EmojiPicker value={user.emoji} onChange={e => patch.mutate({ emoji: e })} />
         </div>
 
         <div className="flex items-center justify-between">

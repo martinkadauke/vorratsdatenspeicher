@@ -25,11 +25,14 @@ export function registerAuth(app: FastifyInstance): void {
     try {
       const payload = jwt.verify(token, JWT_SECRET) as unknown as { sub: number };
       const rows = await sql`
-        SELECT id, username, email, is_admin, sees_all_konten, can_write, prefers_dark, preferred_lang, has_seen_tour, pinned_chains
-        FROM users WHERE id = ${payload.sub}
+        SELECT u.id, u.username, u.email, u.is_admin, u.sees_all_konten, u.can_write, u.prefers_dark, u.preferred_lang, u.has_seen_tour, u.pinned_chains, u.emoji,
+               (SELECT emoji FROM family_member WHERE user_id = u.id AND emoji IS NOT NULL ORDER BY sort_order LIMIT 1) AS member_emoji
+        FROM users u WHERE u.id = ${payload.sub}
       `;
       if (!rows.length) return reply.code(401).send({ error: 'unauthorized' });
+      const row = rows[0];
       const user = rows[0] as unknown as User;
+      user.emoji = resolvedEmoji(row.emoji as string | null, row.member_emoji as string | null, user.is_admin);
 
       // Read-only accounts (can_write = false, non-admin) may not mutate data.
       // Self-service prefs/own-password (PATCH /api/me) stay allowed.
@@ -67,4 +70,9 @@ export async function requireSuperAdmin(req: FastifyRequest, reply: FastifyReply
 
 export function signToken(userId: number): string {
   return jwt.sign({ sub: userId }, JWT_SECRET, { expiresIn: '7d' });
+}
+
+/** Avatar emoji shown in the header: own emoji → linked family member's → 🤖 for admins. */
+export function resolvedEmoji(userEmoji: string | null, memberEmoji: string | null, isAdmin: boolean): string | null {
+  return userEmoji ?? memberEmoji ?? (isAdmin ? '🤖' : null);
 }

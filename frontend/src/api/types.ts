@@ -8,6 +8,7 @@ export interface User {
   pinned_chains?: string[];
   prefers_dark: boolean;
   preferred_lang: string;
+  emoji?: string | null;
   has_seen_tour?: boolean;
   created_at?: string;
   invite_pending?: boolean;

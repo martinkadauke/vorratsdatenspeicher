@@ -101,8 +101,11 @@ export function Layout() {
         </NavLink>
         <div className="flex items-center gap-1">
           <NotificationBell />
-          <NavLink to="/profile" className="rounded-xl p-2 text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800">
-            <UserCircle size={20} />
+          <NavLink
+            to="/profile" title={user?.username}
+            className="flex h-9 w-9 items-center justify-center rounded-xl text-xl leading-none text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+          >
+            {user?.emoji ? <span aria-hidden>{user.emoji}</span> : <UserCircle size={20} />}
           </NavLink>
         </div>
       </header>
