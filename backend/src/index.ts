@@ -36,6 +36,7 @@ import { rescheduleChurner } from './churner/scheduler.js';
 import { rescheduleSupermarket } from './supermarket/scheduler.js';
 import { rescheduleModelReview } from './maintenance/modelReview.js';
 import { modelReviewRoutes } from './routes/modelReview.js';
+import { analyticsRoutes } from './routes/analytics.js';
 
 async function main(): Promise<void> {
   await migrate();
@@ -98,6 +99,7 @@ async function main(): Promise<void> {
   subscriptionRoutes(app);
   offerRoutes(app);
   modelReviewRoutes(app);
+  analyticsRoutes(app);
 
   const receiptsDir = process.env.RECEIPTS_LOCAL_PATH ?? '/receipts';
 

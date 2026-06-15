@@ -1,0 +1,119 @@
+// Deterministic query builder: a validated AnalyticsQuery → ONE parameterized
+// SELECT over v_transactions. Identifiers come only from the catalog (never from
+// the LLM/user); every value is a bound $n placeholder. Executed via
+// analyticsRead → least-privilege, read-only, timeout-capped. This is why a
+// wrong or adversarial intent can return bad numbers AT WORST, never mutate, and
+// why every figure is traceable to the SQL we return alongside it.
+
+import { analyticsRead } from '../db.js';
+import type { User } from '../types.js';
+import {
+  METRICS, DIMENSIONS, GRAINS, grainExpr,
+  type AnalyticsQuery, type ColumnMeta, AnalyticsError,
+} from './catalog.js';
+
+const MAX_ROWS = 1000;
+const DEFAULT_ROWS = 200;
+
+/** Replicate kontoScope() as bound params (analyticsRead takes raw text + params). */
+function kontoWhere(user: User | undefined, params: unknown[]): string | null {
+  if (!user || user.sees_all_konten) return null;
+  const ids = user.konto_ids ?? [];
+  if (!ids.length) return 'FALSE';
+  const ph = ids.map(id => `$${params.push(id)}`).join(', ');
+  return `(t.konto_id IN (${ph}) OR t.konto_id IS NULL)`;
+}
+
+export interface BuiltQuery { text: string; params: unknown[]; columns: ColumnMeta }
+
+export function buildAnalyticsSql(q: AnalyticsQuery, user: User | undefined): BuiltQuery {
+  const metric = METRICS[q.metric];
+  if (!metric) throw new AnalyticsError(`unknown metric "${q.metric}"`);
+
+  const dims = (q.dimensions ?? []).map(key => {
+    const def = DIMENSIONS[key];
+    if (!def) throw new AnalyticsError(`unknown dimension "${key}"`);
+    return def;
+  });
+  if (dims.length > 3) throw new AnalyticsError('at most 3 dimensions');
+
+  const grain = q.grain ?? null;
+  if (grain && !GRAINS.includes(grain)) throw new AnalyticsError(`unknown grain "${grain}"`);
+
+  const params: unknown[] = [];
+  const where: string[] = [];
+
+  const ks = kontoWhere(user, params);
+  if (ks) where.push(ks);
+
+  const f = q.filters ?? {};
+  if (f.from) where.push(`t.datum >= $${params.push(f.from)}`);
+  if (f.to) where.push(`t.datum <= $${params.push(f.to)}`);
+  if (f.direction) {
+    if (f.direction !== 'expense' && f.direction !== 'income') throw new AnalyticsError('bad direction');
+    where.push(`t.direction = $${params.push(f.direction)}`);
+  }
+  if (f.category) {
+    const a = params.push(f.category);
+    const b = params.push(`${f.category}/%`);
+    where.push(`(t.category_path = $${a} OR t.category_path LIKE $${b})`);
+  }
+  if (f.source?.length) {
+    const ph = f.source.map(s => `$${params.push(String(s))}`).join(', ');
+    where.push(`t.source IN (${ph})`);
+  }
+  if (f.konto_id?.length) {
+    const ph = f.konto_id.map(id => `$${params.push(Number(id))}`).join(', ');
+    where.push(`t.konto_id IN (${ph})`);
+  }
+  if (f.merchant) where.push(`t.counterparty ILIKE $${params.push(`%${f.merchant}%`)}`);
+  if (f.product) where.push(`t.canonical_name ILIKE $${params.push(`%${f.product}%`)}`);
+  if (f.min_amount != null) where.push(`ABS(t.amount) >= $${params.push(Number(f.min_amount))}`);
+  if (f.max_amount != null) where.push(`ABS(t.amount) <= $${params.push(Number(f.max_amount))}`);
+
+  const excludeMeta = f.exclude_meta !== false;        // default on (matches existing spend stats)
+  const needKontoJoin = dims.some(d => d.needsKontoJoin);
+
+  const select: string[] = [];
+  const groupExprs: string[] = [];
+  const columns: ColumnMeta = {
+    time: grain,
+    dims: dims.map(d => ({ key: d.key, label: d.label })),
+    value: { key: metric.key, label: metric.label, unit: metric.unit },
+  };
+
+  if (grain) { select.push(`${grainExpr(grain)} AS bucket`); groupExprs.push(grainExpr(grain)); }
+  dims.forEach((d, i) => { select.push(`${d.expr} AS d${i}`); groupExprs.push(d.expr); });
+  select.push(`${metric.expr} AS value`);
+
+  let text = `SELECT ${select.join(', ')} FROM v_transactions t`;
+  if (needKontoJoin) text += ` LEFT JOIN konto k ON k.id = t.konto_id`;
+  if (excludeMeta) {
+    text += ` LEFT JOIN category c ON c.path = t.category_path`;
+    where.push(`(c.is_meta IS NOT TRUE)`);   // income/fixed have no category row → kept
+  }
+  if (where.length) text += ` WHERE ${where.join(' AND ')}`;
+  if (groupExprs.length) text += ` GROUP BY ${groupExprs.join(', ')}`;
+
+  if (grain) text += ` ORDER BY bucket ASC`;
+  else if (dims.length) text += ` ORDER BY value ${q.order === 'asc' ? 'ASC' : 'DESC'}`;
+
+  const cap = Math.min(Math.max(1, Math.floor(q.limit ?? DEFAULT_ROWS)), MAX_ROWS);
+  text += ` LIMIT ${cap}`;
+
+  return { text, params, columns };
+}
+
+export interface AnalyticsRow { bucket?: string; dims: (string | null)[]; value: number }
+export interface AnalyticsResult { rows: AnalyticsRow[]; columns: ColumnMeta; sql: string; params: unknown[] }
+
+export async function runAnalyticsQuery(q: AnalyticsQuery, user: User | undefined): Promise<AnalyticsResult> {
+  const { text, params, columns } = buildAnalyticsSql(q, user);
+  const raw = await analyticsRead<Record<string, unknown>>(text, params);
+  const rows: AnalyticsRow[] = raw.map(r => ({
+    bucket: columns.time ? String(r.bucket ?? '') : undefined,
+    dims: columns.dims.map((_, i) => (r[`d${i}`] == null ? null : String(r[`d${i}`]))),
+    value: r.value == null ? 0 : Number(r.value),
+  }));
+  return { rows, columns, sql: text, params };
+}

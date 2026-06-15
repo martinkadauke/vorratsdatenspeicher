@@ -35,7 +35,8 @@ export function registerAuth(app: FastifyInstance): void {
       // Self-service prefs/own-password (PATCH /api/me) stay allowed.
       if (!user.is_admin && user.can_write === false
           && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)
-          && url !== '/api/me') {
+          && url !== '/api/me'
+          && !url.startsWith('/api/analytics/')) {   // analytics endpoints are reads (POST carries the query body)
         return reply.code(403).send({ error: 'read_only', message: 'Nur-Lese-Zugang – Änderungen sind für dieses Konto deaktiviert.' });
       }
       // Accounts this user may see: shared (GKK) + their own personal accounts.
