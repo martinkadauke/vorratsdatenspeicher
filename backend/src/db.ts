@@ -12,6 +12,35 @@ const sql = postgres(DATABASE_URL, {
 
 export default sql;
 
+/**
+ * Run a SELECT for the Analytics agent under least privilege.
+ *
+ * Every analytics query executes inside a transaction that (1) assumes the
+ * SELECT-only `analytics` role, (2) is marked transaction_read_only, and
+ * (3) has a hard statement/lock timeout. This is the enforcement that makes the
+ * agent's "never write/delete" guarantee physical, not prompt-based: even if a
+ * query were malformed or adversarial, the role cannot mutate and the
+ * transaction rejects writes.
+ *
+ * `text` MUST be assembled only from the curated metrics catalog (whitelisted
+ * identifiers). Every user-supplied value MUST be passed in `params` as a bound
+ * placeholder ($1, $2, …) — never string-interpolated into `text`.
+ */
+export async function analyticsRead<T = postgres.Row>(
+  text: string,
+  params: readonly unknown[] = [],
+): Promise<T[]> {
+  const rows = await sql.begin(async tx => {
+    await tx`SET LOCAL ROLE analytics`;
+    await tx`SET LOCAL transaction_read_only = on`;
+    await tx`SET LOCAL statement_timeout = 8000`;
+    await tx`SET LOCAL lock_timeout = 2000`;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return tx.unsafe(text, params as any[]);
+  });
+  return rows as unknown as T[];
+}
+
 /** Apply backend/migrations/*.sql in filename order, tracked in schema_migrations. */
 export async function migrate(): Promise<void> {
   await sql`CREATE TABLE IF NOT EXISTS schema_migrations (
