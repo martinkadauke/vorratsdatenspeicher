@@ -27,7 +27,7 @@ function coerceTileType(req: TileType, q: AnalyticsQuery): TileType {
 }
 
 interface SpecTile { type?: string; title?: string; query: AnalyticsQuery }
-interface AgentSpec { clarify?: string | null; options?: string[]; title?: string; summary?: string; tiles?: SpecTile[] }
+interface AgentSpec { clarify?: string | null; options?: string[]; chip?: string; title?: string; summary?: string; tiles?: SpecTile[] }
 
 export interface DashboardTile {
   type: TileType; title: string;
@@ -36,6 +36,7 @@ export interface DashboardTile {
 export interface AskResult {
   clarify?: string | null;
   options?: string[];          // clickable answer choices for a clarify (yes/no, a list …)
+  chip?: string;               // 1–3 word label of the question, for the recent-queries strip
   title?: string;
   summary?: string;
   tiles: DashboardTile[];
@@ -84,8 +85,10 @@ FILTER (Feld "filters", alle optional):
 
 TILE-TYPEN (Feld "type"): kpi (Einzelwert, ohne grain/dimensions), line/area (Zeitreihe, braucht grain), bar/pie (nach genau 1 dimension), table (beliebig).
 
+Gib außerdem "chip" an: ein sehr kurzes Label (1–3 Wörter, wenige Zeichen) das die Frage zusammenfasst, z.B. "Katzen Kosten" für „wie viel geben wir für Katzen aus".
+
 Antworte mit GENAU diesem JSON (keine Erklärung drumherum):
-{"clarify": null, "options": null, "title": "...", "summary": "...", "tiles": [{"type":"kpi","title":"...","query":{"metric":"spend","grain":"month","dimensions":["category"],"filters":{"from":"2026-01-01"},"limit":12}}]}
+{"clarify": null, "options": null, "chip": "...", "title": "...", "summary": "...", "tiles": [{"type":"kpi","title":"...","query":{"metric":"spend","grain":"month","dimensions":["category"],"filters":{"from":"2026-01-01"},"limit":12}}]}
 
 Sprache der Texte (title/summary/clarify): ${lang === 'en' ? 'Englisch' : 'Deutsch'}. Baue 1–5 sinnvolle, sich ergänzende Tiles (z.B. KPI-Summe + Zeitreihe + Breakdown).`;
 }
@@ -155,12 +158,14 @@ export async function askAnalytics(question: string, user: User | undefined, lan
     };
   }
 
+  const chip = typeof spec.chip === 'string' && spec.chip.trim() ? spec.chip.trim().slice(0, 30) : undefined;
+
   if (spec.clarify) {
     await logAsk(user, question, spec, true, null);
     const options = Array.isArray(spec.options)
       ? spec.options.filter(o => typeof o === 'string' && o.trim()).slice(0, 6)
       : undefined;
-    return { clarify: spec.clarify, options: options?.length ? options : undefined, tiles: [], dropped: 0 };
+    return { clarify: spec.clarify, options: options?.length ? options : undefined, chip, tiles: [], dropped: 0 };
   }
 
   const tiles: DashboardTile[] = [];
@@ -188,5 +193,5 @@ export async function askAnalytics(question: string, user: User | undefined, lan
   }
 
   await logAsk(user, question, spec, true, null);
-  return { title: spec.title, summary: spec.summary, tiles, dropped };
+  return { title: spec.title, summary: spec.summary, chip, tiles, dropped };
 }

@@ -8,7 +8,12 @@ import { AnalyticsTile, type TileType, type TileData, type AnalyticsResult } fro
 import { toast } from '../components/Toast';
 import { cn } from '../lib/utils';
 
-interface AskResult { clarify?: string | null; options?: string[]; title?: string; summary?: string; tiles: TileData[]; dropped: number }
+interface AskResult { clarify?: string | null; options?: string[]; chip?: string; title?: string; summary?: string; tiles: TileData[]; dropped: number }
+interface RecentQuery { q: string; chip: string }
+const RECENT_KEY = 'vds-analytics-recent';
+function loadRecent(): RecentQuery[] {
+  try { const v = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]'); return Array.isArray(v) ? v.slice(0, 5) : []; } catch { return []; }
+}
 interface Catalog {
   sources: { key: string; label: string }[];
   konten: { id: number; name: string; is_shared: boolean }[];
@@ -43,13 +48,6 @@ const DEFAULT_TILES: TileSpec[] = [
   { type: 'bar', title: 'Nach Quelle', query: { metric: 'spend', dimensions: ['source'], limit: 8 } },
 ];
 
-const EXAMPLES = [
-  'Lebensmittel letzte 6 Wochen',
-  'Wofür gebe ich am meisten aus?',
-  'Ausgaben pro Monat',
-  'Teuerste Läden',
-];
-
 const chip = (active: boolean) => cn(
   'shrink-0 whitespace-nowrap rounded-full border px-3 py-1 text-xs font-medium transition',
   active ? 'border-transparent bg-violet-600 text-white' : 'border-zinc-300 text-zinc-500 hover:border-zinc-400 dark:border-zinc-700 dark:text-zinc-400',
@@ -81,6 +79,15 @@ export function Analytics() {
   const [sending, setSending] = useState(false);
   const [originalQuestion, setOriginalQuestion] = useState('');
   const [clarifyAnswer, setClarifyAnswer] = useState('');
+  const [recent, setRecent] = useState<RecentQuery[]>(loadRecent);
+
+  const pushRecent = (q: string, label: string) => {
+    setRecent(prev => {
+      const next = [{ q, chip: label }, ...prev.filter(r => r.q !== q)].slice(0, 5);
+      try { localStorage.setItem(RECENT_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  };
 
   const { data: catalog } = useQuery({
     queryKey: ['analytics-catalog'],
@@ -109,6 +116,7 @@ export function Analytics() {
       setAsk(res);
       setClarifyAnswer('');
       if (!res.clarify) setQuestion('');
+      if (!prior) pushRecent(text, res.chip?.trim() || text.slice(0, 22));   // keep last 5 initial queries
     } catch (e) {
       setAskErr((e as Error).message);
     } finally {
@@ -122,10 +130,12 @@ export function Analytics() {
   const sendReport = async () => {
     setSending(true);
     try {
-      const r = await api<{ sent: boolean; to: string }>('/api/analytics/report', {
-        method: 'POST',
-        body: { filters, periodLabel: PRESETS.find(p => p.key === preset)?.label ?? '' },
-      });
+      // Prefer the NL-generated dashboard the user is looking at; else the default view.
+      const useDash = ask && !ask.clarify && ask.tiles?.length;
+      const body = useDash
+        ? { dashboard: { title: ask?.title, summary: ask?.summary, tiles: ask?.tiles } }
+        : { filters, periodLabel: PRESETS.find(p => p.key === preset)?.label ?? '' };
+      const r = await api<{ sent: boolean; to: string }>('/api/analytics/report', { method: 'POST', body });
       toast(`Report an ${r.to} gesendet`, 'success');
     } catch (e) {
       toast((e as Error).message, 'error');
@@ -167,11 +177,13 @@ export function Analytics() {
             {asking ? <Spinner /> : <Send size={16} />}
           </Button>
         </div>
-        <div className={scrollRow}>
-          {EXAMPLES.map(ex => (
-            <button key={ex} type="button" onClick={() => setQuestion(ex)} className={chip(false)}>{ex}</button>
-          ))}
-        </div>
+        {recent.length > 0 && (
+          <div className={scrollRow}>
+            {recent.map(r => (
+              <button key={r.q} type="button" onClick={() => void doAsk(r.q)} title={r.q} className={chip(false)}>{r.chip}</button>
+            ))}
+          </div>
+        )}
       </Card>
 
       {askErr && (
@@ -222,7 +234,7 @@ export function Analytics() {
             : (
               <div className="grid gap-3 sm:grid-cols-2">
                 {ask.tiles.map((tile, i) => (
-                  <div key={i} className={tile.type === 'kpi' ? '' : 'sm:col-span-2'}>
+                  <div key={i} className={cn('min-w-0', tile.type === 'kpi' ? '' : 'sm:col-span-2')}>
                     <AnalyticsTile tile={tile} />
                   </div>
                 ))}

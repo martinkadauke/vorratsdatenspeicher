@@ -75,21 +75,21 @@ function renderBody(type: TileType, data: { x: string; value: number }[], unit: 
 
   if (type === 'table') {
     return (
-      <div className="max-h-72 overflow-auto">
-        <table className="w-full text-sm">
+      <div className="max-h-72 w-full overflow-auto">
+        <table className="w-full text-xs sm:text-sm">
           <thead className="sticky top-0 bg-white text-left text-xs text-zinc-400 dark:bg-zinc-900">
             <tr>
-              {tile.columns.time && <th className="py-1 pr-2 font-medium">Zeit</th>}
-              {tile.columns.dims.map(d => <th key={d.key} className="py-1 pr-2 font-medium">{d.label}</th>)}
-              <th className="py-1 text-right font-medium">{tile.columns.value.label}</th>
+              {tile.columns.time && <th className="whitespace-nowrap py-1 pr-3 font-medium">Zeit</th>}
+              {tile.columns.dims.map(d => <th key={d.key} className="whitespace-nowrap py-1 pr-3 font-medium">{d.label}</th>)}
+              <th className="whitespace-nowrap py-1 pl-2 text-right font-medium">{tile.columns.value.label}</th>
             </tr>
           </thead>
           <tbody>
             {tile.rows.map((r, i) => (
               <tr key={i} className="border-t border-zinc-50 dark:border-zinc-800/60">
-                {tile.columns.time && <td className="py-1 pr-2">{r.bucket}</td>}
-                {tile.columns.dims.map((_, di) => <td key={di} className="py-1 pr-2">{r.dims[di] ?? '—'}</td>)}
-                <td className="py-1 text-right tabular-nums font-medium">{fmt(r.value, unit)}</td>
+                {tile.columns.time && <td className="whitespace-nowrap py-1 pr-3">{r.bucket}</td>}
+                {tile.columns.dims.map((_, di) => <td key={di} className="max-w-[45vw] truncate py-1 pr-3 sm:max-w-xs">{r.dims[di] ?? '—'}</td>)}
+                <td className="whitespace-nowrap py-1 pl-2 text-right font-medium tabular-nums">{fmt(r.value, unit)}</td>
               </tr>
             ))}
           </tbody>

@@ -2,10 +2,7 @@ import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
-import {
-  ReceiptText, ChartPie, ShoppingCart, Package, Tags, ListChecks, Store,
-  Settings, UserCircle, LogOut, MoreHorizontal, BadgePercent, Eye, Target, LayoutDashboard,
-} from 'lucide-react';
+import { ReceiptText, UserCircle, LogOut, MoreHorizontal, Eye } from 'lucide-react';
 import { useAuth } from '../context/auth';
 import { api } from '../api/client';
 import { NotificationBell } from './NotificationBell';
@@ -13,6 +10,7 @@ import { Tour } from './Tour';
 import { Toaster } from './Toast';
 import { ConfirmHost } from './Confirm';
 import { cn } from '../lib/utils';
+import { NAV, MOBILE_PRIMARY, navExtras } from '../lib/nav';
 
 /** Colour-coded environment badge keyed on the runtime VDS_ENV (prod/stage/dev),
  *  which is reliable even when branches share a commit SHA. Unknown → no badge. */
@@ -21,19 +19,6 @@ const ENV_BADGE: Record<string, { label: string; cls: string }> = {
   stage: { label: 'stage', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-400' },
   dev: { label: 'dev', cls: 'bg-sky-100 text-sky-700 dark:bg-sky-950/50 dark:text-sky-400' },
 };
-
-const NAV = [
-  { to: '/analytics', icon: LayoutDashboard, key: 'nav.analytics' },
-  { to: '/receipts', icon: ReceiptText, key: 'nav.receipts' },
-  { to: '/stats', icon: ChartPie, key: 'nav.stats' },
-  { to: '/shopping', icon: ShoppingCart, key: 'nav.shopping' },
-  { to: '/pantry', icon: Package, key: 'nav.pantry' },
-  { to: '/names', icon: Tags, key: 'nav.names' },
-  { to: '/stores', icon: Store, key: 'nav.stores' },
-  { to: '/offers', icon: BadgePercent, key: 'nav.offers' },
-  { to: '/ziele', icon: Target, key: 'nav.ziele' },
-  { to: '/queue', icon: ListChecks, key: 'nav.queue' },
-] as const;
 
 export function Layout() {
   const { t } = useTranslation();
@@ -114,7 +99,7 @@ export function Layout() {
         {/* Desktop sidebar */}
         <aside className="sticky top-[53px] hidden h-[calc(100dvh-53px)] w-52 shrink-0 flex-col gap-1 overflow-y-auto p-3 md:flex">
           {NAV.map(n => navItem(n.to, n.icon, t(n.key)))}
-          {user?.is_admin && navItem('/admin', Settings, t('nav.admin'))}
+          {navExtras(!!user?.is_admin).map(n => navItem(n.to, n.icon, t(n.key)))}
           <div className="mt-auto">
             <button
               onClick={() => { logout(); navigate('/login'); }}
@@ -140,7 +125,7 @@ export function Layout() {
 
       {/* Mobile bottom nav */}
       <nav className="fixed inset-x-0 bottom-0 z-30 flex border-t border-zinc-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/95 md:hidden">
-        {NAV.slice(0, 4).map(n => navItem(n.to, n.icon, t(n.key), true))}
+        {NAV.slice(0, MOBILE_PRIMARY).map(n => navItem(n.to, n.icon, t(n.key), true))}
         {navItem('/more', MoreHorizontal, t('nav.more'), true)}
       </nav>
 
