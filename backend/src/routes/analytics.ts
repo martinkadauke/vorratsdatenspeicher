@@ -1,9 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import sql from '../db.js';
+import { getConfig } from '../config.js';
+import { sendMail, smtpConfigured } from '../mailer.js';
 import { runAnalyticsQuery } from '../analytics/query.js';
 import { askAnalytics } from '../analytics/agent.js';
+import { buildReport } from '../analytics/report.js';
 import {
-  METRICS, DIMENSIONS, GRAINS, SOURCES, AnalyticsError, type AnalyticsQuery,
+  METRICS, DIMENSIONS, GRAINS, SOURCES, AnalyticsError, type AnalyticsQuery, type FilterSpec,
 } from '../analytics/catalog.js';
 
 export function analyticsRoutes(app: FastifyInstance): void {
@@ -47,6 +50,43 @@ export function analyticsRoutes(app: FastifyInstance): void {
     } catch (e) {
       req.log.error(e);
       return reply.code(502).send({ error: 'analytics agent unavailable' });
+    }
+  });
+
+  // Email the current dashboard (for the active filters) to the user as a polished
+  // HTML report. Same read-only metrics layer — the report can't see anything the
+  // user can't see in the UI.
+  app.post('/api/analytics/report', async (req, reply) => {
+    const user = req.user;
+    if (!user?.email) return reply.code(400).send({ error: 'no_email', message: 'Für dein Konto ist keine E-Mail-Adresse hinterlegt.' });
+    if (!(await smtpConfigured())) return reply.code(400).send({ error: 'no_smtp', message: 'SMTP ist nicht konfiguriert (Admin → SMTP).' });
+
+    const body = (req.body ?? {}) as { filters?: FilterSpec; periodLabel?: string };
+    const filters = body.filters ?? {};
+    const periodLabel = typeof body.periodLabel === 'string' ? body.periodLabel.slice(0, 80) : '';
+
+    try {
+      const [spend, income, net, cats, months] = await Promise.all([
+        runAnalyticsQuery({ metric: 'spend', filters }, user),
+        runAnalyticsQuery({ metric: 'income', filters }, user),
+        runAnalyticsQuery({ metric: 'net', filters }, user),
+        runAnalyticsQuery({ metric: 'spend', dimensions: ['category'], filters, limit: 8 }, user),
+        runAnalyticsQuery({ metric: 'spend', grain: 'month', filters, limit: 12 }, user),
+      ]);
+      const { subject, text, html } = buildReport({
+        periodLabel,
+        userName: user.username,
+        kpis: { spend: spend.rows[0]?.value ?? 0, income: income.rows[0]?.value ?? 0, net: net.rows[0]?.value ?? 0 },
+        categories: cats.rows.map(r => ({ label: r.dims[0] ?? '—', value: r.value })),
+        months: months.rows.map(r => ({ label: r.bucket ?? '', value: r.value })),
+        appUrl: (await getConfig('app.base_url')) || '',
+      });
+      await sendMail(user.email, subject, text, html);
+      return { sent: true, to: user.email };
+    } catch (e) {
+      if (e instanceof AnalyticsError) return reply.code(400).send({ error: e.message });
+      req.log.error(e);
+      return reply.code(502).send({ error: 'send_failed', message: (e as Error).message });
     }
   });
 }

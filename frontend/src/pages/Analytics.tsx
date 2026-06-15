@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { LayoutDashboard, Sparkles, Send, X } from 'lucide-react';
+import { LayoutDashboard, Sparkles, Send, X, Mail, SlidersHorizontal } from 'lucide-react';
 import { api } from '../api/client';
 import { Card, Button, Input, Spinner, Select } from '../components/ui';
 import { AnalyticsTile, type TileType, type TileData, type AnalyticsResult } from '../components/AnalyticsTile';
+import { toast } from '../components/Toast';
 import { cn } from '../lib/utils';
 
 interface AskResult { clarify?: string | null; title?: string; summary?: string; tiles: TileData[]; dropped: number }
@@ -43,16 +44,17 @@ const DEFAULT_TILES: TileSpec[] = [
 ];
 
 const EXAMPLES = [
-  'Ausgaben für Lebensmittel der letzten 6 Wochen',
+  'Lebensmittel letzte 6 Wochen',
   'Wofür gebe ich am meisten aus?',
-  'Ausgaben pro Monat dieses Jahr',
-  'Welche Läden sind am teuersten?',
+  'Ausgaben pro Monat',
+  'Teuerste Läden',
 ];
 
 const chip = (active: boolean) => cn(
-  'rounded-full border px-3 py-1 text-xs font-medium transition',
+  'shrink-0 whitespace-nowrap rounded-full border px-3 py-1 text-xs font-medium transition',
   active ? 'border-transparent bg-violet-600 text-white' : 'border-zinc-300 text-zinc-500 hover:border-zinc-400 dark:border-zinc-700 dark:text-zinc-400',
 );
+const scrollRow = 'flex gap-1.5 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden';
 
 function QueryTile({ spec, filters }: { spec: TileSpec; filters: FilterSpec }) {
   const query = { ...spec.query, filters: { ...(spec.query.filters as object ?? {}), ...filters } };
@@ -60,7 +62,7 @@ function QueryTile({ spec, filters }: { spec: TileSpec; filters: FilterSpec }) {
     queryKey: ['analytics-q', spec.type, spec.title, JSON.stringify(query)],
     queryFn: () => api<AnalyticsResult>('/api/analytics/query', { method: 'POST', body: query }),
   });
-  if (isLoading || !data) return <Card className="flex h-44 items-center justify-center p-3"><Spinner /></Card>;
+  if (isLoading || !data) return <Card className="flex h-32 items-center justify-center p-3 sm:h-44"><Spinner /></Card>;
   return <AnalyticsTile tile={{ type: spec.type, title: spec.title, rows: data.rows, columns: data.columns, sql: data.sql }} />;
 }
 
@@ -70,11 +72,13 @@ export function Analytics() {
   const [sources, setSources] = useState<string[]>([]);
   const [konto, setKonto] = useState<number | ''>('');
   const [direction, setDirection] = useState<'' | 'expense' | 'income'>('');
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const [question, setQuestion] = useState('');
   const [asking, setAsking] = useState(false);
   const [ask, setAsk] = useState<AskResult | null>(null);
   const [askErr, setAskErr] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
 
   const { data: catalog } = useQuery({
     queryKey: ['analytics-catalog'],
@@ -88,6 +92,7 @@ export function Analytics() {
     ...(konto !== '' ? { konto_id: [konto] } : {}),
     ...(direction ? { direction } : {}),
   };
+  const activeFilters = (direction ? 1 : 0) + (sources.length ? 1 : 0) + (konto !== '' ? 1 : 0);
 
   const runAsk = async () => {
     const q = question.trim();
@@ -106,24 +111,45 @@ export function Analytics() {
     }
   };
 
+  const sendReport = async () => {
+    setSending(true);
+    try {
+      const r = await api<{ sent: boolean; to: string }>('/api/analytics/report', {
+        method: 'POST',
+        body: { filters, periodLabel: PRESETS.find(p => p.key === preset)?.label ?? '' },
+      });
+      toast(`Report an ${r.to} gesendet`, 'success');
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setSending(false);
+    }
+  };
+
   const toggleSource = (key: string) =>
     setSources(s => (s.includes(key) ? s.filter(x => x !== key) : [...s, key]));
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-2">
-        <LayoutDashboard size={20} className="text-violet-500" />
-        <h1 className="text-lg font-bold">Analytics</h1>
+    <div className="flex flex-col gap-3 sm:gap-4">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <LayoutDashboard size={20} className="text-violet-500" />
+          <h1 className="text-lg font-bold">Analytics</h1>
+        </div>
+        <Button variant="secondary" onClick={() => void sendReport()} disabled={sending} className="shrink-0 px-3">
+          {sending ? <Spinner /> : <Mail size={15} />}
+          <span className="hidden sm:inline">Report senden</span>
+        </Button>
       </div>
 
       {/* Natural-language ask */}
-      <Card className="flex flex-col gap-3 p-3">
+      <Card className="flex flex-col gap-2 p-2.5 sm:p-3">
         <div className="flex gap-2">
           <div className="relative flex-1">
             <Sparkles size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-violet-400" />
             <Input
               className="pl-9"
-              placeholder="Frag deine Daten … z.B. „Ausgaben für Lebensmittel der letzten 6 Wochen“"
+              placeholder="Frag deine Daten …"
               value={question}
               onChange={e => setQuestion(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') void runAsk(); }}
@@ -133,11 +159,9 @@ export function Analytics() {
             {asking ? <Spinner /> : <Send size={16} />}
           </Button>
         </div>
-        <div className="flex flex-wrap gap-1.5">
+        <div className={scrollRow}>
           {EXAMPLES.map(ex => (
-            <button key={ex} type="button" onClick={() => { setQuestion(ex); }} className={chip(false)}>
-              {ex}
-            </button>
+            <button key={ex} type="button" onClick={() => setQuestion(ex)} className={chip(false)}>{ex}</button>
           ))}
         </div>
       </Card>
@@ -149,7 +173,7 @@ export function Analytics() {
       )}
 
       {ask && (
-        <div className="flex flex-col gap-3 rounded-2xl border border-violet-200 bg-violet-50/40 p-3 dark:border-violet-900/50 dark:bg-violet-950/20">
+        <div className="flex flex-col gap-3 rounded-2xl border border-violet-200 bg-violet-50/40 p-2.5 dark:border-violet-900/50 dark:bg-violet-950/20 sm:p-3">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <div className="flex items-center gap-1.5 text-xs font-semibold text-violet-600 dark:text-violet-400">
@@ -176,34 +200,48 @@ export function Analytics() {
         </div>
       )}
 
-      {/* Manual filters */}
+      {/* Filters: presets always visible (scrollable); the rest collapsible */}
       <div className="flex flex-col gap-2 border-t border-zinc-200 pt-3 dark:border-zinc-800">
-        <div className="flex flex-wrap items-center gap-1.5">
-          {PRESETS.map(p => (
-            <button key={p.key} type="button" onClick={() => setPreset(p.key)} className={chip(preset === p.key)}>{p.label}</button>
-          ))}
-          <span className="mx-1 h-4 w-px bg-zinc-200 dark:bg-zinc-700" />
-          {([['', 'Alle'], ['expense', 'Ausgaben'], ['income', 'Einnahmen']] as const).map(([k, lbl]) => (
-            <button key={k} type="button" onClick={() => setDirection(k)} className={chip(direction === k)}>{lbl}</button>
-          ))}
-          {(catalog?.konten.length ?? 0) > 1 && (
-            <Select value={String(konto)} onChange={e => setKonto(e.target.value === '' ? '' : Number(e.target.value))} className="h-8 w-auto py-0 text-xs">
-              <option value="">Alle Konten</option>
-              {catalog?.konten.map(k => <option key={k.id} value={k.id}>{k.name}</option>)}
-            </Select>
-          )}
-        </div>
-        {!!catalog?.sources.length && (
-          <div className="flex flex-wrap gap-1.5">
-            {catalog.sources.map(s => (
-              <button key={s.key} type="button" onClick={() => toggleSource(s.key)} className={chip(sources.includes(s.key))}>{s.label}</button>
+        <div className="flex items-center gap-2">
+          <div className={scrollRow}>
+            {PRESETS.map(p => (
+              <button key={p.key} type="button" onClick={() => setPreset(p.key)} className={chip(preset === p.key)}>{p.label}</button>
             ))}
+          </div>
+          <button
+            type="button" onClick={() => setFiltersOpen(o => !o)}
+            className={cn('shrink-0', chip(activeFilters > 0 || filtersOpen))}
+          >
+            <SlidersHorizontal size={13} className="-mt-0.5 mr-1 inline" />
+            {activeFilters > 0 ? `Filter · ${activeFilters}` : 'Filter'}
+          </button>
+        </div>
+        {filtersOpen && (
+          <div className="flex flex-col gap-2 rounded-xl border border-zinc-200 p-2.5 dark:border-zinc-800">
+            <div className={scrollRow}>
+              {([['', 'Alle'], ['expense', 'Ausgaben'], ['income', 'Einnahmen']] as const).map(([k, lbl]) => (
+                <button key={k} type="button" onClick={() => setDirection(k)} className={chip(direction === k)}>{lbl}</button>
+              ))}
+              {(catalog?.konten.length ?? 0) > 1 && (
+                <Select value={String(konto)} onChange={e => setKonto(e.target.value === '' ? '' : Number(e.target.value))} className="h-7 w-auto shrink-0 py-0 text-xs">
+                  <option value="">Alle Konten</option>
+                  {catalog?.konten.map(k => <option key={k.id} value={k.id}>{k.name}</option>)}
+                </Select>
+              )}
+            </div>
+            {!!catalog?.sources.length && (
+              <div className={scrollRow}>
+                {catalog.sources.map(s => (
+                  <button key={s.key} type="button" onClick={() => toggleSource(s.key)} className={chip(sources.includes(s.key))}>{s.label}</button>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
 
       {/* Default dashboard */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-3 gap-2 sm:gap-3">
         {DEFAULT_TILES.slice(0, 3).map(spec => <QueryTile key={spec.title} spec={spec} filters={filters} />)}
       </div>
       <div className="grid gap-3 md:grid-cols-2">

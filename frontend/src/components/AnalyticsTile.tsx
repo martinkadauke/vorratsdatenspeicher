@@ -41,9 +41,9 @@ export function AnalyticsTile({ tile }: { tile: TileData }) {
   const empty = !tile.rows.length;
 
   return (
-    <Card className="flex flex-col gap-2 p-3">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="truncate text-sm font-semibold">{tile.title || tile.columns.value.label}</h3>
+    <Card className="flex min-w-0 flex-col gap-2 p-2.5 sm:p-3">
+      <div className="flex items-center justify-between gap-1">
+        <h3 className="truncate text-xs font-semibold sm:text-sm">{tile.title || tile.columns.value.label}</h3>
         {tile.sql && (
           <button
             type="button" onClick={() => setShowSql(s => !s)} title="SQL anzeigen"
@@ -70,7 +70,7 @@ export function AnalyticsTile({ tile }: { tile: TileData }) {
 function renderBody(type: TileType, data: { x: string; value: number }[], unit: 'eur' | 'count', tile: TileData) {
   if (type === 'kpi') {
     const v = data.reduce((s, d) => s + d.value, 0); // usually a single row
-    return <div className="py-2 text-3xl font-bold tabular-nums">{fmt(v, unit)}</div>;
+    return <div className="truncate py-1 text-base font-bold leading-tight tabular-nums sm:py-2 sm:text-2xl">{fmt(v, unit)}</div>;
   }
 
   if (type === 'table') {
