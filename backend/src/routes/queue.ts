@@ -17,10 +17,24 @@ export function queueRoutes(app: FastifyInstance): void {
       : sql`ORDER BY q.confidence::numeric ASC NULLS FIRST, q.created_at ASC`; // default: most-uncertain first
     const items = await sql`
       SELECT q.id, q.proposed_canonical, q.raw_patterns, q.ai_examples, q.confidence,
-             q.status, q.created_at, q.artikel_id, a.einkauf_id
+             q.status, q.created_at,
+             COALESCE(q.artikel_id, fb.artikel_id) AS artikel_id,
+             COALESCE(a.einkauf_id, fb.einkauf_id) AS einkauf_id
       FROM verifikations_queue q
       LEFT JOIN artikel a ON a.id = q.artikel_id
       LEFT JOIN einkauf e ON e.id = a.einkauf_id
+      -- Fallback for entries without a direct artikel_id: find the latest matching
+      -- purchase by its parsed name (same match the approve step uses) so the
+      -- receipt link still works.
+      LEFT JOIN LATERAL (
+        SELECT a2.id AS artikel_id, a2.einkauf_id
+        FROM artikel a2 JOIN einkauf e2 ON e2.id = a2.einkauf_id
+        WHERE q.artikel_id IS NULL AND q.ai_examples IS NOT NULL
+          AND COALESCE(NULLIF(a2.ai_guess, ''), a2.name) = q.ai_examples
+          ${kontoScope(req.user, sql`e2.konto_id`)}
+        ORDER BY e2.datum DESC, a2.id DESC
+        LIMIT 1
+      ) fb ON TRUE
       WHERE q.status = 'pending' ${searchCond}
         ${kontoScope(req.user, sql`e.konto_id`)}
       ${order}
