@@ -142,7 +142,7 @@ export function pantryRoutes(app: FastifyInstance): void {
    *  expected price. Free-text entries (canonical_name NULL) carry no price. */
   app.get('/api/shopping-list', async (req) => {
     const items = await sql`
-      SELECT id, canonical_name, title, menge::float8 AS menge, einheit, source, done, priority, added_by, added_at
+      SELECT id, canonical_name, title, menge::float8 AS menge, einheit, source, done, priority, added_by, added_at, comment
       FROM einkaufsliste_item
       ORDER BY done ASC, priority DESC, added_at DESC
     `;
@@ -226,14 +226,17 @@ export function pantryRoutes(app: FastifyInstance): void {
   app.patch('/api/shopping-list/:id', async (req, reply) => {
     const id = parseInt((req.params as { id: string }).id, 10);
     if (!id) return reply.code(400).send({ error: 'id required' });
-    const b = (req.body ?? {}) as { title?: string; menge?: number | null; einheit?: string | null; done?: boolean; priority?: number };
+    const b = (req.body ?? {}) as { title?: string; menge?: number | null; einheit?: string | null; done?: boolean; priority?: number; comment?: string };
+    // comment: send '' to clear, omit to keep (COALESCE: NULL = unchanged, '' = cleared).
+    const comment = b.comment === undefined ? null : b.comment.trim().slice(0, 500);
     await sql`
       UPDATE einkaufsliste_item SET
         title    = COALESCE(${b.title ?? null}::text, title),
         menge    = COALESCE(${b.menge ?? 1}::numeric, menge),
         einheit  = COALESCE(${b.einheit ?? null}::text, einheit),
         done     = COALESCE(${b.done ?? null}::boolean, done),
-        priority = COALESCE(${b.priority ?? null}::int, priority)
+        priority = COALESCE(${b.priority ?? null}::int, priority),
+        comment  = COALESCE(${comment}::text, comment)
       WHERE id = ${id}
     `;
     return { ok: true };

@@ -161,6 +161,7 @@ export interface ShoppingItem {
   priority: number;
   added_by: string | null;
   added_at: string | null;
+  comment: string | null;
   avg_price: number | null;
   avg_unit: string | null;
   expected_price: number | null;

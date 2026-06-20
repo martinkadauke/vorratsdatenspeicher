@@ -196,6 +196,8 @@
     "unit": "Einh.",
     "remove": "Von der Liste entfernen",
     "freeText": "frei",
+    "comment": "Kommentar",
+    "commentPlaceholder": "Kommentar (z.B. große Packung, Bio) …",
     "suggested": "Vorschlag",
     "expectedTotal": "Erwartete Summe",
     "holdToType": "Lange drücken zum Eintippen",

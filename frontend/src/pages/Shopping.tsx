@@ -11,7 +11,7 @@ import {
   verticalListSortingStrategy, useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { GripVertical, Minus, Plus, Trash2, Search, Sparkles, BarChart3, Send, TrendingDown } from 'lucide-react';
+import { GripVertical, Minus, Plus, Trash2, Search, Sparkles, BarChart3, Send, TrendingDown, MessageSquare } from 'lucide-react';
 import { api } from '../api/client';
 import type { ShoppingItem } from '../api/types';
 import { Card, Spinner, EmptyState, Button, Input, Badge } from '../components/ui';
@@ -78,6 +78,11 @@ export function Shopping() {
   const patchMenge = useMutation({
     mutationFn: ({ id, menge }: { id: number; menge: number | null }) =>
       api(`/api/shopping-list/${id}`, { method: 'PATCH', body: { menge } }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['shopping'] }),
+  });
+  const patchComment = useMutation({
+    mutationFn: ({ id, comment }: { id: number; comment: string }) =>
+      api(`/api/shopping-list/${id}`, { method: 'PATCH', body: { comment } }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['shopping'] }),
   });
   const remove = useMutation({
@@ -183,6 +188,7 @@ export function Shopping() {
                 s={s}
                 t={t}
                 onMenge={(m) => patchMenge.mutate({ id: s.id, menge: m })}
+                onComment={(c) => patchComment.mutate({ id: s.id, comment: c })}
                 onRemove={() => remove.mutate(s.id)}
               />
             ))}
@@ -257,47 +263,83 @@ export function Shopping() {
   );
 }
 
-function ShoppingRow({ s, t, onMenge, onRemove }: {
-  s: ShoppingItem; t: TFunction; onMenge: (m: number) => void; onRemove: () => void;
+function ShoppingRow({ s, t, onMenge, onComment, onRemove }: {
+  s: ShoppingItem; t: TFunction; onMenge: (m: number) => void; onComment: (c: string) => void; onRemove: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: s.id });
   const style = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 10 : undefined };
+  const [commentOpen, setCommentOpen] = useState(false);
+  const [draft, setDraft] = useState(s.comment ?? '');
+  const hasComment = !!(s.comment && s.comment.trim());
+
+  const toggleComment = () => { setDraft(s.comment ?? ''); setCommentOpen(o => !o); };
+  const saveComment = () => {
+    setCommentOpen(false);
+    const v = draft.trim();
+    if (v !== (s.comment ?? '').trim()) onComment(v);   // '' clears it
+  };
+
   return (
     <div ref={setNodeRef} style={style}>
-      <Card className={cn('flex items-center gap-2 px-1.5 py-2.5 sm:gap-2.5 sm:px-2.5',
+      <Card className={cn('flex flex-col gap-2 px-1.5 py-2.5 sm:px-2.5',
         isDragging && 'opacity-80 shadow-lg ring-2 ring-emerald-400')}
       >
-        <button
-          type="button"
-          {...attributes}
-          {...listeners}
-          aria-label="Verschieben"
-          className="shrink-0 cursor-grab touch-none rounded-md p-1 text-zinc-300 hover:bg-zinc-100 hover:text-zinc-500 active:cursor-grabbing dark:text-zinc-600 dark:hover:bg-zinc-800"
-        >
-          <GripVertical size={16} />
-        </button>
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-1.5">
-            <span className="truncate font-medium">{s.title}</span>
-            {s.canonical_name == null && <Badge>{t('shopping.freeText')}</Badge>}
-            {s.source === 'suggested' && <Sparkles size={12} className="shrink-0 text-amber-500" aria-label={t('shopping.suggested')} />}
+        <div className="flex items-center gap-2 sm:gap-2.5">
+          <button
+            type="button"
+            {...attributes}
+            {...listeners}
+            aria-label="Verschieben"
+            className="shrink-0 cursor-grab touch-none rounded-md p-1 text-zinc-300 hover:bg-zinc-100 hover:text-zinc-500 active:cursor-grabbing dark:text-zinc-600 dark:hover:bg-zinc-800"
+          >
+            <GripVertical size={16} />
+          </button>
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <span className="truncate font-medium">{s.title}</span>
+              {s.canonical_name == null && <Badge>{t('shopping.freeText')}</Badge>}
+              {s.source === 'suggested' && <Sparkles size={12} className="shrink-0 text-amber-500" aria-label={t('shopping.suggested')} />}
+            </div>
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-zinc-500 dark:text-zinc-400">
+              {s.avg_price != null && s.avg_unit && <span>Ø {eur(s.avg_price)}/{s.avg_unit}</span>}
+              {s.expected_price != null && (
+                <span className="font-semibold text-emerald-600 dark:text-emerald-500">≈ {eur(s.expected_price)}</span>
+              )}
+              {hasComment && !commentOpen && <span className="truncate italic text-zinc-400">„{s.comment}"</span>}
+            </div>
           </div>
-          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-zinc-500 dark:text-zinc-400">
-            {s.avg_price != null && s.avg_unit && <span>Ø {eur(s.avg_price)}/{s.avg_unit}</span>}
-            {s.expected_price != null && (
-              <span className="font-semibold text-emerald-600 dark:text-emerald-500">≈ {eur(s.expected_price)}</span>
-            )}
-          </div>
+          <MengeStepper value={s.menge ?? 1} unit={s.avg_unit} onChange={onMenge} t={t} />
+          <button
+            type="button"
+            onClick={toggleComment}
+            title={t('shopping.comment')}
+            aria-label={t('shopping.comment')}
+            className={cn('shrink-0 rounded-lg p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800',
+              hasComment ? 'text-amber-500' : 'text-zinc-400')}
+          >
+            <MessageSquare size={16} />
+          </button>
+          <button
+            type="button"
+            onClick={onRemove}
+            title={t('shopping.remove')}
+            className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30"
+          >
+            <Trash2 size={16} />
+          </button>
         </div>
-        <MengeStepper value={s.menge ?? 1} unit={s.avg_unit} onChange={onMenge} t={t} />
-        <button
-          type="button"
-          onClick={onRemove}
-          title={t('shopping.remove')}
-          className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30"
-        >
-          <Trash2 size={16} />
-        </button>
+
+        {commentOpen && (
+          <Input
+            autoFocus
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            onBlur={saveComment}
+            onKeyDown={e => { if (e.key === 'Enter') saveComment(); if (e.key === 'Escape') setCommentOpen(false); }}
+            placeholder={t('shopping.commentPlaceholder')}
+            className="text-sm"
+          />
+        )}
       </Card>
     </div>
   );
