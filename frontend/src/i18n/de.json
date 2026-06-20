@@ -373,6 +373,10 @@
       "title": "Tipp: schnelles Erfassen",
       "body": "Mit ↑/↓ springst du durch die Posten (grün umrandet), Enter öffnet den Artikel mit fokussiertem kanonischen Namen. Posten lassen sich per Griff neu ordnen. Stimmt die Summe mit dem Bon-Total überein, blitzt es grün.",
       "bodyMobile": "Tippe einen Posten zum Bearbeiten – der kanonische Name ist gleich fokussiert. Mit dem Kopier-Symbol duplizierst du, mit der dünnen Linie zwischen zwei Posten fügst du eine neue Position ein, mit dem Griff ordnest du um. Stimmt die Summe mit dem Bon-Total überein, blitzt es grün."
+    },
+    "queue": {
+      "title": "Tipp: Prüfung",
+      "body": "Unsichere KI-Vorschläge für Artikelnamen. Suche mit Taste F, sortiere nach Konfidenz/Datum. Markiere mehrere und übernimm/verwirf sie auf einmal über die Leiste unten — ideal zum schnellen Aufräumen."
     }
   },
   "queue": {
@@ -385,7 +389,15 @@
     "ocr": "OCR-Text",
     "empty": "Nichts zu prüfen 🎉",
     "editHint": "Name anpassen und übernehmen",
-    "openReceipt": "Beleg öffnen (Artikel hervorgehoben)"
+    "openReceipt": "Beleg öffnen (Artikel hervorgehoben)",
+    "search": "Vorschläge durchsuchen …",
+    "sortConfidenceAsc": "Konfidenz ↑ (unsicherste zuerst)",
+    "sortConfidenceDesc": "Konfidenz ↓ (sicherste zuerst)",
+    "sortDate": "Neueste zuerst",
+    "sortAlpha": "Alphabetisch",
+    "countOpen": "{{count}} offen",
+    "showing": "zeige {{n}}",
+    "bulkDone": "{{count}} verarbeitet"
   },
   "bell": {
     "title": "Benachrichtigungen",

@@ -373,6 +373,10 @@
       "title": "Tip: fast entry",
       "body": "Use ↑/↓ to move through items (green outline), Enter opens the item with the canonical name focused. Drag the handle to reorder. When the item sum matches the receipt total, it flashes green.",
       "bodyMobile": "Tap an item to edit it – the canonical name is focused right away. Use the copy icon to duplicate, the thin line between two items to insert a new one, and the grip to reorder. When the item sum matches the receipt total, the screen flashes green."
+    },
+    "queue": {
+      "title": "Tip: review queue",
+      "body": "Uncertain AI proposals for product names. Search with the F key, sort by confidence/date. Select several and approve/reject them at once via the bottom bar — great for fast cleanup."
     }
   },
   "queue": {
@@ -385,7 +389,15 @@
     "ocr": "OCR text",
     "empty": "Nothing to review 🎉",
     "editHint": "Adjust name and approve",
-    "openReceipt": "Open receipt (item highlighted)"
+    "openReceipt": "Open receipt (item highlighted)",
+    "search": "Search proposals …",
+    "sortConfidenceAsc": "Confidence ↑ (most uncertain first)",
+    "sortConfidenceDesc": "Confidence ↓ (most certain first)",
+    "sortDate": "Newest first",
+    "sortAlpha": "Alphabetical",
+    "countOpen": "{{count}} open",
+    "showing": "showing {{n}}",
+    "bulkDone": "{{count}} processed"
   },
   "bell": {
     "title": "Notifications",
