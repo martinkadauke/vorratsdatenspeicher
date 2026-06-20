@@ -240,7 +240,7 @@ export function pantryRoutes(app: FastifyInstance): void {
     await sql`
       UPDATE einkaufsliste_item SET
         title    = COALESCE(${b.title ?? null}::text, title),
-        menge    = COALESCE(${b.menge ?? 1}::numeric, menge),
+        menge    = COALESCE(${b.menge ?? null}::numeric, menge),
         einheit  = COALESCE(${b.einheit ?? null}::text, einheit),
         done     = COALESCE(${b.done ?? null}::boolean, done),
         priority = COALESCE(${b.priority ?? null}::int, priority),
