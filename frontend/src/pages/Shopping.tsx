@@ -12,7 +12,7 @@ import {
   verticalListSortingStrategy, useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { GripVertical, Minus, Plus, Trash2, Search, Sparkles, BarChart3, Send, TrendingDown, MessageSquare } from 'lucide-react';
+import { GripVertical, Minus, Plus, Trash2, Search, Sparkles, BarChart3, Send, TrendingDown, MessageSquare, CheckSquare, Square, ClipboardList, ShoppingBag } from 'lucide-react';
 import { api } from '../api/client';
 import type { ShoppingItem } from '../api/types';
 import { Card, Spinner, EmptyState, Button, Input, Badge } from '../components/ui';
@@ -30,7 +30,7 @@ const num = (s: string): number | null => {
 const fmt = (n: number): string => (Number.isInteger(n) ? String(n) : String(n).replace('.', ','));
 
 export function Shopping() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const qc = useQueryClient();
 
   const { data, isLoading } = useQuery({
@@ -85,6 +85,30 @@ export function Shopping() {
     mutationFn: ({ id, comment }: { id: number; comment: string }) =>
       api(`/api/shopping-list/${id}`, { method: 'PATCH', body: { comment } }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['shopping'] }),
+  });
+
+  // Einkaufszettel (shopping trip) state
+  const { data: session } = useQuery({
+    queryKey: ['shopping-session'],
+    queryFn: () => api<{ active: boolean; created_at: string | null }>('/api/shopping-list/session'),
+  });
+  const sessionActive = !!session?.active;
+  const patchDone = useMutation({
+    mutationFn: ({ id, done }: { id: number; done: boolean }) =>
+      api(`/api/shopping-list/${id}`, { method: 'PATCH', body: { done } }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['shopping'] }),
+  });
+  const startSession = useMutation({
+    mutationFn: () => api('/api/shopping-list/session/start', { method: 'POST' }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['shopping-session'] }); invalidate(); },
+  });
+  const finishSession = useMutation({
+    mutationFn: () => api<{ removed: number }>('/api/shopping-list/session/finish', { method: 'POST' }),
+    onSuccess: (r) => {
+      void qc.invalidateQueries({ queryKey: ['shopping-session'] });
+      invalidate();
+      toast(t('shopping.tripDone', { count: r.removed }), 'success');
+    },
   });
   const remove = useMutation({
     mutationFn: (id: number) => api(`/api/shopping-list/${id}`, { method: 'DELETE' }),
@@ -145,6 +169,11 @@ export function Shopping() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-lg font-bold">{t('shopping.title')}</h1>
         <div className="flex flex-wrap gap-2">
+          {!sessionActive && (
+            <Button onClick={() => startSession.mutate()} disabled={startSession.isPending || !items.length} className="shrink-0">
+              <ClipboardList size={15} /> {t('shopping.startTrip')}
+            </Button>
+          )}
           <Button variant="secondary" onClick={() => suggest.mutate()} disabled={suggest.isPending} className="shrink-0">
             <Sparkles size={15} /> {t('shopping.getSuggestions')}
           </Button>
@@ -178,6 +207,13 @@ export function Shopping() {
         <Button type="submit" disabled={!canAdd} className="shrink-0"><Plus size={16} /></Button>
       </form>
 
+      {sessionActive && session?.created_at && (
+        <div className="flex items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
+          <ShoppingBag size={15} className="shrink-0" />
+          <span>{t('shopping.tripSince', { date: new Date(session.created_at).toLocaleDateString(i18n.language === 'en' ? 'en-GB' : 'de-DE') })}</span>
+        </div>
+      )}
+
       {!items.length && <EmptyState>{t('shopping.empty')}</EmptyState>}
 
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
@@ -188,14 +224,22 @@ export function Shopping() {
                 key={s.id}
                 s={s}
                 t={t}
+                sessionActive={sessionActive}
                 onMenge={(m) => patchMenge.mutate({ id: s.id, menge: m })}
                 onComment={(c) => patchComment.mutate({ id: s.id, comment: c })}
+                onToggleDone={() => patchDone.mutate({ id: s.id, done: !s.done })}
                 onRemove={() => remove.mutate(s.id)}
               />
             ))}
           </div>
         </SortableContext>
       </DndContext>
+
+      {sessionActive && (
+        <Button onClick={() => finishSession.mutate()} disabled={finishSession.isPending} className="w-full justify-center">
+          <ShoppingBag size={16} /> {t('shopping.finishTrip')}
+        </Button>
+      )}
 
       {total > 0 && (
         <div className="flex items-center justify-between rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-sm dark:border-zinc-800 dark:bg-zinc-900">
@@ -264,8 +308,9 @@ export function Shopping() {
   );
 }
 
-function ShoppingRow({ s, t, onMenge, onComment, onRemove }: {
-  s: ShoppingItem; t: TFunction; onMenge: (m: number) => void; onComment: (c: string) => void; onRemove: () => void;
+function ShoppingRow({ s, t, sessionActive, onMenge, onComment, onToggleDone, onRemove }: {
+  s: ShoppingItem; t: TFunction; sessionActive: boolean;
+  onMenge: (m: number) => void; onComment: (c: string) => void; onToggleDone: () => void; onRemove: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: s.id });
   const style = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 10 : undefined };
@@ -273,6 +318,14 @@ function ShoppingRow({ s, t, onMenge, onComment, onRemove }: {
   const [commentOpen, setCommentOpen] = useState(false);
   const [draft, setDraft] = useState(s.comment ?? '');
   const hasComment = !!(s.comment && s.comment.trim());
+  const done = sessionActive && s.done;
+
+  // Checkbox: tap = toggle done, long-press (500ms) = remove the item.
+  const held = useRef(false);
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const startHold = () => { held.current = false; holdTimer.current = setTimeout(() => { held.current = true; onRemove(); }, 500); };
+  const cancelHold = () => { if (holdTimer.current) { clearTimeout(holdTimer.current); holdTimer.current = undefined; } };
+  const onCheckClick = () => { if (held.current) { held.current = false; return; } onToggleDone(); };
 
   const toggleComment = () => { setDraft(s.comment ?? ''); setCommentOpen(o => !o); };
   const saveComment = () => {
@@ -296,16 +349,16 @@ function ShoppingRow({ s, t, onMenge, onComment, onRemove }: {
           >
             <GripVertical size={16} />
           </button>
-          <div className="min-w-0 flex-1">
+          <div className={cn('min-w-0 flex-1', done && 'opacity-50')}>
             <div className="flex min-w-0 items-center gap-1.5">
               {s.canonical_name
                 ? <button
                     type="button"
                     onPointerDown={e => e.stopPropagation()}
                     onClick={() => navigate(`/names?open=${encodeURIComponent(s.canonical_name!)}`)}
-                    className="truncate text-left font-medium hover:text-emerald-600 hover:underline dark:hover:text-emerald-400"
+                    className={cn('truncate text-left font-medium hover:text-emerald-600 hover:underline dark:hover:text-emerald-400', done && 'line-through')}
                   >{s.title}</button>
-                : <span className="truncate font-medium">{s.title}</span>}
+                : <span className={cn('truncate font-medium', done && 'line-through')}>{s.title}</span>}
               {s.canonical_name == null && <Badge>{t('shopping.freeText')}</Badge>}
               {s.source === 'suggested' && <Sparkles size={12} className="shrink-0 text-amber-500" aria-label={t('shopping.suggested')} />}
             </div>
@@ -328,14 +381,30 @@ function ShoppingRow({ s, t, onMenge, onComment, onRemove }: {
           >
             <MessageSquare size={16} />
           </button>
-          <button
-            type="button"
-            onClick={onRemove}
-            title={t('shopping.remove')}
-            className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30"
-          >
-            <Trash2 size={16} />
-          </button>
+          {sessionActive ? (
+            <button
+              type="button"
+              onPointerDown={e => { e.stopPropagation(); startHold(); }}
+              onPointerUp={cancelHold}
+              onPointerLeave={cancelHold}
+              onClick={onCheckClick}
+              title={s.done ? t('shopping.uncheck') : t('shopping.check')}
+              aria-label={s.done ? t('shopping.uncheck') : t('shopping.check')}
+              className={cn('shrink-0 touch-none rounded-lg p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800',
+                s.done ? 'text-emerald-500' : 'text-zinc-400')}
+            >
+              {s.done ? <CheckSquare size={18} /> : <Square size={18} />}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onRemove}
+              title={t('shopping.remove')}
+              className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30"
+            >
+              <Trash2 size={16} />
+            </button>
+          )}
         </div>
 
         {commentOpen && (

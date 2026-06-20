@@ -271,6 +271,34 @@ export function pantryRoutes(app: FastifyInstance): void {
     return { ok: true };
   });
 
+  // ── Einkaufszettel (shopping trip) ──────────────────────────────────────
+  /** Is a shopping trip currently open? (at most one) */
+  app.get('/api/shopping-list/session', async () => {
+    const [s] = await sql`SELECT created_at FROM shopping_session WHERE closed_at IS NULL ORDER BY id DESC LIMIT 1`;
+    return { active: !!s, created_at: s ? (s.created_at as Date).toISOString() : null };
+  });
+
+  /** Start a shopping trip: freeze the current list with a date; from now items
+   *  are checked off instead of deleted. Resets any stale done flags. Idempotent. */
+  app.post('/api/shopping-list/session/start', async (req) => {
+    const [existing] = await sql`SELECT created_at FROM shopping_session WHERE closed_at IS NULL ORDER BY id DESC LIMIT 1`;
+    if (existing) return { active: true, created_at: (existing.created_at as Date).toISOString() };
+    await sql`UPDATE einkaufsliste_item SET done = FALSE WHERE done = TRUE`;
+    const [s] = await sql`INSERT INTO shopping_session (created_by) VALUES (${req.user?.username ?? null}) RETURNING created_at`;
+    return { active: true, created_at: (s.created_at as Date).toISOString() };
+  });
+
+  /** Finish the trip: remove the checked-off (bought) items, keep the rest, close
+   *  the session. */
+  app.post('/api/shopping-list/session/finish', async () => {
+    const removed = await sql.begin(async tx => {
+      const del = await tx`DELETE FROM einkaufsliste_item WHERE done = TRUE RETURNING id`;
+      await tx`UPDATE shopping_session SET closed_at = NOW() WHERE closed_at IS NULL`;
+      return del.length;
+    });
+    return { ok: true, removed };
+  });
+
   /** Auto-fill the list from tracked products whose live estimate is running low
    *  (out / ≤5 days / below the iron-reserve minimum), skipping anything already
    *  on the list, snoozed, or excluded. Adds them as 'suggested'. */
