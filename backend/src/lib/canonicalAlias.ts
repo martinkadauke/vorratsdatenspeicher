@@ -101,3 +101,30 @@ export async function backfillAliases(): Promise<void> {
   }
   console.log(`[alias] backfilled ${added} OCR→canonical aliases`);
 }
+
+/** Populate artikel.ocr_key for any rows still missing it, using the JS ocrKey()
+ *  (the normalization can't run in SQL). Idempotent and safe to run every boot —
+ *  it only touches rows where ocr_key IS NULL, so after the first pass it is a
+ *  no-op SELECT. New rows get their ocr_key written at scan time. Rows whose text
+ *  normalizes to an empty key are stamped '' so they aren't re-scanned forever. */
+export async function backfillArtikelOcrKey(): Promise<void> {
+  try {
+    const rows = await sql`
+      SELECT id, original_text, name FROM artikel WHERE ocr_key IS NULL
+    `;
+    if (!rows.length) return;
+    let n = 0;
+    for (const r of rows) {
+      const key = ocrKey((r.original_text as string) ?? (r.name as string));
+      try {
+        await sql`UPDATE artikel SET ocr_key = ${key} WHERE id = ${r.id}`;
+        n++;
+      } catch { /* skip a bad row, keep going */ }
+    }
+    console.log(`[ocr_key] backfilled ${n} artikel ocr_key values`);
+  } catch (err) {
+    // Never let backfill abort boot — a crash here would silently roll the Swarm
+    // back to the old image. New rows still get ocr_key at scan time.
+    console.warn('[ocr_key] backfill skipped:', (err as Error).message);
+  }
+}

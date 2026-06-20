@@ -295,6 +295,12 @@ export function nameRoutes(app: FastifyInstance): void {
     `;
     // learn each OCR text → canonical so future scans match without the LLM
     await recordAliases(rows.map(r => [(r.original_text as string) ?? (r.name as string), name]), true);
+    // A manual decision supersedes any pending churner proposal for these articles,
+    // so stale Prüfung entries don't linger (e.g. the Sitzkeilkissen leftovers).
+    await sql`
+      UPDATE verifikations_queue SET status = 'superseded'
+      WHERE status = 'pending' AND artikel_id IN ${sql(artikel_ids)}
+    `;
     return { ok: true, updated: rows.length };
   });
 

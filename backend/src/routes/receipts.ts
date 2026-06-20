@@ -88,11 +88,11 @@ async function ocrAndStore(id: number, bildPfad: string): Promise<{ items: numbe
       const fromUser = !!fromAlias && userKeys.has(key); // inherited a user correction
       await tx`
         INSERT INTO artikel
-          (einkauf_id, name, menge, einheit, preis, kategorie, original_text, ai_guess, canonical_name, user_corrected)
+          (einkauf_id, name, menge, einheit, preis, kategorie, original_text, ai_guess, canonical_name, user_corrected, ocr_key)
         VALUES
           (${id}, ${a.name ?? a.original_text ?? ''}, ${a.menge ?? null}, ${a.einheit ?? ''},
            ${a.preis ?? null}, ${a.kategorie ?? ''}, ${a.original_text ?? a.name ?? ''},
-           ${a.ai_guess ?? a.name ?? ''}, ${canon}, ${fromUser})
+           ${a.ai_guess ?? a.name ?? ''}, ${canon}, ${fromUser}, ${key})
       `;
     }
   });
