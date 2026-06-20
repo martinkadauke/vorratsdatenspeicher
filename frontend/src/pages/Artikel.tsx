@@ -297,9 +297,20 @@ export function Artikel() {
   const [params, setParams] = useSearchParams();
   const openParam = params.get('open');
   useEffect(() => {
-    if (!openParam || !data) return;
+    if (!openParam || !data) return;            // wait until the list has loaded
     const g = data.find(x => x.canonical_name === openParam);
-    if (g) { openDetail(g); setParams({}, { replace: true }); }
+    if (g) {
+      openDetail(g);
+    } else {
+      // Not in the current list (filtered/scoped) — open a minimal detail anyway;
+      // the modal fetches receipts/prices by canonical name itself.
+      setDetail({
+        canonical_name: openParam, artikel_count: 0, category_path: null,
+        base_unit: null, expected_price: null, last_bought: null,
+        translation_en: null, consumers: [], consumers_exclusive: false,
+      });
+    }
+    setParams({}, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openParam, data]);
 

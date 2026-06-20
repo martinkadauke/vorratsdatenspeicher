@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -269,6 +269,7 @@ function ShoppingRow({ s, t, onMenge, onComment, onRemove }: {
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: s.id });
   const style = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 10 : undefined };
+  const navigate = useNavigate();
   const [commentOpen, setCommentOpen] = useState(false);
   const [draft, setDraft] = useState(s.comment ?? '');
   const hasComment = !!(s.comment && s.comment.trim());
@@ -298,7 +299,12 @@ function ShoppingRow({ s, t, onMenge, onComment, onRemove }: {
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center gap-1.5">
               {s.canonical_name
-                ? <Link to={`/names?open=${encodeURIComponent(s.canonical_name)}`} className="truncate font-medium hover:text-emerald-600 hover:underline dark:hover:text-emerald-400">{s.title}</Link>
+                ? <button
+                    type="button"
+                    onPointerDown={e => e.stopPropagation()}
+                    onClick={() => navigate(`/names?open=${encodeURIComponent(s.canonical_name!)}`)}
+                    className="truncate text-left font-medium hover:text-emerald-600 hover:underline dark:hover:text-emerald-400"
+                  >{s.title}</button>
                 : <span className="truncate font-medium">{s.title}</span>}
               {s.canonical_name == null && <Badge>{t('shopping.freeText')}</Badge>}
               {s.source === 'suggested' && <Sparkles size={12} className="shrink-0 text-amber-500" aria-label={t('shopping.suggested')} />}
