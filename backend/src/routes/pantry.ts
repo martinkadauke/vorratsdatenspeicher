@@ -159,16 +159,24 @@ export function pantryRoutes(app: FastifyInstance): void {
         FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
         WHERE a.canonical_name IN ${sql(canons)} AND a.preis IS NOT NULL ${kontoScope(req.user, sql`e.konto_id`)}
       `;
-      const metaRows = await sql`SELECT canonical_name, base_unit FROM canonical_meta WHERE canonical_name IN ${sql(canons)}`;
+      const metaRows = await sql`SELECT canonical_name, base_unit, expected_price::float8 AS expected_price FROM canonical_meta WHERE canonical_name IN ${sql(canons)}`;
       const baseUnit = new Map(metaRows.map(m => [m.canonical_name as string, (m.base_unit as string | null) ?? null]));
+      const overridePrice = new Map(metaRows.map(m => [m.canonical_name as string, (m.expected_price as number | null) ?? null]));
       const byCanon = new Map<string, Line[]>();
       for (const l of lines as unknown as Line[]) {
         const arr = byCanon.get(l.canonical_name) ?? [];
         arr.push(l); byCanon.set(l.canonical_name, arr);
       }
       for (const c of canons) {
+        const bu = baseUnit.get(c) ?? null;
+        const ov = overridePrice.get(c);
+        if (ov != null && ov > 0) {
+          // Manual override (€ per base_unit) — wins over the history average.
+          avgByCanon.set(c, { price: ov, unit: unitKey(units, bu ?? undefined) ?? bu ?? 'Einheit' });
+          continue;
+        }
         const groups = comparisonGroups((byCanon.get(c) ?? []) as unknown as PriceLine[], units);
-        const buKey = unitKey(units, baseUnit.get(c) ?? undefined);
+        const buKey = unitKey(units, bu ?? undefined);
         const g = (buKey ? groups.find(x => x.unit === buKey) : undefined) ?? groups[0];
         if (g && g.avg > 0) avgByCanon.set(c, { price: g.avg, unit: g.unit });
       }

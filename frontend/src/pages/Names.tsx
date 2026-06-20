@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { Search, ReceiptText, Store, Image as ImageIcon } from 'lucide-react';
 import { api } from '../api/client';
-import type { CanonicalName, Receipt } from '../api/types';
+import type { CanonicalName } from '../api/types';
 import { Card, Input, Spinner, EmptyState, Badge, Modal, Button, Label } from '../components/ui';
 import { CategoryPicker } from '../components/CategoryPicker';
 import { UnitSelect } from '../components/UnitSelect';
@@ -18,6 +18,12 @@ interface PriceHistory {
   base_unit: string | null;
   stores: { key: string; display: string; avg_eur: number; unit: string | null; groups: { unit: string; avg: number; min: number; n: number }[] }[];
   cheapest: { key: string; display: string; avg_eur: number } | null;
+}
+
+interface CanonicalReceipt {
+  artikel_id: number; original_text: string | null; artikel_name: string | null;
+  preis: number | null; menge: number | null; einheit: string | null;
+  id: number; datum: string; roh_ladenname: string | null; bild_pfad: string | null;
 }
 
 export function Names() {
@@ -74,6 +80,7 @@ export function NameEditModal({ name, onClose }: { name: CanonicalName | null; o
   const [consumers, setConsumers] = useState<number[]>([]);
   const [exclusive, setExclusive] = useState(false);
   const [baseUnit, setBaseUnit] = useState<string | null>(null);
+  const [expectedPrice, setExpectedPrice] = useState('');
   const [trackVorrat, setTrackVorrat] = useState(false);
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
 
@@ -86,12 +93,13 @@ export function NameEditModal({ name, onClose }: { name: CanonicalName | null; o
     setConsumers(name.consumers);
     setExclusive(name.consumers_exclusive);
     setBaseUnit(name.base_unit ?? null);
+    setExpectedPrice(name.expected_price != null ? String(name.expected_price).replace('.', ',') : '');
     setTrackVorrat(!!name.track_vorrat);
   }, [name?.canonical_name]);
 
   const { data: receipts } = useQuery({
     queryKey: ['name-receipts', name?.canonical_name],
-    queryFn: () => api<Receipt[]>(`/api/canonical/${encodeURIComponent(name!.canonical_name)}/receipts`),
+    queryFn: () => api<CanonicalReceipt[]>(`/api/canonical/${encodeURIComponent(name!.canonical_name)}/receipts`),
     enabled: !!name,
   });
 
@@ -129,6 +137,14 @@ export function NameEditModal({ name, onClose }: { name: CanonicalName | null; o
           body: { base_unit: baseUnit },
         });
       }
+      const epParsed = expectedPrice.trim() ? parseFloat(expectedPrice.replace(',', '.')) : null;
+      const epClean = epParsed != null && Number.isFinite(epParsed) && epParsed >= 0 ? epParsed : null;
+      if (epClean !== (name.expected_price ?? null)) {
+        await api(`/api/names/${encodeURIComponent(effective)}/meta`, {
+          method: 'PATCH',
+          body: { expected_price: epClean },
+        });
+      }
       if (trackVorrat !== !!name.track_vorrat) {
         await api(`/api/names/${encodeURIComponent(effective)}/meta`, {
           method: 'PATCH',
@@ -139,6 +155,7 @@ export function NameEditModal({ name, onClose }: { name: CanonicalName | null; o
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['names'] });
       void qc.invalidateQueries({ queryKey: ['artikel-list'] });
+      void qc.invalidateQueries({ queryKey: ['shopping'] });
       toast(t('common.saved'), 'success');
       onClose();
     },
@@ -187,6 +204,20 @@ export function NameEditModal({ name, onClose }: { name: CanonicalName | null; o
           <Label>{t('names.baseUnit')}</Label>
           <UnitSelect value={baseUnit} onChange={setBaseUnit} allowEmpty />
           <p className="mt-1 text-xs text-zinc-400">{t('names.baseUnitHint')}</p>
+        </div>
+        <div>
+          <Label>{t('names.expectedPrice')}</Label>
+          <div className="flex items-center gap-1.5">
+            <Input
+              value={expectedPrice}
+              onChange={e => setExpectedPrice(e.target.value)}
+              placeholder="0,00"
+              inputMode="decimal"
+              className="w-28"
+            />
+            <span className="text-sm text-zinc-500 dark:text-zinc-400">€ / {baseUnit || t('names.unit')}</span>
+          </div>
+          <p className="mt-1 text-xs text-zinc-400">{t('names.expectedPriceHint')}</p>
         </div>
         <div>
           <Label>{t('names.trackVorrat')}</Label>
@@ -239,17 +270,23 @@ export function NameEditModal({ name, onClose }: { name: CanonicalName | null; o
         {!!receipts?.length && (
           <div>
             <Label>{t('names.receipts')}</Label>
-            <div className="flex max-h-40 flex-col gap-1 overflow-y-auto">
+            <div className="flex max-h-56 flex-col gap-1 overflow-y-auto">
               {receipts.map(r => (
                 <Link
-                  key={r.id}
+                  key={r.artikel_id}
                   to={`/receipts/${r.id}?hq=${encodeURIComponent(name!.canonical_name)}`}
                   onClick={onClose}
-                  className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
+                  className="flex flex-col gap-0.5 rounded-lg px-2 py-1.5 text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
                 >
-                  <ReceiptText size={14} className="shrink-0 text-zinc-400" />
-                  <span>{fmtDate(r.datum, i18n.language)} · {r.roh_ladenname}</span>
-                  {r.bild_pfad && <span className="text-xs text-emerald-600">📷</span>}
+                  <div className="flex items-center gap-2">
+                    <ReceiptText size={14} className="shrink-0 text-zinc-400" />
+                    <span className="min-w-0 truncate">{fmtDate(r.datum, i18n.language)} · {r.roh_ladenname}</span>
+                    {r.preis != null && <span className="tabular ml-auto shrink-0 text-xs font-medium">{eur(r.preis)}</span>}
+                    {r.bild_pfad && <span className="shrink-0 text-xs text-emerald-600">📷</span>}
+                  </div>
+                  {r.original_text && (
+                    <span className="truncate pl-6 text-xs italic text-zinc-400" title={r.original_text}>„{r.original_text}"</span>
+                  )}
                 </Link>
               ))}
             </div>

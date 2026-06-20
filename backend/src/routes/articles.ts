@@ -284,15 +284,19 @@ export function articleRoutes(app: FastifyInstance): void {
 
   app.get('/api/canonical/:name/receipts', async (req) => {
     const name = decodeURIComponent((req.params as { name: string }).name);
+    // One row per PURCHASE INSTANCE (not per receipt), so each shows the raw OCR
+    // text + line price/qty that was scanned for this product on that receipt.
     return sql`
-      SELECT DISTINCT e.id, e.datum, e.roh_ladenname, e.bild_pfad
+      SELECT a.id AS artikel_id, a.original_text, a.name AS artikel_name,
+             a.preis::float8 AS preis, a.menge::float8 AS menge, a.einheit,
+             e.id, e.datum, e.roh_ladenname, e.bild_pfad
       FROM einkauf e
       JOIN artikel a ON a.einkauf_id = e.id
       WHERE (a.canonical_name = ${name}
          OR COALESCE(NULLIF(a.ai_guess, ''), a.name) = ${name})
         ${kontoScope(req.user, sql`e.konto_id`)}
       ORDER BY e.datum DESC, e.id DESC
-      LIMIT 10
+      LIMIT 20
     `;
   });
 }

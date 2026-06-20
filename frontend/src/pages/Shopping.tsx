@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -296,7 +297,9 @@ function ShoppingRow({ s, t, onMenge, onComment, onRemove }: {
           </button>
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center gap-1.5">
-              <span className="truncate font-medium">{s.title}</span>
+              {s.canonical_name
+                ? <Link to={`/names?open=${encodeURIComponent(s.canonical_name)}`} className="truncate font-medium hover:text-emerald-600 hover:underline dark:hover:text-emerald-400">{s.title}</Link>
+                : <span className="truncate font-medium">{s.title}</span>}
               {s.canonical_name == null && <Badge>{t('shopping.freeText')}</Badge>}
               {s.source === 'suggested' && <Sparkles size={12} className="shrink-0 text-amber-500" aria-label={t('shopping.suggested')} />}
             </div>

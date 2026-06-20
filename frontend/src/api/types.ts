@@ -108,6 +108,7 @@ export interface CanonicalName {
   artikel_count: number;
   category_path: string | null;
   base_unit?: string | null;
+  expected_price?: number | null;
   track_vorrat?: boolean | null;
   last_bought: string | null;
   translation_en: string | null;

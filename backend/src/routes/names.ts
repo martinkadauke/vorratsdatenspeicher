@@ -13,6 +13,7 @@ export function nameRoutes(app: FastifyInstance): void {
              COUNT(*)::int AS artikel_count,
              mode() WITHIN GROUP (ORDER BY a.category_path) AS category_path,
              MAX(cm.base_unit) AS base_unit,
+             MAX(cm.expected_price)::float8 AS expected_price,
              bool_or(cm.track_vorrat) AS track_vorrat,
              MAX(e.datum)::text AS last_bought
       FROM artikel a
@@ -113,7 +114,7 @@ export function nameRoutes(app: FastifyInstance): void {
     // Per-product base_unit + hidden flag, and a unit-aware comparison price
     // (€/kg, €/l, €/Stück) built from all of the product's purchases (konto-scoped).
     const meta = canonicals.length ? await sql`
-      SELECT canonical_name, base_unit, hidden, track_vorrat FROM canonical_meta WHERE canonical_name IN ${sql(canonicals)}
+      SELECT canonical_name, base_unit, hidden, track_vorrat, expected_price::float8 AS expected_price FROM canonical_meta WHERE canonical_name IN ${sql(canonicals)}
     ` : [];
     const metaMap = new Map(meta.map(m => [m.canonical_name as string, m]));
     const units = await loadUnits();
@@ -155,6 +156,7 @@ export function nameRoutes(app: FastifyInstance): void {
         last_bought: r.last_bought,
         avg_price: r.avg_price,
         base_unit: baseUnit,
+        expected_price: (m?.expected_price as number | null | undefined) ?? null,
         hidden: (m?.hidden as boolean | undefined) ?? false,
         track_vorrat: (m?.track_vorrat as boolean | undefined) ?? false,
         comparison: comparison ? { unit: comparison.unit, avg: comparison.avg } : null,
@@ -171,8 +173,8 @@ export function nameRoutes(app: FastifyInstance): void {
   /** Set per-product metadata: base_unit (Grundpreis-Einheit) and/or hidden. */
   app.patch('/api/names/:name/meta', async (req, reply) => {
     const name = decodeURIComponent((req.params as { name: string }).name);
-    const body = (req.body ?? {}) as { base_unit?: string | null; hidden?: boolean; track_vorrat?: boolean; reserve_min?: number | null };
-    if (!('base_unit' in body) && !('hidden' in body) && !('track_vorrat' in body) && !('reserve_min' in body)) {
+    const body = (req.body ?? {}) as { base_unit?: string | null; hidden?: boolean; track_vorrat?: boolean; reserve_min?: number | null; expected_price?: number | null };
+    if (!('base_unit' in body) && !('hidden' in body) && !('track_vorrat' in body) && !('reserve_min' in body) && !('expected_price' in body)) {
       return reply.code(400).send({ error: 'nothing to update' });
     }
     if ('base_unit' in body) {
@@ -198,6 +200,14 @@ export function nameRoutes(app: FastifyInstance): void {
         INSERT INTO canonical_meta (canonical_name, reserve_min, updated_at, updated_by)
         VALUES (${name}, ${body.reserve_min ?? null}, NOW(), ${req.user!.id})
         ON CONFLICT (canonical_name) DO UPDATE SET reserve_min = EXCLUDED.reserve_min, updated_at = NOW(), updated_by = EXCLUDED.updated_by`;
+    }
+    if ('expected_price' in body) {
+      const ep = body.expected_price == null || !Number.isFinite(Number(body.expected_price)) || Number(body.expected_price) < 0
+        ? null : Number(body.expected_price);
+      await sql`
+        INSERT INTO canonical_meta (canonical_name, expected_price, updated_at, updated_by)
+        VALUES (${name}, ${ep}, NOW(), ${req.user!.id})
+        ON CONFLICT (canonical_name) DO UPDATE SET expected_price = EXCLUDED.expected_price, updated_at = NOW(), updated_by = EXCLUDED.updated_by`;
     }
     return { ok: true };
   });

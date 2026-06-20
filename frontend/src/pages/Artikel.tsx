@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Search, X, Rows3, CheckSquare, Square, Users, Ban, Tag, Bell, FolderTree, ReceiptText, SlidersHorizontal, UserCheck, Eye, EyeOff, Scale, Boxes } from 'lucide-react';
 import { api } from '../api/client';
 import type { CanonicalName } from '../api/types';
@@ -30,6 +30,7 @@ interface ArtikelGroup {
   sample_artikel_id: number | null;
   consumers: number[];
   base_unit: string | null;
+  expected_price: number | null;
   hidden: boolean;
   track_vorrat: boolean;
   comparison: { unit: string; avg: number } | null;
@@ -284,12 +285,23 @@ export function Artikel() {
       artikel_count: g.count,
       category_path: g.category,
       base_unit: g.base_unit,
+      expected_price: g.expected_price,
       last_bought: g.last_bought,
       translation_en: null,
       consumers: g.consumers,
       consumers_exclusive: false,
     });
   };
+
+  // Deep-link from the shopping list (?open=<canonical>) → open that product's detail.
+  const [params, setParams] = useSearchParams();
+  const openParam = params.get('open');
+  useEffect(() => {
+    if (!openParam || !data) return;
+    const g = data.find(x => x.canonical_name === openParam);
+    if (g) { openDetail(g); setParams({}, { replace: true }); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openParam, data]);
 
   return (
     <div className="flex flex-col gap-3 pb-20">
