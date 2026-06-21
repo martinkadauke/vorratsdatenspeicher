@@ -1,0 +1,95 @@
+import type { FastifyInstance } from 'fastify';
+import sql from '../db.js';
+import { encryptSecret, decryptSecret } from '../lib/crypto.js';
+import { testMailbox, runMailImportForUser } from '../mail/importer.js';
+
+interface MailboxBody {
+  imap_host?: string;
+  imap_port?: number;
+  imap_secure?: boolean;
+  imap_user?: string;
+  imap_pass?: string;   // write-only; omitted on update keeps the stored password
+  folder?: string;
+  enabled?: boolean;
+  make_private?: boolean;
+}
+
+function normalise(b: MailboxBody) {
+  return {
+    host: (b.imap_host ?? '').trim(),
+    user: (b.imap_user ?? '').trim(),
+    port: Number.isInteger(b.imap_port) && (b.imap_port as number) > 0 ? (b.imap_port as number) : 993,
+    secure: b.imap_secure !== false,        // default implicit TLS (993)
+    folder: (b.folder ?? '').trim() || 'INBOX',
+    enabled: b.enabled !== false,           // default on
+    makePrivate: !!b.make_private,
+    pass: (b.imap_pass ?? '').toString(),
+  };
+}
+
+/** Per-user IMAP mailbox config for automatic e-mail receipt import (Path B).
+ *  All endpoints act on the authenticated user only; the password is encrypted
+ *  at rest and never returned. */
+export function mailboxRoutes(app: FastifyInstance): void {
+  // Current config (without the password).
+  app.get('/api/me/mailbox', async (req) => {
+    const userId = req.user!.id;
+    const [m] = await sql`
+      SELECT imap_host, imap_port, imap_secure, imap_user, folder, enabled, make_private,
+             last_poll_at, last_ok_at, last_error
+      FROM user_mailbox WHERE user_id = ${userId}`;
+    if (!m) return { configured: false };
+    return { configured: true, ...m };
+  });
+
+  // Create or update. On update, an empty password keeps the stored one.
+  app.put('/api/me/mailbox', async (req, reply) => {
+    const userId = req.user!.id;
+    const n = normalise((req.body ?? {}) as MailboxBody);
+    if (!n.host || !n.user) return reply.code(400).send({ error: 'imap_host and imap_user required' });
+
+    const [existing] = await sql`SELECT imap_pass_enc FROM user_mailbox WHERE user_id = ${userId}`;
+    let passEnc: string;
+    if (n.pass) passEnc = encryptSecret(n.pass);
+    else if (existing) passEnc = existing.imap_pass_enc as string;
+    else return reply.code(400).send({ error: 'imap_pass required' });
+
+    await sql`
+      INSERT INTO user_mailbox
+        (user_id, imap_host, imap_port, imap_secure, imap_user, imap_pass_enc, folder, enabled, make_private, updated_at)
+      VALUES
+        (${userId}, ${n.host}, ${n.port}, ${n.secure}, ${n.user}, ${passEnc}, ${n.folder}, ${n.enabled}, ${n.makePrivate}, NOW())
+      ON CONFLICT (user_id) DO UPDATE SET
+        imap_host = EXCLUDED.imap_host, imap_port = EXCLUDED.imap_port, imap_secure = EXCLUDED.imap_secure,
+        imap_user = EXCLUDED.imap_user, imap_pass_enc = EXCLUDED.imap_pass_enc, folder = EXCLUDED.folder,
+        enabled = EXCLUDED.enabled, make_private = EXCLUDED.make_private, updated_at = NOW()`;
+    return { ok: true };
+  });
+
+  // Remove the mailbox (stops importing; keeps already-imported receipts).
+  app.delete('/api/me/mailbox', async (req) => {
+    await sql`DELETE FROM user_mailbox WHERE user_id = ${req.user!.id}`;
+    return { ok: true };
+  });
+
+  // Live connection check for the "Test" button — uses the supplied password, or
+  // the stored one when the field is left blank.
+  app.post('/api/me/mailbox/test', async (req, reply) => {
+    const userId = req.user!.id;
+    const n = normalise((req.body ?? {}) as MailboxBody);
+    if (!n.host || !n.user) return reply.code(400).send({ error: 'imap_host and imap_user required' });
+    let pass = n.pass;
+    if (!pass) {
+      const [existing] = await sql`SELECT imap_pass_enc FROM user_mailbox WHERE user_id = ${userId}`;
+      if (!existing) return reply.code(400).send({ error: 'imap_pass required' });
+      try { pass = decryptSecret(existing.imap_pass_enc as string); }
+      catch { return reply.code(400).send({ error: 'stored password could not be decrypted — please re-enter it' }); }
+    }
+    return testMailbox({ imap_host: n.host, imap_port: n.port, imap_secure: n.secure, imap_user: n.user, pass, folder: n.folder });
+  });
+
+  // Trigger an immediate poll for this user ("fetch now").
+  app.post('/api/me/mailbox/run', async (req) => {
+    return runMailImportForUser(req.user!.id);
+  });
+}

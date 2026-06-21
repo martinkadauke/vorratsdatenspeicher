@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, ChevronLeft, ChevronRight, RotateCw, Check, Hand, Wallet, X, Search, Ban, Lock, Plus, Camera, ImagePlus } from 'lucide-react';
+import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, ChevronLeft, ChevronRight, RotateCw, Check, Hand, Wallet, X, Search, Ban, Lock, Plus, Camera, ImagePlus, FileText } from 'lucide-react';
 import { TransformWrapper, TransformComponent, useControls } from 'react-zoom-pan-pinch';
 import { api } from '../api/client';
 import type { Artikel, Receipt, ReceiptDetail } from '../api/types';
@@ -457,11 +457,24 @@ export function ReceiptDetailPage() {
         {/* Receipt image — zoomable in place so items list stays visible */}
         <div className="lg:sticky lg:top-[60px] lg:self-start">
           {data.bild_pfad ? (
-            <ZoomableReceiptImage
-              src={imgVersion ? `${data.bild_pfad}?v=${imgVersion}` : data.bild_pfad}
-              panEnabled={panEnabled}
-              onPanToggle={() => setPanEnabled(v => !v)}
-            />
+            /\.pdf$/i.test(data.bild_pfad) ? (
+              // E-mail-imported invoices can be PDFs — an <img> can't render those,
+              // so offer to open the original instead.
+              <a
+                href={data.bild_pfad}
+                target="_blank"
+                rel="noreferrer"
+                className="flex h-48 flex-col items-center justify-center gap-2 rounded-2xl border border-zinc-200 bg-zinc-50 text-sm font-medium text-emerald-600 hover:border-emerald-400 dark:border-zinc-700 dark:bg-zinc-900"
+              >
+                <FileText size={28} /> {t('receiptDetail.openPdf')}
+              </a>
+            ) : (
+              <ZoomableReceiptImage
+                src={imgVersion ? `${data.bild_pfad}?v=${imgVersion}` : data.bild_pfad}
+                panEnabled={panEnabled}
+                onPanToggle={() => setPanEnabled(v => !v)}
+              />
+            )
           ) : editable ? (
             <div className="flex flex-col gap-2 rounded-2xl border border-dashed border-zinc-300 p-4 dark:border-zinc-700">
               <p className="text-center text-sm text-zinc-400">{t('receiptDetail.noPhotoHint')}</p>

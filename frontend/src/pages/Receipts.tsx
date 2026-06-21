@@ -428,7 +428,7 @@ export function Receipts() {
                   </div>
                 )}
                 <Card onClick={() => navigate(`/receipts/${r.id}${filterQs}`)} className="flex min-w-0 items-center gap-3 p-3">
-                  {r.bild_pfad ? (
+                  {r.bild_pfad && !/\.pdf$/i.test(r.bild_pfad) ? (
                     <img
                       src={r.bild_pfad}
                       alt=""
@@ -441,7 +441,7 @@ export function Receipts() {
                       style={{ width: size.thumb * 0.75, height: size.thumb }}
                       className="flex shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-lg dark:bg-zinc-800"
                     >
-                      🧾
+                      {r.bild_pfad ? '📄' : '🧾'}
                     </div>
                   )}
                   <div className="min-w-0 flex-1">

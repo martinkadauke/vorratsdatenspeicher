@@ -56,6 +56,11 @@ export interface AppConfig {
   // bi-weekly AI model review (reviewer model is itself configurable → can be fully local)
   'model_review.enabled': boolean;
   'model_review.cron': string;
+  // automatic e-mail receipt import (Path B): polls each user's configured IMAP
+  // mailbox. The real gate is per-user (user_mailbox.enabled); this is the global
+  // kill-switch + schedule. Inert when no mailbox is configured.
+  'mailimport.enabled': boolean;
+  'mailimport.cron': string;
 }
 
 const DEFAULTS: AppConfig = {
@@ -104,6 +109,8 @@ const DEFAULTS: AppConfig = {
   'supermarket.cron': '0 4 * * *',
   'model_review.enabled': true,
   'model_review.cron': '0 5 1,15 * *', // ~bi-weekly: 1st & 15th, 05:00
+  'mailimport.enabled': true,
+  'mailimport.cron': '*/15 * * * *', // every 15 min — snappy "I forwarded it → it appears"
 };
 
 export async function getConfig<K extends keyof AppConfig>(key: K): Promise<AppConfig[K]> {

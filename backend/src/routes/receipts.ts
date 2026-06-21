@@ -6,7 +6,7 @@ import Jimp from 'jimp';
 import sql from '../db.js';
 import { requireAdmin } from '../auth/plugin.js';
 import { kontoScope, canSeeKonto } from '../auth/konto.js';
-import { ocrFromImage } from '../llm/ocr.js';
+import { ocrFromImage, type OcrResult } from '../llm/ocr.js';
 import { searchFilter, col, numCol, lk, type Frag } from '../lib/search.js';
 import { cleanMatch } from '../lib/canonicalMatch.js';
 import { ocrKey, loadAliasMap, loadUserAliasKeys, recordAliases } from '../lib/canonicalAlias.js';
@@ -60,16 +60,13 @@ export function cleanLadenName(ladenkette: string | null, filiale: string | null
   return full.replace(/\b(Süd|Nord|Ost|West|GmbH|Co\.?\s*KG|KG|AG|SE|e\.?\s*K\.?)\b\.?/gi, ' ').replace(/\s+/g, ' ').trim();
 }
 
-/** Run vision OCR on a receipt's stored image and replace its line items.
- *  Throws on unusable OCR. Shared by re-OCR and the in-app create-with-photo
- *  flow (the same Claude-vision path n8n uses, just without n8n/Telegram). */
-async function ocrAndStore(id: number, bildPfad: string): Promise<{ items: number; confidence: number }> {
-  const filename = bildPfad.split('/').pop();
-  const source = filename ? path.join(RECEIPTS_LOCAL_PATH, filename) : bildPfad;
-  const parsed = await ocrFromImage(source);
-  // A missing DATE is no longer fatal — many valid receipts (email order
-  // confirmations, screenshots) have none. Keep the items and flag the date so the
-  // user confirms it before finalising. Only bail if there's nothing usable at all.
+/** Persist a parsed OCR/extraction result onto an existing receipt: replace its
+ *  line items and fill in store/date/total without wiping known values, inheriting
+ *  canonical names from learned aliases + guarded deterministic matches. Shared by
+ *  the image path (ocrAndStore) and the e-mail-text import path. A missing DATE is
+ *  not fatal — it flags date_uncertain so the user confirms before finalising; only
+ *  a fully empty result throws. */
+export async function storeOcrResult(id: number, parsed: OcrResult): Promise<{ items: number; confidence: number }> {
   if (!parsed.ladenkette && !(parsed.artikel?.length)) throw new Error('OCR returned no usable receipt data');
   const ladenName = cleanLadenName(parsed.ladenkette, parsed.filiale);
   const gesamt = Number.isFinite(parsed.gesamt_betrag) ? parsed.gesamt_betrag : null;
@@ -112,6 +109,16 @@ async function ocrAndStore(id: number, bildPfad: string): Promise<{ items: numbe
   });
   await recordAliases(learn);
   return { items: parsed.artikel?.length ?? 0, confidence: parsed.confidence };
+}
+
+/** Run vision OCR on a receipt's stored image/PDF and replace its line items.
+ *  Throws on unusable OCR. Shared by re-OCR, the in-app create-with-photo flow,
+ *  and the e-mail importer (the same Claude-vision path n8n uses). */
+export async function ocrAndStore(id: number, bildPfad: string): Promise<{ items: number; confidence: number }> {
+  const filename = bildPfad.split('/').pop();
+  const source = filename ? path.join(RECEIPTS_LOCAL_PATH, filename) : bildPfad;
+  const parsed = await ocrFromImage(source);
+  return storeOcrResult(id, parsed);
 }
 
 export function receiptRoutes(app: FastifyInstance): void {

@@ -36,8 +36,10 @@ import { offerRoutes } from './routes/offers.js';
 import { rescheduleChurner } from './churner/scheduler.js';
 import { rescheduleSupermarket } from './supermarket/scheduler.js';
 import { rescheduleModelReview } from './maintenance/modelReview.js';
+import { rescheduleMailImport } from './mail/scheduler.js';
 import { modelReviewRoutes } from './routes/modelReview.js';
 import { analyticsRoutes } from './routes/analytics.js';
+import { mailboxRoutes } from './routes/mailbox.js';
 
 async function main(): Promise<void> {
   await migrate();
@@ -59,6 +61,10 @@ async function main(): Promise<void> {
   // Any receipt left "analysing" by a container that died mid-OCR will never
   // finish — clear the flag so the UI doesn't show a perpetual spinner.
   await sql`UPDATE einkauf SET ocr_pending = FALSE WHERE ocr_pending = TRUE`;
+  // Drop e-mail-import claims left "processing" by a container that died between
+  // claiming a message and finishing it, so that message can be re-claimed and
+  // retried on the next poll (the unique (user_id, message_id) still prevents dupes).
+  await sql`DELETE FROM imported_email WHERE status = 'processing' AND created_at < NOW() - INTERVAL '1 hour'`;
 
   const app = Fastify({ logger: { level: 'info' } });
 
@@ -107,6 +113,7 @@ async function main(): Promise<void> {
   offerRoutes(app);
   modelReviewRoutes(app);
   analyticsRoutes(app);
+  mailboxRoutes(app);
 
   const receiptsDir = process.env.RECEIPTS_LOCAL_PATH ?? '/receipts';
 
@@ -164,6 +171,7 @@ async function main(): Promise<void> {
   await rescheduleChurner();
   await rescheduleSupermarket();
   await rescheduleModelReview();
+  await rescheduleMailImport();
 
   await app.listen({ port: PORT, host: '0.0.0.0' });
   app.log.info(`Vorratsdatenspeicher listening on :${PORT}`);
