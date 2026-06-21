@@ -85,7 +85,15 @@ export function pruefenRoutes(app: FastifyInstance): void {
       return { ok: true, updated };
     }
     // reject: bury the proposals; the article stays unresolved and listed so the
-    // human can rename it. (Durable anti-re-propose lands in Phase 3.)
+    // human can rename it. Remember the rejection so the churner won't re-mint it.
+    await sql`
+      INSERT INTO rejected_proposal (ocr_key, proposed_canonical)
+      SELECT a.ocr_key, vq.proposed_canonical
+      FROM verifikations_queue vq JOIN artikel a ON a.id = vq.artikel_id
+      WHERE vq.status = 'pending' AND vq.artikel_id IN ${sql(ids)}
+        AND a.ocr_key IS NOT NULL AND a.ocr_key <> '' AND vq.proposed_canonical IS NOT NULL
+      ON CONFLICT DO NOTHING
+    `;
     await sql`
       UPDATE verifikations_queue SET status = 'rejected'
       WHERE status = 'pending' AND artikel_id IN ${sql(ids)}
@@ -111,6 +119,14 @@ export function pruefenRoutes(app: FastifyInstance): void {
     } else if (action === 'reject') {
       const allIds = items.flatMap(it => (Array.isArray(it.artikel_ids) ? it.artikel_ids : [])).filter(n => Number.isInteger(n));
       if (allIds.length) {
+        await sql`
+          INSERT INTO rejected_proposal (ocr_key, proposed_canonical)
+          SELECT a.ocr_key, vq.proposed_canonical
+          FROM verifikations_queue vq JOIN artikel a ON a.id = vq.artikel_id
+          WHERE vq.status = 'pending' AND vq.artikel_id IN ${sql(allIds)}
+            AND a.ocr_key IS NOT NULL AND a.ocr_key <> '' AND vq.proposed_canonical IS NOT NULL
+          ON CONFLICT DO NOTHING
+        `;
         await sql`UPDATE verifikations_queue SET status = 'rejected' WHERE status = 'pending' AND artikel_id IN ${sql(allIds)}`;
         count = items.length;
       }

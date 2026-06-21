@@ -8,7 +8,7 @@ import { requireAdmin } from '../auth/plugin.js';
 import { kontoScope, canSeeKonto } from '../auth/konto.js';
 import { ocrFromImage } from '../llm/ocr.js';
 import { searchFilter, col, numCol, lk, type Frag } from '../lib/search.js';
-import { matchExistingCanonical } from '../lib/canonicalMatch.js';
+import { cleanMatch } from '../lib/canonicalMatch.js';
 import { ocrKey, loadAliasMap, loadUserAliasKeys, recordAliases } from '../lib/canonicalAlias.js';
 
 /** Search config for the receipts list/nav: free text hits the store name or
@@ -83,7 +83,9 @@ async function ocrAndStore(id: number, bildPfad: string): Promise<{ items: numbe
     for (const a of parsed.artikel ?? []) {
       const key = ocrKey(a.original_text ?? a.name);
       const fromAlias = aliases.get(key);
-      const canon = fromAlias ?? matchExistingCanonical([a.original_text, a.name, a.ai_guess], existing);
+      // Guarded: only inherit a deterministic match when it's unambiguous (no other
+      // significant product noun), else leave NULL for AI + Prüfen review.
+      const canon = fromAlias ?? cleanMatch([a.original_text, a.name, a.ai_guess], existing);
       if (canon && !fromAlias) learn.push([a.original_text ?? a.name ?? null, canon]); // remember new matches
       const fromUser = !!fromAlias && userKeys.has(key); // inherited a user correction
       await tx`

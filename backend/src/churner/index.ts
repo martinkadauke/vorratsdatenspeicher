@@ -3,7 +3,7 @@ import { getConfig } from '../config.js';
 import { parseLlmJson } from '../llm/ollama.js';
 import { providerForTask } from '../llm/provider.js';
 import { searxngSearch, searxngImageSearch } from '../llm/searxng.js';
-import { matchExistingCanonical } from '../lib/canonicalMatch.js';
+import { cleanMatch } from '../lib/canonicalMatch.js';
 import { ocrKey, recordAlias, loadAliasMap, loadUserAliases } from '../lib/canonicalAlias.js';
 import { STAGE1_PROMPT, STAGE2_PROMPT } from '../llm/prompts.js';
 import { mostSimilar } from '../llm/similarity.js';
@@ -168,6 +168,14 @@ async function churnWork(eventId: number): Promise<void> {
 
   const batchSize = await getConfig('churner.batch_size');
   const confidenceGate = await getConfig('churner.confidence');
+  const hitlMode = await getConfig('churner.hitl_mode'); // guarded | uncertain_only | all_new
+  const GENERIC = ['Diverse Artikel', 'Backwaren', 'Gemüse', 'Fleisch', 'Gewürze'];
+  // Durable reject memory: (ocr_key, proposed) pairs a human already rejected, so we
+  // never re-propose them. JSON key → collision-proof, no delimiter games.
+  const rejected = new Set(
+    (await sql`SELECT ocr_key, proposed_canonical FROM rejected_proposal`)
+      .map(r => JSON.stringify([r.ocr_key as string, r.proposed_canonical as string])),
+  );
 
   const candidates = await sql`
     SELECT a.id, a.name, a.original_text, a.ai_guess, a.canonical_name, e.roh_ladenname AS store_raw
@@ -209,8 +217,13 @@ async function churnWork(eventId: number): Promise<void> {
       // match — both free + reliable, before the (slow) LLM.
       const aKey = ocrKey(a.original_text ?? a.name);
       const fromAlias = aliases.get(aKey);
-      const pre = fromAlias ?? matchExistingCanonical([a.original_text, a.name, a.ai_guess], existing);
+      // cleanMatch: only an unambiguous whole-word match (no other product noun)
+      // auto-applies; risky containment falls through to the LLM + Prüfen.
+      const pre = fromAlias ?? cleanMatch([a.original_text, a.name, a.ai_guess], existing);
       if (pre) {
+        // A deterministic match the human already rejected for this key must not
+        // silently re-apply. (A learned alias is the user's own mapping → it wins.)
+        if (!fromAlias && rejected.has(JSON.stringify([aKey, pre]))) { skipped++; continue; }
         if (pre !== a.canonical_name) {
           // Inherited from a user-confirmed alias → carry the "Nutzerkorrigiert" mark.
           const fromUser = !!fromAlias && userKeys.has(aKey);
@@ -287,11 +300,24 @@ async function churnWork(eventId: number): Promise<void> {
 
       // Snap near-duplicates to existing canonical names
       const twin = mostSimilar(canonical, existing, 0.85);
+      const corroborated = !!twin || !!sourceUrl; // snapped to a known name OR web-sourced
       if (twin) canonical = twin;
 
       if (canonical === a.canonical_name) { skipped++; continue; }
 
-      if (confidence >= confidenceGate) {
+      // Durable reject: never re-propose something a human already rejected for this key.
+      if (rejected.has(JSON.stringify([aKey, canonical]))) { skipped++; continue; }
+
+      // Guarded auto-apply: a confident AI name is applied silently ONLY when an
+      // independent signal agrees (snapped to a known name, or came from a web
+      // lookup) AND it isn't a vague catch-all. Otherwise it goes to Prüfen.
+      const isGeneric = canonical.length > 40 || GENERIC.includes(canonical);
+      const autoOk =
+        hitlMode === 'uncertain_only' ? confidence >= confidenceGate
+        : hitlMode === 'all_new' ? false
+        : confidence >= confidenceGate && corroborated && !isGeneric; // guarded (default)
+
+      if (autoOk) {
         await sql`UPDATE artikel SET canonical_name = ${canonical} WHERE id = ${a.id}`;
         await recordAlias(a.original_text ?? a.name, canonical); // learn so future repeats skip the LLM
         if (translationEn) {
@@ -312,17 +338,16 @@ async function churnWork(eventId: number): Promise<void> {
         autoApplied++;
         if (!existing.includes(canonical)) existing.push(canonical);
       } else {
+        // Queue for review — but only if no pending row already exists for this
+        // article, so repeated churn passes don't pile up duplicates. No per-item
+        // notification: the end-of-run summary + the Prüfen nav badge are the digest.
         await sql`
           INSERT INTO verifikations_queue (proposed_canonical, raw_patterns, ai_examples, confidence, status, artikel_id)
-          VALUES (${canonical}, ${a.original_text ?? a.name}, ${a.ai_guess ?? a.name}, ${String(confidence.toFixed(2))}, 'pending', ${a.id})
+          SELECT ${canonical}, ${a.original_text ?? a.name}, ${a.ai_guess ?? a.name}, ${String(confidence.toFixed(2))}, 'pending', ${a.id}
+          WHERE NOT EXISTS (
+            SELECT 1 FROM verifikations_queue WHERE status = 'pending' AND artikel_id = ${a.id}
+          )
         `;
-        await notify('churner.queued', {
-          artikel_id: a.id,
-          original_text: a.original_text,
-          proposed_canonical: canonical,
-          confidence,
-          source_url: sourceUrl,
-        });
         queued++;
       }
     } catch (err) {

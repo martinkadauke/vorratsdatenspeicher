@@ -29,6 +29,11 @@ export interface AppConfig {
   'churner.cron': string;
   'churner.confidence': number;
   'churner.batch_size': number;
+  // How aggressively the churner auto-applies AI canonical names:
+  //  'guarded'        — only confident AND corroborated (web/snap), non-generic names auto-apply; rest → Prüfen
+  //  'uncertain_only' — confident names auto-apply (legacy confidence-gate behavior)
+  //  'all_new'        — never AI-auto-apply; every new name goes to Prüfen
+  'churner.hitl_mode': string;
   'searxng.url': string;
   'app.default_lang': string;
   'app.base_url': string;
@@ -79,6 +84,7 @@ const DEFAULTS: AppConfig = {
   'churner.cron': '0 3 * * *',
   'churner.confidence': 0.85,
   'churner.batch_size': 200,
+  'churner.hitl_mode': 'guarded',
   'searxng.url': 'http://192.168.1.238:8089',
   'app.default_lang': 'de',
   'app.base_url': 'http://192.168.1.238:8766',
