@@ -56,6 +56,9 @@ async function main(): Promise<void> {
         summary = COALESCE(summary, '{}'::jsonb) || ${sql.json({ interrupted_by: 'container_restart' })}
     WHERE status = 'running'
   `;
+  // Any receipt left "analysing" by a container that died mid-OCR will never
+  // finish — clear the flag so the UI doesn't show a perpetual spinner.
+  await sql`UPDATE einkauf SET ocr_pending = FALSE WHERE ocr_pending = TRUE`;
 
   const app = Fastify({ logger: { level: 'info' } });
 

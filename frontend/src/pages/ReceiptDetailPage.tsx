@@ -112,11 +112,11 @@ export function ReceiptDetailPage() {
     queryKey: ['receipt', id],
     queryFn: () => api<ReceiptDetail>(`/api/receipts/${id}`),
     enabled: !!id,
-    // a fresh upload OCRs in the background — poll briefly until items appear
+    // a fresh upload OCRs in the background — poll while the server flags it as
+    // analysing (bounded, in case a flag ever gets stuck).
     refetchInterval: (q) => {
       const d = q.state.data as ReceiptDetail | undefined;
-      const pending = !!d?.bild_pfad && d.artikel.length === 0;
-      return pending && Date.now() - mountedAt.current < 150_000 ? 4000 : false;
+      return d?.ocr_pending && Date.now() - mountedAt.current < 180_000 ? 4000 : false;
     },
   });
 
@@ -249,8 +249,10 @@ export function ReceiptDetailPage() {
   }
   const scrollToId = highlightId ?? (q ? [...matchIds][0] ?? null : null);
 
-  // A freshly uploaded photo is being OCR'd server-side (no items yet).
-  const ocrPending = !!data.bild_pfad && data.artikel.length === 0 && Date.now() - mountedAt.current < 150_000;
+  // The photo is being OCR'd server-side right now (authoritative flag).
+  const ocrPending = !!data.ocr_pending;
+  // OCR finished but found no line items (e.g. a screenshot with only a total).
+  const ocrEmpty = !!data.bild_pfad && !data.ocr_pending && data.artikel.length === 0;
 
   // Warn if this receipt contains items the household decided to avoid.
   const avoidedSet = new Set(avoidedList ?? []);
@@ -412,6 +414,13 @@ export function ReceiptDetailPage() {
         <div className="flex items-center gap-2 rounded-xl border border-sky-300 bg-sky-50 px-3 py-2 text-sm text-sky-800 dark:border-sky-700/50 dark:bg-sky-950/40 dark:text-sky-300">
           <ScanLine size={16} className="shrink-0 animate-pulse" />
           <span>{t('receiptDetail.ocrPending')}</span>
+        </div>
+      )}
+
+      {ocrEmpty && (
+        <div className="flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700/50 dark:bg-amber-950/40 dark:text-amber-300">
+          <AlertTriangle size={16} className="shrink-0" />
+          <span>{t('receiptDetail.ocrEmpty')}</span>
         </div>
       )}
 

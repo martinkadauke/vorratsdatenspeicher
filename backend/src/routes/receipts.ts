@@ -126,7 +126,7 @@ export function receiptRoutes(app: FastifyInstance): void {
 
     const rows = await sql`
       SELECT e.id, e.datum, e.roh_ladenname, e.bild_pfad, e.gesamt_betrag, e.geprueft,
-             e.konto_id, e.quelle, k.name AS konto_name,
+             e.konto_id, e.quelle, k.name AS konto_name, e.ocr_pending,
              (e.private_for_user_id IS NOT NULL) AS private,
              COUNT(a.id)::int AS item_count
       FROM einkauf e
@@ -202,8 +202,10 @@ export function receiptRoutes(app: FastifyInstance): void {
     // on mobile and put the phone away — items fill in a moment later). A failed
     // OCR just leaves the created receipt + photo for manual entry / re-OCR.
     if (bildPfad) {
+      await sql`UPDATE einkauf SET ocr_pending = TRUE WHERE id = ${row.id}`;
       void ocrAndStore(row.id as number, bildPfad)
-        .catch(e => req.log.error(`background OCR failed for receipt ${row.id}: ${(e as Error).message}`));
+        .catch(e => req.log.error(`background OCR failed for receipt ${row.id}: ${(e as Error).message}`))
+        .finally(() => sql`UPDATE einkauf SET ocr_pending = FALSE WHERE id = ${row.id}`.catch(() => {}));
     }
     return { ok: true, id: row.id };
   });
@@ -232,8 +234,10 @@ export function receiptRoutes(app: FastifyInstance): void {
     await sql`UPDATE einkauf SET bild_pfad = ${bildPfad} WHERE id = ${id}`;
     const [{ n }] = await sql`SELECT COUNT(*)::int AS n FROM artikel WHERE einkauf_id = ${id}`;
     if (n === 0) {
+      await sql`UPDATE einkauf SET ocr_pending = TRUE WHERE id = ${id}`;
       void ocrAndStore(id, bildPfad)
-        .catch(e => req.log.error(`background OCR failed for receipt ${id}: ${(e as Error).message}`));
+        .catch(e => req.log.error(`background OCR failed for receipt ${id}: ${(e as Error).message}`))
+        .finally(() => sql`UPDATE einkauf SET ocr_pending = FALSE WHERE id = ${id}`.catch(() => {}));
     }
     return { ok: true, bild_pfad: bildPfad, ocr: n === 0 };
   });
@@ -438,7 +442,7 @@ export function receiptRoutes(app: FastifyInstance): void {
 
     const receipts = await sql`
       SELECT e.id, e.datum, e.roh_ladenname, e.bild_pfad, e.gesamt_betrag, e.geprueft,
-             e.konto_id, e.quelle, k.name AS konto_name,
+             e.konto_id, e.quelle, k.name AS konto_name, e.ocr_pending,
              e.private_for_user_id,
              (e.private_for_user_id IS NOT NULL) AS private
       FROM einkauf e LEFT JOIN konto k ON k.id = e.konto_id

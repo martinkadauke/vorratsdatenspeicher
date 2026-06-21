@@ -98,6 +98,7 @@
   "receiptDetail": {
     "avoidedWarning": "Contains items from the avoid list",
     "ocrPending": "Reading the receipt … line items will appear shortly.",
+    "ocrEmpty": "No line items detected — add them manually below, or re-run OCR.",
     "mismatch": "Sum of items doesn't match receipt total",
     "mismatchHint": "A line is missing, duplicated, or has the wrong price",
     "verifyHint": "Totals match — click to lock as reviewed",

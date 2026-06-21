@@ -27,6 +27,7 @@ export interface Receipt {
   quelle?: string;
   item_count?: number;
   private?: boolean;
+  ocr_pending?: boolean;
 }
 
 export interface Konto {

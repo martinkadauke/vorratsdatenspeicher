@@ -98,6 +98,7 @@
   "receiptDetail": {
     "avoidedWarning": "Enthält Artikel von der Vermeiden-Liste",
     "ocrPending": "Beleg wird ausgelesen … die Positionen erscheinen gleich.",
+    "ocrEmpty": "Keine Positionen erkannt – du kannst sie unten manuell hinzufügen oder neu auslesen.",
     "mismatch": "Summe der Positionen weicht vom Bon-Gesamtbetrag ab",
     "mismatchHint": "Eine Position fehlt, ist doppelt oder hat falschen Preis",
     "verifyHint": "Summen stimmen — zum Sperren als geprüft klicken",
