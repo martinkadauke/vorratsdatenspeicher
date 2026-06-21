@@ -263,132 +263,136 @@ export function ReceiptDetailPage() {
   return (
     <div className="flex flex-col gap-4" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
       {matchFlash && <div className="flash-green-overlay pointer-events-none fixed inset-0 z-50 bg-emerald-400/30" />}
-      <div className="flex items-center gap-2 sm:gap-3">
-        <Link to={`/receipts${filterQs}`} className="shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
-          <ArrowLeft size={20} />
-        </Link>
-        <button
-          onClick={goPrev}
-          disabled={!neighbors?.prev_id}
-          className="hidden shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 disabled:opacity-30 dark:hover:bg-zinc-800 sm:block"
-          title={t('receiptDetail.prev')}
-        >
-          <ChevronLeft size={20} />
-        </button>
-        <div className="min-w-0 flex-1">
-          {/* Plain block heading (NOT a flex item) so line-clamp works and the name
-              uses the full width; the #id sits inline at the end. */}
-          <h1 className="text-lg font-bold leading-tight line-clamp-2 [overflow-wrap:anywhere]">
-            {data.roh_ladenname ?? '?'}
-            <span className="ml-1.5 align-baseline text-xs font-medium text-zinc-400 dark:text-zinc-500">#{data.id}</span>
-          </h1>
-          <div className="text-sm text-zinc-500">
-            {fmtDate(data.datum, i18n.language)} · <span className="tabular font-semibold text-emerald-600 dark:text-emerald-500">{eur(data.gesamt_betrag)}</span>
-          </div>
-          <div className="mt-1 flex flex-wrap items-center gap-1">
-            {data.konto_name && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-medium text-violet-700 dark:bg-violet-950/50 dark:text-violet-300">
-                <Wallet size={11} /> {data.konto_name}
-              </span>
-            )}
-            {data.quelle && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-                {t(`quelle.${data.quelle}`)}
-              </span>
-            )}
-            {/* Private toggle — only you can see a private receipt (case-by-case hide). */}
-            {data.private ? (
-              <button
-                onClick={() => { if (canWrite && !setPrivate.isPending) setPrivate.mutate(false); }}
-                disabled={!canWrite || setPrivate.isPending}
-                className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-medium text-rose-700 disabled:cursor-default dark:bg-rose-950/50 dark:text-rose-300"
-                title={t('receiptDetail.privateToggle')}
-              >
-                <Lock size={11} /> {t('receiptDetail.private')}
-              </button>
-            ) : (canWrite && (
-              <button
-                onClick={() => { if (!setPrivate.isPending) setPrivate.mutate(true); }}
-                disabled={setPrivate.isPending}
-                className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-500 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400"
-                title={t('receiptDetail.privateToggle')}
-              >
-                <Lock size={11} /> {t('receiptDetail.makePrivate')}
-              </button>
-            ))}
-          </div>
+      <div className="flex flex-col gap-1.5">
+        {/* Title row — the store name gets the FULL width (only back + #id share the
+            row); #id sits far right. Action buttons moved to the toolbar below so they
+            can't squeeze the name on a phone. */}
+        <div className="flex items-center gap-2">
+          <Link to={`/receipts${filterQs}`} className="shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
+            <ArrowLeft size={20} />
+          </Link>
+          <h1 className="min-w-0 flex-1 truncate text-lg font-bold">{data.roh_ladenname ?? '?'}</h1>
+          <span className="tabular shrink-0 text-xs font-medium text-zinc-400 dark:text-zinc-500">#{data.id}</span>
         </div>
-        <button
-          onClick={goNext}
-          disabled={!neighbors?.next_id}
-          className="hidden shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 disabled:opacity-30 dark:hover:bg-zinc-800 sm:block"
-          title={t('receiptDetail.next')}
-        >
-          <ChevronRight size={20} />
-        </button>
-        {/* Verification status, single control: red check (sums differ) → green check
-            (sums match) → click to lock → red lock → click to unlock. */}
-        {locked ? (
+
+        <div className="text-sm text-zinc-500">
+          {fmtDate(data.datum, i18n.language)} · <span className="tabular font-semibold text-emerald-600 dark:text-emerald-500">{eur(data.gesamt_betrag)}</span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1">
+          {data.konto_name && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-medium text-violet-700 dark:bg-violet-950/50 dark:text-violet-300">
+              <Wallet size={11} /> {data.konto_name}
+            </span>
+          )}
+          {data.quelle && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+              {t(`quelle.${data.quelle}`)}
+            </span>
+          )}
+          {/* Private toggle — only you can see a private receipt (case-by-case hide). */}
+          {data.private ? (
+            <button
+              onClick={() => { if (canWrite && !setPrivate.isPending) setPrivate.mutate(false); }}
+              disabled={!canWrite || setPrivate.isPending}
+              className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-medium text-rose-700 disabled:cursor-default dark:bg-rose-950/50 dark:text-rose-300"
+              title={t('receiptDetail.privateToggle')}
+            >
+              <Lock size={11} /> {t('receiptDetail.private')}
+            </button>
+          ) : (canWrite && (
+            <button
+              onClick={() => { if (!setPrivate.isPending) setPrivate.mutate(true); }}
+              disabled={setPrivate.isPending}
+              className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-500 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400"
+              title={t('receiptDetail.privateToggle')}
+            >
+              <Lock size={11} /> {t('receiptDetail.makePrivate')}
+            </button>
+          ))}
+        </div>
+
+        {/* Toolbar — actions on the left, prev/next nav on the right (nav hidden on mobile). */}
+        <div className="mt-0.5 flex items-center gap-1">
+          {locked ? (
+            <button
+              onClick={() => { if (canWrite && !setReviewed.isPending) setReviewed.mutate(false); }}
+              disabled={!canWrite || setReviewed.isPending}
+              className={cn('shrink-0 rounded-xl p-2 text-red-500 hover:bg-red-50 disabled:cursor-default disabled:opacity-60 dark:hover:bg-red-950/30')}
+              title={t('receiptDetail.lockedHint')}
+            >
+              <Lock size={18} />
+            </button>
+          ) : mismatch ? (
+            <span
+              className={cn('shrink-0 rounded-xl p-2 text-red-500')}
+              title={t('receiptDetail.mismatchHint')}
+            >
+              <Check size={18} />
+            </span>
+          ) : (
+            <button
+              onClick={() => { if (canWrite && !setReviewed.isPending && !data.date_uncertain) setReviewed.mutate(true); }}
+              disabled={!canWrite || setReviewed.isPending || !!data.date_uncertain}
+              className={cn('shrink-0 rounded-xl p-2 text-emerald-600 hover:bg-emerald-50 disabled:cursor-default disabled:opacity-60 dark:text-emerald-500 dark:hover:bg-emerald-950/30')}
+              title={data.date_uncertain ? t('receiptDetail.dateRequired') : t('receiptDetail.verifyHint')}
+            >
+              <Check size={18} />
+            </button>
+          )}
+          {editable && (
+            <>
+              <button
+                onClick={() => rotate.mutate()}
+                disabled={rotate.isPending || !data.bild_pfad}
+                className="shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 disabled:opacity-30 dark:hover:bg-zinc-800"
+                title={t('receiptDetail.rotate')}
+              >
+                <RotateCw size={18} className={rotate.isPending ? 'animate-spin' : ''} />
+              </button>
+              <button
+                onClick={async () => { if (await confirm({ title: t('receiptDetail.reocr'), message: t('receiptDetail.reocrConfirm'), confirmLabel: t('receiptDetail.reocr'), cancelLabel: t('common.cancel') })) reocr.mutate(); }}
+                disabled={reocr.isPending || !data.bild_pfad}
+                className="shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 disabled:opacity-30 dark:hover:bg-zinc-800"
+                title={t('receiptDetail.reocr')}
+              >
+                <ScanLine size={18} className={reocr.isPending ? 'animate-pulse' : ''} />
+              </button>
+              <button
+                onClick={() => setEditReceipt(true)}
+                className="shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                title={t('receiptEdit.title')}
+              >
+                <Pencil size={18} />
+              </button>
+              <button
+                onClick={async () => { if (await confirm({ title: t('receiptEdit.delete'), message: t('receiptEdit.deleteConfirm'), confirmLabel: t('common.delete'), cancelLabel: t('common.cancel'), danger: true })) deleteReceipt.mutate(); }}
+                disabled={deleteReceipt.isPending}
+                className="shrink-0 rounded-xl p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30"
+                title={t('receiptEdit.delete')}
+              >
+                <Trash2 size={18} />
+              </button>
+            </>
+          )}
+          <div className="flex-1" />
           <button
-            onClick={() => { if (canWrite && !setReviewed.isPending) setReviewed.mutate(false); }}
-            disabled={!canWrite || setReviewed.isPending}
-            className={cn('shrink-0 rounded-xl p-2 text-red-500 hover:bg-red-50 disabled:cursor-default disabled:opacity-60 dark:hover:bg-red-950/30')}
-            title={t('receiptDetail.lockedHint')}
+            onClick={goPrev}
+            disabled={!neighbors?.prev_id}
+            className="hidden shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 disabled:opacity-30 dark:hover:bg-zinc-800 sm:block"
+            title={t('receiptDetail.prev')}
           >
-            <Lock size={18} />
+            <ChevronLeft size={20} />
           </button>
-        ) : mismatch ? (
-          <span
-            className={cn('shrink-0 rounded-xl p-2 text-red-500')}
-            title={t('receiptDetail.mismatchHint')}
-          >
-            <Check size={18} />
-          </span>
-        ) : (
           <button
-            onClick={() => { if (canWrite && !setReviewed.isPending && !data.date_uncertain) setReviewed.mutate(true); }}
-            disabled={!canWrite || setReviewed.isPending || !!data.date_uncertain}
-            className={cn('shrink-0 rounded-xl p-2 text-emerald-600 hover:bg-emerald-50 disabled:cursor-default disabled:opacity-60 dark:text-emerald-500 dark:hover:bg-emerald-950/30')}
-            title={data.date_uncertain ? t('receiptDetail.dateRequired') : t('receiptDetail.verifyHint')}
+            onClick={goNext}
+            disabled={!neighbors?.next_id}
+            className="hidden shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 disabled:opacity-30 dark:hover:bg-zinc-800 sm:block"
+            title={t('receiptDetail.next')}
           >
-            <Check size={18} />
+            <ChevronRight size={20} />
           </button>
-        )}
-        {editable && (
-          <>
-            <button
-              onClick={() => rotate.mutate()}
-              disabled={rotate.isPending || !data.bild_pfad}
-              className="shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 disabled:opacity-30 dark:hover:bg-zinc-800"
-              title={t('receiptDetail.rotate')}
-            >
-              <RotateCw size={18} className={rotate.isPending ? 'animate-spin' : ''} />
-            </button>
-            <button
-              onClick={async () => { if (await confirm({ title: t('receiptDetail.reocr'), message: t('receiptDetail.reocrConfirm'), confirmLabel: t('receiptDetail.reocr'), cancelLabel: t('common.cancel') })) reocr.mutate(); }}
-              disabled={reocr.isPending || !data.bild_pfad}
-              className="shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 disabled:opacity-30 dark:hover:bg-zinc-800"
-              title={t('receiptDetail.reocr')}
-            >
-              <ScanLine size={18} className={reocr.isPending ? 'animate-pulse' : ''} />
-            </button>
-            <button
-              onClick={() => setEditReceipt(true)}
-              className="shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-              title={t('receiptEdit.title')}
-            >
-              <Pencil size={18} />
-            </button>
-            <button
-              onClick={async () => { if (await confirm({ title: t('receiptEdit.delete'), message: t('receiptEdit.deleteConfirm'), confirmLabel: t('common.delete'), cancelLabel: t('common.cancel'), danger: true })) deleteReceipt.mutate(); }}
-              disabled={deleteReceipt.isPending}
-              className="shrink-0 rounded-xl p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30"
-              title={t('receiptEdit.delete')}
-            >
-              <Trash2 size={18} />
-            </button>
-          </>
-        )}
+        </div>
       </div>
 
       <FirstVisitHint id="receiptDetail2" titleKey="hint.receiptDetail.title" bodyKey="hint.receiptDetail.body" bodyKeyMobile="hint.receiptDetail.bodyMobile" />
