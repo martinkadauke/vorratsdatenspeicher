@@ -276,10 +276,12 @@ export function ReceiptDetailPage() {
           <ChevronLeft size={20} />
         </button>
         <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-baseline gap-2">
-            <h1 className="min-w-0 flex-1 text-lg font-bold leading-tight line-clamp-2 [overflow-wrap:anywhere]">{data.roh_ladenname ?? '?'}</h1>
-            <span className="tabular shrink-0 text-xs font-medium text-zinc-400 dark:text-zinc-500">#{data.id}</span>
-          </div>
+          {/* Plain block heading (NOT a flex item) so line-clamp works and the name
+              uses the full width; the #id sits inline at the end. */}
+          <h1 className="text-lg font-bold leading-tight line-clamp-2 [overflow-wrap:anywhere]">
+            {data.roh_ladenname ?? '?'}
+            <span className="ml-1.5 align-baseline text-xs font-medium text-zinc-400 dark:text-zinc-500">#{data.id}</span>
+          </h1>
           <div className="text-sm text-zinc-500">
             {fmtDate(data.datum, i18n.language)} · <span className="tabular font-semibold text-emerald-600 dark:text-emerald-500">{eur(data.gesamt_betrag)}</span>
           </div>
