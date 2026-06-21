@@ -277,7 +277,7 @@ export function ReceiptDetailPage() {
         </button>
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2">
-            <h1 className="min-w-0 flex-1 truncate text-lg font-bold">{data.roh_ladenname ?? '?'}</h1>
+            <h1 className="min-w-0 flex-1 text-lg font-bold leading-tight line-clamp-2 [overflow-wrap:anywhere]">{data.roh_ladenname ?? '?'}</h1>
             <span className="tabular shrink-0 text-xs font-medium text-zinc-400 dark:text-zinc-500">#{data.id}</span>
           </div>
           <div className="text-sm text-zinc-500">
