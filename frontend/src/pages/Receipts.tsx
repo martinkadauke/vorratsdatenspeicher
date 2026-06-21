@@ -44,7 +44,7 @@ export function Receipts() {
 
   const { data: kontenRaw } = useQuery({
     queryKey: ['konten'],
-    queryFn: () => api<{ id: number; name: string; receipts: number }[]>('/api/konten'),
+    queryFn: () => api<{ id: number; name: string; receipts: number; is_cash: boolean }[]>('/api/konten'),
     staleTime: 60_000,
   });
   // Only offer accounts that actually have receipts visible to this user.
@@ -61,6 +61,14 @@ export function Receipts() {
   const showQuelle = quellen.length > 1;
   // when there's only one source, don't filter (Kassenbon == everything)
   const effQuelle = showQuelle ? quelleFilter : 'alle';
+  // Accounts relevant to the selected source: cash ("Bargeld") accounts only ever
+  // hold cash receipts, so don't offer them under Kassenbon/E-Mail, and offer ONLY
+  // them under Barzahlung.
+  const visibleKonten = useMemo(() => {
+    if (effQuelle === 'bar') return konten.filter(k => k.is_cash);
+    if (effQuelle === 'zettel' || effQuelle === 'email') return konten.filter(k => !k.is_cash);
+    return konten;
+  }, [konten, effQuelle]);
   const updateKontoFilter = (id: string | null) => {
     setKontoFilter(id);
     const next = new URLSearchParams(params);
@@ -107,6 +115,13 @@ export function Receipts() {
     if (k !== kontoFilter) setKontoFilter(k);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params]);
+
+  // If the selected account no longer fits the chosen source (e.g. a cash account
+  // while filtering Kassenbon), drop it so the list isn't silently empty.
+  useEffect(() => {
+    if (kontoFilter && !visibleKonten.some(k => String(k.id) === kontoFilter)) updateKontoFilter(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleKonten, kontoFilter]);
 
   // Horizontal store-chip scroller (desktop has no swipe → arrow buttons)
   const chipsRef = useRef<HTMLDivElement>(null);
@@ -305,7 +320,7 @@ export function Receipts() {
         </div>
       )}
 
-      {konten && konten.length > 1 && (
+      {visibleKonten.length > 1 && (
         <div className="scrollbar-none -mx-1 flex gap-1.5 overflow-x-auto px-1">
           <button
             onClick={() => updateKontoFilter(null)}
@@ -318,7 +333,7 @@ export function Receipts() {
           >
             {t('receipts.allKonten')}
           </button>
-          {konten.map(k => (
+          {visibleKonten.map(k => (
             <button
               key={k.id}
               onClick={() => updateKontoFilter(kontoFilter === String(k.id) ? null : String(k.id))}
