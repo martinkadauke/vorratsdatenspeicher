@@ -208,6 +208,36 @@ export function receiptRoutes(app: FastifyInstance): void {
     return { ok: true, id: row.id };
   });
 
+  /** Attach a photo to an EXISTING receipt (e.g. one entered manually without one),
+   *  then OCR it in the background — but ONLY when the receipt has no line items yet,
+   *  so a manual entry's items are never overwritten. Privacy-guarded. */
+  app.post('/api/receipts/:id/photo', { bodyLimit: 16 * 1024 * 1024 }, async (req, reply) => {
+    const id = parseInt((req.params as { id: string }).id, 10);
+    if (!id) return reply.code(400).send({ error: 'invalid id' });
+    if (!await guardReceipt(req, reply, id)) return;
+    const b = (req.body ?? {}) as { photo_base64?: string; photo_mime?: string };
+    if (!b.photo_base64) return reply.code(400).send({ error: 'photo_base64 required' });
+    const mime = b.photo_mime || 'image/jpeg';
+    const ext = mime.includes('png') ? 'png' : 'jpg';
+    const data = b.photo_base64.replace(/^data:[^,]+,/, '');
+    let bildPfad: string;
+    try {
+      const filename = `vds-${crypto.randomUUID()}.${ext}`;
+      await writeFile(path.join(RECEIPTS_LOCAL_PATH, filename), Buffer.from(data, 'base64'));
+      bildPfad = `/receipts/${filename}`;
+    } catch (e) {
+      req.log.error(`photo save failed: ${(e as Error).message}`);
+      return reply.code(500).send({ error: 'photo save failed' });
+    }
+    await sql`UPDATE einkauf SET bild_pfad = ${bildPfad} WHERE id = ${id}`;
+    const [{ n }] = await sql`SELECT COUNT(*)::int AS n FROM artikel WHERE einkauf_id = ${id}`;
+    if (n === 0) {
+      void ocrAndStore(id, bildPfad)
+        .catch(e => req.log.error(`background OCR failed for receipt ${id}: ${(e as Error).message}`));
+    }
+    return { ok: true, bild_pfad: bildPfad, ocr: n === 0 };
+  });
+
   /** Review-progress across visible receipts (for the overview progress bar).
    *  Respects the active account filter so the bar matches what's shown. */
   app.get('/api/receipts/review-progress', async (req) => {

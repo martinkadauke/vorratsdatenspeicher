@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, ChevronLeft, ChevronRight, RotateCw, Check, Hand, Wallet, X, Search, Ban, Lock, Plus } from 'lucide-react';
+import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, ChevronLeft, ChevronRight, RotateCw, Check, Hand, Wallet, X, Search, Ban, Lock, Plus, Camera, ImagePlus } from 'lucide-react';
 import { TransformWrapper, TransformComponent, useControls } from 'react-zoom-pan-pinch';
 import { api } from '../api/client';
 import type { Artikel, Receipt, ReceiptDetail } from '../api/types';
@@ -14,7 +14,7 @@ import { SortableArticleList } from '../components/SortableArticleList';
 import { useAuth } from '../context/auth';
 import { toast } from '../components/Toast';
 import { confirm } from '../components/Confirm';
-import { cn, eur, fmtDate } from '../lib/utils';
+import { cn, eur, fmtDate, fileToResizedDataUrl } from '../lib/utils';
 import { searchMatch } from '../lib/search';
 
 export function ReceiptDetailPage() {
@@ -119,6 +119,28 @@ export function ReceiptDetailPage() {
       return pending && Date.now() - mountedAt.current < 150_000 ? 4000 : false;
     },
   });
+
+  // Attach a photo to a receipt that has none (manual cash entries etc.).
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const uploadPhoto = useMutation({
+    mutationFn: (dataUrl: string) => api(`/api/receipts/${id}/photo`, { method: 'POST', body: { photo_base64: dataUrl, photo_mime: 'image/jpeg' } }),
+    onSuccess: () => {
+      mountedAt.current = Date.now(); // restart the OCR-pending poll window
+      void qc.invalidateQueries({ queryKey: ['receipt', id] });
+      void qc.invalidateQueries({ queryKey: ['receipts'] });
+      toast(t('receiptDetail.photoAdded'), 'success');
+    },
+    onError: (e) => toast((e as Error).message, 'error'),
+  });
+  const onPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    setPhotoBusy(true);
+    try { await uploadPhoto.mutateAsync(await fileToResizedDataUrl(f)); }
+    catch (err) { toast((err as Error).message, 'error'); }
+    finally { setPhotoBusy(false); }
+  };
   const { data: avoidedList } = useQuery({
     queryKey: ['avoided'],
     queryFn: () => api<string[]>('/api/avoided'),
@@ -414,6 +436,21 @@ export function ReceiptDetailPage() {
               panEnabled={panEnabled}
               onPanToggle={() => setPanEnabled(v => !v)}
             />
+          ) : editable ? (
+            <div className="flex flex-col gap-2 rounded-2xl border border-dashed border-zinc-300 p-4 dark:border-zinc-700">
+              <p className="text-center text-sm text-zinc-400">{t('receiptDetail.noPhotoHint')}</p>
+              <div className="flex gap-2">
+                <label className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-xl border border-zinc-300 px-3 py-3 text-sm font-medium text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700">
+                  <Camera size={16} /> {t('createPurchase.photoCamera')}
+                  <input type="file" accept="image/*" capture="environment" className="hidden" onChange={onPhoto} disabled={photoBusy || uploadPhoto.isPending} />
+                </label>
+                <label className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-xl border border-zinc-300 px-3 py-3 text-sm font-medium text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700">
+                  <ImagePlus size={16} /> {t('createPurchase.photoPick')}
+                  <input type="file" accept="image/*" className="hidden" onChange={onPhoto} disabled={photoBusy || uploadPhoto.isPending} />
+                </label>
+              </div>
+              {(photoBusy || uploadPhoto.isPending) && <p className="text-center text-xs text-zinc-400">{t('createPurchase.photoBusy')}</p>}
+            </div>
           ) : (
             <div className="flex h-48 items-center justify-center rounded-2xl bg-zinc-100 text-sm text-zinc-400 dark:bg-zinc-900">
               {t('receipts.noImage')}

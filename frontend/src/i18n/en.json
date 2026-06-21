@@ -118,6 +118,8 @@
     "private": "Private",
     "makePrivate": "Make private",
     "privateToggle": "Only you can see private receipts — click to toggle",
+    "noPhotoHint": "No photo yet — take or pick one",
+    "photoAdded": "Photo added",
     "duplicate": "Duplicate line",
     "insertHere": "Insert a line here",
     "locked": "Receipt locked — fully reviewed & totals match.",
