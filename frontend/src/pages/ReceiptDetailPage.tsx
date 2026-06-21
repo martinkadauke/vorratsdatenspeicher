@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, ChevronLeft, ChevronRight, RotateCw, Check, Hand, Wallet, X, Search, Ban, Lock } from 'lucide-react';
+import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, ChevronLeft, ChevronRight, RotateCw, Check, Hand, Wallet, X, Search, Ban, Lock, Plus } from 'lucide-react';
 import { TransformWrapper, TransformComponent, useControls } from 'react-zoom-pan-pinch';
 import { api } from '../api/client';
 import type { Artikel, Receipt, ReceiptDetail } from '../api/types';
@@ -441,6 +441,18 @@ export function ReceiptDetailPage() {
                 <span className="tabular text-base font-bold">{eur(itemSum)}</span>
               </span>
             </div>
+          )}
+
+          {/* Global add-position button — the reliable way to add an item (esp. on a
+              fresh cash receipt with no rows yet, where there are no dividers to tap). */}
+          {editable && (
+            <button
+              type="button"
+              onClick={() => { setInsertAfterId(null); setAdding(true); }}
+              className="mt-1 flex items-center justify-center gap-2 rounded-xl border border-dashed border-zinc-300 px-3 py-2.5 text-sm font-medium text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700"
+            >
+              <Plus size={16} /> {t('receiptDetail.addPosition')}
+            </button>
           )}
         </div>
       </div>
