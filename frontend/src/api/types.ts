@@ -128,6 +128,21 @@ export interface QueueItem {
   einkauf_id: number | null;
 }
 
+/** One article-driven Prüfen review row: all articles sharing an OCR key that still
+ *  need a human decision, with the churner's pending proposal as a pre-fill. */
+export interface PruefenGroup {
+  grp: string;
+  ocr_key: string | null;
+  artikel_ids: number[];
+  occurrences: number;
+  original_text: string | null;
+  ai_guess: string | null;
+  einkauf_id: number | null;
+  sample_artikel_id: number | null;
+  suggestion: string | null;
+  confidence: string | null;
+}
+
 export interface Notification {
   id: number;
   type: string;

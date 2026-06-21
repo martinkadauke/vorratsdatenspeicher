@@ -35,6 +35,15 @@ export function Layout() {
   });
   const envBadge = version?.env ? ENV_BADGE[version.env] : undefined;
 
+  // Live count of articles awaiting a decision, shown as a badge on the Prüfung nav.
+  const { data: pruefen } = useQuery({
+    queryKey: ['pruefen-count'],
+    queryFn: () => api<{ count: number }>('/api/pruefen/count'),
+    refetchInterval: 60000,
+    staleTime: 30000,
+  });
+  const pruefenCount = pruefen?.count ?? 0;
+
   // Auto-open tour on first login (after a tiny delay so the UI has settled)
   useEffect(() => {
     if (user && user.has_seen_tour === false) {
@@ -50,14 +59,14 @@ export function Layout() {
     return () => window.removeEventListener('vds:open-tour', open);
   }, []);
 
-  const navItem = (to: string, Icon: typeof ReceiptText, label: string, mobile = false) => (
+  const navItem = (to: string, Icon: typeof ReceiptText, label: string, mobile = false, badge = 0) => (
     <NavLink
       key={to}
       to={to}
       className={({ isActive }) =>
         cn(
           mobile
-            ? 'flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-medium'
+            ? 'relative flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-medium'
             : 'flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium',
           isActive
             ? 'text-emerald-600 dark:text-emerald-500'
@@ -68,6 +77,14 @@ export function Layout() {
     >
       <Icon size={mobile ? 22 : 18} />
       <span>{label}</span>
+      {badge > 0 && (
+        <span className={cn(
+          'rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold leading-none text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400',
+          mobile ? 'absolute right-3 top-1' : 'ml-auto',
+        )}>
+          {badge}
+        </span>
+      )}
     </NavLink>
   );
 
@@ -98,7 +115,7 @@ export function Layout() {
       <div className="mx-auto flex max-w-6xl">
         {/* Desktop sidebar */}
         <aside className="sticky top-[53px] hidden h-[calc(100dvh-53px)] w-52 shrink-0 flex-col gap-1 overflow-y-auto p-3 md:flex">
-          {NAV.map(n => navItem(n.to, n.icon, t(n.key)))}
+          {NAV.map(n => navItem(n.to, n.icon, t(n.key), false, n.to === '/queue' ? pruefenCount : 0))}
           {navExtras(!!user?.is_admin).map(n => navItem(n.to, n.icon, t(n.key)))}
           <div className="mt-auto">
             <button

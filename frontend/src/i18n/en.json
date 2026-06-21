@@ -397,6 +397,7 @@
     "sortAlpha": "Alphabetical",
     "countOpen": "{{count}} open",
     "showing": "showing {{n}}",
+    "times": "{{count}}×",
     "bulkDone": "{{count}} processed"
   },
   "bell": {

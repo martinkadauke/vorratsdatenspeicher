@@ -19,6 +19,7 @@ import { goalRoutes } from './routes/goals.js';
 import { pantryRoutes } from './routes/pantry.js';
 import { nameRoutes } from './routes/names.js';
 import { queueRoutes } from './routes/queue.js';
+import { pruefenRoutes } from './routes/pruefen.js';
 import { notificationRoutes } from './routes/notifications.js';
 import { adminRoutes } from './routes/admin.js';
 import { meRoutes } from './routes/me.js';
@@ -86,6 +87,7 @@ async function main(): Promise<void> {
   pantryRoutes(app);
   nameRoutes(app);
   queueRoutes(app);
+  pruefenRoutes(app);
   notificationRoutes(app);
   adminRoutes(app);
   meRoutes(app);
