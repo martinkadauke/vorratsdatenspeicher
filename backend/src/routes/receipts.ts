@@ -252,6 +252,17 @@ export function receiptRoutes(app: FastifyInstance): void {
         updates.gesamt_betrag = n;
       }
     }
+    // On accept (geprueft → true) with no total entered, fall back to the sum of the
+    // line items — so a cash receipt entered without a total still shows a sum in the
+    // overview (and counts in store totals). Only fills a missing total; never
+    // overwrites one the user/OCR already set.
+    if (updates.geprueft === true && !('gesamt_betrag' in body)) {
+      const [cur] = await sql`SELECT gesamt_betrag FROM einkauf WHERE id = ${id}`;
+      if (cur && cur.gesamt_betrag === null) {
+        const [{ sum }] = await sql`SELECT COALESCE(SUM(preis), 0)::numeric(10,2) AS sum FROM artikel WHERE einkauf_id = ${id}`;
+        if (Number(sum) > 0) updates.gesamt_betrag = Number(sum);
+      }
+    }
     if (!Object.keys(updates).length) return reply.code(400).send({ error: 'no patchable fields' });
     const rows = await sql`UPDATE einkauf SET ${sql(updates)} WHERE id = ${id} RETURNING id`;
     if (!rows.length) return reply.code(404).send({ error: 'not found' });
