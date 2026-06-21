@@ -446,9 +446,9 @@ export function Receipts() {
                   )}
                   <div className="min-w-0 flex-1">
                     <div className="flex min-w-0 items-baseline gap-1.5">
-                      {/* line-clamp-2 (not truncate): let "LIDL Gomaringen" show fully
-                          and wrap if a narrow card needs it, instead of cutting to "LIDL Go…". */}
-                      <div className="font-semibold leading-tight line-clamp-2 [overflow-wrap:anywhere]">{r.roh_ladenname ?? '?'}</div>
+                      {/* min-w-0 flex-1 so the name fills the available width (it wasn't
+                          growing → looked cut off with empty space beside it). */}
+                      <div className="min-w-0 flex-1 truncate font-semibold">{r.roh_ladenname ?? '?'}</div>
                       <span className="tabular shrink-0 text-[10px] font-medium text-zinc-400 dark:text-zinc-500">#{r.id}</span>
                     </div>
                     <div className="truncate text-xs text-zinc-500 dark:text-zinc-400">
