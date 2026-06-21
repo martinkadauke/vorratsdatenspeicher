@@ -99,6 +99,8 @@
     "avoidedWarning": "Enthält Artikel von der Vermeiden-Liste",
     "ocrPending": "Beleg wird ausgelesen … die Positionen erscheinen gleich.",
     "ocrEmpty": "Keine Positionen erkannt – du kannst sie unten manuell hinzufügen oder neu auslesen.",
+    "dateUncertain": "Datum nicht aus dem Bild erkannt – bitte tippen, um es einzugeben.",
+    "dateRequired": "Bitte zuerst das Datum eingeben",
     "mismatch": "Summe der Positionen weicht vom Bon-Gesamtbetrag ab",
     "mismatchHint": "Eine Position fehlt, ist doppelt oder hat falschen Preis",
     "verifyHint": "Summen stimmen — zum Sperren als geprüft klicken",

@@ -344,10 +344,10 @@ export function ReceiptDetailPage() {
           </span>
         ) : (
           <button
-            onClick={() => { if (canWrite && !setReviewed.isPending) setReviewed.mutate(true); }}
-            disabled={!canWrite || setReviewed.isPending}
+            onClick={() => { if (canWrite && !setReviewed.isPending && !data.date_uncertain) setReviewed.mutate(true); }}
+            disabled={!canWrite || setReviewed.isPending || !!data.date_uncertain}
             className={cn('shrink-0 rounded-xl p-2 text-emerald-600 hover:bg-emerald-50 disabled:cursor-default disabled:opacity-60 dark:text-emerald-500 dark:hover:bg-emerald-950/30')}
-            title={t('receiptDetail.verifyHint')}
+            title={data.date_uncertain ? t('receiptDetail.dateRequired') : t('receiptDetail.verifyHint')}
           >
             <Check size={18} />
           </button>
@@ -422,6 +422,17 @@ export function ReceiptDetailPage() {
           <AlertTriangle size={16} className="shrink-0" />
           <span>{t('receiptDetail.ocrEmpty')}</span>
         </div>
+      )}
+
+      {data.date_uncertain && (
+        <button
+          onClick={() => editable && setEditReceipt(true)}
+          disabled={!editable}
+          className="flex w-full items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-left text-sm text-amber-800 hover:bg-amber-100 disabled:cursor-default dark:border-amber-700/50 dark:bg-amber-950/40 dark:text-amber-300 dark:hover:bg-amber-950/60"
+        >
+          <AlertTriangle size={16} className="shrink-0" />
+          <span>{t('receiptDetail.dateUncertain')}</span>
+        </button>
       )}
 
       {avoidedHere.length > 0 && (

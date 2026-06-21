@@ -28,6 +28,7 @@ export interface Receipt {
   item_count?: number;
   private?: boolean;
   ocr_pending?: boolean;
+  date_uncertain?: boolean;
 }
 
 export interface Konto {

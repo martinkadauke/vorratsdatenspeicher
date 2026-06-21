@@ -67,9 +67,13 @@ async function ocrAndStore(id: number, bildPfad: string): Promise<{ items: numbe
   const filename = bildPfad.split('/').pop();
   const source = filename ? path.join(RECEIPTS_LOCAL_PATH, filename) : bildPfad;
   const parsed = await ocrFromImage(source);
-  if (!parsed.datum || !parsed.ladenkette) throw new Error('OCR returned no usable receipt data');
+  // A missing DATE is no longer fatal — many valid receipts (email order
+  // confirmations, screenshots) have none. Keep the items and flag the date so the
+  // user confirms it before finalising. Only bail if there's nothing usable at all.
+  if (!parsed.ladenkette && !(parsed.artikel?.length)) throw new Error('OCR returned no usable receipt data');
   const ladenName = cleanLadenName(parsed.ladenkette, parsed.filiale);
   const gesamt = Number.isFinite(parsed.gesamt_betrag) ? parsed.gesamt_betrag : null;
+  const dateUncertain = !parsed.datum; // OCR found no date → user must confirm it
   // Inherit known canonical names already at scan time: first the learned alias
   // memory (exact OCR repeat → instant), then deterministic whole-word match.
   const existing = (await sql`SELECT DISTINCT canonical_name FROM artikel WHERE canonical_name IS NOT NULL`)
@@ -79,7 +83,15 @@ async function ocrAndStore(id: number, bildPfad: string): Promise<{ items: numbe
   const learn: [string | null, string][] = [];
   await sql.begin(async tx => {
     await tx`DELETE FROM artikel WHERE einkauf_id = ${id}`;
-    await tx`UPDATE einkauf SET datum = ${parsed.datum}, roh_ladenname = ${ladenName}, gesamt_betrag = ${gesamt} WHERE id = ${id}`;
+    // COALESCE so an OCR that misses a field doesn't wipe an existing value
+    // (datum is NOT NULL — keep the receipt's current date when OCR found none).
+    await tx`
+      UPDATE einkauf SET
+        datum         = COALESCE(${parsed.datum ?? null}::date, datum),
+        roh_ladenname = COALESCE(NULLIF(${ladenName}, ''), roh_ladenname),
+        gesamt_betrag = COALESCE(${gesamt}, gesamt_betrag),
+        date_uncertain = ${dateUncertain}
+      WHERE id = ${id}`;
     for (const a of parsed.artikel ?? []) {
       const key = ocrKey(a.original_text ?? a.name);
       const fromAlias = aliases.get(key);
@@ -126,7 +138,7 @@ export function receiptRoutes(app: FastifyInstance): void {
 
     const rows = await sql`
       SELECT e.id, e.datum, e.roh_ladenname, e.bild_pfad, e.gesamt_betrag, e.geprueft,
-             e.konto_id, e.quelle, k.name AS konto_name, e.ocr_pending,
+             e.konto_id, e.quelle, k.name AS konto_name, e.ocr_pending, e.date_uncertain,
              (e.private_for_user_id IS NOT NULL) AS private,
              COUNT(a.id)::int AS item_count
       FROM einkauf e
@@ -267,7 +279,8 @@ export function receiptRoutes(app: FastifyInstance): void {
     if (!await guardReceipt(req, reply, id)) return;
     const body = (req.body ?? {}) as Record<string, unknown>;
     const updates: Record<string, unknown> = {};
-    if ('datum' in body && typeof body.datum === 'string') updates.datum = body.datum;
+    // Entering/confirming the date clears the "OCR found no date" flag.
+    if ('datum' in body && typeof body.datum === 'string') { updates.datum = body.datum; updates.date_uncertain = false; }
     if ('roh_ladenname' in body) updates.roh_ladenname = body.roh_ladenname;
     if ('geprueft' in body) updates.geprueft = Boolean(body.geprueft);
     if ('quelle' in body && typeof body.quelle === 'string') updates.quelle = body.quelle;
@@ -303,6 +316,11 @@ export function receiptRoutes(app: FastifyInstance): void {
         const [{ sum }] = await sql`SELECT COALESCE(SUM(preis), 0)::numeric(10,2) AS sum FROM artikel WHERE einkauf_id = ${id}`;
         if (Number(sum) > 0) updates.gesamt_betrag = Number(sum);
       }
+    }
+    // Finalise gate: a receipt whose date OCR couldn't read must get a date first.
+    if (updates.geprueft === true && updates.date_uncertain !== false) {
+      const [cur] = await sql`SELECT date_uncertain FROM einkauf WHERE id = ${id}`;
+      if (cur?.date_uncertain) return reply.code(400).send({ error: 'date_required', message: 'Bitte zuerst das Datum eingeben.' });
     }
     if (!Object.keys(updates).length) return reply.code(400).send({ error: 'no patchable fields' });
     const rows = await sql`UPDATE einkauf SET ${sql(updates)} WHERE id = ${id} RETURNING id`;
@@ -442,7 +460,7 @@ export function receiptRoutes(app: FastifyInstance): void {
 
     const receipts = await sql`
       SELECT e.id, e.datum, e.roh_ladenname, e.bild_pfad, e.gesamt_betrag, e.geprueft,
-             e.konto_id, e.quelle, k.name AS konto_name, e.ocr_pending,
+             e.konto_id, e.quelle, k.name AS konto_name, e.ocr_pending, e.date_uncertain,
              e.private_for_user_id,
              (e.private_for_user_id IS NOT NULL) AS private
       FROM einkauf e LEFT JOIN konto k ON k.id = e.konto_id
