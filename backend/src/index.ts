@@ -4,7 +4,7 @@ import fastifyStatic from '@fastify/static';
 import path from 'node:path';
 import { existsSync, statSync } from 'node:fs';
 import './types.js';
-import sql, { migrate, ensureAdmin } from './db.js';
+import sql, { migrate, ensureAdmin, ensureCashKonten } from './db.js';
 import { initSearch } from './lib/search.js';
 import { backfillAliases, backfillArtikelOcrKey } from './lib/canonicalAlias.js';
 import { PORT } from './config.js';
@@ -42,6 +42,7 @@ import { analyticsRoutes } from './routes/analytics.js';
 async function main(): Promise<void> {
   await migrate();
   await ensureAdmin();
+  await ensureCashKonten();
   await initSearch();
   await backfillAliases();
   await backfillArtikelOcrKey();

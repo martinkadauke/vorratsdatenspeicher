@@ -76,6 +76,7 @@
     "store": "Store",
     "storePlaceholder": "e.g. LIDL Tübingen",
     "konto": "Account",
+    "kontoCash": "Whose cash?",
     "kontoDefault": "Default (shared)",
     "date": "Date",
     "amount": "Amount",

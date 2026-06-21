@@ -9,7 +9,7 @@ import { toast } from './Toast';
 import { cn, fileToResizedDataUrl } from '../lib/utils';
 
 interface StoreRow { display: string; raw: string[]; filialen?: { name: string }[] }
-interface Konto { id: number; name: string; is_shared: boolean }
+interface Konto { id: number; name: string; is_shared: boolean; is_cash: boolean }
 
 /** Quick manual purchase entry (cash or card) with an optional photo. Nothing
  *  is required; if a photo is added it's OCR'd in the background server-side. */
@@ -39,13 +39,24 @@ export function CreatePurchaseModal({ open, onClose }: { open: boolean; onClose:
   const [photo, setPhoto] = useState<string | null>(null);
   const [photoBusy, setPhotoBusy] = useState(false);
 
-  // default to the shared account (GKK) once accounts load
+  // Accounts eligible for the chosen method: cash accounts for Barzahlung, the
+  // regular ones for card. Falls back to all accounts if a set is empty.
+  const kontenForMethod = useMemo(() => {
+    const all = konten ?? [];
+    const filtered = all.filter(k => (quelle === 'bar' ? k.is_cash : !k.is_cash));
+    return filtered.length ? filtered : all;
+  }, [konten, quelle]);
+
+  // Default/repair the selected account whenever the method changes: cash → first
+  // cash account; card → the shared account (GKK).
   useEffect(() => {
-    if (open && !kontoId && konten?.length) {
-      const shared = konten.find(k => k.is_shared) ?? konten[0];
-      if (shared) setKontoId(String(shared.id));
-    }
-  }, [open, konten, kontoId]);
+    if (!open || !kontenForMethod.length) return;
+    if (kontenForMethod.some(k => String(k.id) === kontoId)) return; // still valid
+    const fallback = quelle === 'bar'
+      ? kontenForMethod[0]
+      : (kontenForMethod.find(k => k.is_shared) ?? kontenForMethod[0]);
+    setKontoId(String(fallback.id));
+  }, [open, kontenForMethod, quelle, kontoId]);
 
   const reset = () => {
     setQuelle('zettel'); setLaden(''); setDatum(today()); setBetrag('');
@@ -125,11 +136,11 @@ export function CreatePurchaseModal({ open, onClose }: { open: boolean; onClose:
           </datalist>
         </div>
 
-        {konten && konten.length > 0 && (
+        {kontenForMethod.length > 0 && (
           <div>
-            <Label>{t('createPurchase.konto')}</Label>
+            <Label>{quelle === 'bar' ? t('createPurchase.kontoCash') : t('createPurchase.konto')}</Label>
             <Select value={kontoId} onChange={e => setKontoId(e.target.value)}>
-              {konten.map(k => <option key={k.id} value={k.id}>{k.name}</option>)}
+              {kontenForMethod.map(k => <option key={k.id} value={k.id}>{k.name}</option>)}
             </Select>
           </div>
         )}

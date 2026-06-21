@@ -65,6 +65,30 @@ export async function migrate(): Promise<void> {
   }
 }
 
+/** Ensure a cash ("Bargeld") account exists for every user-linked personal account,
+ *  so cash payments can be attributed per person — separately from their card/bank
+ *  account. Idempotent and crash-safe (must never abort boot). Name is derived by
+ *  swapping "Konto"→"Bargeld" (e.g. "Martins Konto" → "Martins Bargeld"); rename in
+ *  Admin → Konten if you prefer. */
+export async function ensureCashKonten(): Promise<void> {
+  try {
+    const personal = await sql`
+      SELECT id, name, user_id FROM konto
+      WHERE user_id IS NOT NULL AND is_shared = FALSE AND is_cash = FALSE
+    `;
+    for (const k of personal) {
+      const [{ has }] = await sql`SELECT EXISTS(SELECT 1 FROM konto WHERE user_id = ${k.user_id} AND is_cash = TRUE) AS has`;
+      if (has) continue;
+      const swapped = (k.name as string).replace(/Konto/i, 'Bargeld').trim();
+      const name = swapped && swapped !== (k.name as string) ? swapped : `${k.name} Bargeld`;
+      await sql`INSERT INTO konto (name, is_shared, is_cash, user_id) VALUES (${name}, FALSE, TRUE, ${k.user_id})`;
+      console.log(`[seed] created cash account "${name}" for user ${k.user_id}`);
+    }
+  } catch (err) {
+    console.warn('[seed] ensureCashKonten skipped:', (err as Error).message);
+  }
+}
+
 /** Seed/repair the admin user.
  *  - Creates "martin" if no admin user exists yet.
  *  - ADMIN_RESET=true forces a password reset for "martin" (recovery switch).
