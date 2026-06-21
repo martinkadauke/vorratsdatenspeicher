@@ -86,7 +86,7 @@ export function spendingRoutes(app: FastifyInstance): void {
       SELECT a.id, a.preis, a.canonical_name, a.category_path, e.datum::text AS datum
       FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
       WHERE e.datum >= ${rangeStart} AND e.datum < ${rangeEnd}
-        ${kontoScope(req.user, sql`e.konto_id`)}
+        ${kontoScope(req.user, sql`e`)}
     `) as unknown as ArtikelRow[];
 
     const share = await buildShareResolver(member);
@@ -167,7 +167,7 @@ export function spendingRoutes(app: FastifyInstance): void {
       SELECT a.id, a.preis, a.canonical_name, a.category_path, e.datum::text AS datum
       FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
       WHERE e.datum >= ${rangeStart}
-        ${kontoScope(req.user, sql`e.konto_id`)}
+        ${kontoScope(req.user, sql`e`)}
     `) as unknown as ArtikelRow[];
 
     const share = await buildShareResolver(member);
@@ -210,7 +210,7 @@ export function spendingRoutes(app: FastifyInstance): void {
       WHERE e.datum >= ${rangeStart} AND e.datum < ${rangeEnd}
         AND (a.category_path IS NULL OR a.category_path NOT LIKE 'Meta/%')
         ${path ? sql`AND (a.category_path = ${path} OR a.category_path LIKE ${path + '/%'})` : sql``}
-        ${kontoScope(req.user, sql`e.konto_id`)}
+        ${kontoScope(req.user, sql`e`)}
       ORDER BY a.preis DESC NULLS LAST
     `;
 

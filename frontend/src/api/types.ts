@@ -26,6 +26,7 @@ export interface Receipt {
   konto_name?: string | null;
   quelle?: string;
   item_count?: number;
+  private?: boolean;
 }
 
 export interface Konto {

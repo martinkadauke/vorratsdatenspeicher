@@ -46,7 +46,7 @@ export function storeRoutes(app: FastifyInstance): void {
       FROM store_branch f
       LEFT JOIN einkauf e
         ON e.branch_id = f.id
-       ${kontoScope(req.user, sql`e.konto_id`)}
+       ${kontoScope(req.user, sql`e`)}
       WHERE f.kind = ${kind}
       GROUP BY f.id
       HAVING COUNT(e.id) > 0
@@ -68,7 +68,7 @@ export function storeRoutes(app: FastifyInstance): void {
       FROM store_branch f
       LEFT JOIN einkauf e
         ON e.branch_id = f.id
-       ${kontoScope(req.user, sql`e.konto_id`)}
+       ${kontoScope(req.user, sql`e`)}
       WHERE f.id = ${id}
       GROUP BY f.id
     `;
@@ -122,7 +122,7 @@ export function storeRoutes(app: FastifyInstance): void {
       FROM einkauf e
       LEFT JOIN store_branch sb ON sb.name = e.roh_ladenname AND sb.kind = 'filiale'
       WHERE e.roh_ladenname IS NOT NULL
-        ${kontoScope(req.user, sql`e.konto_id`)}
+        ${kontoScope(req.user, sql`e`)}
       GROUP BY e.roh_ladenname
       ORDER BY receipts DESC
     `;
@@ -241,7 +241,7 @@ export function storeRoutes(app: FastifyInstance): void {
       SELECT e.roh_ladenname AS store, a.preis, a.menge, a.einheit
       FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
       WHERE a.canonical_name = ${name} AND a.preis IS NOT NULL AND a.preis > 0
-        ${kontoScope(req.user, sql`e.konto_id`)}
+        ${kontoScope(req.user, sql`e`)}
     `;
 
     const byStore = new Map<string, { display: string; lines: PriceLine[] }>();

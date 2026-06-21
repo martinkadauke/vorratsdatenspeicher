@@ -111,14 +111,14 @@ Frage: "${question}"`;
 }
 
 async function loadContext(user: User | undefined): Promise<Ctx> {
-  const ks = kontoScope(user, sql`t.konto_id`);
+  const ks = kontoScope(user, sql`t`);
   const [range] = await sql`
     SELECT to_char(MIN(datum), 'YYYY-MM-DD') AS lo, to_char(MAX(datum), 'YYYY-MM-DD') AS hi
     FROM v_transactions t WHERE TRUE ${ks}`;
   const cats = await sql`SELECT display FROM category WHERE level = 1 ORDER BY sort_order, display`;
-  const konten = user?.sees_all_konten
-    ? await sql`SELECT name FROM konto ORDER BY sort_order, id`
-    : await sql`SELECT name FROM konto WHERE is_shared = TRUE OR user_id = ${user?.id ?? -1} ORDER BY sort_order, id`;
+  // Accounts are no longer hidden — list all for grounding (private receipts stay
+  // hidden via the privacy filter on the data itself).
+  const konten = await sql`SELECT name FROM konto ORDER BY sort_order, id`;
   const members = await sql`SELECT name FROM family_member ORDER BY sort_order, name`;
   return {
     today: new Date().toISOString().slice(0, 10),

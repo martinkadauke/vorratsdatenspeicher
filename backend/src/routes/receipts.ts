@@ -106,9 +106,12 @@ export function receiptRoutes(app: FastifyInstance): void {
   /** Ensure the receipt exists AND the caller may see its account.
    *  Returns false (and sends the response) when not. */
   async function guardReceipt(req: import('fastify').FastifyRequest, reply: import('fastify').FastifyReply, id: number): Promise<boolean> {
-    const [row] = await sql`SELECT konto_id FROM einkauf WHERE id = ${id}`;
+    const [row] = await sql`SELECT private_for_user_id FROM einkauf WHERE id = ${id}`;
     if (!row) { void reply.code(404).send({ error: 'not found' }); return false; }
-    if (!canSeeKonto(req.user, row.konto_id as number | null)) { void reply.code(403).send({ error: 'forbidden' }); return false; }
+    // Per-receipt privacy: a private receipt is reachable only by its owner (even a
+    // super-admin can't open another user's private receipt by id).
+    const pf = row.private_for_user_id as number | null;
+    if (pf !== null && pf !== (req.user?.id ?? null)) { void reply.code(403).send({ error: 'forbidden' }); return false; }
     return true;
   }
 
@@ -124,6 +127,7 @@ export function receiptRoutes(app: FastifyInstance): void {
     const rows = await sql`
       SELECT e.id, e.datum, e.roh_ladenname, e.bild_pfad, e.gesamt_betrag, e.geprueft,
              e.konto_id, e.quelle, k.name AS konto_name,
+             (e.private_for_user_id IS NOT NULL) AS private,
              COUNT(a.id)::int AS item_count
       FROM einkauf e
       LEFT JOIN artikel a ON a.einkauf_id = e.id
@@ -135,7 +139,7 @@ export function receiptRoutes(app: FastifyInstance): void {
         ${quellen ? sql`AND e.quelle IN ${sql(quellen)}` : sql``}
         ${q.from ? sql`AND e.datum >= ${q.from}` : sql``}
         ${q.to ? sql`AND e.datum <= ${q.to}` : sql``}
-        ${kontoScope(req.user, sql`e.konto_id`)}
+        ${kontoScope(req.user, sql`e`)}
       GROUP BY e.id, k.name
       ORDER BY e.datum DESC, e.id DESC
       LIMIT ${limit} OFFSET ${offset}
@@ -148,7 +152,7 @@ export function receiptRoutes(app: FastifyInstance): void {
   app.get('/api/receipts/quellen', async (req) => {
     const rows = await sql`
       SELECT DISTINCT quelle FROM einkauf e
-      WHERE quelle IS NOT NULL ${kontoScope(req.user, sql`e.konto_id`)}
+      WHERE quelle IS NOT NULL ${kontoScope(req.user, sql`e`)}
     `;
     return rows.map(r => r.quelle as string);
   });
@@ -160,7 +164,7 @@ export function receiptRoutes(app: FastifyInstance): void {
     const b = (req.body ?? {}) as {
       quelle?: string; roh_ladenname?: string; datum?: string;
       gesamt_betrag?: number | string; konto_id?: number | null;
-      photo_base64?: string; photo_mime?: string; ocr?: boolean;
+      photo_base64?: string; photo_mime?: string; ocr?: boolean; private?: boolean;
     };
     const quelle = b.quelle === 'bar' ? 'bar' : 'zettel'; // cash → bar; card → normal store receipt
     const datum = (b.datum && /^\d{4}-\d{2}-\d{2}$/.test(b.datum)) ? b.datum : new Date().toISOString().slice(0, 10);
@@ -171,6 +175,7 @@ export function receiptRoutes(app: FastifyInstance): void {
       : null;
     const kontoId = b.konto_id ?? null;
     if (kontoId != null && !canSeeKonto(req.user, kontoId)) return reply.code(403).send({ error: 'forbidden' });
+    const privateFor = b.private ? (req.user?.id ?? null) : null;
 
     let bildPfad: string | null = null;
     if (b.photo_base64) {
@@ -187,8 +192,8 @@ export function receiptRoutes(app: FastifyInstance): void {
     }
 
     const [row] = await sql`
-      INSERT INTO einkauf (datum, roh_ladenname, gesamt_betrag, quelle, konto_id, bild_pfad)
-      VALUES (${datum}, ${laden}, ${gesamt}, ${quelle}, ${kontoId}, ${bildPfad})
+      INSERT INTO einkauf (datum, roh_ladenname, gesamt_betrag, quelle, konto_id, bild_pfad, private_for_user_id)
+      VALUES (${datum}, ${laden}, ${gesamt}, ${quelle}, ${kontoId}, ${bildPfad}, ${privateFor})
       RETURNING id
     `;
 
@@ -216,7 +221,7 @@ export function receiptRoutes(app: FastifyInstance): void {
       WHERE TRUE
         ${kontoId ? sql`AND e.konto_id = ${kontoId}` : sql``}
         ${quellen ? sql`AND e.quelle IN ${sql(quellen)}` : sql``}
-        ${kontoScope(req.user, sql`e.konto_id`)}
+        ${kontoScope(req.user, sql`e`)}
     `;
     return { total: row.total, reviewed: row.reviewed };
   });
@@ -232,6 +237,8 @@ export function receiptRoutes(app: FastifyInstance): void {
     if ('roh_ladenname' in body) updates.roh_ladenname = body.roh_ladenname;
     if ('geprueft' in body) updates.geprueft = Boolean(body.geprueft);
     if ('quelle' in body && typeof body.quelle === 'string') updates.quelle = body.quelle;
+    // Mark/unmark this receipt private (visible only to the current user).
+    if ('private' in body) updates.private_for_user_id = body.private ? (req.user?.id ?? null) : null;
     if ('konto_id' in body) {
       const v = body.konto_id;
       if (v === null || v === '') updates.konto_id = null;
@@ -341,6 +348,7 @@ export function receiptRoutes(app: FastifyInstance): void {
   app.get('/api/receipts/:id/neighbors', async (req, reply) => {
     const id = parseInt((req.params as { id: string }).id, 10);
     if (!id) return reply.code(400).send({ error: 'invalid id' });
+    if (!await guardReceipt(req, reply, id)) return; // another user's private receipt → 404/403
     // datum is a DATE column; coerce to YYYY-MM-DD string so the comparison
     // is not affected by timezone juggling that breaks row-tuple compares.
     const [cur] = await sql`SELECT TO_CHAR(datum, 'YYYY-MM-DD') AS datum, id FROM einkauf WHERE id = ${id}`;
@@ -356,7 +364,7 @@ export function receiptRoutes(app: FastifyInstance): void {
     const filter = sql`
       ${searchFilter(search, receiptSearch(sql`einkauf`))}
       ${storeLike ? sql`AND einkauf.roh_ladenname ILIKE ${storeLike}` : sql``}
-      ${kontoScope(req.user, sql`einkauf.konto_id`)}
+      ${kontoScope(req.user, sql`einkauf`)}
     `;
 
     // prev = newer (one position earlier in the (datum DESC, id DESC) list)
@@ -400,12 +408,16 @@ export function receiptRoutes(app: FastifyInstance): void {
 
     const receipts = await sql`
       SELECT e.id, e.datum, e.roh_ladenname, e.bild_pfad, e.gesamt_betrag, e.geprueft,
-             e.konto_id, e.quelle, k.name AS konto_name
+             e.konto_id, e.quelle, k.name AS konto_name,
+             e.private_for_user_id,
+             (e.private_for_user_id IS NOT NULL) AS private
       FROM einkauf e LEFT JOIN konto k ON k.id = e.konto_id
       WHERE e.id = ${id}
     `;
     if (!receipts.length) return reply.code(404).send({ error: 'not found' });
-    if (!canSeeKonto(req.user, receipts[0].konto_id as number | null)) {
+    // Per-receipt privacy: another user's private receipt is 404-equivalent.
+    const pf = receipts[0].private_for_user_id as number | null;
+    if (pf !== null && pf !== (req.user?.id ?? null)) {
       return reply.code(403).send({ error: 'forbidden' });
     }
 

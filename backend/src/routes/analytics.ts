@@ -12,9 +12,9 @@ import {
 export function analyticsRoutes(app: FastifyInstance): void {
   // Vocabulary for the manual filter UI (and a mirror of what the agent may use).
   app.get('/api/analytics/catalog', async (req) => {
-    const konten = req.user?.sees_all_konten
-      ? await sql`SELECT id, name, is_shared FROM konto ORDER BY sort_order, id`
-      : await sql`SELECT id, name, is_shared FROM konto WHERE is_shared = TRUE OR user_id = ${req.user?.id ?? -1} ORDER BY sort_order, id`;
+    // Accounts are no longer hidden — list all for the filter UI (private receipts
+    // stay hidden in the results via the privacy predicate).
+    const konten = await sql`SELECT id, name, is_shared FROM konto ORDER BY sort_order, id`;
     return {
       metrics: Object.values(METRICS).map(m => ({ key: m.key, label: m.label, label_en: m.label_en, unit: m.unit })),
       dimensions: Object.values(DIMENSIONS).map(d => ({ key: d.key, label: d.label, label_en: d.label_en })),

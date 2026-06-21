@@ -48,7 +48,7 @@ async function trackedVorrat(user: ScopeUser) {
     SELECT a.canonical_name, a.menge, a.einheit, e.datum::text AS datum
     FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
     WHERE a.canonical_name IN ${sql(canons)}
-      ${kontoScope(user, sql`e.konto_id`)}
+      ${kontoScope(user, sql`e`)}
   `) as unknown as PLine[];
   const byCanon = new Map<string, PLine[]>();
   for (const l of lines) { const arr = byCanon.get(l.canonical_name) ?? []; arr.push(l); byCanon.set(l.canonical_name, arr); }
@@ -157,7 +157,7 @@ export function pantryRoutes(app: FastifyInstance): void {
       const lines = await sql`
         SELECT a.canonical_name, a.preis, a.menge, a.einheit
         FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
-        WHERE a.canonical_name IN ${sql(canons)} AND a.preis IS NOT NULL ${kontoScope(req.user, sql`e.konto_id`)}
+        WHERE a.canonical_name IN ${sql(canons)} AND a.preis IS NOT NULL ${kontoScope(req.user, sql`e`)}
       `;
       const metaRows = await sql`SELECT canonical_name, base_unit, expected_price::float8 AS expected_price FROM canonical_meta WHERE canonical_name IN ${sql(canons)}`;
       const baseUnit = new Map(metaRows.map(m => [m.canonical_name as string, (m.base_unit as string | null) ?? null]));
@@ -378,7 +378,7 @@ export function pantryRoutes(app: FastifyInstance): void {
       SELECT a.canonical_name, a.preis, a.menge, a.einheit, e.roh_ladenname AS store
       FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
       WHERE a.canonical_name IN ${sql(canons)}
-        ${kontoScope(req.user, sql`e.konto_id`)}`) as unknown as Line[] : [];
+        ${kontoScope(req.user, sql`e`)}`) as unknown as Line[] : [];
     const allByCanon = new Map<string, PriceLine[]>();
     const byCanonChain = new Map<string, PriceLine[]>();
     const carried = new Set<string>();
@@ -406,7 +406,7 @@ export function pantryRoutes(app: FastifyInstance): void {
     const chainRows = await sql`
       SELECT f.chain_key, MAX(f.name) AS name,
              (array_agg(f.warengruppen) FILTER (WHERE f.warengruppen IS NOT NULL))[1] AS warengruppen
-      FROM store_branch f LEFT JOIN einkauf e ON e.branch_id = f.id ${kontoScope(req.user, sql`e.konto_id`)}
+      FROM store_branch f LEFT JOIN einkauf e ON e.branch_id = f.id ${kontoScope(req.user, sql`e`)}
       WHERE f.kind = 'filiale'
       GROUP BY f.chain_key HAVING COUNT(e.id) > 0 ORDER BY COUNT(e.id) DESC`;
     const chainKeys = chainRows.map(c => c.chain_key as string);

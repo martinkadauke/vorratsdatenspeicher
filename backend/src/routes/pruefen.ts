@@ -22,7 +22,7 @@ export function pruefenRoutes(app: FastifyInstance): void {
     SELECT COUNT(DISTINCT COALESCE(NULLIF(a.ocr_key, ''), 'id:' || a.id))::int AS count
     FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
     WHERE a.canonical_name IS NULL AND a.user_corrected = FALSE
-      ${kontoScope(req.user, sql`e.konto_id`)}
+      ${kontoScope(req.user, sql`e`)}
   `;
 
   app.get('/api/pruefen', async (req) => {
@@ -32,7 +32,7 @@ export function pruefenRoutes(app: FastifyInstance): void {
                COALESCE(NULLIF(a.ocr_key, ''), 'id:' || a.id) AS grp
         FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
         WHERE a.canonical_name IS NULL AND a.user_corrected = FALSE
-          ${kontoScope(req.user, sql`e.konto_id`)}
+          ${kontoScope(req.user, sql`e`)}
       ),
       withprop AS (
         SELECT n.*, q.proposed_canonical, q.confidence, q.created_at AS prop_at

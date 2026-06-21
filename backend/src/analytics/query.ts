@@ -31,13 +31,11 @@ function asNum(v: unknown, field: string): number {
   return n;
 }
 
-/** Replicate kontoScope() as bound params (analyticsRead takes raw text + params). */
+/** Replicate kontoScope() as bound params (analyticsRead takes raw text + params).
+ *  Per-receipt privacy: a private transaction is visible only to its owner. */
 function kontoWhere(user: User | undefined, params: unknown[]): string | null {
-  if (!user || user.sees_all_konten) return null;
-  const ids = user.konto_ids ?? [];
-  if (!ids.length) return 'FALSE';
-  const ph = ids.map(id => `$${params.push(id)}`).join(', ');
-  return `(t.konto_id IN (${ph}) OR t.konto_id IS NULL)`;
+  if (!user) return null;
+  return `(t.private_for_user_id IS NULL OR t.private_for_user_id = $${params.push(user.id)})`;
 }
 
 export interface BuiltQuery { text: string; params: unknown[]; columns: ColumnMeta }
@@ -82,13 +80,9 @@ export function buildAnalyticsSql(q: AnalyticsQuery, user: User | undefined): Bu
     where.push(`t.source IN (${ph})`);
   }
   if (f.konto_id?.length) {
+    // Accounts are no longer hidden — anyone may filter by any account; private
+    // receipts within it stay hidden via the privacy predicate above.
     const ids = f.konto_id.map(id => asNum(id, 'konto_id'));
-    // Defense in depth: a non-super-admin may only filter to accounts they can
-    // already see (kontoScope also intersects, but fail loudly on an over-ask).
-    if (user && !user.sees_all_konten) {
-      const allowed = new Set(user.konto_ids ?? []);
-      if (ids.some(id => !allowed.has(id))) throw new AnalyticsError('konto not accessible');
-    }
     const ph = ids.map(id => `$${params.push(id)}`).join(', ');
     where.push(`t.konto_id IN (${ph})`);
   }
@@ -161,11 +155,8 @@ function buildMemberSql(q: AnalyticsQuery, user: User | undefined): BuiltQuery {
     where.push(`(t.category_path = $${a} OR t.category_path LIKE $${b})`);
   }
   if (f.konto_id?.length) {
+    // Accounts no longer hidden; private receipts stay hidden via kontoWhere.
     const ids = f.konto_id.map(id => asNum(id, 'konto_id'));
-    if (user && !user.sees_all_konten) {
-      const allowed = new Set(user.konto_ids ?? []);
-      if (ids.some(id => !allowed.has(id))) throw new AnalyticsError('konto not accessible');
-    }
     where.push(`t.konto_id IN (${ids.map(id => `$${params.push(id)}`).join(', ')})`);
   }
   if (f.product) where.push(`t.canonical_name ILIKE $${params.push(`%${String(f.product)}%`)}`);

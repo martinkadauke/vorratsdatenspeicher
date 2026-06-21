@@ -93,12 +93,12 @@ export function queueRoutes(app: FastifyInstance): void {
         FROM artikel a2 JOIN einkauf e2 ON e2.id = a2.einkauf_id
         WHERE q.artikel_id IS NULL AND q.ai_examples IS NOT NULL
           AND COALESCE(NULLIF(a2.ai_guess, ''), a2.name) = q.ai_examples
-          ${kontoScope(req.user, sql`e2.konto_id`)}
+          ${kontoScope(req.user, sql`e2`)}
         ORDER BY e2.datum DESC, a2.id DESC
         LIMIT 1
       ) fb ON TRUE
       WHERE q.status = 'pending' ${searchCond}
-        ${kontoScope(req.user, sql`e.konto_id`)}
+        ${kontoScope(req.user, sql`e`)}
       ${order}
       LIMIT 200
     `;
@@ -108,7 +108,7 @@ export function queueRoutes(app: FastifyInstance): void {
       LEFT JOIN artikel a ON a.id = q.artikel_id
       LEFT JOIN einkauf e ON e.id = a.einkauf_id
       WHERE q.status = 'pending'
-        ${kontoScope(req.user, sql`e.konto_id`)}
+        ${kontoScope(req.user, sql`e`)}
     `;
     return { items, total };
   });

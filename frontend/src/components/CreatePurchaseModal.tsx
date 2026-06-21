@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Camera, ImagePlus, Banknote, CreditCard } from 'lucide-react';
+import { Camera, ImagePlus, Banknote, CreditCard, Lock } from 'lucide-react';
 import { api } from '../api/client';
 import { Modal, Button, Input, Label, Select } from './ui';
 import { toast } from './Toast';
@@ -38,6 +38,7 @@ export function CreatePurchaseModal({ open, onClose }: { open: boolean; onClose:
   const [kontoId, setKontoId] = useState('');
   const [photo, setPhoto] = useState<string | null>(null);
   const [photoBusy, setPhotoBusy] = useState(false);
+  const [isPrivate, setIsPrivate] = useState(false);
 
   // Accounts eligible for the chosen method: cash accounts for Barzahlung, the
   // regular ones for card. Falls back to all accounts if a set is empty.
@@ -60,7 +61,7 @@ export function CreatePurchaseModal({ open, onClose }: { open: boolean; onClose:
 
   const reset = () => {
     setQuelle('zettel'); setLaden(''); setDatum(today()); setBetrag('');
-    setKontoId(''); setPhoto(null);
+    setKontoId(''); setPhoto(null); setIsPrivate(false);
   };
   const close = () => { reset(); onClose(); };
 
@@ -70,6 +71,7 @@ export function CreatePurchaseModal({ open, onClose }: { open: boolean; onClose:
       body: {
         quelle, roh_ladenname: laden, datum, gesamt_betrag: betrag,
         konto_id: kontoId ? parseInt(kontoId, 10) : null,
+        private: isPrivate,
         photo_base64: photo ?? undefined, photo_mime: photo ? 'image/jpeg' : undefined,
       },
     }),
@@ -144,6 +146,12 @@ export function CreatePurchaseModal({ open, onClose }: { open: boolean; onClose:
             </Select>
           </div>
         )}
+
+        <label className="flex items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2.5 text-sm dark:border-zinc-700">
+          <input type="checkbox" checked={isPrivate} onChange={e => setIsPrivate(e.target.checked)} className="h-4 w-4 accent-emerald-600" />
+          <Lock size={14} className="text-zinc-400" />
+          <span>{t('createPurchase.private')}</span>
+        </label>
 
         <div className="grid grid-cols-2 gap-2">
           <div>

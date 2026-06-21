@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useInfiniteQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Search, CheckCircle2, Rows3, X, ChevronLeft, ChevronRight, Plus } from 'lucide-react';
+import { Search, CheckCircle2, Rows3, X, ChevronLeft, ChevronRight, Plus, Lock } from 'lucide-react';
 import { api } from '../api/client';
 import type { Receipt } from '../api/types';
 import { Card, Input, Spinner, EmptyState } from '../components/ui';
@@ -441,6 +441,11 @@ export function Receipts() {
                       {eur(r.gesamt_betrag)}
                     </div>
                   </div>
+                  {r.private && (
+                    <span className="shrink-0 self-start" title={t('receiptDetail.private')}>
+                      <Lock size={16} className="text-rose-500" />
+                    </span>
+                  )}
                   {r.geprueft && (
                     <span className="shrink-0 self-start" title={t('receiptDetail.reviewedYes')}>
                       <CheckCircle2 size={18} className="text-emerald-500" />

@@ -41,7 +41,7 @@ export function offerRoutes(app: FastifyInstance): void {
     const lines = offered.length ? await sql`
       SELECT a.canonical_name, a.preis, a.menge, a.einheit, e.datum::text AS datum
       FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
-      WHERE a.canonical_name IN ${sql(offered)} ${kontoScope(req.user, sql`e.konto_id`)}
+      WHERE a.canonical_name IN ${sql(offered)} ${kontoScope(req.user, sql`e`)}
     ` : [];
     const metaRows = offered.length ? await sql`
       SELECT canonical_name, base_unit FROM canonical_meta WHERE canonical_name IN ${sql(offered)}

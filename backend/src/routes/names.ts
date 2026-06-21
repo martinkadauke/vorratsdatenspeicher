@@ -28,7 +28,7 @@ export function nameRoutes(app: FastifyInstance): void {
           ],
           fields: { kategorie: col(sql`a.category_path`) },
         })}
-        ${kontoScope(req.user, sql`e.konto_id`)}
+        ${kontoScope(req.user, sql`e`)}
       GROUP BY a.canonical_name
       ORDER BY a.canonical_name ASC
     `;
@@ -94,7 +94,7 @@ export function nameRoutes(app: FastifyInstance): void {
           nums: { preis: numCol(sql`a.preis`) },
         })}
         ${catFilter} ${fromFilter} ${toFilter} ${kontoFilter}
-        ${kontoScope(req.user, sql`e.konto_id`)}
+        ${kontoScope(req.user, sql`e`)}
       GROUP BY grp
     `;
 
@@ -126,7 +126,7 @@ export function nameRoutes(app: FastifyInstance): void {
     const lineRows = canonicals.length ? await sql`
       SELECT a.canonical_name, a.preis, a.menge, a.einheit
       FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
-      WHERE a.canonical_name IN ${sql(canonicals)} ${kontoScope(req.user, sql`e.konto_id`)}
+      WHERE a.canonical_name IN ${sql(canonicals)} ${kontoScope(req.user, sql`e`)}
     ` : [];
     const linesByCanon = new Map<string, PriceLine[]>();
     for (const l of lineRows as unknown as (PriceLine & { canonical_name: string })[]) {
@@ -248,7 +248,7 @@ export function nameRoutes(app: FastifyInstance): void {
           nums: { preis: numCol(sql`a.preis`) },
         })}
         ${catFilter} ${fromFilter} ${toFilter} ${kontoFilter}
-        ${kontoScope(req.user, sql`e.konto_id`)}
+        ${kontoScope(req.user, sql`e`)}
     `;
     return { items: row.items, total: row.total };
   });
@@ -290,7 +290,7 @@ export function nameRoutes(app: FastifyInstance): void {
       UPDATE artikel a SET canonical_name = ${name}, user_corrected = TRUE
       FROM einkauf e
       WHERE a.einkauf_id = e.id AND a.id IN ${sql(artikel_ids)}
-        ${kontoScope(req.user, sql`e.konto_id`)}
+        ${kontoScope(req.user, sql`e`)}
       RETURNING a.id, a.original_text, a.name
     `;
     // learn each OCR text → canonical so future scans match without the LLM
@@ -313,7 +313,7 @@ export function nameRoutes(app: FastifyInstance): void {
       UPDATE artikel a SET category_path = ${category_path}
       FROM einkauf e
       WHERE a.einkauf_id = e.id AND a.id IN ${sql(artikel_ids)}
-        ${kontoScope(req.user, sql`e.konto_id`)}
+        ${kontoScope(req.user, sql`e`)}
       RETURNING a.id
     `;
     return { ok: true, updated: rows.length };
@@ -342,7 +342,7 @@ export function nameRoutes(app: FastifyInstance): void {
         // Only loose artikel the caller may see.
         const visible = (await tx`
           SELECT a.id FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
-          WHERE a.id IN ${tx(aids)} ${kontoScope(req.user, tx`e.konto_id`)}
+          WHERE a.id IN ${tx(aids)} ${kontoScope(req.user, tx`e`)}
         `).map(r => r.id as number);
         for (const aid of visible) {
           await tx`DELETE FROM artikel_consumer WHERE artikel_id = ${aid}`;

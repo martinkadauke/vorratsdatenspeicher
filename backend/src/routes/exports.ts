@@ -56,7 +56,7 @@ export function exportRoutes(app: FastifyInstance): void {
       WHERE TRUE
         ${q.from ? sql`AND e.datum >= ${q.from}` : sql``}
         ${q.to ? sql`AND e.datum <= ${q.to}` : sql``}
-        ${kontoScope(req.user, sql`e.konto_id`)}
+        ${kontoScope(req.user, sql`e`)}
       ORDER BY e.datum DESC, e.id DESC, a.id ASC
     `;
 
@@ -92,7 +92,7 @@ export function exportRoutes(app: FastifyInstance): void {
       WHERE TRUE
         ${q.from ? sql`AND e.datum >= ${q.from}` : sql``}
         ${q.to ? sql`AND e.datum <= ${q.to}` : sql``}
-        ${kontoScope(req.user, sql`e.konto_id`)}
+        ${kontoScope(req.user, sql`e`)}
       GROUP BY e.id
       ORDER BY e.datum DESC, e.id DESC
     `;
@@ -120,7 +120,7 @@ export function exportRoutes(app: FastifyInstance): void {
       FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
       WHERE a.preis IS NOT NULL
         AND (a.category_path IS NULL OR a.category_path NOT LIKE 'Meta/%')
-        ${kontoScope(req.user, sql`e.konto_id`)}
+        ${kontoScope(req.user, sql`e`)}
       GROUP BY ym, category_path
       ORDER BY ym DESC, category_path
     `;

@@ -8,25 +8,24 @@ export function kontoRoutes(app: FastifyInstance): void {
    *  Includes the user-visible receipt count so the overview can hide
    *  empty accounts from its filter chips. */
   app.get('/api/konten', async (req) => {
-    const idFilter = req.user?.sees_all_konten ? sql`` : (() => {
-      const ids = req.user?.konto_ids ?? [];
-      return ids.length ? sql`WHERE k.id IN ${sql(ids)}` : sql`WHERE FALSE`;
-    })();
+    // Whole-account hiding is gone: every account is visible to every user. Only
+    // individual receipts can be private (the per-account count excludes others'
+    // private receipts via kontoScope).
     return sql`
       SELECT k.id, k.name, k.is_shared, k.is_cash, k.user_id, u.username AS owner,
              (SELECT COUNT(*)::int FROM einkauf e
-              WHERE e.konto_id = k.id ${kontoScope(req.user, sql`e.konto_id`)}) AS receipts
+              WHERE e.konto_id = k.id ${kontoScope(req.user, sql`e`)}) AS receipts
       FROM konto k LEFT JOIN users u ON u.id = k.user_id
-      ${idFilter}
       ORDER BY k.is_shared DESC, k.is_cash, k.sort_order, k.name
     `;
   });
 
   /** Full account list (admin) with receipt counts. */
-  app.get('/api/admin/konten', { preHandler: requireAdmin }, async () => {
+  app.get('/api/admin/konten', { preHandler: requireAdmin }, async (req) => {
     return sql`
       SELECT k.id, k.name, k.is_shared, k.user_id, u.username AS owner, k.sort_order,
-             (SELECT COUNT(*)::int FROM einkauf e WHERE e.konto_id = k.id) AS receipts
+             (SELECT COUNT(*)::int FROM einkauf e
+              WHERE e.konto_id = k.id ${kontoScope(req.user, sql`e`)}) AS receipts
       FROM konto k LEFT JOIN users u ON u.id = k.user_id
       ORDER BY k.is_shared DESC, k.sort_order, k.name
     `;

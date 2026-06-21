@@ -89,6 +89,15 @@ export function ReceiptDetailPage() {
     },
   });
 
+  const setPrivate = useMutation({
+    mutationFn: (value: boolean) => api(`/api/receipts/${id}`, { method: 'PATCH', body: { private: value } }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['receipt', id] });
+      void qc.invalidateQueries({ queryKey: ['receipts'] });
+    },
+    onError: (e) => toast((e as Error).message, 'error'),
+  });
+
   const dupArticle = useMutation({
     mutationFn: (aid: number) => api(`/api/articles/${aid}/duplicate`, { method: 'POST' }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['receipt', id] }),
@@ -261,6 +270,26 @@ export function ReceiptDetailPage() {
                 {t(`quelle.${data.quelle}`)}
               </span>
             )}
+            {/* Private toggle — only you can see a private receipt (case-by-case hide). */}
+            {data.private ? (
+              <button
+                onClick={() => { if (canWrite && !setPrivate.isPending) setPrivate.mutate(false); }}
+                disabled={!canWrite || setPrivate.isPending}
+                className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-medium text-rose-700 disabled:cursor-default dark:bg-rose-950/50 dark:text-rose-300"
+                title={t('receiptDetail.privateToggle')}
+              >
+                <Lock size={11} /> {t('receiptDetail.private')}
+              </button>
+            ) : (canWrite && (
+              <button
+                onClick={() => { if (!setPrivate.isPending) setPrivate.mutate(true); }}
+                disabled={setPrivate.isPending}
+                className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-500 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400"
+                title={t('receiptDetail.privateToggle')}
+              >
+                <Lock size={11} /> {t('receiptDetail.makePrivate')}
+              </button>
+            ))}
           </div>
         </div>
         <button

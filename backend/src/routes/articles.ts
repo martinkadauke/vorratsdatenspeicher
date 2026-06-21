@@ -15,11 +15,13 @@ function coerceDecimal(v: unknown): string | null {
 }
 
 export function articleRoutes(app: FastifyInstance): void {
-  /** Guard: the artikel belongs to a receipt the caller may see. */
+  /** Guard: the artikel belongs to a receipt the caller may see — i.e. NOT another
+   *  user's PRIVATE receipt (per-receipt privacy, same rule as guardReceipt). */
   async function guardArtikel(req: import('fastify').FastifyRequest, reply: import('fastify').FastifyReply, artikelId: number): Promise<boolean> {
-    const [row] = await sql`SELECT e.konto_id FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id WHERE a.id = ${artikelId}`;
+    const [row] = await sql`SELECT e.private_for_user_id FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id WHERE a.id = ${artikelId}`;
     if (!row) { void reply.code(404).send({ error: 'not found' }); return false; }
-    if (!canSeeKonto(req.user, row.konto_id as number | null)) { void reply.code(403).send({ error: 'forbidden' }); return false; }
+    const pf = row.private_for_user_id as number | null;
+    if (pf !== null && pf !== (req.user?.id ?? null)) { void reply.code(403).send({ error: 'forbidden' }); return false; }
     return true;
   }
 
@@ -28,9 +30,10 @@ export function articleRoutes(app: FastifyInstance): void {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const einkaufId = parseInt(String(body.einkauf_id ?? ''), 10);
     if (!einkaufId) return reply.code(400).send({ error: 'einkauf_id required' });
-    const [exists] = await sql`SELECT id, konto_id FROM einkauf WHERE id = ${einkaufId}`;
+    const [exists] = await sql`SELECT id, private_for_user_id FROM einkauf WHERE id = ${einkaufId}`;
     if (!exists) return reply.code(404).send({ error: 'einkauf not found' });
-    if (!canSeeKonto(req.user, exists.konto_id as number | null)) return reply.code(403).send({ error: 'forbidden' });
+    const epf = exists.private_for_user_id as number | null;
+    if (epf !== null && epf !== (req.user?.id ?? null)) return reply.code(403).send({ error: 'forbidden' });
 
     const name = String(body.name ?? '').trim();
     if (!name && !body.canonical_name) return reply.code(400).send({ error: 'name or canonical_name required' });
@@ -160,7 +163,7 @@ export function articleRoutes(app: FastifyInstance): void {
       UPDATE artikel a SET canonical_name = ${canonical_name}, user_corrected = TRUE ${setCat}
       FROM einkauf e
       WHERE a.einkauf_id = e.id AND ${idMatch}
-        ${kontoScope(req.user, sql`e.konto_id`)}
+        ${kontoScope(req.user, sql`e`)}
       RETURNING a.id
     `;
     // learn this OCR identity → canonical for future scans
@@ -171,6 +174,7 @@ export function articleRoutes(app: FastifyInstance): void {
   app.put('/api/articles/:id/consumers', async (req, reply) => {
     const id = parseInt((req.params as { id: string }).id, 10);
     if (!id) return reply.code(400).send({ error: 'invalid id' });
+    if (!await guardArtikel(req, reply, id)) return;
     const { members } = (req.body ?? {}) as { members?: number[] };
     if (!Array.isArray(members)) return reply.code(400).send({ error: 'members must be an array' });
 
@@ -294,7 +298,7 @@ export function articleRoutes(app: FastifyInstance): void {
       JOIN artikel a ON a.einkauf_id = e.id
       WHERE (a.canonical_name = ${name}
          OR COALESCE(NULLIF(a.ai_guess, ''), a.name) = ${name})
-        ${kontoScope(req.user, sql`e.konto_id`)}
+        ${kontoScope(req.user, sql`e`)}
       ORDER BY e.datum DESC, e.id DESC
       LIMIT 20
     `;
