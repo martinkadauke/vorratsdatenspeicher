@@ -122,6 +122,9 @@ export function storeRoutes(app: FastifyInstance): void {
       FROM einkauf e
       LEFT JOIN store_branch sb ON sb.name = e.roh_ladenname AND sb.kind = 'filiale'
       WHERE e.roh_ladenname IS NOT NULL
+        -- E-mail receipts are online shops (the link_store_branch trigger files them
+        -- as kind='shop'); they belong in the Shops tab, not the physical-Filialen list.
+        AND e.quelle IS DISTINCT FROM 'email'
         ${kontoScope(req.user, sql`e`)}
       GROUP BY e.roh_ladenname
       ORDER BY receipts DESC
