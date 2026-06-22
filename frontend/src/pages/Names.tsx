@@ -107,6 +107,14 @@ export function NameEditModal({ name, onClose }: { name: CanonicalName | null; o
     enabled: !!name,
   });
 
+  // Fetch the avg weekly consumption directly (unified estimateVorrat) so it's
+  // always correct — independent of whether the list item passed it in.
+  const { data: consumption } = useQuery({
+    queryKey: ['name-consumption', name?.canonical_name],
+    queryFn: () => api<{ weekly_consumption: number | null; consumption_unit: string | null }>(`/api/canonical/${encodeURIComponent(name!.canonical_name)}/consumption`),
+    enabled: !!name,
+  });
+
   const save = useMutation({
     mutationFn: async () => {
       if (!name) return;
@@ -210,9 +218,13 @@ export function NameEditModal({ name, onClose }: { name: CanonicalName | null; o
         <div>
           <Label>{t('names.weeklyConsumption')}</Label>
           <div className="mt-1 text-sm font-semibold text-sky-700 dark:text-sky-400">
-            {name.weekly_consumption != null && name.consumption_unit
-              ? `Ø ${Number(name.weekly_consumption).toLocaleString(i18n.language, { maximumFractionDigits: 1 })} ${name.consumption_unit}`
-              : <span className="font-normal text-zinc-400">{t('names.weeklyConsumptionNone')}</span>}
+            {(() => {
+              const wk = consumption?.weekly_consumption ?? name.weekly_consumption ?? null;
+              const unit = consumption?.consumption_unit ?? name.consumption_unit ?? null;
+              return wk != null && unit
+                ? `Ø ${Number(wk).toLocaleString(i18n.language, { maximumFractionDigits: 1 })} ${unit}`
+                : <span className="font-normal text-zinc-400">{t('names.weeklyConsumptionNone')}</span>;
+            })()}
           </div>
           <p className="mt-1 text-xs text-zinc-400">{t('names.weeklyConsumptionHint')}</p>
         </div>

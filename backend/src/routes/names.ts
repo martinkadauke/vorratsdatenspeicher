@@ -4,7 +4,7 @@ import { kontoScope } from '../auth/konto.js';
 import { searchFilter, col, numCol, lk } from '../lib/search.js';
 import { recordAliases } from '../lib/canonicalAlias.js';
 import { loadUnits, comparisonGroups, type PriceLine } from '../lib/units.js';
-import { estimateVorrat } from '../lib/vorrat.js';
+import { estimateVorrat, type VorratLine } from '../lib/vorrat.js';
 
 export function nameRoutes(app: FastifyInstance): void {
   app.get('/api/names', async (req) => {
@@ -173,6 +173,33 @@ export function nameRoutes(app: FastifyInstance): void {
         consumers: cn ? (coMap.get(cn) ?? []) : [],
       };
     });
+  });
+
+  /** Avg weekly consumption for one canonical product — fetched directly by the
+   *  article detail modal so it's correct regardless of how the modal was opened
+   *  (it no longer depends on the value being passed in from the list item).
+   *  Reuses the unified estimateVorrat() (konto-scoped lines + manual override). */
+  app.get('/api/canonical/:name/consumption', async (req) => {
+    const name = decodeURIComponent((req.params as { name: string }).name);
+    const lines = await sql`
+      SELECT a.menge, a.einheit, e.datum::text AS datum
+      FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
+      WHERE a.canonical_name = ${name} ${kontoScope(req.user, sql`e`)}`;
+    const [meta] = await sql`SELECT base_unit FROM canonical_meta WHERE canonical_name = ${name}`;
+    const [ov] = await sql`SELECT menge::float8 AS menge, gesetzt_am::text AS gesetzt_am FROM vorrat_override WHERE canonical_name = ${name}`;
+    const units = await loadUnits();
+    const est = estimateVorrat(
+      lines as unknown as VorratLine[],
+      (meta?.base_unit as string | null) ?? null,
+      units,
+      ov ? { menge: ov.menge as number, gesetzt_am: ov.gesetzt_am as string } : null,
+    );
+    return {
+      weekly_consumption: est.rate_per_day != null ? Math.round(est.rate_per_day * 7 * 100) / 100 : null,
+      consumption_unit: est.base_unit,
+      days_until_empty: est.days_until_empty,
+      last_bought: est.last_bought,
+    };
   });
 
   /** Set per-product metadata: base_unit (Grundpreis-Einheit) and/or hidden. */
