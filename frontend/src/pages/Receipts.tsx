@@ -7,6 +7,7 @@ import { api } from '../api/client';
 import type { Receipt } from '../api/types';
 import { Card, Input, Spinner, EmptyState } from '../components/ui';
 import { StoreIcon } from '../components/IconPicker';
+import { PdfPreview } from '../components/PdfPreview';
 import { CreatePurchaseModal } from '../components/CreatePurchaseModal';
 import { FirstVisitHint } from '../components/FirstVisitHint';
 import { useAuth } from '../context/auth';
@@ -441,15 +442,13 @@ export function Receipts() {
                 )}
                 <Card onClick={() => navigate(`/receipts/${r.id}${filterQs}`)} className="flex min-w-0 items-center gap-3 p-3">
                   {r.bild_pfad && /\.pdf$/i.test(r.bild_pfad) ? (
-                    // Inline first-page preview of the PDF (viewer chrome hidden).
-                    <iframe
-                      title=""
-                      src={`${r.bild_pfad}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
-                      loading="lazy"
-                      tabIndex={-1}
-                      style={{ width: size.thumb * 0.75, height: size.thumb, pointerEvents: 'none' }}
-                      className="shrink-0 rounded-lg border border-zinc-200 bg-white dark:border-zinc-700"
-                    />
+                    // Inline first-page preview of the PDF (rendered via pdf.js).
+                    <div
+                      style={{ width: size.thumb * 0.75, height: size.thumb }}
+                      className="shrink-0 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-700"
+                    >
+                      <PdfPreview url={r.bild_pfad} maxPages={1} className="w-full" />
+                    </div>
                   ) : r.bild_pfad ? (
                     <img
                       src={r.bild_pfad}

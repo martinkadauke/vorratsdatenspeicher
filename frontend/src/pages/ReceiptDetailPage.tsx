@@ -14,6 +14,7 @@ import { SortableArticleList } from '../components/SortableArticleList';
 import { useAuth } from '../context/auth';
 import { toast } from '../components/Toast';
 import { confirm } from '../components/Confirm';
+import { PdfPreview } from '../components/PdfPreview';
 import { cn, eur, fmtDate, fileToResizedDataUrl } from '../lib/utils';
 import { searchMatch } from '../lib/search';
 
@@ -465,7 +466,9 @@ export function ReceiptDetailPage() {
                   <span className="flex items-center gap-1.5 text-xs font-medium text-zinc-500"><FileText size={13} /> PDF</span>
                   <a href={data.bild_pfad} target="_blank" rel="noreferrer" className="text-xs font-medium text-emerald-600 hover:underline">{t('receiptDetail.openPdf')}</a>
                 </div>
-                <iframe title="PDF" src={`${data.bild_pfad}#view=FitH`} className="h-[28rem] w-full bg-white" />
+                <div className="max-h-[28rem] overflow-y-auto bg-zinc-50 p-2 dark:bg-zinc-900">
+                  <PdfPreview url={data.bild_pfad} />
+                </div>
               </div>
             ) : (
               <ZoomableReceiptImage
