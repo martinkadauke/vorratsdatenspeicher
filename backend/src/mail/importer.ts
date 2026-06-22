@@ -312,6 +312,32 @@ function normMid(m: string | null | undefined): string {
   return (m ?? '').replace(/[<>]/g, '').trim().toLowerCase();
 }
 
+/** If an e-mail receipt has no stored image/PDF but its mail actually carries a
+ *  PDF/image attachment (missed at import — e.g. it went down the text path),
+ *  save the attachment now and OCR it when the receipt has no line items yet.
+ *  Notification mails without an attachment are left as-is (the body is shown). */
+async function recoverAttachment(einkaufId: number, parsed: ParsedMail): Promise<void> {
+  const [row] = await sql`SELECT bild_pfad FROM einkauf WHERE id = ${einkaufId}`;
+  if (!row || row.bild_pfad) return;
+  const atts = (parsed.attachments ?? []).filter(a => a.content && ((a.size ?? a.content.length) > 0));
+  const att = atts.find(a => (a.contentType ?? '').toLowerCase().includes('pdf') || /\.pdf$/i.test(a.filename ?? ''))
+           ?? atts.find(a => (a.contentType ?? '').toLowerCase().startsWith('image/'));
+  if (!att) return;
+  const isPdf = (att.contentType ?? '').toLowerCase().includes('pdf') || /\.pdf$/i.test(att.filename ?? '');
+  const ext = isPdf ? 'pdf' : ((att.contentType ?? '').toLowerCase().includes('png') ? 'png' : 'jpg');
+  const filename = `vds-${crypto.randomUUID()}.${ext}`;
+  await writeFile(path.join(RECEIPTS_LOCAL_PATH, filename), att.content as Buffer);
+  const bildPfad = `/receipts/${filename}`;
+  await sql`UPDATE einkauf SET bild_pfad = ${bildPfad} WHERE id = ${einkaufId}`;
+  const [{ n }] = await sql`SELECT COUNT(*)::int AS n FROM artikel WHERE einkauf_id = ${einkaufId}`;
+  if (n === 0) {
+    await sql`UPDATE einkauf SET ocr_pending = TRUE WHERE id = ${einkaufId}`;
+    try { await ocrAndStore(einkaufId, bildPfad); }
+    catch (e) { console.error(`[backfill] re-OCR receipt ${einkaufId} failed:`, (e as Error).message); }
+    finally { await sql`UPDATE einkauf SET ocr_pending = FALSE WHERE id = ${einkaufId}`.catch(() => {}); }
+  }
+}
+
 /** Back-fill the stored source mail for THIS user's e-mail-sourced receipts that
  *  were imported before e-mail storage existed. Two-pass to stay cheap: a header
  *  (envelope) scan finds which UIDs carry a wanted Message-ID, then only those
@@ -325,7 +351,8 @@ export async function backfillEmails(userId: number): Promise<{ filled: number }
     FROM imported_email ie
     JOIN einkauf e ON e.id = ie.einkauf_id AND e.quelle = 'email'
     WHERE ie.user_id = ${userId} AND ie.einkauf_id IS NOT NULL
-      AND NOT EXISTS (SELECT 1 FROM email_message em WHERE em.einkauf_id = ie.einkauf_id)`;
+      AND (e.bild_pfad IS NULL
+           OR NOT EXISTS (SELECT 1 FROM email_message em WHERE em.einkauf_id = ie.einkauf_id))`;
   if (!missing.length) return { filled: 0 };
   const wanted = new Map<string, number>();
   for (const r of missing) {
@@ -354,10 +381,17 @@ export async function backfillEmails(userId: number): Promise<{ filled: number }
             const einkaufId = wanted.get(normMid(msg.envelope?.messageId));
             if (einkaufId) hits.push({ uid: Number(msg.uid), einkaufId });
           }
-          // Pass 2 — download the full source only for the matches.
+          // Pass 2 — download the full source only for the matches: store the mail
+          // body AND recover a PDF/image attachment that was missed at import.
           for (const { uid, einkaufId } of hits) {
             for await (const m of client.fetch(String(uid), { uid: true, source: true }, { uid: true })) {
-              if (m.source) { await storeEmail(einkaufId, await simpleParser(m.source as Buffer)); filled++; }
+              if (m.source) {
+                const parsed = await simpleParser(m.source as Buffer);
+                await storeEmail(einkaufId, parsed);
+                filled++;
+                try { await recoverAttachment(einkaufId, parsed); }
+                catch (e) { console.error(`[backfill] recoverAttachment ${einkaufId} failed:`, (e as Error).message); }
+              }
               break;
             }
           }
