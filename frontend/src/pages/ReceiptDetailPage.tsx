@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, ChevronLeft, ChevronRight, RotateCw, Check, Hand, Wallet, X, Search, Ban, Lock, Plus, Camera, ImagePlus, FileText, Mail } from 'lucide-react';
+import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, ChevronLeft, ChevronRight, RotateCw, Check, Hand, Wallet, X, Search, Ban, Lock, Plus, Camera, ImagePlus, FileText, Mail, Maximize2 } from 'lucide-react';
 import { TransformWrapper, TransformComponent, useControls } from 'react-zoom-pan-pinch';
 import { api } from '../api/client';
 import type { Artikel, Receipt, ReceiptDetail } from '../api/types';
@@ -458,16 +458,15 @@ export function ReceiptDetailPage() {
         <div className="lg:sticky lg:top-[60px] lg:self-start">
           {data.bild_pfad ? (
             /\.pdf$/i.test(data.bild_pfad) ? (
-              // E-mail-imported invoices can be PDFs — an <img> can't render those,
-              // so offer to open the original instead.
-              <a
-                href={data.bild_pfad}
-                target="_blank"
-                rel="noreferrer"
-                className="flex h-48 flex-col items-center justify-center gap-2 rounded-2xl border border-zinc-200 bg-zinc-50 text-sm font-medium text-emerald-600 hover:border-emerald-400 dark:border-zinc-700 dark:bg-zinc-900"
-              >
-                <FileText size={28} /> {t('receiptDetail.openPdf')}
-              </a>
+              // E-mail-imported invoices can be PDFs — render the PDF inline (the
+              // browser's viewer) with a link to open the original full-size.
+              <div className="overflow-hidden rounded-2xl border border-zinc-200 dark:border-zinc-700">
+                <div className="flex items-center justify-between border-b border-zinc-200 bg-zinc-50 px-3 py-1.5 dark:border-zinc-700 dark:bg-zinc-900">
+                  <span className="flex items-center gap-1.5 text-xs font-medium text-zinc-500"><FileText size={13} /> PDF</span>
+                  <a href={data.bild_pfad} target="_blank" rel="noreferrer" className="text-xs font-medium text-emerald-600 hover:underline">{t('receiptDetail.openPdf')}</a>
+                </div>
+                <iframe title="PDF" src={`${data.bild_pfad}#view=FitH`} className="h-[28rem] w-full bg-white" />
+              </div>
             ) : (
               <ZoomableReceiptImage
                 src={imgVersion ? `${data.bild_pfad}?v=${imgVersion}` : data.bild_pfad}
@@ -598,6 +597,7 @@ function EmailViewer({ id }: { id: number }) {
     queryKey: ['receipt-email', id],
     queryFn: () => api<{ from?: string | null; subject?: string | null; sent_at?: string | null; html?: string | null; text?: string | null }>(`/api/receipts/${id}/email`),
   });
+  const [big, setBig] = useState(false);
   if (isLoading) {
     return (
       <div className="flex h-48 items-center justify-center gap-2 rounded-2xl bg-zinc-100 text-sm text-zinc-400 dark:bg-zinc-900">
@@ -620,20 +620,28 @@ function EmailViewer({ id }: { id: number }) {
   // embedded data:/blob: images and inline styles render. The sandbox blocks scripts.
   const srcDoc = `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: blob:; style-src 'unsafe-inline'; font-src data:"><base target="_blank"><body style="margin:0;background:#fff;font-family:system-ui,sans-serif">${inner}</body>`;
   return (
-    <div className="overflow-hidden rounded-2xl border border-zinc-200 dark:border-zinc-700">
-      <div className="flex items-start gap-2 border-b border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900">
-        <Mail size={14} className="mt-0.5 shrink-0 text-zinc-400" />
-        <div className="min-w-0">
-          <div className="truncate text-xs font-semibold">{data.subject || t('receiptDetail.email')}</div>
-          {(data.from || data.sent_at) && (
-            <div className="truncate text-[11px] text-zinc-500">
-              {data.from}{data.from && data.sent_at ? ' · ' : ''}{data.sent_at ? new Date(data.sent_at).toLocaleDateString(i18n.language) : ''}
-            </div>
-          )}
+    <>
+      <div className="overflow-hidden rounded-2xl border border-zinc-200 dark:border-zinc-700">
+        <div className="flex items-start gap-2 border-b border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900">
+          <Mail size={14} className="mt-0.5 shrink-0 text-zinc-400" />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-xs font-semibold">{data.subject || t('receiptDetail.email')}</div>
+            {(data.from || data.sent_at) && (
+              <div className="truncate text-[11px] text-zinc-500">
+                {data.from}{data.from && data.sent_at ? ' · ' : ''}{data.sent_at ? new Date(data.sent_at).toLocaleDateString(i18n.language) : ''}
+              </div>
+            )}
+          </div>
+          <button onClick={() => setBig(true)} className="shrink-0 rounded-lg p-1 text-zinc-400 hover:bg-zinc-200 hover:text-zinc-600 dark:hover:bg-zinc-700" title={t('receiptDetail.emailOpen')}>
+            <Maximize2 size={14} />
+          </button>
         </div>
+        <iframe title={t('receiptDetail.email')} sandbox="" referrerPolicy="no-referrer" srcDoc={srcDoc} className="h-[28rem] w-full bg-white" />
       </div>
-      <iframe title={t('receiptDetail.email')} sandbox="" referrerPolicy="no-referrer" srcDoc={srcDoc} className="h-[28rem] w-full bg-white" />
-    </div>
+      <Modal open={big} onClose={() => setBig(false)} title={data.subject || t('receiptDetail.email')}>
+        <iframe title={t('receiptDetail.email')} sandbox="" referrerPolicy="no-referrer" srcDoc={srcDoc} className="h-[75vh] w-full rounded-lg border border-zinc-200 bg-white dark:border-zinc-700" />
+      </Modal>
+    </>
   );
 }
 

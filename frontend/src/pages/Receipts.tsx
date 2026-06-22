@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useInfiniteQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Search, CheckCircle2, Rows3, X, ChevronLeft, ChevronRight, Plus, Lock } from 'lucide-react';
+import { Search, CheckCircle2, Rows3, X, ChevronLeft, ChevronRight, Plus, Lock, Mail } from 'lucide-react';
 import { api } from '../api/client';
 import type { Receipt } from '../api/types';
 import { Card, Input, Spinner, EmptyState } from '../components/ui';
@@ -440,7 +440,17 @@ export function Receipts() {
                   </div>
                 )}
                 <Card onClick={() => navigate(`/receipts/${r.id}${filterQs}`)} className="flex min-w-0 items-center gap-3 p-3">
-                  {r.bild_pfad && !/\.pdf$/i.test(r.bild_pfad) ? (
+                  {r.bild_pfad && /\.pdf$/i.test(r.bild_pfad) ? (
+                    // Inline first-page preview of the PDF (viewer chrome hidden).
+                    <iframe
+                      title=""
+                      src={`${r.bild_pfad}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
+                      loading="lazy"
+                      tabIndex={-1}
+                      style={{ width: size.thumb * 0.75, height: size.thumb, pointerEvents: 'none' }}
+                      className="shrink-0 rounded-lg border border-zinc-200 bg-white dark:border-zinc-700"
+                    />
+                  ) : r.bild_pfad ? (
                     <img
                       src={r.bild_pfad}
                       alt=""
@@ -451,9 +461,9 @@ export function Receipts() {
                   ) : (
                     <div
                       style={{ width: size.thumb * 0.75, height: size.thumb }}
-                      className="flex shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-lg dark:bg-zinc-800"
+                      className={cn('flex shrink-0 items-center justify-center rounded-lg', r.quelle === 'email' ? 'bg-sky-50 text-sky-400 dark:bg-sky-950/40 dark:text-sky-500' : 'bg-zinc-100 text-lg dark:bg-zinc-800')}
                     >
-                      {r.bild_pfad ? '📄' : '🧾'}
+                      {r.quelle === 'email' ? <Mail size={Math.max(16, Math.round(size.thumb * 0.4))} /> : '🧾'}
                     </div>
                   )}
                   <div className="min-w-0 flex-1">
