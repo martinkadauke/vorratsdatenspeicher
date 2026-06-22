@@ -14,6 +14,7 @@ import { ConsumerDots, ConsumerChips } from '../components/ConsumerChips';
 import { toast } from '../components/Toast';
 import { NameEditModal } from './Names';
 import { cn, eur, fmtDate } from '../lib/utils';
+import { useUrlState } from '../hooks/useUrlState';
 
 interface ArtikelGroup {
   key: string;
@@ -62,8 +63,8 @@ export function Artikel() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const canWrite = user?.can_write !== false;
-  const [search, setSearch] = useState('');
-  const [sort, setSort] = useState<SortMode>('count');
+  const [search, setSearch] = useUrlState('q', '');
+  const [sort, setSort] = useUrlState<SortMode>('sort', 'count');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [detail, setDetail] = useState<CanonicalName | null>(null);
   const [assignOpen, setAssignOpen] = useState(false);
@@ -72,10 +73,10 @@ export function Artikel() {
   const [pickedCategory, setPickedCategory] = useState<string | null>(null);
   // category + time-range filter
   const [filterOpen, setFilterOpen] = useState(false);
-  const [filterCat, setFilterCat] = useState<string | null>(null);
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
-  const [kontoFilter, setKontoFilter] = useState<string | null>(null);
+  const [filterCat, setFilterCat] = useUrlState<string | null>('category', null);
+  const [from, setFrom] = useUrlState('from', '');
+  const [to, setTo] = useUrlState('to', '');
+  const [kontoFilter, setKontoFilter] = useUrlState<string | null>('konto', null);
   const filterQs = [
     filterCat ? `category=${encodeURIComponent(filterCat)}` : '',
     from ? `from=${from}` : '',

@@ -8,6 +8,7 @@ import { Card, Input, Button, Label, Modal, Spinner, EmptyState, Select } from '
 import { StoreIcon } from '../components/IconPicker';
 import { eur } from '../lib/utils';
 import { searchMatch } from '../lib/search';
+import { useUrlState } from '../hooks/useUrlState';
 
 interface Filiale { name: string; receipts: number; total: number; branch_id: number | null }
 interface StoreRow {
@@ -22,8 +23,8 @@ interface StoreRow {
 export function Stores() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const [search, setSearch] = useState('');
-  const [view, setView] = useState<'filialen' | 'shops'>('filialen');
+  const [search, setSearch] = useUrlState('q', '');
+  const [view, setView] = useUrlState<'filialen' | 'shops'>('view', 'filialen');
   const [editing, setEditing] = useState<StoreRow | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggleExpand = (key: string) => setExpanded(prev => {

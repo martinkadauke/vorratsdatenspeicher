@@ -101,9 +101,10 @@ export function Receipts() {
     if (storeFilter) p.set('store', storeFilter);
     if (kontoFilter) p.set('konto', kontoFilter);
     if (search.trim()) p.set('q', search.trim());
+    if (effQuelle !== 'alle') p.set('quelle', effQuelle);
     const s = p.toString();
     return s ? `?${s}` : '';
-  }, [storeFilter, kontoFilter, search]);
+  }, [storeFilter, kontoFilter, search, effQuelle]);
 
   const gridRef = useRef<HTMLDivElement>(null);
   const [cols, setCols] = useState(3);

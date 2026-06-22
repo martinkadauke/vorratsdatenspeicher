@@ -10,6 +10,7 @@ import { CanonicalIcon } from '../components/IconPicker';
 import { FirstVisitHint } from '../components/FirstVisitHint';
 import { toast } from '../components/Toast';
 import { cn } from '../lib/utils';
+import { useUrlState } from '../hooks/useUrlState';
 
 function confColor(c: string | null): string {
   const v = c ? parseFloat(c) : NaN;
@@ -22,7 +23,7 @@ function confColor(c: string | null): string {
 export function Queue() {
   const { t } = useTranslation();
   const qc = useQueryClient();
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useUrlState('q', '');
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
