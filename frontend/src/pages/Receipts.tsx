@@ -35,7 +35,7 @@ export function Receipts() {
   const canWrite = user?.can_write !== false;
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(params.get('q') ?? '');
   const [storeFilter, setStoreFilter] = useState<string | null>(params.get('store'));
   const [kontoFilter, setKontoFilter] = useState<string | null>(params.get('konto'));
   // Source filter — default to till receipts (Kassenbon) so cash/email don't
@@ -75,6 +75,17 @@ export function Receipts() {
     if (id) next.set('konto', id); else next.delete('konto');
     setParams(next, { replace: true });
   };
+
+  // Mirror the search text into the URL so entering a receipt and pressing Back
+  // restores the search (store/konto already persist via their own updaters).
+  // Build from `params` (not window.location) and no-op when unchanged, so this
+  // can't clobber a concurrent store/konto/quelle update or loop.
+  useEffect(() => {
+    const next = new URLSearchParams(params);
+    const s = search.trim();
+    if (s) next.set('q', s); else next.delete('q');
+    if (next.toString() !== params.toString()) setParams(next, { replace: true });
+  }, [search, params, setParams]);
 
   const [sizeIdx, setSizeIdx] = useState(() => {
     const saved = parseInt(localStorage.getItem(SIZE_KEY) ?? '', 10);

@@ -110,10 +110,14 @@ export function FilialProfil() {
           <div className="text-base font-semibold tabular-nums">{branch.receipts}</div>
           <div className="text-xs text-zinc-400">{t('stores.receipts')}</div>
         </div>
-        <div>
-          <div className="text-base font-semibold tabular-nums text-emerald-600 dark:text-emerald-500">{eur(branch.total)}</div>
+        <Link
+          to={`/positionen?store=${encodeURIComponent(branch.name)}`}
+          className="block rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
+          title={t('positionen.fromStore')}
+        >
+          <div className="text-base font-semibold tabular-nums text-emerald-600 underline-offset-2 hover:underline dark:text-emerald-500">{eur(branch.total)}</div>
           <div className="text-xs text-zinc-400">{t('filiale.total')}</div>
-        </div>
+        </Link>
         <div>
           <div className="text-base font-semibold tabular-nums">{branch.last_visit ? fmtDate(branch.last_visit, i18n.language) : '–'}</div>
           <div className="text-xs text-zinc-400">{t('filiale.lastVisit')}</div>

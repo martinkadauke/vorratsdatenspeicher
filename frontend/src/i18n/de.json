@@ -617,6 +617,19 @@
       "backfillDone": "{{n}} Mails nachgeladen"
     }
   },
+  "positionen": {
+    "title": "Positionen",
+    "search": "Suche (Artikel, Laden · laden: kategorie: preis>)",
+    "sort_date_desc": "Datum, neueste",
+    "sort_date_asc": "Datum, älteste",
+    "sort_price_desc": "Preis, höchster",
+    "sort_price_asc": "Preis, niedrigster",
+    "sort_name_asc": "Name A–Z",
+    "dateRange": "Zeitraum",
+    "allStores": "Alle Läden",
+    "empty": "Keine Positionen gefunden",
+    "fromStore": "Positionen dieses Ladens anzeigen"
+  },
   "tour": {
     "next": "Weiter",
     "prev": "Zurück",

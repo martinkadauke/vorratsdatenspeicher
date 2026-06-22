@@ -189,6 +189,64 @@ export function receiptRoutes(app: FastifyInstance): void {
     return rows.map(r => r.quelle as string);
   });
 
+  /** Flat "Positionen" list: one row per artikel (line item) across all receipts,
+   *  joined with its receipt's date/store. Read-only; reuses the receipts search
+   *  machinery + kontoScope privacy. Distinct from receipts (Belege) and from the
+   *  canonical-product views (Artikel) — those are untouched. */
+  app.get('/api/positionen', async (req) => {
+    const q = req.query as {
+      limit?: string; offset?: string; q?: string; from?: string; to?: string;
+      store?: string; branch_id?: string; konto?: string; quelle?: string; kategorie?: string; sort?: string;
+    };
+    const limit = Math.min(parseInt(q.limit ?? '50', 10) || 50, 200);
+    const offset = parseInt(q.offset ?? '0', 10) || 0;
+    const search = (q.q ?? '').trim();
+    const storeLike = q.store ? `%${q.store}%` : null;
+    const branchId = q.branch_id ? parseInt(q.branch_id, 10) : null;
+    const kontoId = q.konto ? parseInt(q.konto, 10) : null;
+    const quellen = q.quelle ? q.quelle.split(',').filter(Boolean) : null;
+    const katLike = q.kategorie ? `%${q.kategorie}%` : null;
+
+    const ORDER: Record<string, Frag> = {
+      date_desc: sql`e.datum DESC, e.id DESC, a.sort_order NULLS LAST, a.id`,
+      date_asc: sql`e.datum ASC, e.id ASC, a.sort_order NULLS LAST, a.id`,
+      price_desc: sql`a.preis DESC NULLS LAST, e.datum DESC`,
+      price_asc: sql`a.preis ASC NULLS LAST, e.datum DESC`,
+      name_asc: sql`lower(COALESCE(NULLIF(a.canonical_name, ''), a.name)) ASC, e.datum DESC`,
+    };
+    const orderBy = ORDER[q.sort ?? 'date_desc'] ?? ORDER.date_desc;
+
+    // Same search shape as receiptSearch, but text matches the artikel name +
+    // canonical + the receipt's store; supports laden:/kategorie:/preis> too.
+    const posSearch = (a: Frag, e: Frag) => ({
+      text: [col(sql`${a}.name`), col(sql`${a}.canonical_name`), col(sql`${e}.roh_ladenname`)],
+      fields: { laden: col(sql`${e}.roh_ladenname`), kategorie: col(sql`${a}.category_path`) },
+      nums: { preis: numCol(sql`${a}.preis`) },
+    });
+
+    const rows = await sql`
+      SELECT a.id, a.name, a.menge, a.einheit, a.preis, a.canonical_name, a.category_path,
+             e.id AS einkauf_id, e.datum, e.roh_ladenname, e.quelle, e.konto_id,
+             k.name AS konto_name, (e.private_for_user_id IS NOT NULL) AS private
+      FROM artikel a
+      JOIN einkauf e ON e.id = a.einkauf_id
+      LEFT JOIN konto k ON k.id = e.konto_id
+      WHERE TRUE
+        ${searchFilter(search, posSearch(sql`a`, sql`e`))}
+        ${storeLike ? sql`AND e.roh_ladenname ILIKE ${storeLike}` : sql``}
+        ${branchId ? sql`AND e.branch_id = ${branchId}` : sql``}
+        ${kontoId ? sql`AND e.konto_id = ${kontoId}` : sql``}
+        ${quellen ? sql`AND e.quelle IN ${sql(quellen)}` : sql``}
+        ${katLike ? sql`AND a.category_path ILIKE ${katLike}` : sql``}
+        ${q.from ? sql`AND e.datum >= ${q.from}` : sql``}
+        ${q.to ? sql`AND e.datum <= ${q.to}` : sql``}
+        ${kontoScope(req.user, sql`e`)}
+      ORDER BY ${orderBy}
+      LIMIT ${limit} OFFSET ${offset}
+    `;
+    return rows;
+  });
+
   /** Manually create a purchase (cash or card). Everything is optional so it's
    *  one tap to log something; details can be filled in later. An optional
    *  photo is sent as base64 and stored alongside scanned receipts. */

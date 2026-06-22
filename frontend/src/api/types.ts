@@ -62,6 +62,25 @@ export interface ReceiptDetail extends Receipt {
   artikel: Artikel[];
 }
 
+/** A single line item ("Position") — one artikel row joined with its receipt's
+ *  date/store. Distinct from a canonical product (Artikel) and a receipt (Beleg). */
+export interface Position {
+  id: number;                       // artikel id
+  name: string;
+  canonical_name: string | null;
+  menge: string | number | null;
+  einheit: string | null;
+  preis: string | null;
+  category_path: string | null;
+  einkauf_id: number;
+  datum: string;
+  roh_ladenname: string | null;
+  quelle?: string;
+  konto_id?: number | null;
+  konto_name?: string | null;
+  private?: boolean;
+}
+
 export interface Category {
   id: number;
   path: string;

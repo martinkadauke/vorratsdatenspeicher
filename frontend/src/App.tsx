@@ -5,6 +5,7 @@ import { Login } from './pages/Login';
 import { Reset } from './pages/Reset';
 import { Receipts } from './pages/Receipts';
 import { ReceiptDetailPage } from './pages/ReceiptDetailPage';
+import { Positionen } from './pages/Positionen';
 import { Stats } from './pages/Stats';
 import { Analytics } from './pages/Analytics';
 import { Pantry } from './pages/Pantry';
@@ -45,6 +46,7 @@ export function App() {
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/receipts" element={<Receipts />} />
           <Route path="/receipts/:id" element={<ReceiptDetailPage />} />
+          <Route path="/positionen" element={<Positionen />} />
           <Route path="/stats" element={<Stats />} />
           <Route path="/shopping" element={<Shopping />} />
           <Route path="/pantry" element={<Pantry />} />

@@ -617,6 +617,19 @@
       "backfillDone": "{{n}} e-mails backfilled"
     }
   },
+  "positionen": {
+    "title": "Line items",
+    "search": "Search (item, store · laden: kategorie: preis>)",
+    "sort_date_desc": "Date, newest",
+    "sort_date_asc": "Date, oldest",
+    "sort_price_desc": "Price, highest",
+    "sort_price_asc": "Price, lowest",
+    "sort_name_asc": "Name A–Z",
+    "dateRange": "Period",
+    "allStores": "All stores",
+    "empty": "No line items found",
+    "fromStore": "Show this store's line items"
+  },
   "tour": {
     "next": "Next",
     "prev": "Back",
