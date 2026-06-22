@@ -205,7 +205,9 @@
     "editConsumption": "Consumption/week",
     "weeklyQty": "per week",
     "consumptionReset": "Reset to automatic",
-    "openPositions": "View line items"
+    "openPositions": "View line items",
+    "search": "Search pantry…",
+    "noMatch": "No match"
   },
   "shopping": {
     "title": "Shopping list",

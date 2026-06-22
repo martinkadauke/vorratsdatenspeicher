@@ -205,7 +205,9 @@
     "editConsumption": "Verbrauch/Woche",
     "weeklyQty": "pro Woche",
     "consumptionReset": "Auf automatisch zurücksetzen",
-    "openPositions": "Positionen ansehen"
+    "openPositions": "Positionen ansehen",
+    "search": "Vorrat durchsuchen…",
+    "noMatch": "Kein Treffer"
   },
   "shopping": {
     "title": "Einkaufsliste",

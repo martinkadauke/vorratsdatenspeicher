@@ -11,9 +11,10 @@ import {
   verticalListSortingStrategy, useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { TriangleAlert, Pencil, RotateCcw, Check, X, ChevronDown, Shield, Plus, Trash2, GripVertical, ShoppingCart, Gauge, List } from 'lucide-react';
+import { TriangleAlert, Pencil, RotateCcw, Check, X, ChevronDown, Shield, Plus, Trash2, GripVertical, ShoppingCart, Gauge, List, Search } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
+import { useUrlState } from '../hooks/useUrlState';
 import type { PantryItem, ShoppingItem } from '../api/types';
 import { Card, Spinner, EmptyState, Badge, Input, Button } from '../components/ui';
 import { CanonicalIcon } from '../components/IconPicker';
@@ -29,6 +30,7 @@ export function Pantry() {
   const { t, i18n } = useTranslation();
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({ queryKey: ['pantry'], queryFn: () => api<PantryItem[]>('/api/pantry') });
+  const [q, setQ] = useUrlState('q', '');
 
   // Local order preserved across refetches (so a drag isn't undone by a refresh).
   const [items, setItems] = useState<PantryItem[]>([]);
@@ -82,6 +84,7 @@ export function Pantry() {
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
   const onDragEnd = (e: DragEndEvent) => {
+    if (q.trim()) return; // no reordering while the list is filtered
     const { active, over } = e;
     if (!over || active.id === over.id) return;
     setItems(prev => {
@@ -93,16 +96,32 @@ export function Pantry() {
 
   if (isLoading) return <Spinner />;
 
+  const term = q.trim().toLowerCase();
+  const filtered = term ? items.filter(p => p.canonical_name.toLowerCase().includes(term)) : items;
+
   return (
     <div className="flex max-w-2xl flex-col gap-3">
       <h1 className="text-lg font-bold">{t('pantry.title')}</h1>
+      {items.length > 0 && (
+        <div className="relative">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+          <Input className="pl-9 pr-9" placeholder={t('pantry.search')} value={q} onChange={e => setQ(e.target.value)} />
+          {q && (
+            <button type="button" onClick={() => setQ('')} title={t('common.clear')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
+              <X size={15} />
+            </button>
+          )}
+        </div>
+      )}
       {!items.length && <EmptyState>{t('pantry.emptyTracked')}</EmptyState>}
+      {items.length > 0 && !filtered.length && <EmptyState>{t('pantry.noMatch')}</EmptyState>}
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
-        <SortableContext items={items.map(i => i.canonical_name)} strategy={verticalListSortingStrategy}>
+        <SortableContext items={filtered.map(i => i.canonical_name)} strategy={verticalListSortingStrategy}>
           <div className="flex flex-col gap-2">
-            {items.map(p => (
+            {filtered.map(p => (
               <VorratRow
-                key={p.canonical_name} p={p} t={t} lang={i18n.language}
+                key={p.canonical_name} p={p} t={t} lang={i18n.language} dragDisabled={!!term}
                 onList={onListSet.has(p.canonical_name)}
                 onToggleList={() => toggleList.mutate({ name: p.canonical_name, add: !onListSet.has(p.canonical_name) })}
                 onSetOverride={(menge) => setOverride.mutate({ name: p.canonical_name, menge })}
@@ -118,8 +137,8 @@ export function Pantry() {
   );
 }
 
-function VorratRow({ p, t, lang, onList, onToggleList, onSetOverride, onClearOverride, onSetConsumption, onReserveChanged }: {
-  p: PantryItem; t: TFunction; lang: string; onList: boolean; onToggleList: () => void;
+function VorratRow({ p, t, lang, dragDisabled, onList, onToggleList, onSetOverride, onClearOverride, onSetConsumption, onReserveChanged }: {
+  p: PantryItem; t: TFunction; lang: string; dragDisabled?: boolean; onList: boolean; onToggleList: () => void;
   onSetOverride: (menge: number) => void; onClearOverride: () => void; onSetConsumption: (cpw: number | null) => void; onReserveChanged: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: p.canonical_name });
@@ -146,8 +165,11 @@ function VorratRow({ p, t, lang, onList, onToggleList, onSetOverride, onClearOve
       <Card className={cn('flex flex-col p-3', isDragging && 'opacity-80 shadow-lg ring-2 ring-emerald-400')}>
         <div className="flex items-center gap-2">
           <button
-            type="button" {...attributes} {...listeners} aria-label="Verschieben"
-            className="shrink-0 cursor-grab touch-none rounded-md p-1 text-zinc-300 hover:bg-zinc-100 hover:text-zinc-500 active:cursor-grabbing dark:text-zinc-600 dark:hover:bg-zinc-800"
+            type="button" {...(dragDisabled ? {} : attributes)} {...(dragDisabled ? {} : listeners)}
+            aria-label="Verschieben" disabled={dragDisabled}
+            className={cn('shrink-0 rounded-md p-1 text-zinc-300 dark:text-zinc-600',
+              dragDisabled ? 'cursor-default opacity-30'
+                : 'cursor-grab touch-none hover:bg-zinc-100 hover:text-zinc-500 active:cursor-grabbing dark:hover:bg-zinc-800')}
           >
             <GripVertical size={16} />
           </button>
