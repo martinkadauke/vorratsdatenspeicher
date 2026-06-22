@@ -37,7 +37,7 @@ export function articleRoutes(app: FastifyInstance): void {
 
     const name = String(body.name ?? '').trim();
     if (!name && !body.canonical_name) return reply.code(400).send({ error: 'name or canonical_name required' });
-    const menge = coerceDecimal(body.menge);
+    const menge = coerceDecimal(body.menge) ?? 1; // a line with no quantity means one item
     const preis = coerceDecimal(body.preis);
     const einheit = body.einheit ? String(body.einheit) : null;
     const canonical = body.canonical_name ? String(body.canonical_name) : null;
