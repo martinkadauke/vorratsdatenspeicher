@@ -37,25 +37,26 @@ export function estimateVorrat(
   const manualRate = ratePerWeekOverride != null && ratePerWeekOverride > 0 ? ratePerWeekOverride / 7 : null;
   const buKey = groupKey(units, baseUnitName); // declared base-unit group (may be null)
 
+  const keyOf = (u: ReturnType<typeof units.get>): string =>
+    u ? (u.dimension === 'mass' ? 'kg' : u.dimension === 'volume' ? 'l' : u.name) : 'Stück';
+
   // Bucket every purchase line by its OWN comparison unit (kg/l/Stück…), summed
   // per date. Empty/unknown units count as pieces (Stück), like the rest of the app.
+  // A line with a unit but no quantity is still a real purchase → count it as ONE
+  // unit (a quantity-less receipt line is almost always a single item) rather than
+  // dropping it. Dropping it was the bug behind "bought today, still shown overdue":
+  // a fresh buy with a blank quantity vanished, so the last-bought anchor never moved.
+  // (We default to 1, not the group median — multipacks like a 24-can tuna case would
+  // otherwise make every blank line count as a whole case and explode the rate.)
   const groups = new Map<string, Map<string, number>>();
   const groupLines = new Map<string, number>();
   for (const l of lines) {
     const un = normalizeEinheit(l.einheit);
     const u = un ? units.get(un) : undefined;
-    let key: string;
-    let qty: number;
-    if (u) {
-      key = u.dimension === 'mass' ? 'kg' : u.dimension === 'volume' ? 'l' : u.name;
-      const m = toNum(l.menge);
-      if (!Number.isFinite(m)) continue;
-      qty = m * u.to_base;
-    } else {
-      key = 'Stück';
-      const m = toNum(l.menge);
-      qty = Number.isFinite(m) ? m : 1;
-    }
+    const key = keyOf(u);
+    const m = toNum(l.menge);
+    const eff = Number.isFinite(m) && m > 0 ? m : 1;
+    const qty = u ? eff * u.to_base : eff;
     if (qty <= 0) continue;
     if (!groups.has(key)) groups.set(key, new Map());
     const pd = groups.get(key)!;
