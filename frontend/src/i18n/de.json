@@ -143,6 +143,8 @@
     "originalText": "Original (Kassenbon)",
     "canonical": "Kanonischer Name",
     "userCorrected": "Nutzerkorrigiert – der Name wurde von einer Person bestätigt",
+    "weeklyConsumptionHint": "Ø Verbrauch pro Woche (aus der Kaufhistorie geschätzt)",
+    "perWeek": "/Wo",
     "category": "Kategorie",
     "amount": "Menge",
     "unit": "Einheit",

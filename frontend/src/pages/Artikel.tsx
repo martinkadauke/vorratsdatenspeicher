@@ -34,6 +34,8 @@ interface ArtikelGroup {
   hidden: boolean;
   track_vorrat: boolean;
   comparison: { unit: string; avg: number } | null;
+  weekly_consumption: number | null;
+  consumption_unit: string | null;
   needs_weight: boolean;
 }
 
@@ -501,6 +503,11 @@ export function Artikel() {
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-zinc-400">
                     <Badge>{g.count}×</Badge>
                     {g.category && <Badge className="max-w-[40vw] truncate sm:max-w-none">{g.category.split('/').pop()}</Badge>}
+                    {g.weekly_consumption != null && g.consumption_unit && (
+                      <Badge title={t('article.weeklyConsumptionHint')} className="bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300">
+                        Ø {Number(g.weekly_consumption).toLocaleString(i18n.language, { maximumFractionDigits: 1 })} {g.consumption_unit}{t('article.perWeek')}
+                      </Badge>
+                    )}
                     {g.comparison
                       ? <span>Ø {g.comparison.avg.toFixed(2).replace('.', ',')} €/{g.comparison.unit}</span>
                       : g.avg_price && <span>Ø {eur(g.avg_price)}</span>}

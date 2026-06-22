@@ -4,6 +4,7 @@ import { kontoScope } from '../auth/konto.js';
 import { searchFilter, col, numCol, lk } from '../lib/search.js';
 import { recordAliases } from '../lib/canonicalAlias.js';
 import { loadUnits, comparisonGroups, type PriceLine } from '../lib/units.js';
+import { estimateVorrat } from '../lib/vorrat.js';
 
 export function nameRoutes(app: FastifyInstance): void {
   app.get('/api/names', async (req) => {
@@ -124,12 +125,12 @@ export function nameRoutes(app: FastifyInstance): void {
       return u ? (u.dimension === 'mass' ? 'kg' : u.dimension === 'volume' ? 'l' : u.name) : null;
     };
     const lineRows = canonicals.length ? await sql`
-      SELECT a.canonical_name, a.preis, a.menge, a.einheit
+      SELECT a.canonical_name, a.preis, a.menge, a.einheit, e.datum::text AS datum
       FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
       WHERE a.canonical_name IN ${sql(canonicals)} ${kontoScope(req.user, sql`e`)}
     ` : [];
-    const linesByCanon = new Map<string, PriceLine[]>();
-    for (const l of lineRows as unknown as (PriceLine & { canonical_name: string })[]) {
+    const linesByCanon = new Map<string, (PriceLine & { datum: string })[]>();
+    for (const l of lineRows as unknown as (PriceLine & { canonical_name: string; datum: string })[]) {
       const arr = linesByCanon.get(l.canonical_name) ?? [];
       arr.push(l);
       linesByCanon.set(l.canonical_name, arr);
@@ -145,6 +146,10 @@ export function nameRoutes(app: FastifyInstance): void {
       // Product is meant to be compared per kg/l (Grundpreis), but we have no
       // purchase line in that dimension → can't compute €/kg (weights missing).
       const needs_weight = (buKey === 'kg' || buKey === 'l') && !groups.some(g => g.unit === buKey);
+      // Avg weekly consumption — reuse the SAME unified estimator as Vorrat/suggestions/alerts
+      // (override=null → the raw purchase-history rate, not stock-adjusted).
+      const est = cn ? estimateVorrat(linesByCanon.get(cn) ?? [], baseUnit, units, null) : null;
+      const weekly_consumption = est?.rate_per_day != null ? Math.round(est.rate_per_day * 7 * 100) / 100 : null;
       return {
         key: r.grp,
         display: r.display,

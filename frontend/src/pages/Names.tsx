@@ -76,7 +76,6 @@ export function NameEditModal({ name, onClose }: { name: CanonicalName | null; o
   const qc = useQueryClient();
   const [newName, setNewName] = useState('');
   const [category, setCategory] = useState<string | null>(null);
-  const [translation, setTranslation] = useState('');
   const [consumers, setConsumers] = useState<number[]>([]);
   const [exclusive, setExclusive] = useState(false);
   const [baseUnit, setBaseUnit] = useState<string | null>(null);
@@ -89,7 +88,6 @@ export function NameEditModal({ name, onClose }: { name: CanonicalName | null; o
     if (!name) return;
     setNewName(name.canonical_name);
     setCategory(name.category_path);
-    setTranslation(name.translation_en ?? '');
     setConsumers(name.consumers);
     setExclusive(name.consumers_exclusive);
     setBaseUnit(name.base_unit ?? null);
@@ -125,12 +123,6 @@ export function NameEditModal({ name, onClose }: { name: CanonicalName | null; o
         method: 'PUT',
         body: { members: consumers, exclusive },
       });
-      if (translation !== (name.translation_en ?? '')) {
-        await api(`/api/canonical/${encodeURIComponent(effective)}/translation`, {
-          method: 'PUT',
-          body: { lang: 'en', translated: translation },
-        });
-      }
       if (baseUnit !== (name.base_unit ?? null)) {
         await api(`/api/names/${encodeURIComponent(effective)}/meta`, {
           method: 'PATCH',
@@ -191,10 +183,6 @@ export function NameEditModal({ name, onClose }: { name: CanonicalName | null; o
         <div>
           <Label>{t('names.rename')}</Label>
           <Input value={newName} onChange={e => setNewName(e.target.value)} />
-        </div>
-        <div>
-          <Label>{t('names.translation')}</Label>
-          <Input value={translation} onChange={e => setTranslation(e.target.value)} placeholder="English name…" />
         </div>
         <div>
           <Label>{t('article.category')}</Label>

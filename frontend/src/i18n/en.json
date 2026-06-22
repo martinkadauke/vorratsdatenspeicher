@@ -143,6 +143,8 @@
     "originalText": "Original (receipt)",
     "canonical": "Canonical name",
     "userCorrected": "User-corrected – the name was confirmed by a person",
+    "weeklyConsumptionHint": "Avg consumption per week (estimated from purchase history)",
+    "perWeek": "/wk",
     "category": "Category",
     "amount": "Amount",
     "unit": "Unit",
