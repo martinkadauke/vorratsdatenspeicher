@@ -111,7 +111,7 @@ export function FilialProfil() {
           <div className="text-xs text-zinc-400">{t('stores.receipts')}</div>
         </div>
         <Link
-          to={`/positionen?store=${encodeURIComponent(branch.name)}`}
+          to={`/warenstamm/positionen?store=${encodeURIComponent(branch.name)}`}
           className="block rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
           title={t('positionen.fromStore')}
         >

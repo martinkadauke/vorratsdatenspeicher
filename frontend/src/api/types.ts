@@ -186,6 +186,7 @@ export interface PantryItem {
   days_until_empty: number | null;
   last_bought: string | null;
   override: { menge: number; gesetzt_am: string } | null;
+  consumption_per_week: number | null; // manual weekly-consumption override (null = auto)
   reserve_min: number | null;
   reserve_total: number;
   reserve_charges: number;

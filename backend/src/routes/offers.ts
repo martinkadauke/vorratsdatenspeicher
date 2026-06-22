@@ -45,9 +45,10 @@ export function offerRoutes(app: FastifyInstance): void {
       WHERE a.canonical_name IN ${sql(offered)} ${kontoScope(req.user, sql`e`)}
     ` : [];
     const metaRows = offered.length ? await sql`
-      SELECT canonical_name, base_unit FROM canonical_meta WHERE canonical_name IN ${sql(offered)}
+      SELECT canonical_name, base_unit, consumption_per_week::float8 AS consumption_per_week FROM canonical_meta WHERE canonical_name IN ${sql(offered)}
     ` : [];
     const baseUnit = new Map(metaRows.map(m => [m.canonical_name as string, (m.base_unit as string | null) ?? null]));
+    const cpwMap = new Map(metaRows.map(m => [m.canonical_name as string, (m.consumption_per_week as number | null) ?? null]));
     // Manual stock overrides — same input the pantry feeds estimateVorrat(), so the
     // offers "due" signal matches what the pantry/suggestions show.
     const overrideRows = offered.length ? await sql`
@@ -94,7 +95,7 @@ export function offerRoutes(app: FastifyInstance): void {
       // pantry, shopping suggestions and alerts use (quantity-weighted rate +
       // optional manual override, not a plain date-interval). "Due" = when we'll
       // run out; the rhythm = how long a typical buy lasts at that rate.
-      const est = estimateVorrat(rows as unknown as VorratLine[], bu, units, overrideMap.get(c) ?? null);
+      const est = estimateVorrat(rows as unknown as VorratLine[], bu, units, overrideMap.get(c) ?? null, cpwMap.get(c) ?? null);
       const rate = est.rate_per_day;
       const weekly_consumption = rate != null ? Math.round(rate * 7 * 100) / 100 : null;
       const due_in_days = est.days_until_empty != null ? Math.round(est.days_until_empty) : null;

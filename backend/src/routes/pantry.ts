@@ -34,9 +34,10 @@ type ScopeUser = Parameters<typeof kontoScope>[0];
  *  /api/pantry and /api/alerts. */
 async function trackedVorrat(user: ScopeUser) {
   const tracked = (await sql`
-    SELECT canonical_name, base_unit, reserve_min::float8 AS reserve_min, vorrat_sort
+    SELECT canonical_name, base_unit, reserve_min::float8 AS reserve_min, vorrat_sort,
+           consumption_per_week::float8 AS consumption_per_week
     FROM canonical_meta WHERE track_vorrat = TRUE
-  `).map(r => ({ canonical_name: r.canonical_name as string, base_unit: r.base_unit as string | null, reserve_min: r.reserve_min as number | null, vorrat_sort: r.vorrat_sort as number | null }));
+  `).map(r => ({ canonical_name: r.canonical_name as string, base_unit: r.base_unit as string | null, reserve_min: r.reserve_min as number | null, vorrat_sort: r.vorrat_sort as number | null, consumption_per_week: r.consumption_per_week as number | null }));
   if (!tracked.length) return [];
   const canons = tracked.map(tk => tk.canonical_name);
   const units = await loadUnits();
@@ -64,11 +65,12 @@ async function trackedVorrat(user: ScopeUser) {
   const resMap = new Map(res.map(r => [r.canonical_name as string, { total: r.total as number, charges: r.charges as number }]));
 
   return tracked.map(tk => {
-    const est = estimateVorrat(byCanon.get(tk.canonical_name) ?? [], tk.base_unit, units, ovMap.get(tk.canonical_name) ?? null);
+    const est = estimateVorrat(byCanon.get(tk.canonical_name) ?? [], tk.base_unit, units, ovMap.get(tk.canonical_name) ?? null, tk.consumption_per_week);
     const reserve = resMap.get(tk.canonical_name);
     return {
       canonical_name: tk.canonical_name,
       ...est,
+      consumption_per_week: tk.consumption_per_week, // manual override (null = auto)
       reserve_min: tk.reserve_min,
       reserve_total: reserve?.total ?? 0,
       reserve_charges: reserve?.charges ?? 0,

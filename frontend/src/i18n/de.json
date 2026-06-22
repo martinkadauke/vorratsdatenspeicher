@@ -6,6 +6,7 @@
     "shopping": "Liste",
     "pantry": "Vorrat",
     "names": "Artikel",
+    "warenstamm": "Warenstamm",
     "stores": "Läden",
     "offers": "Angebote",
     "ziele": "Ziele",
@@ -184,7 +185,7 @@
     "remaining": "Restmenge",
     "lastBought": "Zuletzt gekauft",
     "empty": "Keine Vorratsdaten",
-    "emptyTracked": "Noch keine Artikel im Vorrat. Markiere Artikel im Artikelstamm mit „Vorrat verfolgen“.",
+    "emptyTracked": "Noch keine Artikel im Vorrat. Markiere Artikel im Warenstamm mit „Vorrat verfolgen“.",
     "correct": "Bestand korrigieren",
     "realQty": "Ist-Menge",
     "corrected": "korrigiert",
@@ -197,7 +198,14 @@
     "noCharges": "Keine Chargen",
     "qty": "Menge",
     "buyNext": "Beim nächsten Mal kaufen",
-    "onList": "Auf der Einkaufsliste"
+    "onList": "Auf der Einkaufsliste",
+    "weekAbbr": "Wo",
+    "consumptionManual": "Verbrauch manuell gesetzt",
+    "consumptionAuto": "Verbrauch automatisch geschätzt",
+    "editConsumption": "Verbrauch/Woche",
+    "weeklyQty": "pro Woche",
+    "consumptionReset": "Auf automatisch zurücksetzen",
+    "openPositions": "Positionen ansehen"
   },
   "shopping": {
     "title": "Einkaufsliste",
@@ -287,6 +295,11 @@
     "changeChainImage": "Kettenbild ändern",
     "subscribe": "Angebote abonnieren",
     "wipHint": "In Arbeit — kommt in einem späteren Update."
+  },
+  "warenstamm": {
+    "artikel": "Artikel",
+    "positionen": "Positionen",
+    "vorrat": "Vorrat"
   },
   "names": {
     "title": "Kanonische Namen",

@@ -31,7 +31,10 @@ const toNum = (v: string | number | null): number =>
 
 export function estimateVorrat(
   lines: VorratLine[], baseUnitName: string | null, units: Units, override: VorratOverride | null,
+  ratePerWeekOverride: number | null = null,
 ): VorratEstimate {
+  // Manual consumption override (per week → per day) wins over the derived rate.
+  const manualRate = ratePerWeekOverride != null && ratePerWeekOverride > 0 ? ratePerWeekOverride / 7 : null;
   const buKey = groupKey(units, baseUnitName); // declared base-unit group (may be null)
 
   // Bucket every purchase line by its OWN comparison unit (kg/l/Stück…), summed
@@ -89,7 +92,9 @@ export function estimateVorrat(
   const n = dates.length;
   const last_bought = n ? dates[n - 1] : null;
   if (!n) {
-    return { base_unit: effKey, rate_per_day: null, est_remaining: override?.menge ?? null, days_until_empty: null, last_bought: null, typ_qty: null, override };
+    const rem0 = override?.menge ?? null;
+    const due0 = manualRate && rem0 != null ? Math.round((rem0 / manualRate) * 10) / 10 : null;
+    return { base_unit: effKey, rate_per_day: manualRate, est_remaining: rem0, days_until_empty: due0, last_bought: null, typ_qty: null, override };
   }
 
   const qtys = [...perDate.values()].sort((a, b) => a - b);
@@ -114,13 +119,14 @@ export function estimateVorrat(
   let afterAnchor = 0;
   for (const d of dates) if (Date.parse(d) > anchorMs) afterAnchor += perDate.get(d)!;
 
+  const effRate = manualRate ?? rate; // manual weekly override beats the derived rate
   const daysSince = Math.max(0, (Date.now() - anchorMs) / DAY);
-  const est_remaining = Math.round((anchorQty + afterAnchor - (rate ?? 0) * daysSince) * 100) / 100;
-  const days_until_empty = rate && rate > 0 ? Math.round((est_remaining / rate) * 10) / 10 : null;
+  const est_remaining = Math.round((anchorQty + afterAnchor - (effRate ?? 0) * daysSince) * 100) / 100;
+  const days_until_empty = effRate && effRate > 0 ? Math.round((est_remaining / effRate) * 10) / 10 : null;
 
   return {
     base_unit: effKey,
-    rate_per_day: rate != null ? Math.round(rate * 1000) / 1000 : null,
+    rate_per_day: effRate != null ? Math.round(effRate * 1000) / 1000 : null,
     est_remaining,
     days_until_empty,
     last_bought,

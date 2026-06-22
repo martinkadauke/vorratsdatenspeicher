@@ -6,6 +6,7 @@
     "shopping": "List",
     "pantry": "Pantry",
     "names": "Items",
+    "warenstamm": "Master data",
     "stores": "Stores",
     "offers": "Offers",
     "ziele": "Goals",
@@ -184,7 +185,7 @@
     "remaining": "Remaining",
     "lastBought": "Last bought",
     "empty": "No pantry data",
-    "emptyTracked": "No items tracked yet. Mark items in the article master with “Track stock”.",
+    "emptyTracked": "No items tracked yet. Mark items in the master data with “Track stock”.",
     "correct": "Correct stock",
     "realQty": "Actual qty",
     "corrected": "corrected",
@@ -197,7 +198,14 @@
     "noCharges": "No batches",
     "qty": "Qty",
     "buyNext": "Buy next time",
-    "onList": "On the shopping list"
+    "onList": "On the shopping list",
+    "weekAbbr": "wk",
+    "consumptionManual": "Consumption set manually",
+    "consumptionAuto": "Consumption auto-estimated",
+    "editConsumption": "Consumption/week",
+    "weeklyQty": "per week",
+    "consumptionReset": "Reset to automatic",
+    "openPositions": "View line items"
   },
   "shopping": {
     "title": "Shopping list",
@@ -287,6 +295,11 @@
     "changeChainImage": "Change chain image",
     "subscribe": "Subscribe to offers",
     "wipHint": "Work in progress — coming in a later update."
+  },
+  "warenstamm": {
+    "artikel": "Articles",
+    "positionen": "Line items",
+    "vorrat": "Pantry"
   },
   "names": {
     "title": "Canonical names",

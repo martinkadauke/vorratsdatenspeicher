@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './context/auth';
 import { Layout } from './components/Layout';
 import { Login } from './pages/Login';
@@ -11,6 +11,7 @@ import { Analytics } from './pages/Analytics';
 import { Pantry } from './pages/Pantry';
 import { Shopping } from './pages/Shopping';
 import { Artikel } from './pages/Artikel';
+import { Warenstamm } from './pages/Warenstamm';
 import { Stores } from './pages/Stores';
 import { FilialProfil } from './pages/FilialProfil';
 import { Offers } from './pages/Offers';
@@ -35,6 +36,13 @@ function AdminOnly({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/** Redirect that preserves the query string (so old bookmarks/links with filters
+ *  keep working after the Warenstamm reorg). */
+function Redirect({ to }: { to: string }) {
+  const { search } = useLocation();
+  return <Navigate to={`${to}${search}`} replace />;
+}
+
 export function App() {
   return (
     <BrowserRouter>
@@ -46,11 +54,19 @@ export function App() {
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/receipts" element={<Receipts />} />
           <Route path="/receipts/:id" element={<ReceiptDetailPage />} />
-          <Route path="/positionen" element={<Positionen />} />
           <Route path="/stats" element={<Stats />} />
           <Route path="/shopping" element={<Shopping />} />
-          <Route path="/pantry" element={<Pantry />} />
-          <Route path="/names" element={<Artikel />} />
+          {/* Warenstamm = master-data hub with Artikel / Positionen / Vorrat tabs */}
+          <Route path="/warenstamm" element={<Warenstamm />}>
+            <Route index element={<Navigate to="artikel" replace />} />
+            <Route path="artikel" element={<Artikel />} />
+            <Route path="positionen" element={<Positionen />} />
+            <Route path="vorrat" element={<Pantry />} />
+          </Route>
+          {/* Legacy paths → new tabs (query string preserved for saved filters) */}
+          <Route path="/names" element={<Redirect to="/warenstamm/artikel" />} />
+          <Route path="/positionen" element={<Redirect to="/warenstamm/positionen" />} />
+          <Route path="/pantry" element={<Redirect to="/warenstamm/vorrat" />} />
           <Route path="/stores" element={<Stores />} />
           <Route path="/filialen/:id" element={<FilialProfil />} />
           <Route path="/offers" element={<Offers />} />

@@ -1,5 +1,5 @@
 import {
-  LayoutDashboard, ReceiptText, ShoppingCart, BadgePercent, Tags, Store,
+  LayoutDashboard, ReceiptText, ShoppingCart, BadgePercent, Boxes, Store,
   ListChecks, ChartPie, Settings, UserCircle, type LucideIcon,
 } from 'lucide-react';
 
@@ -12,7 +12,7 @@ export const NAV: NavItem[] = [
   { to: '/receipts', icon: ReceiptText, key: 'nav.receipts' },       // belege
   { to: '/shopping', icon: ShoppingCart, key: 'nav.shopping' },      // liste
   { to: '/offers', icon: BadgePercent, key: 'nav.offers' },          // angebote
-  { to: '/names', icon: Tags, key: 'nav.names' },                    // artikel
+  { to: '/warenstamm', icon: Boxes, key: 'nav.warenstamm' },         // warenstamm (artikel/positionen/vorrat)
   { to: '/stores', icon: Store, key: 'nav.stores' },                 // läden
   { to: '/queue', icon: ListChecks, key: 'nav.queue' },              // prüfung
   { to: '/stats', icon: ChartPie, key: 'nav.stats' },                // statistik

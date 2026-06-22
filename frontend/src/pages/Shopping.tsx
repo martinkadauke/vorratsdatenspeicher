@@ -355,7 +355,7 @@ function ShoppingRow({ s, t, sessionActive, onMenge, onComment, onToggleDone, on
                 ? <button
                     type="button"
                     onPointerDown={e => e.stopPropagation()}
-                    onClick={() => navigate(`/names?open=${encodeURIComponent(s.canonical_name!)}`)}
+                    onClick={() => navigate(`/warenstamm/artikel?open=${encodeURIComponent(s.canonical_name!)}`)}
                     className={cn('truncate text-left font-medium hover:text-emerald-600 hover:underline dark:hover:text-emerald-400', done && 'line-through')}
                   >{s.title}</button>
                 : <span className={cn('truncate font-medium', done && 'line-through')}>{s.title}</span>}

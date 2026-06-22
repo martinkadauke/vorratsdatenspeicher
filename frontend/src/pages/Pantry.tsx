@@ -11,7 +11,8 @@ import {
   verticalListSortingStrategy, useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { TriangleAlert, Pencil, RotateCcw, Check, X, ChevronDown, Shield, Plus, Trash2, GripVertical, ShoppingCart } from 'lucide-react';
+import { TriangleAlert, Pencil, RotateCcw, Check, X, ChevronDown, Shield, Plus, Trash2, GripVertical, ShoppingCart, Gauge, List } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import type { PantryItem, ShoppingItem } from '../api/types';
 import { Card, Spinner, EmptyState, Badge, Input, Button } from '../components/ui';
@@ -51,6 +52,13 @@ export function Pantry() {
   const clearOverride = useMutation({
     mutationFn: (name: string) => api(`/api/pantry/${encodeURIComponent(name)}/override`, { method: 'DELETE' }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['pantry'] }),
+  });
+  // Manual weekly-consumption override (null clears it → back to the derived rate).
+  const setConsumption = useMutation({
+    mutationFn: ({ name, cpw }: { name: string; cpw: number | null }) =>
+      api(`/api/names/${encodeURIComponent(name)}/meta`, { method: 'PATCH', body: { consumption_per_week: cpw } }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['pantry'] }),
+    onError: (e: Error) => toast(e.message, 'error'),
   });
   const persistOrder = useMutation({
     mutationFn: (order: string[]) => api('/api/pantry/order', { method: 'PUT', body: { order } }),
@@ -99,6 +107,7 @@ export function Pantry() {
                 onToggleList={() => toggleList.mutate({ name: p.canonical_name, add: !onListSet.has(p.canonical_name) })}
                 onSetOverride={(menge) => setOverride.mutate({ name: p.canonical_name, menge })}
                 onClearOverride={() => clearOverride.mutate(p.canonical_name)}
+                onSetConsumption={(cpw) => setConsumption.mutate({ name: p.canonical_name, cpw })}
                 onReserveChanged={() => void qc.invalidateQueries({ queryKey: ['pantry'] })}
               />
             ))}
@@ -109,23 +118,28 @@ export function Pantry() {
   );
 }
 
-function VorratRow({ p, t, lang, onList, onToggleList, onSetOverride, onClearOverride, onReserveChanged }: {
+function VorratRow({ p, t, lang, onList, onToggleList, onSetOverride, onClearOverride, onSetConsumption, onReserveChanged }: {
   p: PantryItem; t: TFunction; lang: string; onList: boolean; onToggleList: () => void;
-  onSetOverride: (menge: number) => void; onClearOverride: () => void; onReserveChanged: () => void;
+  onSetOverride: (menge: number) => void; onClearOverride: () => void; onSetConsumption: (cpw: number | null) => void; onReserveChanged: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: p.canonical_name });
   const style = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 10 : undefined };
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
+  const [editingCons, setEditingCons] = useState(false);
+  const [consDraft, setConsDraft] = useState('');
   const [expanded, setExpanded] = useState(false);
 
   const days = p.days_until_empty;
   const critical = days != null && days <= 3;
   const warn = days != null && days > 3 && days <= 7;
   const remaining = p.est_remaining != null ? Math.max(0, p.est_remaining) : null;
+  const weekly = p.rate_per_day != null ? Math.round(p.rate_per_day * 7 * 100) / 100 : null;
+  const consManual = p.consumption_per_week != null;
   const belowReserve = p.reserve_min != null && p.est_remaining != null && p.est_remaining <= p.reserve_min;
   const hasReserve = p.reserve_charges > 0 || p.reserve_min != null;
   const commit = () => { const v = num(draft); if (v != null) { onSetOverride(Math.max(0, v)); setEditing(false); } };
+  const commitCons = () => { const v = num(consDraft); onSetConsumption(v != null && v > 0 ? v : null); setEditingCons(false); };
 
   return (
     <div ref={setNodeRef} style={style} className="scroll-mt-20">
@@ -157,6 +171,14 @@ function VorratRow({ p, t, lang, onList, onToggleList, onSetOverride, onClearOve
                   {Math.max(Math.round(days), 0)} {t('pantry.daysLeft')}
                 </Badge>
               )}
+              {weekly != null && (
+                <span
+                  className={cn('inline-flex items-center gap-0.5', consManual && 'font-medium text-sky-600 dark:text-sky-400')}
+                  title={consManual ? t('pantry.consumptionManual') : t('pantry.consumptionAuto')}
+                >
+                  <Gauge size={11} /> {fmtQty(weekly)} {p.base_unit}/{t('pantry.weekAbbr')}
+                </span>
+              )}
               {p.override
                 ? <span title={fmtDate(p.override.gesetzt_am, lang)}>· {t('pantry.corrected')}</span>
                 : p.last_bought && <span>· {t('pantry.lastBought')}: {fmtDate(p.last_bought, lang)}</span>}
@@ -178,8 +200,26 @@ function VorratRow({ p, t, lang, onList, onToggleList, onSetOverride, onClearOve
                 <button type="button" onClick={() => setEditing(false)} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"><X size={15} /></button>
               </div>
             )}
+            {editingCons && (
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1 text-xs text-sky-600 dark:text-sky-400"><Gauge size={13} /> {t('pantry.editConsumption')}</span>
+                <div className="w-20">
+                  <Input
+                    autoFocus inputMode="decimal" value={consDraft} placeholder={t('pantry.weeklyQty')}
+                    onChange={e => setConsDraft(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') commitCons(); if (e.key === 'Escape') setEditingCons(false); }}
+                  />
+                </div>
+                <span className="text-xs text-zinc-400">{p.base_unit}/{t('pantry.weekAbbr')}</span>
+                <Button className="px-2.5" onClick={commitCons}><Check size={15} /></Button>
+                {consManual && (
+                  <button type="button" onClick={() => { onSetConsumption(null); setEditingCons(false); }} title={t('pantry.consumptionReset')} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800"><RotateCcw size={15} /></button>
+                )}
+                <button type="button" onClick={() => setEditingCons(false)} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"><X size={15} /></button>
+              </div>
+            )}
           </div>
-          {!editing && (
+          {!editing && !editingCons && (
             <div className="flex shrink-0 items-center gap-1">
               <button
                 type="button"
@@ -202,6 +242,21 @@ function VorratRow({ p, t, lang, onList, onToggleList, onSetOverride, onClearOve
                   <RotateCcw size={15} />
                 </button>
               )}
+              <button
+                type="button"
+                onClick={() => { setConsDraft(consManual && p.consumption_per_week != null ? fmtQty(p.consumption_per_week) : (weekly != null ? fmtQty(weekly) : '')); setEditingCons(true); }}
+                title={t('pantry.editConsumption')}
+                className={cn('rounded-lg p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800', consManual ? 'text-sky-600 dark:text-sky-400' : 'text-zinc-400 hover:text-zinc-600')}
+              >
+                <Gauge size={15} />
+              </button>
+              <Link
+                to={`/warenstamm/positionen?q=${encodeURIComponent(p.canonical_name)}`}
+                title={t('pantry.openPositions')}
+                className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800"
+              >
+                <List size={15} />
+              </Link>
               <button type="button" onClick={() => setExpanded(v => !v)} title={t('pantry.reserve')} className={cn('rounded-lg p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800', hasReserve ? 'text-violet-500' : 'text-zinc-400')}>
                 <ChevronDown className={cn('h-4 w-4 transition-transform', expanded && 'rotate-180')} />
               </button>

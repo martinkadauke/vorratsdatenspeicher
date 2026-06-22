@@ -115,7 +115,7 @@ export function nameRoutes(app: FastifyInstance): void {
     // Per-product base_unit + hidden flag, and a unit-aware comparison price
     // (€/kg, €/l, €/Stück) built from all of the product's purchases (konto-scoped).
     const meta = canonicals.length ? await sql`
-      SELECT canonical_name, base_unit, hidden, track_vorrat, expected_price::float8 AS expected_price FROM canonical_meta WHERE canonical_name IN ${sql(canonicals)}
+      SELECT canonical_name, base_unit, hidden, track_vorrat, expected_price::float8 AS expected_price, consumption_per_week::float8 AS consumption_per_week FROM canonical_meta WHERE canonical_name IN ${sql(canonicals)}
     ` : [];
     const metaMap = new Map(meta.map(m => [m.canonical_name as string, m]));
     const units = await loadUnits();
@@ -147,8 +147,8 @@ export function nameRoutes(app: FastifyInstance): void {
       // purchase line in that dimension → can't compute €/kg (weights missing).
       const needs_weight = (buKey === 'kg' || buKey === 'l') && !groups.some(g => g.unit === buKey);
       // Avg weekly consumption — reuse the SAME unified estimator as Vorrat/suggestions/alerts
-      // (override=null → the raw purchase-history rate, not stock-adjusted).
-      const est = cn ? estimateVorrat(linesByCanon.get(cn) ?? [], baseUnit, units, null) : null;
+      // (stock-override=null → raw purchase-history rate; manual weekly override still applies).
+      const est = cn ? estimateVorrat(linesByCanon.get(cn) ?? [], baseUnit, units, null, (m?.consumption_per_week as number | null) ?? null) : null;
       const weekly_consumption = est?.rate_per_day != null ? Math.round(est.rate_per_day * 7 * 100) / 100 : null;
       return {
         key: r.grp,
@@ -185,7 +185,7 @@ export function nameRoutes(app: FastifyInstance): void {
       SELECT a.menge, a.einheit, e.datum::text AS datum
       FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
       WHERE a.canonical_name = ${name} ${kontoScope(req.user, sql`e`)}`;
-    const [meta] = await sql`SELECT base_unit FROM canonical_meta WHERE canonical_name = ${name}`;
+    const [meta] = await sql`SELECT base_unit, consumption_per_week::float8 AS consumption_per_week FROM canonical_meta WHERE canonical_name = ${name}`;
     const [ov] = await sql`SELECT menge::float8 AS menge, gesetzt_am::text AS gesetzt_am FROM vorrat_override WHERE canonical_name = ${name}`;
     const units = await loadUnits();
     const est = estimateVorrat(
@@ -193,6 +193,7 @@ export function nameRoutes(app: FastifyInstance): void {
       (meta?.base_unit as string | null) ?? null,
       units,
       ov ? { menge: ov.menge as number, gesetzt_am: ov.gesetzt_am as string } : null,
+      (meta?.consumption_per_week as number | null) ?? null,
     );
     return {
       weekly_consumption: est.rate_per_day != null ? Math.round(est.rate_per_day * 7 * 100) / 100 : null,
@@ -205,8 +206,8 @@ export function nameRoutes(app: FastifyInstance): void {
   /** Set per-product metadata: base_unit (Grundpreis-Einheit) and/or hidden. */
   app.patch('/api/names/:name/meta', async (req, reply) => {
     const name = decodeURIComponent((req.params as { name: string }).name);
-    const body = (req.body ?? {}) as { base_unit?: string | null; hidden?: boolean; track_vorrat?: boolean; reserve_min?: number | null; expected_price?: number | null };
-    if (!('base_unit' in body) && !('hidden' in body) && !('track_vorrat' in body) && !('reserve_min' in body) && !('expected_price' in body)) {
+    const body = (req.body ?? {}) as { base_unit?: string | null; hidden?: boolean; track_vorrat?: boolean; reserve_min?: number | null; expected_price?: number | null; consumption_per_week?: number | null };
+    if (!('base_unit' in body) && !('hidden' in body) && !('track_vorrat' in body) && !('reserve_min' in body) && !('expected_price' in body) && !('consumption_per_week' in body)) {
       return reply.code(400).send({ error: 'nothing to update' });
     }
     if ('base_unit' in body) {
@@ -240,6 +241,14 @@ export function nameRoutes(app: FastifyInstance): void {
         INSERT INTO canonical_meta (canonical_name, expected_price, updated_at, updated_by)
         VALUES (${name}, ${ep}, NOW(), ${req.user!.id})
         ON CONFLICT (canonical_name) DO UPDATE SET expected_price = EXCLUDED.expected_price, updated_at = NOW(), updated_by = EXCLUDED.updated_by`;
+    }
+    if ('consumption_per_week' in body) {
+      const cpw = body.consumption_per_week == null || !Number.isFinite(Number(body.consumption_per_week)) || Number(body.consumption_per_week) <= 0
+        ? null : Number(body.consumption_per_week);
+      await sql`
+        INSERT INTO canonical_meta (canonical_name, consumption_per_week, updated_at, updated_by)
+        VALUES (${name}, ${cpw}, NOW(), ${req.user!.id})
+        ON CONFLICT (canonical_name) DO UPDATE SET consumption_per_week = EXCLUDED.consumption_per_week, updated_at = NOW(), updated_by = EXCLUDED.updated_by`;
     }
     return { ok: true };
   });
