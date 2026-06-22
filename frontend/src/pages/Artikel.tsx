@@ -289,6 +289,8 @@ export function Artikel() {
       base_unit: g.base_unit,
       expected_price: g.expected_price,
       last_bought: g.last_bought,
+      weekly_consumption: g.weekly_consumption,
+      consumption_unit: g.consumption_unit,
       translation_en: null,
       consumers: g.consumers,
       consumers_exclusive: false,
@@ -309,6 +311,7 @@ export function Artikel() {
       setDetail({
         canonical_name: openParam, artikel_count: 0, category_path: null,
         base_unit: null, expected_price: null, last_bought: null,
+        weekly_consumption: null, consumption_unit: null,
         translation_en: null, consumers: [], consumers_exclusive: false,
       });
     }
@@ -503,11 +506,6 @@ export function Artikel() {
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-zinc-400">
                     <Badge>{g.count}×</Badge>
                     {g.category && <Badge className="max-w-[40vw] truncate sm:max-w-none">{g.category.split('/').pop()}</Badge>}
-                    {g.weekly_consumption != null && g.consumption_unit && (
-                      <Badge title={t('article.weeklyConsumptionHint')} className="bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300">
-                        Ø {Number(g.weekly_consumption).toLocaleString(i18n.language, { maximumFractionDigits: 1 })} {g.consumption_unit}{t('article.perWeek')}
-                      </Badge>
-                    )}
                     {g.comparison
                       ? <span>Ø {g.comparison.avg.toFixed(2).replace('.', ',')} €/{g.comparison.unit}</span>
                       : g.avg_price && <span>Ø {eur(g.avg_price)}</span>}

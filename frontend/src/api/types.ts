@@ -134,6 +134,8 @@ export interface CanonicalName {
   expected_price?: number | null;
   track_vorrat?: boolean | null;
   last_bought: string | null;
+  weekly_consumption?: number | null;
+  consumption_unit?: string | null;
   translation_en: string | null;
   consumers: number[];
   consumers_exclusive: boolean;

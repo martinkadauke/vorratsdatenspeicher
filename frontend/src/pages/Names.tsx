@@ -208,6 +208,15 @@ export function NameEditModal({ name, onClose }: { name: CanonicalName | null; o
           <p className="mt-1 text-xs text-zinc-400">{t('names.expectedPriceHint')}</p>
         </div>
         <div>
+          <Label>{t('names.weeklyConsumption')}</Label>
+          <div className="mt-1 text-sm font-semibold text-sky-700 dark:text-sky-400">
+            {name.weekly_consumption != null && name.consumption_unit
+              ? `Ø ${Number(name.weekly_consumption).toLocaleString(i18n.language, { maximumFractionDigits: 1 })} ${name.consumption_unit}`
+              : <span className="font-normal text-zinc-400">{t('names.weeklyConsumptionNone')}</span>}
+          </div>
+          <p className="mt-1 text-xs text-zinc-400">{t('names.weeklyConsumptionHint')}</p>
+        </div>
+        <div>
           <Label>{t('names.trackVorrat')}</Label>
           <button
             type="button"
