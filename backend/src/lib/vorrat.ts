@@ -67,7 +67,24 @@ export function estimateVorrat(
   if (!effKey && groupLines.size) effKey = [...groupLines.entries()].sort((a, b) => b[1] - a[1])[0][0];
   if (!effKey) effKey = buKey ?? 'Stück';
 
-  const perDate = groups.get(effKey) ?? new Map<string, number>();
+  const perDate = new Map(groups.get(effKey) ?? new Map<string, number>());
+
+  // Unit reconciliation: the same product is often recorded inconsistently — e.g.
+  // "1 kg" buckets one time and "2 Stück" (= 2 buckets) another, or with no unit
+  // at all. When the base unit is mass/volume, fold those loose count purchases
+  // into it, treating each piece as one typical pack (the median real base-unit
+  // purchase). Without this the count purchases land in a separate Stück group and
+  // get silently dropped from the rate, badly under-counting consumption.
+  if (effKey === 'kg' || effKey === 'l') {
+    const baseVals = [...(groups.get(effKey)?.values() ?? [])].sort((a, b) => a - b);
+    const packSize = baseVals.length ? baseVals[Math.floor(baseVals.length / 2)] : null;
+    if (packSize && packSize > 0) {
+      for (const [k, pd] of groups) {
+        if (k === 'kg' || k === 'l') continue; // only fold count groups into the mass/volume base
+        for (const [d, q] of pd) perDate.set(d, (perDate.get(d) ?? 0) + q * packSize);
+      }
+    }
+  }
   const dates = [...perDate.keys()].sort();
   const n = dates.length;
   const last_bought = n ? dates[n - 1] : null;
