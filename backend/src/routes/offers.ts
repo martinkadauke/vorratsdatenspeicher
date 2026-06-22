@@ -4,6 +4,7 @@ import { requireAdmin } from '../auth/plugin.js';
 import { kontoScope } from '../auth/konto.js';
 import { runOfferSearch, sendOfferDigests, isOfferSearchRunning, debugOfferSearch } from '../offers/index.js';
 import { loadUnits, normalizeEinheit, comparisonGroups, type PriceLine } from '../lib/units.js';
+import { estimateVorrat, type VorratLine, type VorratOverride } from '../lib/vorrat.js';
 import { PROGRESS_FRESH_MS } from '../maintenance/progress.js';
 import { haversineKm } from '../lib/geo.js';
 import { getConfig } from '../config.js';
@@ -47,6 +48,15 @@ export function offerRoutes(app: FastifyInstance): void {
       SELECT canonical_name, base_unit FROM canonical_meta WHERE canonical_name IN ${sql(offered)}
     ` : [];
     const baseUnit = new Map(metaRows.map(m => [m.canonical_name as string, (m.base_unit as string | null) ?? null]));
+    // Manual stock overrides — same input the pantry feeds estimateVorrat(), so the
+    // offers "due" signal matches what the pantry/suggestions show.
+    const overrideRows = offered.length ? await sql`
+      SELECT canonical_name, menge::float8 AS menge, gesetzt_am::text AS gesetzt_am
+      FROM vorrat_override WHERE canonical_name IN ${sql(offered)}
+    ` : [];
+    const overrideMap = new Map<string, VorratOverride>(
+      overrideRows.map(o => [o.canonical_name as string, { menge: o.menge as number, gesetzt_am: o.gesetzt_am as string }]),
+    );
 
     // The comparison-group key for a unit name: mass→'kg', volume→'l', count→itself.
     const keyFor = (unitName: string | null | undefined): string | null => {
@@ -64,13 +74,12 @@ export function offerRoutes(app: FastifyInstance): void {
       byCanon.set(l.canonical_name, arr);
     }
 
-    const DAY = 86_400_000;
-    const today = Date.now();
     type Group = ReturnType<typeof comparisonGroups>[number];
     const pantry: Record<string, {
       avg_paid: number | null; base_unit: string | null; groups: Group[];
       last_bought: string | null; interval_days: number | null; due_in_days: number | null;
       status: 'overdue' | 'soon' | 'ok' | null; typ_qty: number | null;
+      weekly_consumption: number | null; consumption_unit: string | null;
     }> = {};
     const groupsByCanon = new Map<string, Group[]>();
 
@@ -81,36 +90,22 @@ export function offerRoutes(app: FastifyInstance): void {
       const bu = baseUnit.get(c) ?? null;
       const buKey = keyFor(bu);
       const headline = (buKey ? groups.find(g => g.unit === buKey) : undefined) ?? groups[0] ?? null;
-      const dateStrs = rows.map(r => r.datum).filter(Boolean).sort();
-      const n = dateStrs.length;
-      const firstStr = n ? dateStrs[0] : null;
-      const lastStr = n ? dateStrs[n - 1] : null;
-      let interval_days: number | null = null, due_in_days: number | null = null;
-      let status: 'overdue' | 'soon' | 'ok' | null = null;
-      if (n >= 2 && firstStr && lastStr && lastStr > firstStr) {
-        interval_days = Math.round((Date.parse(lastStr) - Date.parse(firstStr)) / DAY / (n - 1));
-        const daysSince = Math.round((today - Date.parse(lastStr)) / DAY);
-        due_in_days = interval_days - daysSince;
-        status = due_in_days <= 0 ? 'overdue' : due_in_days <= 7 ? 'soon' : 'ok';
-      }
-      // Typical purchase quantity in the headline group's base unit (median) →
-      // lets the client turn a €/unit discount into € saved per typical buy.
-      let typ_qty: number | null = null;
-      if (headline) {
-        const qtys: number[] = [];
-        for (const r of rows) {
-          const un = normalizeEinheit(r.einheit);
-          if (keyFor(un) !== headline.unit) continue;
-          const u = un ? units.get(un) : undefined;
-          const m = parseFloat((r.menge ?? '').toString().replace(',', '.'));
-          const qty = (Number.isFinite(m) ? m : 1) * (u ? u.to_base : 1);
-          if (qty > 0) qtys.push(qty);
-        }
-        if (qtys.length) { qtys.sort((a, b) => a - b); typ_qty = qtys[Math.floor(qtys.length / 2)]; }
-      }
+      // Unified consumption/replenishment model — the SAME estimateVorrat() the
+      // pantry, shopping suggestions and alerts use (quantity-weighted rate +
+      // optional manual override, not a plain date-interval). "Due" = when we'll
+      // run out; the rhythm = how long a typical buy lasts at that rate.
+      const est = estimateVorrat(rows as unknown as VorratLine[], bu, units, overrideMap.get(c) ?? null);
+      const rate = est.rate_per_day;
+      const weekly_consumption = rate != null ? Math.round(rate * 7 * 100) / 100 : null;
+      const due_in_days = est.days_until_empty != null ? Math.round(est.days_until_empty) : null;
+      const status: 'overdue' | 'soon' | 'ok' | null =
+        due_in_days == null ? null : due_in_days <= 0 ? 'overdue' : due_in_days <= 7 ? 'soon' : 'ok';
+      const interval_days = rate != null && rate > 0 && est.typ_qty != null && est.typ_qty > 0
+        ? Math.round(est.typ_qty / rate) : null;
       pantry[c] = {
         avg_paid: headline?.avg ?? null, base_unit: bu, groups,
-        last_bought: lastStr, interval_days, due_in_days, status, typ_qty,
+        last_bought: est.last_bought, interval_days, due_in_days, status, typ_qty: est.typ_qty,
+        weekly_consumption, consumption_unit: est.base_unit,
       };
     }
 

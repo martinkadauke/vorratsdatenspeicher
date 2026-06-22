@@ -362,6 +362,7 @@
     "dueOverdue": "overdue",
     "dueSoon": "due soon",
     "rhythm": "bought roughly every {{days}} days",
+    "weekly": "Ø {{n}} {{unit}}/week",
     "hide": "hide",
     "unhide": "show",
     "hiddenCount": "{{count}} hidden · show",

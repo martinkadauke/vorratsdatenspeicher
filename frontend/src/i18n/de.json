@@ -362,6 +362,7 @@
     "dueOverdue": "überfällig",
     "dueSoon": "bald fällig",
     "rhythm": "ca. alle {{days}} Tage gekauft",
+    "weekly": "Ø {{n}} {{unit}}/Woche",
     "hide": "ausblenden",
     "unhide": "einblenden",
     "hiddenCount": "{{count}} ausgeblendet · anzeigen",

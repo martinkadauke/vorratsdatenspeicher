@@ -25,6 +25,7 @@ interface PantryInfo {
   avg_paid: number | null; last_bought: string | null;
   interval_days: number | null; due_in_days: number | null;
   status: 'overdue' | 'soon' | 'ok' | null; typ_qty: number | null;
+  weekly_consumption: number | null; consumption_unit: string | null;
 }
 interface NearestBranch { branch_id: number; name: string; address: string | null; distance_km: number }
 interface OffersResponse { offers: Offer[]; pantry: Record<string, PantryInfo>; chains?: Record<string, NearestBranch> }
@@ -53,7 +54,11 @@ function DueBadge({ p, t }: { p?: PantryInfo; t: TFunction }) {
   const tone = p.status === 'overdue'
     ? 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300'
     : 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300';
-  const title = p.interval_days != null ? t('offers.rhythm', { days: p.interval_days }) : '';
+  const title = [
+    p.weekly_consumption != null && p.consumption_unit
+      ? t('offers.weekly', { n: String(p.weekly_consumption).replace('.', ','), unit: p.consumption_unit }) : '',
+    p.interval_days != null ? t('offers.rhythm', { days: p.interval_days }) : '',
+  ].filter(Boolean).join(' · ');
   return (
     <span title={title} className={cn('shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold', tone)}>
       {p.status === 'overdue' ? t('offers.dueOverdue') : t('offers.dueSoon')}
