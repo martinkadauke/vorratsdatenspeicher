@@ -3,29 +3,29 @@ import { getConfig } from '../config.js';
 import { parseLlmJson } from './ollama.js';
 import { recordUsage } from './provider.js';
 
-const VISION_SYSTEM = `Du bist ein Datenextraktions-Assistent für deutsche Kassenbons.
+const VISION_SYSTEM = `Du bist ein Datenextraktions-Assistent für deutsche Kaufbelege — sowohl Kassenbons ALS AUCH Rechnungen und Bestellbestätigungen (z.B. von Online-Shops, Versorgern, Lieferdiensten; häufig als PDF).
 Antworte AUSSCHLIESSLICH mit gültigem JSON ohne Markdown-Fence, ohne Kommentare.
 
-Aus dem Bild extrahieren:
-- Ladenkette (kurz, z.B. "LIDL", "EDEKA", "ALDI Süd", "DM-drogerie", "Bauhaus", "C&A")
-- Filiale Adresse falls erkennbar
-- Datum (YYYY-MM-DD)
-- Uhrzeit falls auf Bon (HH:MM:SS)
-- Gesamtbetrag in Euro als Zahl
-- Alle Artikel mit:
-  * original_text: was wörtlich auf dem Bon steht (mit Abkürzungen)
+Aus dem Bild ODER PDF extrahieren:
+- Ladenkette/Händler (kurz, z.B. "LIDL", "EDEKA", "ALDI Süd", "DM-drogerie", "Amazon", "Zalando", "Telekom")
+- Filiale/Adresse falls erkennbar (sonst null)
+- Datum (YYYY-MM-DD) — Kauf-, Rechnungs- oder Bestelldatum
+- Uhrzeit falls vorhanden (HH:MM:SS, sonst null)
+- Gesamtbetrag in Euro als Zahl (bei Rechnungen der Brutto-/Endbetrag)
+- Alle Positionen mit:
+  * original_text: was wörtlich auf dem Beleg steht (mit Abkürzungen)
   * name: ausgeschriebene Version
   * ai_guess: deine beste Vermutung des Produkts (z.B. "Hafermilch", "Vollkornbrot")
   * menge: Zahl falls erkennbar (sonst null)
   * einheit: "kg" | "l" | "ml" | "g" | "stk" | "" (leer wenn unklar)
   * preis: Euro als Zahl, Komma → Punkt
-  * kategorie: grobe Kategorie ("Obst", "Backwaren", "Drogerie", "Pfand", ...)
+  * kategorie: grobe Kategorie ("Obst", "Backwaren", "Drogerie", "Pfand", "Versand", ...)
 
 Regeln:
-- PFAND-Zeilen als eigene Artikel mit kategorie="Pfand"
-- Coupon-Rabatte zwischen Artikeln ignorieren, nicht als Artikel listen
-- Bei verwackelten/unlesbaren/Nicht-Bon-Bildern: confidence < 0.3, leere artikel
-- Bei guter Lesbarkeit: confidence 0.85-1.0
+- Kassenbon: PFAND-Zeilen als eigene Artikel mit kategorie="Pfand"; Coupon-Rabatte zwischen Artikeln ignorieren.
+- Rechnung/Bestellung: jede bestellte Position einzeln auflisten; Versandkosten als eigene Position mit kategorie="Versand"; Rabatte/Gutscheine ignorieren; bei Netto/MwSt/Brutto den Brutto-Endbetrag als gesamt_betrag nehmen.
+- NUR bei wirklich unlesbaren Bildern ODER Dokumenten, die gar KEIN Kaufbeleg sind (reine Werbung, Newsletter, Versandbenachrichtigung ohne Beträge): confidence < 0.3 und leere artikel.
+- Bei klar lesbarem Beleg/Rechnung: confidence 0.85-1.0.
 
 JSON-Schema:
 {"confidence": 0.0-1.0, "ladenkette": "...", "filiale": "..." | null, "datum": "YYYY-MM-DD", "uhrzeit": "HH:MM:SS" | null, "gesamt_betrag": 12.34, "artikel": [...]}`;

@@ -617,7 +617,9 @@
       "privacyNote": "Your password is stored encrypted and never shown again.",
       "hint": "Tip: forward invoice e-mails (e.g. via a rule in your mail provider) to this mailbox or a dedicated folder. Anything that lands there is read in as a receipt.",
       "backfill": "Backfill e-mails",
-      "backfillDone": "{{n}} e-mails backfilled"
+      "backfillDone": "{{n}} e-mails backfilled",
+      "reocr": "Re-scan PDF invoices",
+      "reocrQueued": "Re-scanning {{n}} PDF invoices…"
     }
   },
   "positionen": {

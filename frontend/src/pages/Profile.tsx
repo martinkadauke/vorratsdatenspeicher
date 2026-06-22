@@ -186,6 +186,11 @@ function MailboxSettings() {
     onSuccess: r => setRunMsg(r.error ? t('profile.mailbox.runFail', { error: r.error }) : t('profile.mailbox.backfillDone', { n: r.filled ?? 0 })),
     onError: e => setRunMsg(t('profile.mailbox.runFail', { error: (e as Error).message })),
   });
+  const reocr = useMutation({
+    mutationFn: () => api<{ queued?: number }>('/api/me/mailbox/reocr', { method: 'POST' }),
+    onSuccess: r => setRunMsg(t('profile.mailbox.reocrQueued', { n: r.queued ?? 0 })),
+    onError: e => setRunMsg(t('profile.mailbox.runFail', { error: (e as Error).message })),
+  });
   const remove = useMutation({
     mutationFn: () => api('/api/me/mailbox', { method: 'DELETE' }),
     onSuccess: () => {
@@ -249,6 +254,7 @@ function MailboxSettings() {
         <Button variant="secondary" onClick={() => { setTestMsg(null); test.mutate(); }} disabled={!host.trim() || !user.trim() || test.isPending}>{t('profile.mailbox.test')}</Button>
         {configured && <Button variant="secondary" onClick={() => { setRunMsg(null); run.mutate(); }} disabled={run.isPending}>{t('profile.mailbox.run')}</Button>}
         {configured && <Button variant="secondary" onClick={() => { setRunMsg(null); backfill.mutate(); }} disabled={backfill.isPending}>{t('profile.mailbox.backfill')}</Button>}
+        {configured && <Button variant="secondary" onClick={() => { setRunMsg(null); reocr.mutate(); }} disabled={reocr.isPending}>{t('profile.mailbox.reocr')}</Button>}
       </div>
 
       {testMsg && <p className="text-xs text-zinc-600 dark:text-zinc-300">{testMsg}</p>}

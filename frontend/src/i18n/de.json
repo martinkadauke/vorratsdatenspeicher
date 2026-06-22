@@ -617,7 +617,9 @@
       "privacyNote": "Dein Passwort wird verschlüsselt gespeichert und nie wieder angezeigt.",
       "hint": "Tipp: Leite Rechnungs-Mails (z. B. per Regel deines Mail-Anbieters) an dieses Postfach oder einen eigenen Ordner weiter. Alles, was dort landet, wird als Beleg eingelesen.",
       "backfill": "Mails nachladen",
-      "backfillDone": "{{n}} Mails nachgeladen"
+      "backfillDone": "{{n}} Mails nachgeladen",
+      "reocr": "PDF-Rechnungen neu auslesen",
+      "reocrQueued": "{{n}} PDF-Rechnungen werden neu ausgelesen…"
     }
   },
   "positionen": {

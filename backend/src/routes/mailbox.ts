@@ -2,6 +2,23 @@ import type { FastifyInstance } from 'fastify';
 import sql from '../db.js';
 import { encryptSecret, decryptSecret } from '../lib/crypto.js';
 import { testMailbox, runMailImportForUser, backfillEmails } from '../mail/importer.js';
+import { ocrAndStore } from './receipts.js';
+
+/** Re-run OCR (with the now invoice-aware prompt) on the given PDF receipts,
+ *  one at a time in the background, flagging ocr_pending per receipt. */
+async function reocrPdfs(rows: { id: number; bild_pfad: string }[]): Promise<void> {
+  for (const r of rows) {
+    if (!r.bild_pfad) continue;
+    await sql`UPDATE einkauf SET ocr_pending = TRUE WHERE id = ${r.id}`.catch(() => {});
+    try {
+      await ocrAndStore(r.id, r.bild_pfad);
+    } catch (e) {
+      console.error(`[reocr] receipt ${r.id} failed:`, (e as Error).message);
+    } finally {
+      await sql`UPDATE einkauf SET ocr_pending = FALSE WHERE id = ${r.id}`.catch(() => {});
+    }
+  }
+}
 
 interface MailboxBody {
   imap_host?: string;
@@ -96,5 +113,21 @@ export function mailboxRoutes(app: FastifyInstance): void {
   // Back-fill stored source mails for receipts imported before e-mail storage existed.
   app.post('/api/me/mailbox/backfill-emails', async (req) => {
     return backfillEmails(req.user!.id);
+  });
+
+  // Re-OCR this user's e-mail-imported PDF receipts that ended up with NO line
+  // items (e.g. PDFs that the old Kassenbon-tuned prompt rejected). Only touches
+  // 0-item receipts, so it can't overwrite anything the user corrected. Runs in
+  // the background; each receipt shows its ocr_pending spinner while processing.
+  app.post('/api/me/mailbox/reocr', async (req) => {
+    const userId = req.user!.id;
+    const rows = await sql`
+      SELECT DISTINCT e.id, e.bild_pfad
+      FROM einkauf e
+      JOIN imported_email ie ON ie.einkauf_id = e.id AND ie.user_id = ${userId}
+      WHERE e.quelle = 'email' AND e.bild_pfad ILIKE '%.pdf'
+        AND NOT EXISTS (SELECT 1 FROM artikel a WHERE a.einkauf_id = e.id)`;
+    void reocrPdfs(rows as unknown as { id: number; bild_pfad: string }[]);
+    return { queued: rows.length };
   });
 }
