@@ -121,6 +121,19 @@ export async function ocrAndStore(id: number, bildPfad: string): Promise<{ items
   return storeOcrResult(id, parsed);
 }
 
+/** Best-effort scrub of e-mail HTML before it's shown in a sandboxed iframe.
+ *  The iframe sandbox (no allow-scripts) is the real XSS guard; this strips the
+ *  obvious active content as defence in depth. */
+function sanitizeEmailHtml(html: string): string {
+  return html
+    .replace(/<\s*script[\s\S]*?<\s*\/\s*script\s*>/gi, '')
+    .replace(/<\s*(?:iframe|object|embed|link|meta|base)\b[^>]*>/gi, '')
+    .replace(/\son\w+\s*=\s*"[^"]*"/gi, '')
+    .replace(/\son\w+\s*=\s*'[^']*'/gi, '')
+    .replace(/\son\w+\s*=\s*[^\s>]+/gi, '')
+    .replace(/javascript:/gi, '');
+}
+
 export function receiptRoutes(app: FastifyInstance): void {
   /** Ensure the receipt exists AND the caller may see its account.
    *  Returns false (and sends the response) when not. */
@@ -469,7 +482,8 @@ export function receiptRoutes(app: FastifyInstance): void {
       SELECT e.id, e.datum, e.roh_ladenname, e.bild_pfad, e.gesamt_betrag, e.geprueft,
              e.konto_id, e.quelle, k.name AS konto_name, e.ocr_pending, e.date_uncertain,
              e.private_for_user_id,
-             (e.private_for_user_id IS NOT NULL) AS private
+             (e.private_for_user_id IS NOT NULL) AS private,
+             EXISTS(SELECT 1 FROM email_message em WHERE em.einkauf_id = e.id) AS has_email
       FROM einkauf e LEFT JOIN konto k ON k.id = e.konto_id
       WHERE e.id = ${id}
     `;
@@ -524,6 +538,23 @@ export function receiptRoutes(app: FastifyInstance): void {
           consumers_source: override ? 'artikel' : canonical?.length ? 'canonical' : 'none',
         };
       }),
+    };
+  });
+
+  /** The source e-mail behind an e-mail-imported receipt (privacy-guarded). HTML
+   *  is lightly scrubbed; the client renders it in a sandboxed iframe. */
+  app.get('/api/receipts/:id/email', async (req, reply) => {
+    const id = parseInt((req.params as { id: string }).id, 10);
+    if (!id) return reply.code(400).send({ error: 'invalid id' });
+    if (!await guardReceipt(req, reply, id)) return;
+    const [em] = await sql`SELECT from_addr, subject, sent_at, html, body_text FROM email_message WHERE einkauf_id = ${id}`;
+    if (!em) return reply.code(404).send({ error: 'no email' });
+    return {
+      from: em.from_addr,
+      subject: em.subject,
+      sent_at: em.sent_at,
+      html: em.html ? sanitizeEmailHtml(em.html as string) : null,
+      text: em.body_text,
     };
   });
 }

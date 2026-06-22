@@ -123,6 +123,7 @@
     "privateToggle": "Nur du siehst private Belege – klick zum Umschalten",
     "noPhotoHint": "Noch kein Foto – aufnehmen oder auswählen",
     "openPdf": "PDF öffnen",
+    "email": "E-Mail",
     "photoAdded": "Foto hinzugefügt",
     "duplicate": "Position duplizieren",
     "insertHere": "Hier neue Position einfügen",
@@ -611,7 +612,9 @@
       "lastPoll": "Letzter Abruf: {{when}}",
       "lastErrorLabel": "Letzter Fehler",
       "privacyNote": "Dein Passwort wird verschlüsselt gespeichert und nie wieder angezeigt.",
-      "hint": "Tipp: Leite Rechnungs-Mails (z. B. per Regel deines Mail-Anbieters) an dieses Postfach oder einen eigenen Ordner weiter. Alles, was dort landet, wird als Beleg eingelesen."
+      "hint": "Tipp: Leite Rechnungs-Mails (z. B. per Regel deines Mail-Anbieters) an dieses Postfach oder einen eigenen Ordner weiter. Alles, was dort landet, wird als Beleg eingelesen.",
+      "backfill": "Mails nachladen",
+      "backfillDone": "{{n}} Mails nachgeladen"
     }
   },
   "tour": {

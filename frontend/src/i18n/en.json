@@ -123,6 +123,7 @@
     "privateToggle": "Only you can see private receipts — click to toggle",
     "noPhotoHint": "No photo yet — take or pick one",
     "openPdf": "Open PDF",
+    "email": "E-mail",
     "photoAdded": "Photo added",
     "duplicate": "Duplicate line",
     "insertHere": "Insert a line here",
@@ -611,7 +612,9 @@
       "lastPoll": "Last poll: {{when}}",
       "lastErrorLabel": "Last error",
       "privacyNote": "Your password is stored encrypted and never shown again.",
-      "hint": "Tip: forward invoice e-mails (e.g. via a rule in your mail provider) to this mailbox or a dedicated folder. Anything that lands there is read in as a receipt."
+      "hint": "Tip: forward invoice e-mails (e.g. via a rule in your mail provider) to this mailbox or a dedicated folder. Anything that lands there is read in as a receipt.",
+      "backfill": "Backfill e-mails",
+      "backfillDone": "{{n}} e-mails backfilled"
     }
   },
   "tour": {

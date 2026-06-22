@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, ChevronLeft, ChevronRight, RotateCw, Check, Hand, Wallet, X, Search, Ban, Lock, Plus, Camera, ImagePlus, FileText } from 'lucide-react';
+import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, ChevronLeft, ChevronRight, RotateCw, Check, Hand, Wallet, X, Search, Ban, Lock, Plus, Camera, ImagePlus, FileText, Mail } from 'lucide-react';
 import { TransformWrapper, TransformComponent, useControls } from 'react-zoom-pan-pinch';
 import { api } from '../api/client';
 import type { Artikel, Receipt, ReceiptDetail } from '../api/types';
@@ -475,6 +475,9 @@ export function ReceiptDetailPage() {
                 onPanToggle={() => setPanEnabled(v => !v)}
               />
             )
+          ) : data.has_email ? (
+            // E-mail-imported receipt without an attachment → show the source mail.
+            <EmailViewer id={data.id} />
           ) : editable ? (
             <div className="flex flex-col gap-2 rounded-2xl border border-dashed border-zinc-300 p-4 dark:border-zinc-700">
               <p className="text-center text-sm text-zinc-400">{t('receiptDetail.noPhotoHint')}</p>
@@ -578,6 +581,58 @@ export function ReceiptDetailPage() {
         onClose={() => setEditing(null)}
         invalidateKeys={[['receipt', id], ['receipts']]}
       />
+    </div>
+  );
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+}
+
+/** Shows the source e-mail of an e-mail-imported receipt. The body is rendered in
+ *  a fully sandboxed iframe (no scripts/forms/same-origin) — the hard XSS guard for
+ *  untrusted mail HTML; the backend additionally scrubs active content. */
+function EmailViewer({ id }: { id: number }) {
+  const { t, i18n } = useTranslation();
+  const { data, isLoading } = useQuery({
+    queryKey: ['receipt-email', id],
+    queryFn: () => api<{ from?: string | null; subject?: string | null; sent_at?: string | null; html?: string | null; text?: string | null }>(`/api/receipts/${id}/email`),
+  });
+  if (isLoading) {
+    return (
+      <div className="flex h-48 items-center justify-center gap-2 rounded-2xl bg-zinc-100 text-sm text-zinc-400 dark:bg-zinc-900">
+        <Mail size={16} /> …
+      </div>
+    );
+  }
+  if (!data) return null;
+  if (!data.html && !data.text) {
+    return (
+      <div className="flex h-48 items-center justify-center gap-2 rounded-2xl bg-zinc-100 text-sm text-zinc-400 dark:bg-zinc-900">
+        <Mail size={16} /> {t('receiptDetail.email')} —
+      </div>
+    );
+  }
+  const inner = data.html
+    ? data.html
+    : `<pre style="white-space:pre-wrap;word-break:break-word;font-family:system-ui,sans-serif;font-size:13px;line-height:1.5;color:#27272a;margin:0;padding:12px">${escapeHtml(data.text ?? '')}</pre>`;
+  // CSP blocks REMOTE resources (no tracking pixels / IP leak to the sender); only
+  // embedded data:/blob: images and inline styles render. The sandbox blocks scripts.
+  const srcDoc = `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: blob:; style-src 'unsafe-inline'; font-src data:"><base target="_blank"><body style="margin:0;background:#fff;font-family:system-ui,sans-serif">${inner}</body>`;
+  return (
+    <div className="overflow-hidden rounded-2xl border border-zinc-200 dark:border-zinc-700">
+      <div className="flex items-start gap-2 border-b border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900">
+        <Mail size={14} className="mt-0.5 shrink-0 text-zinc-400" />
+        <div className="min-w-0">
+          <div className="truncate text-xs font-semibold">{data.subject || t('receiptDetail.email')}</div>
+          {(data.from || data.sent_at) && (
+            <div className="truncate text-[11px] text-zinc-500">
+              {data.from}{data.from && data.sent_at ? ' · ' : ''}{data.sent_at ? new Date(data.sent_at).toLocaleDateString(i18n.language) : ''}
+            </div>
+          )}
+        </div>
+      </div>
+      <iframe title={t('receiptDetail.email')} sandbox="" referrerPolicy="no-referrer" srcDoc={srcDoc} className="h-[28rem] w-full bg-white" />
     </div>
   );
 }

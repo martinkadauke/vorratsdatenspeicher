@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import sql from '../db.js';
 import { encryptSecret, decryptSecret } from '../lib/crypto.js';
-import { testMailbox, runMailImportForUser } from '../mail/importer.js';
+import { testMailbox, runMailImportForUser, backfillEmails } from '../mail/importer.js';
 
 interface MailboxBody {
   imap_host?: string;
@@ -91,5 +91,10 @@ export function mailboxRoutes(app: FastifyInstance): void {
   // Trigger an immediate poll for this user ("fetch now").
   app.post('/api/me/mailbox/run', async (req) => {
     return runMailImportForUser(req.user!.id);
+  });
+
+  // Back-fill stored source mails for receipts imported before e-mail storage existed.
+  app.post('/api/me/mailbox/backfill-emails', async (req) => {
+    return backfillEmails(req.user!.id);
   });
 }

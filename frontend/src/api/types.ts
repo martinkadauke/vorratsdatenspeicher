@@ -29,6 +29,7 @@ export interface Receipt {
   private?: boolean;
   ocr_pending?: boolean;
   date_uncertain?: boolean;
+  has_email?: boolean;
 }
 
 export interface Konto {

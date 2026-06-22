@@ -1,5 +1,5 @@
 import { ImapFlow } from 'imapflow';
-import { simpleParser } from 'mailparser';
+import { simpleParser, type ParsedMail } from 'mailparser';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -61,6 +61,22 @@ async function defaultKontoFor(userId: number): Promise<number | null> {
     ORDER BY CASE WHEN user_id = ${userId} THEN 0 ELSE 1 END, is_shared ASC, sort_order ASC, id ASC
     LIMIT 1`;
   return (k?.id as number | undefined) ?? null;
+}
+
+/** Persist the source e-mail (from/subject/date + html/text body) so the receipt
+ *  detail page can show the original mail instead of a photo. Idempotent. */
+async function storeEmail(einkaufId: number, parsed: ParsedMail): Promise<void> {
+  const html = parsed.html || null; // mailparser yields `false` when there's no HTML part
+  const text = parsed.text ?? null;
+  if (!html && !text) return;
+  // Guard against an Invalid Date from a malformed header (→ NULL sent_at).
+  const sentAt = parsed.date instanceof Date && !isNaN(parsed.date.getTime()) ? parsed.date : null;
+  await sql`
+    INSERT INTO email_message (einkauf_id, from_addr, subject, sent_at, html, body_text)
+    VALUES (${einkaufId}, ${parsed.from?.text ?? null}, ${parsed.subject ?? null}, ${sentAt}, ${html}, ${text})
+    ON CONFLICT (einkauf_id) DO UPDATE SET
+      from_addr = EXCLUDED.from_addr, subject = EXCLUDED.subject, sent_at = EXCLUDED.sent_at,
+      html = EXCLUDED.html, body_text = EXCLUDED.body_text`;
 }
 
 /** Open & authenticate an IMAP connection. Caller must logout(). */
@@ -168,6 +184,12 @@ async function processMessage(mb: MailboxRow, kontoId: number | null, raw: Buffe
   } catch (e) {
     status = 'failed';
     reason = (e as Error).message.slice(0, 300);
+  }
+
+  // Keep the source mail so the detail page can show it (best-effort, non-fatal).
+  if (einkaufId) {
+    try { await storeEmail(einkaufId, parsed); }
+    catch (e) { console.error(`[mailimport] storeEmail failed for receipt ${einkaufId}:`, (e as Error).message); }
   }
 
   await sql`
@@ -278,4 +300,76 @@ export async function runMailImportForUser(userId: number): Promise<{ imported: 
     await sql`UPDATE user_mailbox SET last_poll_at = NOW(), last_error = ${msg}, updated_at = NOW() WHERE user_id = ${userId}`.catch(() => {});
     return { error: msg };
   }
+}
+
+/** Refuse to scan absurdly large folders (the point at which an envelope scan
+ *  itself gets expensive); the import is meant for a dedicated invoice folder. */
+const BACKFILL_MAX_SCAN = 20000;
+
+/** Normalise a Message-ID for matching: strip the angle brackets + lowercase, so
+ *  the IMAP envelope id lines up with however mailparser stored it at import. */
+function normMid(m: string | null | undefined): string {
+  return (m ?? '').replace(/[<>]/g, '').trim().toLowerCase();
+}
+
+/** Back-fill the stored source mail for THIS user's e-mail-sourced receipts that
+ *  were imported before e-mail storage existed. Two-pass to stay cheap: a header
+ *  (envelope) scan finds which UIDs carry a wanted Message-ID, then only those
+ *  bodies are downloaded. Never creates receipts; skips fallback-hash imports
+ *  (no real Message-ID to re-match). */
+export async function backfillEmails(userId: number): Promise<{ filled: number } | { error: string }> {
+  const [mb] = await sql<MailboxRow[]>`SELECT * FROM user_mailbox WHERE user_id = ${userId}`;
+  if (!mb) return { error: 'no mailbox configured' };
+  const missing = await sql`
+    SELECT ie.message_id, ie.einkauf_id
+    FROM imported_email ie
+    JOIN einkauf e ON e.id = ie.einkauf_id AND e.quelle = 'email'
+    WHERE ie.user_id = ${userId} AND ie.einkauf_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM email_message em WHERE em.einkauf_id = ie.einkauf_id)`;
+  if (!missing.length) return { filled: 0 };
+  const wanted = new Map<string, number>();
+  for (const r of missing) {
+    const k = normMid(r.message_id as string);
+    if (k && !k.startsWith('nomsgid-')) wanted.set(k, r.einkauf_id as number);
+  }
+  if (!wanted.size) return { filled: 0 }; // only fallback-hash imports → nothing re-matchable
+
+  let filled = 0;
+  try {
+    const client = await openMailbox({
+      imap_host: mb.imap_host, imap_port: mb.imap_port, imap_secure: mb.imap_secure,
+      imap_user: mb.imap_user, pass: decryptSecret(mb.imap_pass_enc),
+    });
+    try {
+      const lock = await client.getMailboxLock(mb.folder || 'INBOX');
+      try {
+        const box = client.mailbox;
+        if (box && box.exists > BACKFILL_MAX_SCAN) {
+          return { error: `mailbox too large (${box.exists} messages) — point the import at a dedicated invoice folder` };
+        }
+        if (box && box.exists > 0) {
+          // Pass 1 — cheap header scan: which UIDs carry a wanted Message-ID.
+          const hits: { uid: number; einkaufId: number }[] = [];
+          for await (const msg of client.fetch('1:*', { uid: true, envelope: true }, { uid: true })) {
+            const einkaufId = wanted.get(normMid(msg.envelope?.messageId));
+            if (einkaufId) hits.push({ uid: Number(msg.uid), einkaufId });
+          }
+          // Pass 2 — download the full source only for the matches.
+          for (const { uid, einkaufId } of hits) {
+            for await (const m of client.fetch(String(uid), { uid: true, source: true }, { uid: true })) {
+              if (m.source) { await storeEmail(einkaufId, await simpleParser(m.source as Buffer)); filled++; }
+              break;
+            }
+          }
+        }
+      } finally {
+        lock.release();
+      }
+    } finally {
+      try { await client.logout(); } catch { /* ignore */ }
+    }
+  } catch (e) {
+    return { error: (e as Error).message.slice(0, 300) };
+  }
+  return { filled };
 }
