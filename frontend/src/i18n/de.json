@@ -448,7 +448,8 @@
     "title": "Admin",
     "webshopEmail": {
       "title": "Webshop-Belege per E-Mail",
-      "wip": "In Arbeit: Hier könnt ihr (du & deine Frau) später einstellen, dass Webshop-Bestellbestätigungen/Rechnungen per E-Mail an VDS weitergeleitet werden, damit VDS auch diese Belege verarbeitet."
+      "live": "Aktiv",
+      "done": "Verfügbar: Jede Person verbindet ihr eigenes E-Mail-Postfach im Profil (Abschnitt E-Mail-Postfach). Weitergeleitete Webshop-Bestellbestätigungen/Rechnungen werden dann automatisch als Belege verarbeitet."
     },
     "searchPlaceholder": "Einstellungen durchsuchen…",
     "searchNoResults": "Keine passenden Einstellungen gefunden.",

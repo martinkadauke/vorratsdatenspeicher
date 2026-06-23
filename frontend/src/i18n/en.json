@@ -448,7 +448,8 @@
     "title": "Admin",
     "webshopEmail": {
       "title": "Webshop receipts via email",
-      "wip": "Work in progress: here you'll later configure forwarding webshop order/receipt emails to VDS (for you & your wife) so VDS processes those receipts too."
+      "live": "Live",
+      "done": "Available: each person connects their own mailbox in Profile under “Email mailbox”. Forwarded webshop order/receipt emails are then processed as receipts automatically."
     },
     "searchPlaceholder": "Search settings…",
     "searchNoResults": "No matching settings found.",
