@@ -111,7 +111,7 @@ export function NameEditModal({ name, onClose }: { name: CanonicalName | null; o
   // always correct — independent of whether the list item passed it in.
   const { data: consumption } = useQuery({
     queryKey: ['name-consumption', name?.canonical_name],
-    queryFn: () => api<{ weekly_consumption: number | null; consumption_unit: string | null }>(`/api/canonical/${encodeURIComponent(name!.canonical_name)}/consumption`),
+    queryFn: () => api<{ weekly_consumption: number | null; consumption_unit: string | null; expected_avg: number | null; expected_unit: string | null }>(`/api/canonical/${encodeURIComponent(name!.canonical_name)}/consumption`),
     enabled: !!name,
   });
 
@@ -207,13 +207,17 @@ export function NameEditModal({ name, onClose }: { name: CanonicalName | null; o
             <Input
               value={expectedPrice}
               onChange={e => setExpectedPrice(e.target.value)}
-              placeholder="0,00"
+              placeholder={consumption?.expected_avg != null ? consumption.expected_avg.toLocaleString(i18n.language, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0,00'}
               inputMode="decimal"
               className="w-28"
             />
             <span className="text-sm text-zinc-500 dark:text-zinc-400">€ / {baseUnit || t('names.unit')}</span>
           </div>
-          <p className="mt-1 text-xs text-zinc-400">{t('names.expectedPriceHint')}</p>
+          <p className="mt-1 text-xs text-zinc-400">
+            {consumption?.expected_avg != null
+              ? t('names.expectedPriceAuto', { price: consumption.expected_avg.toLocaleString(i18n.language, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), unit: consumption.expected_unit ?? baseUnit ?? t('names.unit') })
+              : t('names.expectedPriceHint')}
+          </p>
         </div>
         <div>
           <Label>{t('names.weeklyConsumption')}</Label>

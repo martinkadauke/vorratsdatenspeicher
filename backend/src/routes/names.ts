@@ -182,24 +182,34 @@ export function nameRoutes(app: FastifyInstance): void {
   app.get('/api/canonical/:name/consumption', async (req) => {
     const name = decodeURIComponent((req.params as { name: string }).name);
     const lines = await sql`
-      SELECT a.menge, a.einheit, e.datum::text AS datum
+      SELECT a.preis, a.menge, a.einheit, e.datum::text AS datum
       FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
       WHERE a.canonical_name = ${name} ${kontoScope(req.user, sql`e`)}`;
     const [meta] = await sql`SELECT base_unit, consumption_per_week::float8 AS consumption_per_week FROM canonical_meta WHERE canonical_name = ${name}`;
     const [ov] = await sql`SELECT menge::float8 AS menge, gesetzt_am::text AS gesetzt_am FROM vorrat_override WHERE canonical_name = ${name}`;
     const units = await loadUnits();
+    const baseUnit = (meta?.base_unit as string | null) ?? null;
     const est = estimateVorrat(
       lines as unknown as VorratLine[],
-      (meta?.base_unit as string | null) ?? null,
+      baseUnit,
       units,
       ov ? { menge: ov.menge as number, gesetzt_am: ov.gesetzt_am as string } : null,
       (meta?.consumption_per_week as number | null) ?? null,
     );
+    // History-derived unit price (€ / base_unit) — the SAME headline the shopping
+    // list falls back to when no manual expected_price is set. Surfaced so the modal
+    // can show it as the expected-price placeholder (no need to write it down).
+    const bu = baseUnit ? units.get(baseUnit) : undefined;
+    const buKey = bu ? (bu.dimension === 'mass' ? 'kg' : bu.dimension === 'volume' ? 'l' : bu.name) : null;
+    const groups = comparisonGroups(lines as unknown as PriceLine[], units);
+    const headline = (buKey ? groups.find(g => g.unit === buKey) : undefined) ?? groups[0] ?? null;
     return {
       weekly_consumption: est.rate_per_day != null ? Math.round(est.rate_per_day * 7 * 100) / 100 : null,
       consumption_unit: est.base_unit,
       days_until_empty: est.days_until_empty,
       last_bought: est.last_bought,
+      expected_avg: headline && headline.avg > 0 ? Math.round(headline.avg * 100) / 100 : null,
+      expected_unit: headline?.unit ?? null,
     };
   });
 

@@ -320,6 +320,7 @@
     "unit": "unit",
     "expectedPrice": "Expected price",
     "expectedPriceHint": "Manual price per unit – overrides the (often wrong) computed average on the shopping list. Leave empty = automatic.",
+    "expectedPriceAuto": "Leave empty → Ø {{price}} €/{{unit}} from purchase history is used automatically. Only fill in to override it.",
     "weeklyConsumption": "Avg consumption / week",
     "weeklyConsumptionNone": "Not enough data (needs ≥2 purchases)",
     "weeklyConsumptionHint": "Estimated from purchase history – same logic as the pantry.",

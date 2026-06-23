@@ -320,6 +320,7 @@
     "unit": "Einheit",
     "expectedPrice": "Erwarteter Preis",
     "expectedPriceHint": "Manueller Preis pro Einheit – überschreibt den (oft falschen) berechneten Durchschnitt in der Einkaufsliste. Leer lassen = automatisch.",
+    "expectedPriceAuto": "Leer lassen → Ø {{price}} €/{{unit}} aus der Kaufhistorie wird automatisch genutzt. Nur ausfüllen, um diesen Wert zu überschreiben.",
     "weeklyConsumption": "Ø Verbrauch / Woche",
     "weeklyConsumptionNone": "Zu wenig Daten (mind. 2 Käufe)",
     "weeklyConsumptionHint": "Geschätzt aus der Kaufhistorie – gleiche Logik wie der Vorrat.",
