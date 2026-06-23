@@ -253,7 +253,15 @@ export async function sendOfferDigests(): Promise<void> {
   }
 
   for (const { email, refs } of byUser.values()) {
-    const mine = fresh.filter(o => refs.has(o.canonical_name));
+    // Dedupe look-alike rows (same product/brand/store/price/window) so an offer
+    // doesn't appear twice in the digest.
+    const seen = new Set<string>();
+    const mine = fresh.filter(o => refs.has(o.canonical_name)).filter(o => {
+      const k = `${o.canonical_name}|${o.brand ?? ''}|${o.store ?? ''}|${o.price ?? ''}|${o.valid_until ?? ''}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
     if (!mine.length) continue;
     try {
       const mail = offerDigestEmail({ offers: mine, appUrl });

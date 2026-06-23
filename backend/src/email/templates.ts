@@ -166,7 +166,8 @@ function offerCard(o: DigestOffer): string {
     : '';
   const old = o.old_price ? `<span style="font-size:12px;color:${C.faint};text-decoration:line-through;margin-left:6px;">${esc(o.old_price)}</span>` : '';
   const meta = [o.store ? esc(o.store) : '', o.valid_until ? esc(o.valid_until) : ''].filter(Boolean).join(' · ');
-  const name = `${esc(o.canonical_name)}${o.brand ? ` <span style="color:${C.faint};font-weight:400;">${esc(o.brand)}</span>` : ''}`;
+  const brand = o.brand && !/^thisisnobrand\d*$/i.test(o.brand.trim()) ? o.brand : null;
+  const name = `${esc(o.canonical_name)}${brand ? ` <span style="color:${C.faint};font-weight:400;">${esc(brand)}</span>` : ''}`;
   const wrap = (html: string) => o.source_url
     ? `<a href="${esc(o.source_url)}" target="_blank" style="text-decoration:none;color:inherit;display:block;">${html}</a>`
     : html;

@@ -10,6 +10,14 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
 let keyCache: { apiKey: string; clientKey: string; at: number } | null = null;
 const KEY_TTL = 6 * 60 * 60 * 1000;
 
+/** Marktguru returns a sentinel brand ("thisisnobrand123") for brand-less
+ *  products. Treat that (and blanks) as no brand, else it leaks into offer emails
+ *  as e.g. "Bananen thisisnobrand123". */
+export function cleanBrand(b: string | null | undefined): string | null {
+  const s = (b ?? '').trim();
+  return !s || /^thisisnobrand\d*$/i.test(s) ? null : s;
+}
+
 async function getKeys(): Promise<{ apiKey: string; clientKey: string }> {
   if (keyCache && Date.now() - keyCache.at < KEY_TTL) return keyCache;
   const res = await fetch(HOMEPAGE, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(15_000) });
@@ -75,7 +83,7 @@ export async function searchMarktguru(query: string, zipCode: string, limit = 20
     return {
       id: r.id,
       name: r.product?.name ?? r.description ?? '',
-      brand: r.brand?.name ?? null,
+      brand: cleanBrand(r.brand?.name),
       retailers: (r.advertisers ?? []).map(a => a.name ?? '').filter(Boolean),
       chainSlug: slug,
       price: typeof r.price === 'number' ? r.price : null,
