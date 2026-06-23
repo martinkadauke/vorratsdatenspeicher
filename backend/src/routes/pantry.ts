@@ -536,13 +536,16 @@ export function pantryRoutes(app: FastifyInstance): void {
     }
     let notified = 0;
     for (const u of users) {
-      if ((u.id as number) === req.user!.id) continue; // notify the recipients, not the sender
-      await notify('shopping.shared', { by, count: items.length }, u.id as number);
+      // Push the whole household incl. the sender (they may have push on another
+      // device, and it makes the feature self-testable). The in-app bell still skips
+      // the sender — no point badging your own action.
       await sendPush(u.id as number, {
         title: '🛒 Einkaufsliste',
         body: `${by} hat die Einkaufsliste geteilt (${items.length} Artikel)`,
         url: '/shopping', tag: 'shopping-shared',
       });
+      if ((u.id as number) === req.user!.id) continue;
+      await notify('shopping.shared', { by, count: items.length }, u.id as number);
       notified++;
     }
     return { ok: true, emailed, notified, smtp };

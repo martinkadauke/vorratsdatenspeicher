@@ -611,7 +611,10 @@
       "iosHint": "iPhone/iPad: funktioniert nur, wenn die App zum Home-Bildschirm hinzugefügt ist (iOS 16.4+).",
       "unsupported": "Dieser Browser unterstützt keine Push-Benachrichtigungen.",
       "denied": "Benachrichtigungen sind im Browser blockiert. Bitte in den Browser-Einstellungen für diese Seite erlauben.",
-      "failed": "Push konnte nicht aktiviert werden."
+      "failed": "Push konnte nicht aktiviert werden.",
+      "test": "Test senden",
+      "testSent": "Test gesendet ({{n}} Gerät(e)).",
+      "testNone": "Keine aktive Subscription auf diesem Konto."
     },
     "helpHeading": "Hilfe & Einführung",
     "replayTour": "Tour erneut starten",

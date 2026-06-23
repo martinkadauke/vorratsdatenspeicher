@@ -122,18 +122,27 @@ function PushSettings() {
   const [on, setOn] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [testMsg, setTestMsg] = useState<string | null>(null);
 
   useEffect(() => { void pushStatus().then(setOn).catch(() => { /* ignore */ }); }, []);
 
   const toggle = async (v: boolean) => {
     if (busy) return;
-    setBusy(true); setErr(null);
+    setBusy(true); setErr(null); setTestMsg(null);
     try {
       if (v) await enablePush(); else await disablePush();
       setOn(v);
     } catch (e) {
       setErr((e as Error).message === 'denied' ? t('profile.push.denied') : t('profile.push.failed'));
     } finally { setBusy(false); }
+  };
+
+  const sendTest = async () => {
+    setTestMsg(null);
+    try {
+      const r = await api<{ sent: number }>('/api/push/test', { method: 'POST' });
+      setTestMsg(r.sent > 0 ? t('profile.push.testSent', { n: r.sent }) : t('profile.push.testNone'));
+    } catch { setTestMsg(t('profile.push.failed')); }
   };
 
   return (
@@ -150,6 +159,12 @@ function PushSettings() {
             <Switch checked={on} onChange={toggle} />
           </div>
           {err && <p className="text-xs text-red-500">{err}</p>}
+          {on && (
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="secondary" onClick={sendTest}>{t('profile.push.test')}</Button>
+              {testMsg && <span className="text-xs text-zinc-600 dark:text-zinc-300">{testMsg}</span>}
+            </div>
+          )}
           <p className="text-[11px] text-zinc-400">{t('profile.push.iosHint')}</p>
         </>
       ) : (

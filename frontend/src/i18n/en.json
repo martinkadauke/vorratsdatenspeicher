@@ -611,7 +611,10 @@
       "iosHint": "iPhone/iPad: only works when the app is added to the home screen (iOS 16.4+).",
       "unsupported": "This browser doesn't support push notifications.",
       "denied": "Notifications are blocked in the browser. Please allow them for this site in your browser settings.",
-      "failed": "Could not enable push."
+      "failed": "Could not enable push.",
+      "test": "Send test",
+      "testSent": "Test sent ({{n}} device(s)).",
+      "testNone": "No active subscription on this account."
     },
     "helpHeading": "Help & introduction",
     "replayTour": "Replay tour",
