@@ -133,8 +133,24 @@ async function processMessage(mb: MailboxRow, kontoId: number | null, raw: Buffe
   const datum = parsed.date ? parsed.date.toISOString().slice(0, 10) : null;
   const privateFor = mb.make_private ? mb.user_id : null;
   const atts = (parsed.attachments ?? []).filter(a => a.content && ((a.size ?? a.content.length) > 0));
-  const pdf = atts.find(a => (a.contentType ?? '').toLowerCase().includes('pdf') || /\.pdf$/i.test(a.filename ?? ''));
-  const img = atts.find(a => (a.contentType ?? '').toLowerCase().startsWith('image/'));
+  // Pick the attachment most likely to BE the invoice. The actual invoice is often
+  // in the e-mail body while the only PDF attached is legal boilerplate (AGB / terms
+  // / cancellation / privacy) or an inline HTML logo — those must not be OCR'd in
+  // place of the real invoice. Drop inline (cid-referenced) parts + boilerplate by
+  // filename (unless the name also says "Rechnung"), and prefer an invoice-named PDF.
+  const NONINVOICE = /(agb|gtc|terms|conditions|widerruf|datenschutz|privacy|policy|sepa[-_ ]?mandat|impressum)/i;
+  const INVOICE = /(rechnung|invoice|beleg|quittung|receipt|bestell|order|lieferschein)/i;
+  const isPdf = (a: { contentType?: string; filename?: string }) =>
+    (a.contentType ?? '').toLowerCase().includes('pdf') || /\.pdf$/i.test(a.filename ?? '');
+  const isImg = (a: { contentType?: string }) => (a.contentType ?? '').toLowerCase().startsWith('image/');
+  const usable = atts.filter(a => {
+    const fn = a.filename ?? '';
+    if ((a as { related?: boolean }).related) return false;       // inline logo/signature
+    if (NONINVOICE.test(fn) && !INVOICE.test(fn)) return false;    // legal boilerplate
+    return true;
+  });
+  const pdf = usable.find(a => isPdf(a) && INVOICE.test(a.filename ?? '')) ?? usable.find(a => isPdf(a));
+  const img = usable.find(a => isImg(a));
 
   let einkaufId: number | null = null;
   let status = 'imported';
