@@ -240,6 +240,7 @@ export async function sendOfferDigests(): Promise<void> {
   ` as unknown as OfferRow[];
   if (!fresh.length) return;
   const appUrl = await getConfig('app.base_url');
+  const emailEnabled = await getConfig('offers.email_enabled'); // global admin kill-switch
 
   // user → email, and which canonicals they subscribed to
   // No email filter: users may opt for push only. Email is sent only when present.
@@ -265,7 +266,7 @@ export async function sendOfferDigests(): Promise<void> {
       return true;
     });
     if (!mine.length) continue;
-    if (email) {
+    if (email && emailEnabled) {
       try {
         const mail = offerDigestEmail({ offers: mine, appUrl });
         await sendMail(email, mail.subject, mail.text, mail.html);

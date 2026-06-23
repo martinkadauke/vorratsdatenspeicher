@@ -81,6 +81,7 @@ export function Admin() {
     { id: 'family', title: t('admin.family'), keywords: 'familie family mitglieder members verbraucher consumer haushalt personen', el: <FamilySection /> },
     { id: 'users', title: t('admin.users'), keywords: 'benutzer users nutzer einladen invite admin rolle role zugang access passwort', el: <UsersSection /> },
     { id: 'smtp', title: 'SMTP / E-Mail', keywords: 'smtp email e-mail mail benachrichtigung notification versand digest server port', el: <SmtpSection /> },
+    { id: 'notifications', title: t('admin.notifTitle'), keywords: 'benachrichtigung notification push email e-mail angebote offers einkaufsliste shopping kanal channel global', el: <NotificationsSection /> },
   ];
   const byId = new Map(sections.filter(s => s.show !== false).map(s => [s.id, s] as const));
 
@@ -1112,6 +1113,39 @@ function DataManagementSection() {
 
 // ── Household address + offer radius + offer-only categories ──────────────
 const RADII = [5, 10, 20, 50];
+
+/** Global notification-channel kill-switches. */
+function NotificationsSection() {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const { data: config } = useQuery({
+    queryKey: ['config'],
+    queryFn: () => api<Record<string, unknown>>('/api/config'),
+  });
+  const setCfg = useMutation({
+    mutationFn: ({ key, value }: { key: string; value: unknown }) =>
+      api(`/api/config/${key}`, { method: 'PUT', body: { value } }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['config'] }),
+  });
+  if (!config) return <Section title={t('admin.notifTitle')}><Spinner /></Section>;
+  const offersEmail = config['offers.email_enabled'] !== false;   // default on
+  const shoppingPush = config['shopping.push_enabled'] !== false;  // default on
+  return (
+    <Section title={t('admin.notifTitle')}>
+      <div className="flex flex-col gap-4">
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('admin.notifHint')}</p>
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium">{t('admin.notifOffersEmail')}</span>
+          <Switch checked={offersEmail} onChange={v => setCfg.mutate({ key: 'offers.email_enabled', value: v })} />
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium">{t('admin.notifShoppingPush')}</span>
+          <Switch checked={shoppingPush} onChange={v => setCfg.mutate({ key: 'shopping.push_enabled', value: v })} />
+        </div>
+      </div>
+    </Section>
+  );
+}
 
 function OffersSection() {
   const { t } = useTranslation();

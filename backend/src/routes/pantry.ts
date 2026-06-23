@@ -6,6 +6,7 @@ import { estimateVorrat } from '../lib/vorrat.js';
 import { sendMail, smtpConfigured } from '../mailer.js';
 import { notify } from '../notify.js';
 import { sendPush } from '../push.js';
+import { getConfig } from '../config.js';
 
 /** "LIDL", "Lidl GmbH" → "lidl" (mirrors routes/stores.ts normalizeStore). */
 function normalizeStore(raw: string): string {
@@ -535,11 +536,12 @@ export function pantryRoutes(app: FastifyInstance): void {
       }
     }
     let notified = 0;
+    const pushEnabled = await getConfig('shopping.push_enabled'); // global admin kill-switch
     for (const u of users) {
       // Push the whole household incl. the sender (they may have push on another
       // device, and it makes the feature self-testable). The in-app bell still skips
       // the sender — no point badging your own action.
-      await sendPush(u.id as number, {
+      if (pushEnabled) await sendPush(u.id as number, {
         title: '🛒 Einkaufsliste',
         body: `${by} hat die Einkaufsliste geteilt (${items.length} Artikel)`,
         url: '/shopping', tag: 'shopping-shared',

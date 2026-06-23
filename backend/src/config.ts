@@ -65,6 +65,9 @@ export interface AppConfig {
   'push.vapid_public': string;
   'push.vapid_private': string;
   'push.vapid_subject': string;
+  // notification channel kill-switches (global)
+  'offers.email_enabled': boolean;   // send the offer digest by email
+  'shopping.push_enabled': boolean;  // send a push when a shopping list is shared
 }
 
 const DEFAULTS: AppConfig = {
@@ -118,6 +121,8 @@ const DEFAULTS: AppConfig = {
   'push.vapid_public': '',
   'push.vapid_private': '',
   'push.vapid_subject': '',
+  'offers.email_enabled': true,
+  'shopping.push_enabled': true,
 };
 
 export async function getConfig<K extends keyof AppConfig>(key: K): Promise<AppConfig[K]> {
