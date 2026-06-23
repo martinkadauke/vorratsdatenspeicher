@@ -61,6 +61,10 @@ export interface AppConfig {
   // kill-switch + schedule. Inert when no mailbox is configured.
   'mailimport.enabled': boolean;
   'mailimport.cron': string;
+  // web push (browser notifications) — VAPID keypair, generated + stored on first use
+  'push.vapid_public': string;
+  'push.vapid_private': string;
+  'push.vapid_subject': string;
 }
 
 const DEFAULTS: AppConfig = {
@@ -111,6 +115,9 @@ const DEFAULTS: AppConfig = {
   'model_review.cron': '0 5 1,15 * *', // ~bi-weekly: 1st & 15th, 05:00
   'mailimport.enabled': true,
   'mailimport.cron': '*/15 * * * *', // every 15 min — snappy "I forwarded it → it appears"
+  'push.vapid_public': '',
+  'push.vapid_private': '',
+  'push.vapid_subject': '',
 };
 
 export async function getConfig<K extends keyof AppConfig>(key: K): Promise<AppConfig[K]> {

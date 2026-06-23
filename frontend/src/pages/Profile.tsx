@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Sparkles, Inbox } from 'lucide-react';
+import { LogOut, Sparkles, Inbox, Bell } from 'lucide-react';
 import { api } from '../api/client';
 import { useAuth } from '../context/auth';
 import { setLanguage } from '../i18n';
+import { pushSupported, pushStatus, enablePush, disablePush } from '../lib/push';
 import { Card, Button, Input, Label, Select, Switch } from '../components/ui';
 import { EmojiPicker } from '../components/EmojiPicker';
 import { confirm } from '../components/Confirm';
@@ -76,6 +77,8 @@ export function Profile() {
         </div>
       </Card>
 
+      <PushSettings />
+
       <MailboxSettings />
 
       <Card className="flex flex-col gap-3 p-4">
@@ -109,6 +112,50 @@ export function Profile() {
         <LogOut size={16} /> {t('nav.logout')}
       </Button>
     </div>
+  );
+}
+
+/** Web Push opt-in (browser notifications) for offers + shared shopping lists. */
+function PushSettings() {
+  const { t } = useTranslation();
+  const supported = pushSupported();
+  const [on, setOn] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => { void pushStatus().then(setOn).catch(() => { /* ignore */ }); }, []);
+
+  const toggle = async (v: boolean) => {
+    if (busy) return;
+    setBusy(true); setErr(null);
+    try {
+      if (v) await enablePush(); else await disablePush();
+      setOn(v);
+    } catch (e) {
+      setErr((e as Error).message === 'denied' ? t('profile.push.denied') : t('profile.push.failed'));
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Card className="flex flex-col gap-2 p-4">
+      <div className="flex items-center gap-2">
+        <Bell size={16} className="text-emerald-600 dark:text-emerald-500" />
+        <h2 className="text-base font-semibold">{t('profile.push.heading')}</h2>
+      </div>
+      <p className="text-xs text-zinc-500">{t('profile.push.intro')}</p>
+      {supported ? (
+        <>
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium">{t('profile.push.enable')}</span>
+            <Switch checked={on} onChange={toggle} />
+          </div>
+          {err && <p className="text-xs text-red-500">{err}</p>}
+          <p className="text-[11px] text-zinc-400">{t('profile.push.iosHint')}</p>
+        </>
+      ) : (
+        <p className="text-xs text-zinc-500">{t('profile.push.unsupported')}</p>
+      )}
+    </Card>
   );
 }
 

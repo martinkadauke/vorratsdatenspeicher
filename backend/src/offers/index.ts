@@ -10,6 +10,7 @@ import { searxngSearchRaw } from '../llm/searxng.js';
 import { searchMarktguru, type MarktguruOffer } from './marktguru.js';
 import { sendMail } from '../mailer.js';
 import { offerDigestEmail } from '../email/templates.js';
+import { sendPush } from '../push.js';
 
 const fold = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
@@ -241,18 +242,19 @@ export async function sendOfferDigests(): Promise<void> {
   const appUrl = await getConfig('app.base_url');
 
   // user → email, and which canonicals they subscribed to
+  // No email filter: users may opt for push only. Email is sent only when present.
   const subs = await sql`
     SELECT s.ref, u.id AS user_id, u.email
     FROM offer_subscription s JOIN users u ON u.id = s.user_id
-    WHERE s.kind IN ('artikel', 'watch') AND u.email IS NOT NULL AND u.email <> ''`;
-  const byUser = new Map<number, { email: string; refs: Set<string> }>();
+    WHERE s.kind IN ('artikel', 'watch')`;
+  const byUser = new Map<number, { email: string | null; refs: Set<string> }>();
   for (const s of subs) {
-    const e = byUser.get(s.user_id as number) ?? { email: s.email as string, refs: new Set<string>() };
+    const e = byUser.get(s.user_id as number) ?? { email: (s.email as string | null) ?? null, refs: new Set<string>() };
     e.refs.add(s.ref as string);
     byUser.set(s.user_id as number, e);
   }
 
-  for (const { email, refs } of byUser.values()) {
+  for (const [userId, { email, refs }] of byUser.entries()) {
     // Dedupe look-alike rows (same product/brand/store/price/window) so an offer
     // doesn't appear twice in the digest.
     const seen = new Set<string>();
@@ -263,10 +265,19 @@ export async function sendOfferDigests(): Promise<void> {
       return true;
     });
     if (!mine.length) continue;
+    if (email) {
+      try {
+        const mail = offerDigestEmail({ offers: mine, appUrl });
+        await sendMail(email, mail.subject, mail.text, mail.html);
+      } catch (e) { console.error('[offers] digest mail failed:', (e as Error).message); }
+    }
     try {
-      const mail = offerDigestEmail({ offers: mine, appUrl });
-      await sendMail(email, mail.subject, mail.text, mail.html);
-    } catch (e) { console.error('[offers] digest mail failed:', (e as Error).message); }
+      await sendPush(userId, {
+        title: `Neue Angebote 🛒 (${mine.length})`,
+        body: mine.slice(0, 3).map(o => o.canonical_name).join(', ') + (mine.length > 3 ? ' …' : ''),
+        url: '/offers', tag: 'offers',
+      });
+    } catch (e) { console.error('[offers] digest push failed:', (e as Error).message); }
   }
 
   await sql`UPDATE offer SET notified = TRUE WHERE id IN ${sql(fresh.map(o => o.id))}`;

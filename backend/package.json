@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@fastify/static": "^8.0.3",
+    "@types/web-push": "^3.6.4",
     "bcryptjs": "^2.4.3",
     "fastify": "^5.1.0",
     "imapflow": "^1.4.2",
@@ -18,7 +19,8 @@
     "mailparser": "^3.9.11",
     "node-cron": "^3.0.3",
     "nodemailer": "^8.0.11",
-    "postgres": "^3.4.5"
+    "postgres": "^3.4.5",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

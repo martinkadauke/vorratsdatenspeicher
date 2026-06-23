@@ -5,6 +5,7 @@ import { loadUnits, normalizeEinheit, comparisonGroups, type PriceLine } from '.
 import { estimateVorrat } from '../lib/vorrat.js';
 import { sendMail, smtpConfigured } from '../mailer.js';
 import { notify } from '../notify.js';
+import { sendPush } from '../push.js';
 
 /** "LIDL", "Lidl GmbH" → "lidl" (mirrors routes/stores.ts normalizeStore). */
 function normalizeStore(raw: string): string {
@@ -537,6 +538,11 @@ export function pantryRoutes(app: FastifyInstance): void {
     for (const u of users) {
       if ((u.id as number) === req.user!.id) continue; // notify the recipients, not the sender
       await notify('shopping.shared', { by, count: items.length }, u.id as number);
+      await sendPush(u.id as number, {
+        title: '🛒 Einkaufsliste',
+        body: `${by} hat die Einkaufsliste geteilt (${items.length} Artikel)`,
+        url: '/shopping', tag: 'shopping-shared',
+      });
       notified++;
     }
     return { ok: true, emailed, notified, smtp };

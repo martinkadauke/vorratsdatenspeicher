@@ -604,6 +604,15 @@
     "oldPw": "Altes Passwort",
     "newPw": "Neues Passwort",
     "saved": "Gespeichert",
+    "push": {
+      "heading": "Push-Benachrichtigungen",
+      "intro": "Browser-Benachrichtigungen für neue Angebote (1×/Tag) und wenn jemand die Einkaufsliste teilt.",
+      "enable": "Auf diesem Gerät aktivieren",
+      "iosHint": "iPhone/iPad: funktioniert nur, wenn die App zum Home-Bildschirm hinzugefügt ist (iOS 16.4+).",
+      "unsupported": "Dieser Browser unterstützt keine Push-Benachrichtigungen.",
+      "denied": "Benachrichtigungen sind im Browser blockiert. Bitte in den Browser-Einstellungen für diese Seite erlauben.",
+      "failed": "Push konnte nicht aktiviert werden."
+    },
     "helpHeading": "Hilfe & Einführung",
     "replayTour": "Tour erneut starten",
     "export": "Daten-Export",

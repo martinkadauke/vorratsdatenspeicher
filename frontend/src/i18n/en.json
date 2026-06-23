@@ -604,6 +604,15 @@
     "oldPw": "Old password",
     "newPw": "New password",
     "saved": "Saved",
+    "push": {
+      "heading": "Push notifications",
+      "intro": "Browser notifications for new offers (once a day) and when someone shares the shopping list.",
+      "enable": "Enable on this device",
+      "iosHint": "iPhone/iPad: only works when the app is added to the home screen (iOS 16.4+).",
+      "unsupported": "This browser doesn't support push notifications.",
+      "denied": "Notifications are blocked in the browser. Please allow them for this site in your browser settings.",
+      "failed": "Could not enable push."
+    },
     "helpHeading": "Help & introduction",
     "replayTour": "Replay tour",
     "export": "Data export",

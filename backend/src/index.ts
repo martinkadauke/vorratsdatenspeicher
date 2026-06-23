@@ -18,6 +18,7 @@ import { spendingRoutes } from './routes/spending.js';
 import { goalRoutes } from './routes/goals.js';
 import { pantryRoutes } from './routes/pantry.js';
 import { nameRoutes } from './routes/names.js';
+import { pushRoutes } from './routes/push.js';
 import { queueRoutes } from './routes/queue.js';
 import { pruefenRoutes } from './routes/pruefen.js';
 import { notificationRoutes } from './routes/notifications.js';
@@ -114,6 +115,7 @@ async function main(): Promise<void> {
   modelReviewRoutes(app);
   analyticsRoutes(app);
   mailboxRoutes(app);
+  pushRoutes(app);
 
   const receiptsDir = process.env.RECEIPTS_LOCAL_PATH ?? '/receipts';
 
