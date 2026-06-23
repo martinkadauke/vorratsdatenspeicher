@@ -446,10 +446,15 @@
   },
   "admin": {
     "title": "Admin",
-    "webshopEmail": {
-      "title": "Webshop-Belege per E-Mail",
-      "live": "Aktiv",
-      "done": "Verfügbar: Jede Person verbindet ihr eigenes E-Mail-Postfach im Profil (Abschnitt E-Mail-Postfach). Weitergeleitete Webshop-Bestellbestätigungen/Rechnungen werden dann automatisch als Belege verarbeitet."
+    "integrations": {
+      "title": "VDS verbinden",
+      "intro": "So bindest du externe Quellen an:",
+      "mailboxTitle": "E-Mail-Belege",
+      "mailboxBody": "Jede Person verbindet im Profil ihr eigenes Postfach. Weitergeleitete oder eingegangene Rechnungen/Bestellbestätigungen werden automatisch als Belege erfasst.",
+      "smtpTitle": "E-Mail-Versand",
+      "smtpBody": "In der SMTP-Sektion einrichten, damit VDS Benachrichtigungen (Angebote, geteilte Einkaufslisten) per E-Mail verschicken kann.",
+      "offersTitle": "Angebote (Marktguru)",
+      "offersBody": "Laufen ohne Einrichtung — täglich automatisch geholt und per E-Mail/Push gemeldet. Adresse & Warengruppen in der Haushalt-Sektion verfeinern die Treffer."
     },
     "searchPlaceholder": "Einstellungen durchsuchen…",
     "searchNoResults": "Keine passenden Einstellungen gefunden.",
@@ -572,7 +577,7 @@
     "offerCategoriesHint": "Zusätzliche Warengruppen, die du nur für Angebote willst (z.B. Gartenmöbel, Werkzeug) — nicht in den normalen Artikel-Kategorien.",
     "offerCategoriesPlaceholder": "z.B. Gartenmöbel",
     "offerCategoriesEmpty": "Noch keine zusätzlichen Warengruppen.",
-    "offersWip": "Hinweis: Adresse, Radius & Warengruppen werden gespeichert. Die eigentliche Prospekt-Suche + Benachrichtigung folgt (WIP).",
+    "offersNote": "Angebote werden täglich automatisch über Marktguru geholt (ohne API-Key) und per E-Mail/Push gemeldet. Adresse, Radius & Warengruppen verfeinern die Treffer.",
     "deepseekUrl": "DeepSeek URL",
     "deepseekApiKey": "DeepSeek API-Key",
     "anthropicUrl": "Anthropic URL",

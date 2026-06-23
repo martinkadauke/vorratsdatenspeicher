@@ -446,10 +446,15 @@
   },
   "admin": {
     "title": "Admin",
-    "webshopEmail": {
-      "title": "Webshop receipts via email",
-      "live": "Live",
-      "done": "Available: each person connects their own mailbox in Profile under “Email mailbox”. Forwarded webshop order/receipt emails are then processed as receipts automatically."
+    "integrations": {
+      "title": "Connect VDS",
+      "intro": "How to wire up external sources:",
+      "mailboxTitle": "Email receipts",
+      "mailboxBody": "Each person connects their own mailbox in Profile. Forwarded or incoming invoices/order confirmations are filed as receipts automatically.",
+      "smtpTitle": "Email sending",
+      "smtpBody": "Set up in the SMTP section so VDS can send notifications (offers, shared shopping lists) by email.",
+      "offersTitle": "Offers (Marktguru)",
+      "offersBody": "Work with no setup — fetched daily automatically and announced by email/push. Address & categories in the Household section refine the matches."
     },
     "searchPlaceholder": "Search settings…",
     "searchNoResults": "No matching settings found.",
@@ -572,7 +577,7 @@
     "offerCategoriesHint": "Extra categories you only want for offers (e.g. garden furniture, tools) — not part of the normal product categories.",
     "offerCategoriesPlaceholder": "e.g. garden furniture",
     "offerCategoriesEmpty": "No extra categories yet.",
-    "offersWip": "Note: address, radius & categories are saved. The actual leaflet search + notification is still WIP.",
+    "offersNote": "Offers are fetched daily from Marktguru automatically (no API key needed) and announced by email/push. Address, radius & categories refine the matches.",
     "deepseekUrl": "DeepSeek URL",
     "deepseekApiKey": "DeepSeek API key",
     "anthropicUrl": "Anthropic URL",

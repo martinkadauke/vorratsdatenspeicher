@@ -133,11 +133,13 @@ export function Admin() {
 
       {!query && (
         <Card className="min-w-0 p-3 sm:p-4">
-          <div className="mb-1 flex items-center gap-2">
-            <h2 className="text-base font-semibold">{t('admin.webshopEmail.title')}</h2>
-            <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400">{t('admin.webshopEmail.live')}</span>
-          </div>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">{t('admin.webshopEmail.done')}</p>
+          <h2 className="mb-1 text-base font-semibold">{t('admin.integrations.title')}</h2>
+          <p className="mb-2 text-sm text-zinc-500 dark:text-zinc-400">{t('admin.integrations.intro')}</p>
+          <ul className="flex list-none flex-col gap-2 text-sm text-zinc-600 dark:text-zinc-300">
+            <li><span className="mr-1">📧</span><b>{t('admin.integrations.mailboxTitle')}</b> — {t('admin.integrations.mailboxBody')}</li>
+            <li><span className="mr-1">✉️</span><b>{t('admin.integrations.smtpTitle')}</b> — {t('admin.integrations.smtpBody')}</li>
+            <li><span className="mr-1">🛒</span><b>{t('admin.integrations.offersTitle')}</b> — {t('admin.integrations.offersBody')}</li>
+          </ul>
         </Card>
       )}
     </div>
@@ -1267,8 +1269,8 @@ function OffersSection() {
           </div>
         </div>
 
-        <p className="rounded-lg bg-amber-50 px-2 py-1.5 text-xs text-amber-700 dark:bg-amber-950/40 dark:text-amber-400">
-          {t('admin.offersWip')}
+        <p className="rounded-lg bg-zinc-100 px-2 py-1.5 text-xs text-zinc-500 dark:bg-zinc-800/60 dark:text-zinc-400">
+          {t('admin.offersNote')}
         </p>
       </div>
     </Section>
