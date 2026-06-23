@@ -121,12 +121,24 @@ async function processMessage(mb: MailboxRow, kontoId: number | null, raw: Buffe
     || `nomsgid-${mb.user_id}-${crypto.createHash('sha1').update(raw).digest('hex')}`;
   const subject = (parsed.subject ?? '').slice(0, 500) || null;
 
-  // Claim the message atomically; if another run already has it, stop here.
+  // Claim the message atomically. A new message inserts; a previously FAILED or
+  // SKIPPED one is re-claimed (so re-labelling/forwarding retries it after a fix) —
+  // but a SUCCESSFUL import stays blocked, so re-fetching can never duplicate it.
+  // Both the INSERT (new) and the UPDATE (retry, single-winner via the row lock +
+  // status guard) are race-safe vs. a concurrent manual run.
   const claim = await sql`
-    INSERT INTO imported_email (user_id, message_id, subject, status)
-    VALUES (${mb.user_id}, ${messageId}, ${subject}, 'processing')
-    ON CONFLICT (user_id, message_id) DO NOTHING
-    RETURNING id`;
+    WITH ins AS (
+      INSERT INTO imported_email (user_id, message_id, subject, status)
+      VALUES (${mb.user_id}, ${messageId}, ${subject}, 'processing')
+      ON CONFLICT (user_id, message_id) DO NOTHING
+      RETURNING id
+    ), upd AS (
+      UPDATE imported_email SET status = 'processing', reason = NULL, subject = ${subject}
+      WHERE user_id = ${mb.user_id} AND message_id = ${messageId}
+        AND status IN ('failed', 'skipped')
+      RETURNING id
+    )
+    SELECT id FROM ins UNION ALL SELECT id FROM upd`;
   if (!claim.length) return false;
   const ledgerId = claim[0].id as number;
 
@@ -151,6 +163,8 @@ async function processMessage(mb: MailboxRow, kontoId: number | null, raw: Buffe
   });
   const pdf = usable.find(a => isPdf(a) && INVOICE.test(a.filename ?? '')) ?? usable.find(a => isPdf(a));
   const img = usable.find(a => isImg(a));
+  const bodyText = (parsed.text && parsed.text.trim()) || (parsed.html ? stripHtml(parsed.html) : '');
+  const bodyPrompt = `Betreff: ${parsed.subject ?? ''}\nVon: ${parsed.from?.text ?? ''}\n\n${bodyText}`;
 
   let einkaufId: number | null = null;
   let status = 'imported';
@@ -169,33 +183,43 @@ async function processMessage(mb: MailboxRow, kontoId: number | null, raw: Buffe
         VALUES (${datum ?? todayISO()}, ${subject}, 'email', ${kontoId}, ${bildPfad}, ${privateFor}, TRUE)
         RETURNING id`;
       einkaufId = row.id as number;
+      let attItems = 0;
       try {
-        const r = await ocrAndStore(einkaufId, bildPfad);
-        madeItems = r.items > 0;
-        if (!madeItems) reason = 'attachment OCR returned no line items';
-      } finally {
+        attItems = (await ocrAndStore(einkaufId, bildPfad)).items;
+      } catch { attItems = 0; } // attachment unreadable or not a receipt (e.g. AGB) → try body
+      finally {
         await sql`UPDATE einkauf SET ocr_pending = FALSE WHERE id = ${einkaufId}`.catch(() => {});
       }
-    } else {
-      const body = (parsed.text && parsed.text.trim()) || (parsed.html ? stripHtml(parsed.html) : '');
-      if (!body) {
-        status = 'skipped';
-        reason = 'no attachment and empty body';
-      } else {
-        const extracted = await ocrFromText(`Betreff: ${parsed.subject ?? ''}\nVon: ${parsed.from?.text ?? ''}\n\n${body}`);
-        if (!extracted.ladenkette && !(extracted.artikel?.length)) {
-          status = 'skipped';
-          reason = 'no receipt data found in e-mail body';
-        } else {
-          const [row] = await sql`
-            INSERT INTO einkauf (datum, roh_ladenname, quelle, konto_id, private_for_user_id)
-            VALUES (${datum ?? todayISO()}, ${subject}, 'email', ${kontoId}, ${privateFor})
-            RETURNING id`;
-          einkaufId = row.id as number;
-          const r = await storeOcrResult(einkaufId, extracted);
-          madeItems = r.items > 0;
+      if (attItems > 0) {
+        madeItems = true;
+      } else if (bodyText) {
+        // The attachment wasn't the invoice — the real one is in the body. Fill the
+        // same receipt from it (correct items + date) and drop the misleading image.
+        const extracted = await ocrFromText(bodyPrompt);
+        if (extracted.ladenkette || extracted.artikel?.length) {
+          madeItems = (await storeOcrResult(einkaufId, extracted)).items > 0;
+          if (madeItems) await sql`UPDATE einkauf SET bild_pfad = NULL WHERE id = ${einkaufId}`.catch(() => {});
         }
+        if (!madeItems) reason = 'attachment + e-mail body had no usable line items';
+      } else {
+        reason = 'attachment OCR returned no line items';
       }
+    } else if (bodyText) {
+      const extracted = await ocrFromText(bodyPrompt);
+      if (!extracted.ladenkette && !(extracted.artikel?.length)) {
+        status = 'skipped';
+        reason = 'no receipt data found in e-mail body';
+      } else {
+        const [row] = await sql`
+          INSERT INTO einkauf (datum, roh_ladenname, quelle, konto_id, private_for_user_id)
+          VALUES (${datum ?? todayISO()}, ${subject}, 'email', ${kontoId}, ${privateFor})
+          RETURNING id`;
+        einkaufId = row.id as number;
+        madeItems = (await storeOcrResult(einkaufId, extracted)).items > 0;
+      }
+    } else {
+      status = 'skipped';
+      reason = 'no attachment and empty body';
     }
   } catch (e) {
     status = 'failed';
