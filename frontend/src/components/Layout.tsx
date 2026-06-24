@@ -92,7 +92,7 @@ export function Layout() {
     <div className="min-h-dvh overflow-x-clip">
       {/* Header */}
       <header className="sticky top-0 z-30 flex items-center justify-between border-b border-zinc-200 bg-white/80 px-3 py-2.5 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/80 sm:px-4">
-        <NavLink to="/analytics" className="flex items-center gap-2 text-base font-bold tracking-tight">
+        <NavLink to="/receipts" className="flex items-center gap-2 text-base font-bold tracking-tight">
           <span className="text-xl">🗄️</span>
           <span>Vorratsdatenspeicher</span>
           {envBadge && (

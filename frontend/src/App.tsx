@@ -50,7 +50,7 @@ export function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/reset" element={<Reset />} />
         <Route element={<Protected><Layout /></Protected>}>
-          <Route path="/" element={<Navigate to="/analytics" replace />} />
+          <Route path="/" element={<Navigate to="/receipts" replace />} />
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/receipts" element={<Receipts />} />
           <Route path="/receipts/:id" element={<ReceiptDetailPage />} />
