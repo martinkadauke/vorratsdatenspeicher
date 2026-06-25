@@ -240,7 +240,8 @@ export async function sendOfferDigests(): Promise<void> {
   ` as unknown as OfferRow[];
   if (!fresh.length) return;
   const appUrl = await getConfig('app.base_url');
-  const emailEnabled = await getConfig('offers.email_enabled'); // global admin kill-switch
+  const emailEnabled = await getConfig('offers.email_enabled'); // global admin kill-switches
+  const pushEnabled = await getConfig('offers.push_enabled');
 
   // user → email, and which canonicals they subscribed to
   // No email filter: users may opt for push only. Email is sent only when present.
@@ -272,13 +273,15 @@ export async function sendOfferDigests(): Promise<void> {
         await sendMail(email, mail.subject, mail.text, mail.html);
       } catch (e) { console.error('[offers] digest mail failed:', (e as Error).message); }
     }
-    try {
-      await sendPush(userId, {
-        title: `Neue Angebote 🛒 (${mine.length})`,
-        body: mine.slice(0, 3).map(o => o.canonical_name).join(', ') + (mine.length > 3 ? ' …' : ''),
-        url: '/offers', tag: 'offers',
-      });
-    } catch (e) { console.error('[offers] digest push failed:', (e as Error).message); }
+    if (pushEnabled) {
+      try {
+        await sendPush(userId, {
+          title: 'Neue Angebote für dich 🛒',
+          body: `${mine.length} Treffer: ${mine.slice(0, 3).map(o => o.canonical_name).join(', ')}${mine.length > 3 ? ' …' : ''}`,
+          url: '/offers', tag: 'offers',
+        });
+      } catch (e) { console.error('[offers] digest push failed:', (e as Error).message); }
+    }
   }
 
   await sql`UPDATE offer SET notified = TRUE WHERE id IN ${sql(fresh.map(o => o.id))}`;

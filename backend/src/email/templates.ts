@@ -19,6 +19,12 @@ const C = {
 const esc = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
+// Public base URL for assets referenced in emails (the logo). Set on boot from
+// app.base_url so the hosted icon resolves in external clients like Gmail; falls
+// back to the 🗄️ wordmark when unknown.
+let EMAIL_BASE = '';
+export function setEmailBaseUrl(url: string): void { EMAIL_BASE = (url || '').replace(/\/$/, ''); }
+
 /** Wraps inner content in the branded card + outer background. */
 function layout(opts: { preheader: string; heading: string; inner: string }): string {
   return `<!DOCTYPE html>
@@ -38,7 +44,9 @@ function layout(opts: { preheader: string; heading: string; inner: string }): st
       <!-- brand -->
       <tr><td style="padding:0 4px 16px;">
         <table role="presentation" cellpadding="0" cellspacing="0"><tr>
-          <td style="font-size:24px;line-height:1;padding-right:8px;">🗄️</td>
+          <td style="padding-right:10px;">${EMAIL_BASE
+            ? `<img src="${EMAIL_BASE}/icon-192.png" width="32" height="32" alt="" style="display:block;width:32px;height:32px;border-radius:8px;">`
+            : '<span style="font-size:24px;line-height:1;">🗄️</span>'}</td>
           <td style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:700;color:${C.heading};letter-spacing:-0.01em;">Vorratsdatenspeicher</td>
         </tr></table>
       </td></tr>
@@ -267,4 +275,31 @@ export function noticeEmail(opts: { subject: string; heading: string; body: stri
     </h1>
     <p style="margin:0;font-size:15px;line-height:1.6;color:${C.body};">${esc(opts.body)}</p>`;
   return { subject: opts.subject, text: opts.body, html: layout({ preheader: opts.body, heading: opts.subject, inner }) };
+}
+
+/** Shared shopping list — branded, with the item list + an "open list" button. */
+export function shoppingListEmail(opts: { by: string; items: { title: string; menge: number | null }[]; appUrl: string }): { subject: string; text: string; html: string } {
+  const n = opts.items.length;
+  const subject = `🛒 Einkaufsliste geteilt (${n})`;
+  const listUrl = `${(opts.appUrl || '').replace(/\/$/, '')}/shopping`;
+  const fq = (m: number | null) => m == null ? '' : (Number.isInteger(m) ? String(m) : m.toFixed(1).replace('.', ','));
+  const line = (i: { title: string; menge: number | null }) => `${i.menge != null ? fq(i.menge) + '× ' : ''}${i.title}`;
+  const text = `${opts.by} hat die Einkaufsliste geteilt (${n} Artikel):\n\n`
+    + opts.items.map(i => '• ' + line(i)).join('\n') + `\n\nListe öffnen: ${listUrl}`;
+  const rows = opts.items.map(i => `
+    <tr><td style="padding:9px 0;border-top:1px solid ${C.border};font-size:15px;color:${C.heading};">
+      ${i.menge != null ? `<strong style="color:${C.brandDark};">${esc(fq(i.menge))}×</strong> ` : ''}${esc(i.title)}
+    </td></tr>`).join('');
+  const inner = `
+    <h1 style="margin:0 0 12px;font-size:22px;line-height:1.3;font-weight:700;color:${C.heading};letter-spacing:-0.01em;">
+      Einkaufsliste 🛒
+    </h1>
+    <p style="margin:0 0 8px;font-size:15px;line-height:1.6;color:${C.body};">
+      <strong style="color:${C.heading};">${esc(opts.by)}</strong> hat die Einkaufsliste geteilt – ${n} Artikel:
+    </p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;">${rows}</table>
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 8px;"><tr><td>
+      ${button('Liste öffnen', listUrl)}
+    </td></tr></table>`;
+  return { subject, text, html: layout({ preheader: `${opts.by} hat die Einkaufsliste geteilt (${n} Artikel).`, heading: subject, inner }) };
 }

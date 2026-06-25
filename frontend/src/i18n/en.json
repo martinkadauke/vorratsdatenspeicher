@@ -245,7 +245,11 @@
     "src": { "offer": "offer", "store_avg": "store avg", "global_avg": "overall avg" },
     "send": "Send",
     "sent": "Emailed {{count}} + notified",
-    "sentNoSmtp": "Notified {{count}} (SMTP not set → no email)"
+    "sentNoSmtp": "Notified {{count}} (SMTP not set → no email)",
+    "sentEmail": "Email to {{count}}",
+    "sentPush": "Push to {{count}} device(s)",
+    "sentVia": "List shared – {{via}}",
+    "sentNone": "List shared (notifications are off)"
   },
   "stores": {
     "title": "Stores",
@@ -540,7 +544,11 @@
     "usageTopUpLinks": "Top up credit",
     "offersTitle": "Household",
     "notifTitle": "Notifications",
-    "notifHint": "Global switches. Independently: offers still go out via push to subscribers, shared shopping lists still go out via email.",
+    "notifHint": "Global switches per notification type and channel.",
+    "notifOffers": "Offers",
+    "notifShopping": "Shared shopping list",
+    "notifEmail": "Email",
+    "notifPush": "Push",
     "notifOffersEmail": "Send offers by email",
     "notifShoppingPush": "Send shopping-list push",
     "offersHint": "Household address, nearby-offer search, extra offer-only categories and the avoid list.",

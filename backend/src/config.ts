@@ -65,9 +65,12 @@ export interface AppConfig {
   'push.vapid_public': string;
   'push.vapid_private': string;
   'push.vapid_subject': string;
-  // notification channel kill-switches (global)
-  'offers.email_enabled': boolean;   // send the offer digest by email
-  'shopping.push_enabled': boolean;  // send a push when a shopping list is shared
+  // notification channel kill-switches (global) — offers & shared shopping list,
+  // each per channel (email / push)
+  'offers.email_enabled': boolean;
+  'offers.push_enabled': boolean;
+  'shopping.email_enabled': boolean;
+  'shopping.push_enabled': boolean;
 }
 
 const DEFAULTS: AppConfig = {
@@ -122,6 +125,8 @@ const DEFAULTS: AppConfig = {
   'push.vapid_private': '',
   'push.vapid_subject': '',
   'offers.email_enabled': true,
+  'offers.push_enabled': true,
+  'shopping.email_enabled': true,
   'shopping.push_enabled': true,
 };
 

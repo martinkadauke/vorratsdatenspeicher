@@ -7,6 +7,7 @@ import { sendMail, smtpConfigured } from '../mailer.js';
 import { notify } from '../notify.js';
 import { sendPush } from '../push.js';
 import { getConfig } from '../config.js';
+import { shoppingListEmail } from '../email/templates.js';
 
 /** "LIDL", "Lidl GmbH" → "lidl" (mirrors routes/stores.ts normalizeStore). */
 function normalizeStore(raw: string): string {
@@ -518,39 +519,39 @@ export function pantryRoutes(app: FastifyInstance): void {
   app.post('/api/shopping-list/send', async (req, reply) => {
     const items = (await sql`SELECT title, menge::float8 AS menge FROM einkaufsliste_item ORDER BY priority DESC, added_at DESC`) as unknown as { title: string; menge: number | null }[];
     if (!items.length) return reply.code(400).send({ error: 'Liste ist leer' });
-    const fq = (n: number | null) => n == null ? '' : (Number.isInteger(n) ? String(n) : n.toFixed(1).replace('.', ','));
-    const line = (i: { title: string; menge: number | null }) => `${i.menge != null ? fq(i.menge) + '× ' : ''}${i.title}`;
     const by = req.user!.username;
-    const subject = `🛒 Einkaufsliste (${items.length})`;
-    const text = `${by} hat die Einkaufsliste geteilt:\n\n${items.map(i => '• ' + line(i)).join('\n')}`;
-    const html = `<p><b>${by}</b> hat die Einkaufsliste geteilt:</p><ul>${items.map(i => `<li>${line(i)}</li>`).join('')}</ul>`;
+    const appUrl = await getConfig('app.base_url');
+    const emailEnabled = await getConfig('shopping.email_enabled'); // global admin kill-switch
+    const pushEnabled = await getConfig('shopping.push_enabled');
 
     const users = await sql`SELECT id, email FROM users`;
     let emailed = 0;
     const smtp = await smtpConfigured();
-    if (smtp) {
+    if (smtp && emailEnabled) {
+      const mail = shoppingListEmail({ by, items, appUrl }); // branded list email
       for (const u of users) {
         const email = (u.email as string | null)?.trim();
         if (!email) continue;
-        try { await sendMail(email, subject, text, html); emailed++; } catch { /* skip one bad address */ }
+        try { await sendMail(email, mail.subject, mail.text, mail.html); emailed++; } catch { /* skip one bad address */ }
       }
     }
-    let notified = 0;
-    const pushEnabled = await getConfig('shopping.push_enabled'); // global admin kill-switch
+
+    // Push the whole household incl. the sender (they may have push on another
+    // device, and it makes the feature self-testable). The in-app bell still skips
+    // the sender — no point badging your own action.
+    const preview = items.slice(0, 3).map(i => i.title).join(', ') + (items.length > 3 ? ' …' : '');
+    let pushed = 0, notified = 0;
     for (const u of users) {
-      // Push the whole household incl. the sender (they may have push on another
-      // device, and it makes the feature self-testable). The in-app bell still skips
-      // the sender — no point badging your own action.
-      if (pushEnabled) await sendPush(u.id as number, {
-        title: '🛒 Einkaufsliste',
-        body: `${by} hat die Einkaufsliste geteilt (${items.length} Artikel)`,
+      if (pushEnabled) pushed += await sendPush(u.id as number, {
+        title: 'Einkaufsliste 🛒',
+        body: `${by} hat ${items.length} Artikel geteilt: ${preview}`,
         url: '/shopping', tag: 'shopping-shared',
       });
       if ((u.id as number) === req.user!.id) continue;
       await notify('shopping.shared', { by, count: items.length }, u.id as number);
       notified++;
     }
-    return { ok: true, emailed, notified, smtp };
+    return { ok: true, emailed, pushed, notified, smtp, emailEnabled };
   });
 
   /** Canonical-keyed feedback (used by the offers "on list" toggle). */

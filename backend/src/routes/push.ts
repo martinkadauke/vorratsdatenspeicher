@@ -27,7 +27,9 @@ export function pushRoutes(app: FastifyInstance): void {
   // Self-test: push to the caller's own devices. `sent` = number of devices reached.
   app.post('/api/push/test', async (req) => {
     const sent = await sendPush(req.user!.id, {
-      title: 'Test 🔔', body: 'Push-Benachrichtigungen funktionieren.', url: '/', tag: 'push-test',
+      title: 'Test-Benachrichtigung 🔔',
+      body: 'Push funktioniert ✅ — du bekommst jetzt VDS-Benachrichtigungen.',
+      url: '/', tag: 'push-test',
     });
     return { ok: true, sent };
   });

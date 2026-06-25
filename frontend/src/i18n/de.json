@@ -245,7 +245,11 @@
     "src": { "offer": "Angebot", "store_avg": "Ø Laden", "global_avg": "Ø gesamt" },
     "send": "Senden",
     "sent": "Per E-Mail an {{count}} gesendet + benachrichtigt",
-    "sentNoSmtp": "{{count}} benachrichtigt (SMTP nicht konfiguriert → keine E-Mail)"
+    "sentNoSmtp": "{{count}} benachrichtigt (SMTP nicht konfiguriert → keine E-Mail)",
+    "sentEmail": "E-Mail an {{count}}",
+    "sentPush": "Push an {{count}} Gerät(e)",
+    "sentVia": "Liste geteilt – {{via}}",
+    "sentNone": "Liste geteilt (Benachrichtigungen sind deaktiviert)"
   },
   "stores": {
     "title": "Läden",
@@ -540,7 +544,11 @@
     "usageTopUpLinks": "Guthaben aufladen",
     "offersTitle": "Haushalt",
     "notifTitle": "Benachrichtigungen",
-    "notifHint": "Globale Schalter. Unabhängig davon: Angebote gehen weiter per Push an Abonnenten, geteilte Einkaufslisten weiter per E-Mail.",
+    "notifHint": "Globale Schalter pro Benachrichtigungstyp und Kanal.",
+    "notifOffers": "Angebote",
+    "notifShopping": "Geteilte Einkaufsliste",
+    "notifEmail": "E-Mail",
+    "notifPush": "Push",
     "notifOffersEmail": "Angebote per E-Mail senden",
     "notifShoppingPush": "Einkaufslisten-Push senden",
     "offersHint": "Haushalts-Adresse, Umkreis-Suche für Angebote, zusätzliche Angebots-Warengruppen und die Vermeiden-Liste.",

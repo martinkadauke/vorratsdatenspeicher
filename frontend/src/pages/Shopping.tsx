@@ -135,8 +135,13 @@ export function Shopping() {
   };
 
   const send = useMutation({
-    mutationFn: () => api<{ emailed: number; notified: number; smtp: boolean }>('/api/shopping-list/send', { method: 'POST' }),
-    onSuccess: (r) => toast(r.smtp ? t('shopping.sent', { count: r.emailed }) : t('shopping.sentNoSmtp', { count: r.notified }), 'success'),
+    mutationFn: () => api<{ emailed: number; pushed: number; notified: number; smtp: boolean }>('/api/shopping-list/send', { method: 'POST' }),
+    onSuccess: (r) => {
+      const parts: string[] = [];
+      if (r.emailed > 0) parts.push(t('shopping.sentEmail', { count: r.emailed }));
+      if (r.pushed > 0) parts.push(t('shopping.sentPush', { count: r.pushed }));
+      toast(parts.length ? t('shopping.sentVia', { via: parts.join(' + ') }) : t('shopping.sentNone'), 'success');
+    },
     onError: (e: Error) => toast(e.message, 'error'),
   });
   const persistOrder = useMutation({

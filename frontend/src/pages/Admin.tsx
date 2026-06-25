@@ -1130,19 +1130,25 @@ function NotificationsSection() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['config'] }),
   });
   if (!config) return <Section title={t('admin.notifTitle')}><Spinner /></Section>;
-  const offersEmail = config['offers.email_enabled'] !== false;   // default on
-  const shoppingPush = config['shopping.push_enabled'] !== false;  // default on
+  const row = (key: string, label: string) => (
+    <div className="flex items-center justify-between">
+      <span className="text-sm text-zinc-600 dark:text-zinc-300">{label}</span>
+      <Switch checked={config[key] !== false} onChange={v => setCfg.mutate({ key, value: v })} />
+    </div>
+  );
   return (
     <Section title={t('admin.notifTitle')}>
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-5">
         <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('admin.notifHint')}</p>
-        <div className="flex items-center justify-between">
-          <span className="text-sm font-medium">{t('admin.notifOffersEmail')}</span>
-          <Switch checked={offersEmail} onChange={v => setCfg.mutate({ key: 'offers.email_enabled', value: v })} />
+        <div className="flex flex-col gap-2">
+          <div className="text-sm font-semibold">{t('admin.notifOffers')}</div>
+          {row('offers.email_enabled', t('admin.notifEmail'))}
+          {row('offers.push_enabled', t('admin.notifPush'))}
         </div>
-        <div className="flex items-center justify-between">
-          <span className="text-sm font-medium">{t('admin.notifShoppingPush')}</span>
-          <Switch checked={shoppingPush} onChange={v => setCfg.mutate({ key: 'shopping.push_enabled', value: v })} />
+        <div className="flex flex-col gap-2">
+          <div className="text-sm font-semibold">{t('admin.notifShopping')}</div>
+          {row('shopping.email_enabled', t('admin.notifEmail'))}
+          {row('shopping.push_enabled', t('admin.notifPush'))}
         </div>
       </div>
     </Section>

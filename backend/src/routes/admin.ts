@@ -10,7 +10,7 @@ import { rescheduleModelReview } from '../maintenance/modelReview.js';
 import { listOllamaModels, ollamaHealth } from '../llm/ollama.js';
 import { searxngHealth } from '../llm/searxng.js';
 import { sendMail } from '../mailer.js';
-import { inviteEmail, resetEmail, noticeEmail } from '../email/templates.js';
+import { inviteEmail, resetEmail, noticeEmail, setEmailBaseUrl } from '../email/templates.js';
 import { createAuthToken } from '../auth/routes.js';
 import { listModelsForProvider, healthForProvider, setTaskAi, type ProviderName, type AiTask } from '../llm/provider.js';
 import { matchExistingCanonical } from '../lib/canonicalMatch.js';
@@ -49,6 +49,7 @@ export function adminRoutes(app: FastifyInstance): void {
     const { value } = (req.body ?? {}) as { value?: unknown };
     if (value === undefined) return reply.code(400).send({ error: 'value required' });
     await setConfig(key, value, req.user!.id);
+    if (key === 'app.base_url') setEmailBaseUrl(value as string);
     if (key.startsWith('churner.')) await rescheduleChurner();
     if (key.startsWith('supermarket.')) await rescheduleSupermarket();
     if (key.startsWith('model_review.')) await rescheduleModelReview();

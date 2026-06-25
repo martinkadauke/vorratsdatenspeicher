@@ -7,7 +7,8 @@ import './types.js';
 import sql, { migrate, ensureAdmin, ensureCashKonten } from './db.js';
 import { initSearch } from './lib/search.js';
 import { backfillAliases, backfillArtikelOcrKey } from './lib/canonicalAlias.js';
-import { PORT } from './config.js';
+import { PORT, getConfig } from './config.js';
+import { setEmailBaseUrl } from './email/templates.js';
 import { registerAuth } from './auth/plugin.js';
 import { authRoutes } from './auth/routes.js';
 import { receiptRoutes } from './routes/receipts.js';
@@ -173,6 +174,7 @@ async function main(): Promise<void> {
   await rescheduleChurner();
   await rescheduleSupermarket();
   await rescheduleModelReview();
+  setEmailBaseUrl(await getConfig('app.base_url')); // hosted logo URL for emails
   await rescheduleMailImport();
 
   await app.listen({ port: PORT, host: '0.0.0.0' });
