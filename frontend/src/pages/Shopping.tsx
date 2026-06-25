@@ -12,7 +12,7 @@ import {
   verticalListSortingStrategy, useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { GripVertical, Minus, Plus, Trash2, Search, Sparkles, BarChart3, Send, TrendingDown, MessageSquare, CheckSquare, Square, ClipboardList, ShoppingBag } from 'lucide-react';
+import { GripVertical, Minus, Plus, Trash2, Search, Sparkles, BarChart3, Send, TrendingDown, MessageSquare, CheckSquare, Square, ClipboardList, ShoppingBag, RotateCcw } from 'lucide-react';
 import { api } from '../api/client';
 import type { ShoppingItem } from '../api/types';
 import { Card, Spinner, EmptyState, Button, Input, Badge } from '../components/ui';
@@ -100,15 +100,22 @@ export function Shopping() {
   });
   const startSession = useMutation({
     mutationFn: () => api('/api/shopping-list/session/start', { method: 'POST' }),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['shopping-session'] }); invalidate(); },
+    onSuccess: () => { setByStore(null); setActiveChain(null); void qc.invalidateQueries({ queryKey: ['shopping-session'] }); invalidate(); },
   });
   const finishSession = useMutation({
     mutationFn: () => api<{ removed: number }>('/api/shopping-list/session/finish', { method: 'POST' }),
     onSuccess: (r) => {
+      setByStore(null); setActiveChain(null);
       void qc.invalidateQueries({ queryKey: ['shopping-session'] });
       invalidate();
       toast(t('shopping.tripDone', { count: r.removed }), 'success');
     },
+  });
+  // De-finalize: reopen the list for editing, keep all items.
+  const cancelSession = useMutation({
+    mutationFn: () => api('/api/shopping-list/session/cancel', { method: 'POST' }),
+    onSuccess: () => { setByStore(null); setActiveChain(null); void qc.invalidateQueries({ queryKey: ['shopping-session'] }); invalidate(); },
+    onError: (e: Error) => toast(e.message, 'error'),
   });
   const remove = useMutation({
     mutationFn: (id: number) => api(`/api/shopping-list/${id}`, { method: 'DELETE' }),
@@ -171,46 +178,59 @@ export function Shopping() {
 
   return (
     <div className="flex max-w-2xl flex-col gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-lg font-bold">{t('shopping.title')}</h1>
-        <div className="flex flex-wrap gap-2">
-          {!sessionActive && (
-            <Button onClick={() => startSession.mutate()} disabled={startSession.isPending || !items.length} className="shrink-0">
-              <ClipboardList size={15} /> {t('shopping.startTrip')}
+      <h1 className="text-lg font-bold">{t('shopping.title')}</h1>
+
+      {/* Action toolbar — helper/share actions only. The state-advancing primary
+          button (create slip / shopping done) lives full-width at the bottom.
+          When finalized: no suggestions/compare/add — just share + de-finalize. */}
+      <div className="flex flex-wrap gap-2">
+        {!sessionActive ? (
+          <>
+            <Button variant="secondary" onClick={() => suggest.mutate()} disabled={suggest.isPending} className="grow basis-32 justify-center">
+              <Sparkles size={15} /> {t('shopping.getSuggestions')}
             </Button>
-          )}
-          <Button variant="secondary" onClick={() => suggest.mutate()} disabled={suggest.isPending} className="shrink-0">
-            <Sparkles size={15} /> {t('shopping.getSuggestions')}
-          </Button>
-          <Button variant="secondary" onClick={runCompare} disabled={comparing} className="shrink-0">
-            <BarChart3 size={15} /> {comparing ? t('shopping.comparing') : t('shopping.compareOffers')}
-          </Button>
-          <Button variant="secondary" onClick={() => send.mutate()} disabled={send.isPending} className="shrink-0">
-            <Send size={15} /> {t('shopping.send')}
-          </Button>
-        </div>
+            <Button variant="secondary" onClick={runCompare} disabled={comparing} className="grow basis-32 justify-center">
+              <BarChart3 size={15} /> {comparing ? t('shopping.comparing') : t('shopping.compareOffers')}
+            </Button>
+            <Button variant="secondary" onClick={() => send.mutate()} disabled={send.isPending || !items.length} className="grow basis-32 justify-center">
+              <Send size={15} /> {t('shopping.send')}
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button variant="secondary" onClick={() => send.mutate()} disabled={send.isPending || !items.length} className="grow basis-32 justify-center">
+              <Send size={15} /> {t('shopping.send')}
+            </Button>
+            <Button variant="secondary" onClick={() => cancelSession.mutate()} disabled={cancelSession.isPending} className="grow basis-32 justify-center">
+              <RotateCcw size={15} /> {t('shopping.cancelTrip')}
+            </Button>
+          </>
+        )}
       </div>
 
-      {/* Add: title (typeahead + free-text) · optional menge */}
-      <form
-        onSubmit={e => { e.preventDefault(); if (canAdd) add.mutate(); }}
-        className="flex gap-2 rounded-xl border border-zinc-200 p-2.5 dark:border-zinc-800"
-      >
-        <div className="relative flex-1">
-          <Search size={15} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
-          <Input
-            list="shopping-canon"
-            value={title}
-            onChange={e => setTitle(e.target.value)}
-            placeholder={t('shopping.addPlaceholder')}
-            className="pl-8"
-          />
-          <datalist id="shopping-canon">
-            {(names ?? []).map(n => <option key={n.canonical_name} value={n.canonical_name} />)}
-          </datalist>
-        </div>
-        <Button type="submit" disabled={!canAdd} className="shrink-0"><Plus size={16} /></Button>
-      </form>
+      {/* Add: title (typeahead + free-text) · optional menge. Hidden once the slip
+          is finalized — no more items go on a list that's out shopping. */}
+      {!sessionActive && (
+        <form
+          onSubmit={e => { e.preventDefault(); if (canAdd) add.mutate(); }}
+          className="flex gap-2 rounded-xl border border-zinc-200 p-2.5 dark:border-zinc-800"
+        >
+          <div className="relative flex-1">
+            <Search size={15} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+            <Input
+              list="shopping-canon"
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              placeholder={t('shopping.addPlaceholder')}
+              className="pl-8"
+            />
+            <datalist id="shopping-canon">
+              {(names ?? []).map(n => <option key={n.canonical_name} value={n.canonical_name} />)}
+            </datalist>
+          </div>
+          <Button type="submit" disabled={!canAdd} className="shrink-0"><Plus size={16} /></Button>
+        </form>
+      )}
 
       {sessionActive && session?.created_at && (
         <div className="flex items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
@@ -240,12 +260,6 @@ export function Shopping() {
         </SortableContext>
       </DndContext>
 
-      {sessionActive && (
-        <Button onClick={() => finishSession.mutate()} disabled={finishSession.isPending} className="w-full justify-center">
-          <ShoppingBag size={16} /> {t('shopping.finishTrip')}
-        </Button>
-      )}
-
       {total > 0 && (
         <div className="flex items-center justify-between rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-sm dark:border-zinc-800 dark:bg-zinc-900">
           <span className="font-medium text-zinc-500 dark:text-zinc-400">{t('shopping.expectedTotal')}</span>
@@ -253,7 +267,21 @@ export function Shopping() {
         </div>
       )}
 
-      {byStore && (
+      {/* State-advance: build the list → finalize ("Einkaufszettel erstellen") →
+          shopping done. One big full-width button per list state. */}
+      {!sessionActive
+        ? items.length > 0 && (
+          <Button onClick={() => startSession.mutate()} disabled={startSession.isPending} className="w-full justify-center">
+            <ClipboardList size={16} /> {t('shopping.startTrip')}
+          </Button>
+        )
+        : (
+          <Button onClick={() => finishSession.mutate()} disabled={finishSession.isPending} className="w-full justify-center">
+            <ShoppingBag size={16} /> {t('shopping.finishTrip')}
+          </Button>
+        )}
+
+      {!sessionActive && byStore && (
         <div className="mt-1 flex flex-col gap-2 border-t border-zinc-200 pt-3 dark:border-zinc-800">
           <div className="flex items-center gap-2"><BarChart3 size={16} className="text-violet-500" /><h2 className="text-sm font-bold">{t('shopping.byStore')}</h2></div>
           {!byStore.length && <EmptyState>{t('shopping.noStores')}</EmptyState>}

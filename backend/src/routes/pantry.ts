@@ -304,6 +304,17 @@ export function pantryRoutes(app: FastifyInstance): void {
     return { ok: true, removed };
   });
 
+  /** De-finalize ("definalisieren"): reopen the list for editing without buying
+   *  anything. Closes the open session but keeps every item; clears stale done
+   *  flags so the next trip starts clean. */
+  app.post('/api/shopping-list/session/cancel', async () => {
+    await sql.begin(async tx => {
+      await tx`UPDATE shopping_session SET closed_at = NOW() WHERE closed_at IS NULL`;
+      await tx`UPDATE einkaufsliste_item SET done = FALSE WHERE done = TRUE`;
+    });
+    return { ok: true };
+  });
+
   /** Auto-fill the list from tracked products whose live estimate is running low
    *  (out / ≤5 days / below the iron-reserve minimum), skipping anything already
    *  on the list, snoozed, or excluded. Adds them as 'suggested'. */
