@@ -2,14 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
-import { ExternalLink, RefreshCw, ChevronDown, ChevronLeft, ChevronRight, EyeOff, Eye, Pin, ListPlus, Check, X, Search, Sparkles } from 'lucide-react';
+import { ExternalLink, RefreshCw, ChevronDown, ChevronLeft, ChevronRight, EyeOff, Eye, Pin, ListPlus, Check, Search, Trash2 } from 'lucide-react';
 import { api } from '../api/client';
-import { Card, Spinner, EmptyState, Badge, Button, Input } from '../components/ui';
+import { Card, Spinner, EmptyState, Badge, Button, Input, Modal } from '../components/ui';
 import { CanonicalIcon } from '../components/IconPicker';
 import { useAuth } from '../context/auth';
 import { toast } from '../components/Toast';
 import { FirstVisitHint } from '../components/FirstVisitHint';
-import { cn, fmtDate, eur } from '../lib/utils';
+import { cn, fmtDate } from '../lib/utils';
 
 interface Offer {
   id: number; canonical_name: string; store: string | null; price: string | null;
@@ -27,8 +27,7 @@ interface PantryInfo {
   status: 'overdue' | 'soon' | 'ok' | null; typ_qty: number | null;
   weekly_consumption: number | null; consumption_unit: string | null;
 }
-interface NearestBranch { branch_id: number; name: string; address: string | null; distance_km: number }
-interface OffersResponse { offers: Offer[]; pantry: Record<string, PantryInfo>; chains?: Record<string, NearestBranch> }
+interface OffersResponse { offers: Offer[]; pantry: Record<string, PantryInfo> }
 
 const priceNum = (s: string | null): number | null => {
   if (!s) return null;
@@ -122,155 +121,6 @@ function OfferRow({ o, isHidden, onHide, t, lang }: {
   );
 }
 
-// ---- Recommendation engine (client-side over /api/offers/mine) --------------
-// "What should I buy where this week?" = the user's offers that are due to
-// re-buy AND/OR a good price, ranked, then rolled up per chain. Pure
-// presentation over data the page already has — no extra request.
-const DAY_MS = 86_400_000;
-const dms = (iso: string | null): number => (iso ? Date.parse(iso) : NaN);
-
-interface RecPick {
-  canonical: string; offer: Offer; status: 'overdue' | 'soon' | 'ok' | null;
-  savings: number | null; expiringSoon: boolean; startsFuture: boolean; score: number;
-}
-interface ChainRec {
-  store: string; chain_slug: string | null; picks: RecPick[]; dueCount: number; goodCount: number;
-  savings: number; soonestValidTo: string | null; score: number;
-}
-
-function buildRecommendations(offers: Offer[], pantry: Record<string, PantryInfo>, pinned: Set<string>, nowMs: number) {
-  const SOON = 3 * DAY_MS;
-  const cmp = (x: Offer) => x.grundpreis ?? priceNum(x.price) ?? 1e9;
-  // cheapest still-valid offer per product+store
-  const best = new Map<string, Offer>();
-  for (const o of offers) {
-    if (!o.store) continue;
-    const vt = dms(o.valid_to);
-    if (Number.isFinite(vt) && vt < nowMs - DAY_MS) continue; // already expired
-    const key = `${o.canonical_name}@@${o.store}`;
-    const cur = best.get(key);
-    if (!cur || cmp(o) < cmp(cur)) best.set(key, o);
-  }
-  const picks: RecPick[] = [];
-  for (const o of best.values()) {
-    const p = pantry[o.canonical_name];
-    const status = p?.status ?? null;
-    const due = status === 'overdue' || status === 'soon';
-    if (!due && !o.good_price) continue; // recommend only due and/or good-price
-    const savings = (o.avg_compare != null && o.grundpreis != null && p?.typ_qty != null && o.avg_compare > o.grundpreis)
-      ? Math.round((o.avg_compare - o.grundpreis) * p.typ_qty * 100) / 100 : null;
-    const vt = dms(o.valid_to), vf = dms(o.valid_from);
-    const expiringSoon = Number.isFinite(vt) && vt >= nowMs && vt - nowMs <= SOON;
-    const startsFuture = Number.isFinite(vf) && vf > nowMs;
-    let score = 0;
-    if (status === 'overdue') score += 4; else if (status === 'soon') score += 2;
-    if (o.good_price) score += 2 + (o.discount_pct ?? 0) / 50;
-    if (expiringSoon) score += 1;
-    if (o.store && pinned.has(o.store)) score += 0.5;
-    if (startsFuture) score -= 1; // not actionable yet → rank lower
-    picks.push({ canonical: o.canonical_name, offer: o, status, savings, expiringSoon, startsFuture, score });
-  }
-  picks.sort((a, b) => b.score - a.score);
-
-  const chainMap = new Map<string, ChainRec>();
-  for (const pk of picks) {
-    const store = pk.offer.store as string;
-    let cr = chainMap.get(store);
-    if (!cr) { cr = { store, chain_slug: pk.offer.chain_slug, picks: [], dueCount: 0, goodCount: 0, savings: 0, soonestValidTo: null, score: 0 }; chainMap.set(store, cr); }
-    cr.picks.push(pk);
-    if (pk.status === 'overdue' || pk.status === 'soon') cr.dueCount++;
-    if (pk.offer.good_price) cr.goodCount++;
-    if (pk.savings) cr.savings += pk.savings;
-    const vt = pk.offer.valid_to;
-    if (vt && !pk.startsFuture && (!cr.soonestValidTo || vt < cr.soonestValidTo)) cr.soonestValidTo = vt;
-  }
-  const chains = [...chainMap.values()];
-  for (const cr of chains) cr.score = cr.dueCount * 2 + cr.goodCount + cr.savings / 5 + (pinned.has(cr.store) ? 1 : 0);
-  chains.sort((a, b) => b.score - a.score);
-  return { picks, chains };
-}
-
-function RecPickRow({ pk, onList, toggleList, canWrite, t, lang }: {
-  pk: RecPick; onList: Set<string>; toggleList: (c: string) => void; canWrite: boolean; t: TFunction; lang: string;
-}) {
-  const o = pk.offer;
-  const vFrom = fmtDay(o.valid_from, lang), vTo = fmtDay(o.valid_to, lang);
-  const validity = pk.startsFuture && vFrom ? `${t('offers.from')} ${vFrom}`
-    : pk.expiringSoon && vTo ? t('offers.recExpiring', { date: vTo })
-    : vTo ? `${t('offers.until')} ${vTo}` : null;
-  return (
-    <div className="flex items-center gap-2 py-1.5">
-      <CanonicalIcon name={pk.canonical} size={28} />
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-baseline gap-x-1.5">
-          <span className="truncate text-sm font-medium">{pk.canonical}</span>
-          <span className="text-xs text-zinc-400">@ {o.store}</span>
-          {o.grundpreis != null && o.grundpreis_unit && (
-            <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-500">
-              {o.grundpreis.toFixed(2).replace('.', ',')} €/{o.grundpreis_unit}
-            </span>
-          )}
-          {pk.status === 'overdue' && (
-            <span className="shrink-0 rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-950/60 dark:text-red-300">{t('offers.dueOverdue')}</span>
-          )}
-          {pk.status === 'soon' && (
-            <span className="shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-950/60 dark:text-amber-300">{t('offers.dueSoon')}</span>
-          )}
-          {o.good_price && (
-            <span className="shrink-0 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
-              {t('offers.goodPrice')}{o.discount_pct ? ` −${o.discount_pct}%` : ''}
-            </span>
-          )}
-        </div>
-        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-zinc-400">
-          {validity && <span className={cn(pk.expiringSoon && 'font-semibold text-red-500 dark:text-red-400')}>{validity}</span>}
-          {pk.savings != null && pk.savings > 0 && <span>· {t('offers.recSave', { amount: eur(pk.savings) })}</span>}
-        </div>
-      </div>
-      {canWrite && (
-        <button onClick={() => toggleList(pk.canonical)} title={onList.has(pk.canonical) ? t('offers.onList') : t('offers.addToList')}
-          className={cn('shrink-0 rounded-lg p-1.5', onList.has(pk.canonical)
-            ? 'text-emerald-600 hover:bg-emerald-50 dark:text-emerald-500 dark:hover:bg-emerald-950/30'
-            : 'text-zinc-400 hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-950/30')}>
-          {onList.has(pk.canonical) ? <Check size={15} /> : <ListPlus size={15} />}
-        </button>
-      )}
-    </div>
-  );
-}
-
-function RecommendationSection({ offers, pantry, pinned, chains, onList, toggleList, canWrite, t, lang }: {
-  offers: Offer[]; pantry: Record<string, PantryInfo>; pinned: Set<string>;
-  chains?: Record<string, NearestBranch>;
-  onList: Set<string>; toggleList: (c: string) => void; canWrite: boolean; t: TFunction; lang: string;
-}) {
-  const rec = useMemo(() => buildRecommendations(offers, pantry, pinned, Date.now()), [offers, pantry, pinned]);
-  if (!rec.picks.length) return null;
-  const topChain = rec.chains[0];
-  const nb = topChain?.chain_slug ? chains?.[topChain.chain_slug] : undefined;
-  return (
-    <div className="flex flex-col gap-2 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-3 dark:border-emerald-900/50 dark:bg-emerald-950/20">
-      <div className="flex items-center gap-2">
-        <Sparkles size={16} className="text-emerald-600 dark:text-emerald-400" />
-        <h2 className="text-sm font-bold">{t('offers.recTitle')}</h2>
-      </div>
-      {topChain && (topChain.dueCount + topChain.goodCount) > 0 && (
-        <div className="text-xs text-zinc-600 dark:text-zinc-300">
-          <span className="font-semibold">{t('offers.recBestStore')}: {topChain.store}</span>
-          {' — '}{t('offers.recBestStoreSummary', { count: topChain.picks.length })}
-          {topChain.savings > 0 && <> · {t('offers.recSaveAbout', { amount: eur(topChain.savings) })}</>}
-          {topChain.soonestValidTo && <> · {t('offers.until')} {fmtDay(topChain.soonestValidTo, lang)}</>}
-          {nb && <> · {t('offers.nearestBranch', { name: nb.name, km: nb.distance_km.toFixed(1).replace('.', ',') })}</>}
-        </div>
-      )}
-      <div className="flex flex-col divide-y divide-emerald-100 dark:divide-emerald-900/40">
-        {rec.picks.slice(0, 6).map(pk => (
-          <RecPickRow key={pk.offer.id} pk={pk} onList={onList} toggleList={toggleList} canWrite={canWrite} t={t} lang={lang} />
-        ))}
-      </div>
-    </div>
-  );
-}
 
 export function Offers() {
   const { t, i18n } = useTranslation();
@@ -304,6 +154,7 @@ export function Offers() {
 
   // Ad-hoc "watch" products (things not in the artikel list, e.g. Ben & Jerry's).
   const [watchInput, setWatchInput] = useState('');
+  const [watchModalOpen, setWatchModalOpen] = useState(false);
   const { data: watches } = useQuery({
     queryKey: ['offers-watches'],
     queryFn: () => api<string[]>('/api/offers/watches'),
@@ -323,6 +174,7 @@ export function Offers() {
     try {
       await api('/api/offers/watches', { method: 'DELETE', body: { name } });
       await qc.invalidateQueries({ queryKey: ['offers-watches'] });
+      toast(t('offers.watchRemoved', { name }), 'success');
     } catch (e) { toast((e as Error).message, 'error'); }
   };
 
@@ -446,10 +298,6 @@ export function Offers() {
       <FirstVisitHint id="offers" titleKey="hint.offers.title" bodyKey="hint.offers.body" />
       {busy && <p className="text-xs text-emerald-600 dark:text-emerald-500">{t('offers.refreshingHint')}</p>}
 
-      {!isLoading && (
-        <RecommendationSection offers={offers} pantry={pantry} pinned={pinned} chains={data?.chains} onList={onList} toggleList={toggleList} canWrite={canWrite} t={t} lang={lang} />
-      )}
-
       {/* Watch arbitrary products that aren't in your artikel list */}
       {canWrite && (
         <div className="flex flex-col gap-1.5 rounded-xl border border-zinc-200 p-2.5 dark:border-zinc-800">
@@ -461,20 +309,36 @@ export function Offers() {
             <Button type="submit" variant="secondary" disabled={!watchInput.trim()}>{t('common.add')}</Button>
           </form>
           {watches && watches.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-xs text-zinc-400">{t('offers.watchLabel')}</span>
-              {watches.map(w => (
-                <span key={w} className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-xs dark:bg-zinc-800">
-                  {w}
-                  <button onClick={() => void removeWatch(w)} className="text-zinc-400 hover:text-red-500" aria-label={t('common.delete')}>
-                    <X size={12} />
-                  </button>
-                </span>
-              ))}
-            </div>
+            <button
+              type="button"
+              onClick={() => setWatchModalOpen(true)}
+              className="inline-flex items-center gap-1.5 self-start rounded-lg px-2 py-1 text-xs font-medium text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+            >
+              <Eye size={14} /> {t('offers.watchManage', { count: watches.length })}
+            </button>
           )}
         </div>
       )}
+
+      {/* Beobachtete Produkte — scrollable list in a modal; the page got cluttered
+          with many chips inline. */}
+      <Modal open={watchModalOpen} onClose={() => setWatchModalOpen(false)} title={t('offers.watchModalTitle')}>
+        {watches && watches.length > 0 ? (
+          <div className="flex flex-col divide-y divide-zinc-100 dark:divide-zinc-800">
+            {watches.map(w => (
+              <div key={w} className="flex items-center justify-between gap-2 py-2">
+                <span className="min-w-0 truncate text-sm">{w}</span>
+                <button onClick={() => void removeWatch(w)} aria-label={t('offers.watchRemove', { name: w })}
+                        className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30">
+                  <Trash2 size={15} />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState>{t('offers.watchEmpty')}</EmptyState>
+        )}
+      </Modal>
 
       {/* Kette (chain) picker with scroll arrows, "Deine Läden", and pin toggles */}
       {chains.length > 1 && (
