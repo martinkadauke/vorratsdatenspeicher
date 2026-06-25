@@ -11,7 +11,7 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       # 32+ random bytes, e.g.: openssl rand -hex 32
       JWT_SECRET: ${JWT_SECRET}
-      # shared secret for n8n -> /api/internal/* calls
+      # shared secret guarding the internal API (/api/internal/*)
       INTERNAL_SECRET: ${INTERNAL_SECRET}
       PORT: 80
     volumes:
