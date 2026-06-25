@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
-import { Search, ReceiptText, Store, Image as ImageIcon } from 'lucide-react';
+import { Search, ReceiptText, Store, Image as ImageIcon, UserCheck, Scale } from 'lucide-react';
 import { api } from '../api/client';
 import type { CanonicalName } from '../api/types';
 import { Card, Input, Spinner, EmptyState, Badge, Modal, Button, Label } from '../components/ui';
@@ -80,7 +80,6 @@ export function NameEditModal({ name, onClose }: { name: CanonicalName | null; o
   const [exclusive, setExclusive] = useState(false);
   const [baseUnit, setBaseUnit] = useState<string | null>(null);
   const [expectedPrice, setExpectedPrice] = useState('');
-  const [trackVorrat, setTrackVorrat] = useState(false);
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
 
   // Reset local form state whenever a different name is opened
@@ -92,7 +91,6 @@ export function NameEditModal({ name, onClose }: { name: CanonicalName | null; o
     setExclusive(name.consumers_exclusive);
     setBaseUnit(name.base_unit ?? null);
     setExpectedPrice(name.expected_price != null ? String(name.expected_price).replace('.', ',') : '');
-    setTrackVorrat(!!name.track_vorrat);
   }, [name?.canonical_name]);
 
   const { data: receipts } = useQuery({
@@ -145,12 +143,6 @@ export function NameEditModal({ name, onClose }: { name: CanonicalName | null; o
           body: { expected_price: epClean },
         });
       }
-      if (trackVorrat !== !!name.track_vorrat) {
-        await api(`/api/names/${encodeURIComponent(effective)}/meta`, {
-          method: 'PATCH',
-          body: { track_vorrat: trackVorrat },
-        });
-      }
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['names'] });
@@ -167,20 +159,31 @@ export function NameEditModal({ name, onClose }: { name: CanonicalName | null; o
   return (
     <Modal open={!!name} onClose={onClose} title={name.canonical_name}>
       <div className="flex flex-col gap-4">
-        <button
-          type="button"
-          onClick={() => setIconPickerOpen(true)}
-          className="group flex items-center gap-3 rounded-xl border border-dashed border-zinc-300 p-3 hover:border-emerald-500 dark:border-zinc-700"
-        >
-          <CanonicalIcon name={name.canonical_name} size={48} />
-          <div className="min-w-0 flex-1 text-left">
-            <div className="flex items-center gap-1.5 text-sm font-medium">
-              <ImageIcon size={14} className="text-zinc-400 group-hover:text-emerald-500" />
-              {t('names.changeIcon')}
+        {/* Header: tap the icon to change it · name + the "human-confirmed" badge */}
+        <div className="flex items-end gap-3">
+          <button
+            type="button"
+            onClick={() => setIconPickerOpen(true)}
+            title={t('names.changeIcon')}
+            className="group relative shrink-0 rounded-xl border border-dashed border-zinc-300 p-1.5 hover:border-emerald-500 dark:border-zinc-700"
+          >
+            <CanonicalIcon name={name.canonical_name} size={44} />
+            <span className="absolute -bottom-1 -right-1 rounded-full bg-white p-0.5 text-zinc-400 shadow group-hover:text-emerald-500 dark:bg-zinc-900">
+              <ImageIcon size={12} />
+            </span>
+          </button>
+          <div className="min-w-0 flex-1">
+            <Label>{t('names.rename')}</Label>
+            <div className="flex items-center gap-2">
+              <Input value={newName} onChange={e => setNewName(e.target.value)} className="flex-1" />
+              {name.user_corrected && (
+                <span title={t('article.userCorrected')} className="shrink-0 text-emerald-500">
+                  <UserCheck size={18} />
+                </span>
+              )}
             </div>
-            <div className="text-xs text-zinc-400">{t('names.changeIconHint')}</div>
           </div>
-        </button>
+        </div>
 
         <IconPicker
           canonicalName={name.canonical_name}
@@ -189,63 +192,49 @@ export function NameEditModal({ name, onClose }: { name: CanonicalName | null; o
         />
 
         <div>
-          <Label>{t('names.rename')}</Label>
-          <Input value={newName} onChange={e => setNewName(e.target.value)} />
-        </div>
-        <div>
           <Label>{t('article.category')}</Label>
           <CategoryPicker value={category} onChange={setCategory} />
         </div>
-        <div>
-          <Label>{t('names.baseUnit')}</Label>
-          <UnitSelect value={baseUnit} onChange={setBaseUnit} allowEmpty />
-          <p className="mt-1 text-xs text-zinc-400">{t('names.baseUnitHint')}</p>
-        </div>
-        <div>
-          <Label>{t('names.expectedPrice')}</Label>
-          <div className="flex items-center gap-1.5">
-            <Input
-              value={expectedPrice}
-              onChange={e => setExpectedPrice(e.target.value)}
-              placeholder={consumption?.expected_avg != null ? consumption.expected_avg.toLocaleString(i18n.language, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0,00'}
-              inputMode="decimal"
-              className="w-28"
-            />
-            <span className="text-sm text-zinc-500 dark:text-zinc-400">€ / {baseUnit || t('names.unit')}</span>
+        {/* Einheit · erwarteter Preis · Verbrauch/Woche gehören zusammen → ein
+            kompakter Block. Ohne-Gewicht wird hier (statt als Listen-Icon) erklärt. */}
+        <div className="flex flex-col gap-3 rounded-xl border border-zinc-200 p-3 dark:border-zinc-800">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>{t('names.baseUnit')}</Label>
+              <UnitSelect value={baseUnit} onChange={setBaseUnit} allowEmpty />
+            </div>
+            <div>
+              <Label>{t('names.expectedPrice')}</Label>
+              <div className="flex items-center gap-1">
+                <Input
+                  value={expectedPrice}
+                  onChange={e => setExpectedPrice(e.target.value)}
+                  placeholder={consumption?.expected_avg != null ? consumption.expected_avg.toLocaleString(i18n.language, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0,00'}
+                  inputMode="decimal"
+                  className="w-full min-w-0"
+                />
+                <span className="shrink-0 text-xs text-zinc-500 dark:text-zinc-400">€/{baseUnit || t('names.unit')}</span>
+              </div>
+            </div>
           </div>
-          <p className="mt-1 text-xs text-zinc-400">
-            {consumption?.expected_avg != null
-              ? t('names.expectedPriceAuto', { price: consumption.expected_avg.toLocaleString(i18n.language, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), unit: consumption.expected_unit ?? baseUnit ?? t('names.unit') })
-              : t('names.expectedPriceHint')}
-          </p>
-        </div>
-        <div>
-          <Label>{t('names.weeklyConsumption')}</Label>
-          <div className="mt-1 text-sm font-semibold text-sky-700 dark:text-sky-400">
-            {(() => {
-              const wk = consumption?.weekly_consumption ?? name.weekly_consumption ?? null;
-              const unit = consumption?.consumption_unit ?? name.consumption_unit ?? null;
-              return wk != null && unit
-                ? `Ø ${Number(wk).toLocaleString(i18n.language, { maximumFractionDigits: 1 })} ${unit}`
-                : <span className="font-normal text-zinc-400">{t('names.weeklyConsumptionNone')}</span>;
-            })()}
+          <div className="flex items-center justify-between border-t border-zinc-100 pt-2 text-sm dark:border-zinc-800">
+            <span className="text-zinc-500 dark:text-zinc-400">{t('names.weeklyConsumption')}</span>
+            <span className="font-semibold text-sky-700 dark:text-sky-400">
+              {(() => {
+                const wk = consumption?.weekly_consumption ?? name.weekly_consumption ?? null;
+                const unit = consumption?.consumption_unit ?? name.consumption_unit ?? null;
+                return wk != null && unit
+                  ? `Ø ${Number(wk).toLocaleString(i18n.language, { maximumFractionDigits: 1 })} ${unit}`
+                  : <span className="font-normal text-zinc-400">{t('names.weeklyConsumptionNone')}</span>;
+              })()}
+            </span>
           </div>
-          <p className="mt-1 text-xs text-zinc-400">{t('names.weeklyConsumptionHint')}</p>
-        </div>
-        <div>
-          <Label>{t('names.trackVorrat')}</Label>
-          <button
-            type="button"
-            onClick={() => setTrackVorrat(v => !v)}
-            className={`mt-1 inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm ${
-              trackVorrat
-                ? 'border-emerald-500 bg-emerald-50 font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400'
-                : 'border-zinc-300 text-zinc-500 dark:border-zinc-700'
-            }`}
-          >
-            {trackVorrat ? t('names.trackVorratOn') : t('names.trackVorratOff')}
-          </button>
-          <p className="mt-1 text-xs text-zinc-400">{t('names.trackVorratHint')}</p>
+          {name.needs_weight && (
+            <div className="flex items-start gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+              <Scale size={14} className="mt-px shrink-0" />
+              <span>{t('names.needsWeightHint')}</span>
+            </div>
+          )}
         </div>
         <div>
           <Label>{t('article.consumers')}</Label>

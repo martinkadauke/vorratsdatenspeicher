@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Search, X, Rows3, CheckSquare, Square, Users, Ban, Tag, Bell, FolderTree, ReceiptText, SlidersHorizontal, UserCheck, Eye, EyeOff, Scale, Boxes } from 'lucide-react';
+import { Search, X, CheckSquare, Square, Users, Ban, Tag, Bell, FolderTree, ReceiptText, SlidersHorizontal, Eye, EyeOff, Scale, Boxes } from 'lucide-react';
 import { api } from '../api/client';
 import type { CanonicalName } from '../api/types';
 import { Card, Input, Label, Spinner, EmptyState, Badge, Select, Button, Modal } from '../components/ui';
@@ -10,7 +10,7 @@ import { CategoryPicker } from '../components/CategoryPicker';
 import { FirstVisitHint } from '../components/FirstVisitHint';
 import { useAuth } from '../context/auth';
 import { CanonicalIcon } from '../components/IconPicker';
-import { ConsumerDots, ConsumerChips } from '../components/ConsumerChips';
+import { ConsumerChips } from '../components/ConsumerChips';
 import { toast } from '../components/Toast';
 import { NameEditModal } from './Names';
 import { cn, eur, fmtDate } from '../lib/utils';
@@ -42,12 +42,8 @@ interface ArtikelGroup {
 
 type SortMode = 'alpha' | 'date' | 'category' | 'count';
 
-const SIZES = [
-  { min: 200, icon: 24 },
-  { min: 280, icon: 32 },
-  { min: 380, icon: 44 },
-];
-const SIZE_KEY = 'vds.artikelCardSize';
+// Card size is fixed at the largest step (the zoom slider was removed).
+const CARD_SIZE = { min: 380, icon: 44 };
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const DATE_PRESETS = [
@@ -85,12 +81,7 @@ export function Artikel() {
   ].filter(Boolean).join('&');
   const filterActive = !!(filterCat || from || to);
 
-  const [sizeIdx, setSizeIdx] = useState(() => {
-    const s = parseInt(localStorage.getItem(SIZE_KEY) ?? '', 10);
-    return Number.isFinite(s) && s >= 0 && s < SIZES.length ? s : 1;
-  });
-  useEffect(() => { localStorage.setItem(SIZE_KEY, String(sizeIdx)); }, [sizeIdx]);
-  const size = SIZES[sizeIdx];
+  const size = CARD_SIZE;
 
   const { data, isLoading } = useQuery({
     queryKey: ['artikel-list', search, filterQs],
@@ -126,6 +117,24 @@ export function Artikel() {
   const [onlyNeedsWeight, setOnlyNeedsWeight] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
   const hasNeedsWeight = useMemo(() => (data ?? []).some(g => g.needs_weight), [data]);
+
+  // Default account scope: the household's main account ("GKK"), so the page opens
+  // scoped to GKK rather than everyone. A ?konto param or any explicit choice wins.
+  const kontoInit = useRef(false);
+  const defaultKontoId = useMemo(() => {
+    const gkk = (konten ?? []).find(k => k.name.trim().toLowerCase() === 'gkk');
+    return gkk ? String(gkk.id) : null;
+  }, [konten]);
+  const updateKontoFilter = (id: string | null) => { kontoInit.current = true; setKontoFilter(id); };
+  useEffect(() => {
+    if (kontoInit.current || !konten?.length) return;
+    kontoInit.current = true;
+    if (!kontoFilter && defaultKontoId) setKontoFilter(defaultKontoId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [konten, defaultKontoId]);
+  // The Filter toggle shows a dot whenever the list is narrowed beyond the GKK default.
+  const filtersActive = filterActive || onlySub || onlyAvoided || onlyNeedsWeight
+    || (!!kontoFilter && kontoFilter !== defaultKontoId);
 
   const setHidden = useMutation({
     mutationFn: ({ name, hidden }: { name: string; hidden: boolean }) =>
@@ -295,6 +304,8 @@ export function Artikel() {
       translation_en: null,
       consumers: g.consumers,
       consumers_exclusive: false,
+      user_corrected: g.user_corrected,
+      needs_weight: g.needs_weight,
     });
   };
 
@@ -314,9 +325,14 @@ export function Artikel() {
         base_unit: null, expected_price: null, last_bought: null,
         weekly_consumption: null, consumption_unit: null,
         translation_en: null, consumers: [], consumers_exclusive: false,
+        user_corrected: false, needs_weight: false,
       });
     }
-    setParams({}, { replace: true });
+    // Consume only the ?open param — keep the rest of the URL (konto/q/category/
+    // period/sort) so the GKK default isn't demoted and Back still restores filters.
+    const np = new URLSearchParams(params);
+    np.delete('open');
+    setParams(np, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openParam, data]);
 
@@ -334,84 +350,91 @@ export function Artikel() {
           </button>
         )}
       </div>
-      {konten && konten.length > 1 && (
-        <div className="scrollbar-none -mx-1 flex gap-1.5 overflow-x-auto px-1">
-          <button
-            onClick={() => setKontoFilter(null)}
-            className={cn('shrink-0 rounded-full border px-3 py-1 text-xs font-medium',
-              kontoFilter === null ? 'border-transparent bg-violet-600 text-white' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700')}
-          >
-            {t('receipts.allKonten')}
-          </button>
-          {konten.map(k => (
-            <button
-              key={k.id}
-              onClick={() => setKontoFilter(kontoFilter === String(k.id) ? null : String(k.id))}
-              className={cn('shrink-0 rounded-full border px-3 py-1 text-xs font-medium',
-                kontoFilter === String(k.id) ? 'border-transparent bg-violet-600 text-white' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700')}
-            >
-              {k.name}
-            </button>
-          ))}
-        </div>
-      )}
-
+      {/* One Filter toggle holds everything that narrows the list (konto, sort,
+          membership, category, period) — like Belege. Always-visible: search,
+          select-all, show-hidden. Default scope: GKK. */}
       <div className="flex items-center gap-2">
-        <Select value={sort} onChange={e => setSort(e.target.value as SortMode)} className="min-w-0 flex-1">
-          <option value="alpha">{t('artikel.sortAlpha')}</option>
-          <option value="count">{t('artikel.sortCount')}</option>
-          <option value="date">{t('artikel.sortDate')}</option>
-          <option value="category">{t('artikel.sortCategory')}</option>
-        </Select>
         <button
           onClick={() => setFilterOpen(o => !o)}
-          className={cn('flex shrink-0 items-center gap-1.5 rounded-xl border px-2.5 py-2 text-sm',
-            filterActive ? 'border-emerald-400 text-emerald-600' : 'border-zinc-200 text-zinc-500 dark:border-zinc-800')}
+          className={cn('flex items-center gap-1.5 rounded-xl border px-3 py-2 text-sm font-medium',
+            filtersActive ? 'border-emerald-400 text-emerald-600' : 'border-zinc-200 text-zinc-500 dark:border-zinc-800')}
         >
-          <SlidersHorizontal size={15} />{filterActive && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />}
+          <SlidersHorizontal size={15} /> {t('artikel.filters')}
+          {filtersActive && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />}
         </button>
-        <div className="flex shrink-0 items-center gap-1.5 rounded-xl border border-zinc-200 px-2.5 py-2 dark:border-zinc-800">
-          <Rows3 size={15} className="text-zinc-400" />
-          <input type="range" min={0} max={SIZES.length - 1} value={sizeIdx} onChange={e => setSizeIdx(parseInt(e.target.value, 10))} className="w-16 accent-emerald-600 sm:w-24" />
-        </div>
       </div>
-
-      {(subscribed.size > 0 || avoided.size > 0 || onlySub || onlyAvoided || hasNeedsWeight || onlyNeedsWeight) && (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => setOnlySub(v => !v)}
-            className={cn('flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium',
-              onlySub ? 'border-emerald-400 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
-                : 'border-zinc-200 text-zinc-500 dark:border-zinc-700')}
-          >
-            <Bell size={13} /> {t('artikel.filterSubscribed')} <span className="text-zinc-400">{subscribed.size}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setOnlyAvoided(v => !v)}
-            className={cn('flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium',
-              onlyAvoided ? 'border-red-400 bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300'
-                : 'border-zinc-200 text-zinc-500 dark:border-zinc-700')}
-          >
-            <Ban size={13} /> {t('artikel.filterAvoided')} <span className="text-zinc-400">{avoided.size}</span>
-          </button>
-          {(hasNeedsWeight || onlyNeedsWeight) && (
-            <button
-              type="button"
-              onClick={() => setOnlyNeedsWeight(v => !v)}
-              className={cn('flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium',
-                onlyNeedsWeight ? 'border-amber-400 bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'
-                  : 'border-zinc-200 text-zinc-500 dark:border-zinc-700')}
-            >
-              <Scale size={13} /> {t('artikel.filterNeedsWeight')}
-            </button>
-          )}
-        </div>
-      )}
 
       {filterOpen && (
         <div className="flex flex-col gap-3 rounded-xl border border-zinc-200 p-3 dark:border-zinc-800">
+          {konten && konten.length > 1 && (
+            <div>
+              <Label>{t('artikel.filterKonto')}</Label>
+              <div className="scrollbar-none -mx-1 flex gap-1.5 overflow-x-auto px-1">
+                <button
+                  onClick={() => updateKontoFilter(null)}
+                  className={cn('shrink-0 rounded-full border px-3 py-1 text-xs font-medium',
+                    kontoFilter === null ? 'border-transparent bg-violet-600 text-white' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700')}
+                >
+                  {t('receipts.allKonten')}
+                </button>
+                {konten.map(k => (
+                  <button
+                    key={k.id}
+                    onClick={() => updateKontoFilter(kontoFilter === String(k.id) ? null : String(k.id))}
+                    className={cn('shrink-0 rounded-full border px-3 py-1 text-xs font-medium',
+                      kontoFilter === String(k.id) ? 'border-transparent bg-violet-600 text-white' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700')}
+                  >
+                    {k.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div>
+            <Label>{t('artikel.filterSort')}</Label>
+            <Select value={sort} onChange={e => setSort(e.target.value as SortMode)}>
+              <option value="alpha">{t('artikel.sortAlpha')}</option>
+              <option value="count">{t('artikel.sortCount')}</option>
+              <option value="date">{t('artikel.sortDate')}</option>
+              <option value="category">{t('artikel.sortCategory')}</option>
+            </Select>
+          </div>
+
+          {(subscribed.size > 0 || avoided.size > 0 || hasNeedsWeight || onlySub || onlyAvoided || onlyNeedsWeight) && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setOnlySub(v => !v)}
+                className={cn('flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium',
+                  onlySub ? 'border-emerald-400 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
+                    : 'border-zinc-200 text-zinc-500 dark:border-zinc-700')}
+              >
+                <Bell size={13} /> {t('artikel.filterSubscribed')} <span className="text-zinc-400">{subscribed.size}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setOnlyAvoided(v => !v)}
+                className={cn('flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium',
+                  onlyAvoided ? 'border-red-400 bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300'
+                    : 'border-zinc-200 text-zinc-500 dark:border-zinc-700')}
+              >
+                <Ban size={13} /> {t('artikel.filterAvoided')} <span className="text-zinc-400">{avoided.size}</span>
+              </button>
+              {(hasNeedsWeight || onlyNeedsWeight) && (
+                <button
+                  type="button"
+                  onClick={() => setOnlyNeedsWeight(v => !v)}
+                  className={cn('flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium',
+                    onlyNeedsWeight ? 'border-amber-400 bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'
+                      : 'border-zinc-200 text-zinc-500 dark:border-zinc-700')}
+                >
+                  <Scale size={13} /> {t('artikel.filterNeedsWeight')}
+                </button>
+              )}
+            </div>
+          )}
+
           <div>
             <Label>{t('artikel.filterCategory')} <span className="font-normal text-zinc-400">· [C]</span></Label>
             <CategoryPicker value={filterCat} onChange={setFilterCat} inputId="artikel-cat-search" />
@@ -483,11 +506,6 @@ export function Artikel() {
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 items-center gap-1.5">
                     <span className={cn('truncate font-medium', !g.has_canonical && 'italic text-zinc-500 dark:text-zinc-400')}>{g.display}</span>
-                    {g.user_corrected && (
-                      <span title={t('article.userCorrected')} className="shrink-0">
-                        <UserCheck size={13} className="text-emerald-500" />
-                      </span>
-                    )}
                     {g.canonical_name && avoided.has(g.canonical_name) && (
                       <Ban size={13} className="shrink-0 text-red-500" aria-label={t('artikel.avoid')} />
                     )}
@@ -497,12 +515,6 @@ export function Artikel() {
                     {g.track_vorrat && (
                       <Boxes size={13} className="shrink-0 text-violet-500" aria-label={t('artikel.trackVorrat')} />
                     )}
-                    {g.needs_weight && (
-                      <span title={t('artikel.needsWeight')} className="shrink-0">
-                        <Scale size={13} className="text-amber-500" />
-                      </span>
-                    )}
-                    <ConsumerDots ids={g.consumers} />
                   </div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-zinc-400">
                     <Badge>{g.count}×</Badge>

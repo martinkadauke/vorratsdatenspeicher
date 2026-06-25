@@ -139,6 +139,8 @@ export interface CanonicalName {
   translation_en: string | null;
   consumers: number[];
   consumers_exclusive: boolean;
+  user_corrected?: boolean;   // a human set/confirmed the canonical name
+  needs_weight?: boolean;     // base_unit is kg/l but no purchase carries a weight → no €/kg
 }
 
 export interface QueueItem {
