@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useInfiniteQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Search, CheckCircle2, Rows3, X, ChevronLeft, ChevronRight, Plus, Lock, Mail } from 'lucide-react';
+import { Search, CheckCircle2, Rows3, X, ChevronLeft, ChevronRight, Plus, Lock, Mail, SlidersHorizontal } from 'lucide-react';
 import { api } from '../api/client';
 import type { Receipt } from '../api/types';
 import { Card, Input, Spinner, EmptyState } from '../components/ui';
@@ -50,8 +50,20 @@ export function Receipts() {
   });
   // Only offer accounts that actually have receipts visible to this user.
   const konten = useMemo(() => (kontenRaw ?? []).filter(k => k.receipts > 0), [kontenRaw]);
+  // Default account scope: the household's main account ("GKK" in our setup) so the
+  // page opens to GKK's till receipts, not everyone's. Falls back to the busiest
+  // non-cash account → no hard-coded GKK, still sensible for other households.
+  const defaultKontoId = useMemo(() => {
+    const pool = konten.filter(k => !k.is_cash);
+    if (!pool.length) return null;
+    const gkk = pool.find(k => k.name.trim().toLowerCase() === 'gkk');
+    const busiest = pool.reduce((a, b) => (b.receipts > a.receipts ? b : a));
+    return String((gkk ?? busiest).id);
+  }, [konten]);
+  const kontoInit = useRef(false); // have we applied the default account scope yet?
 
   const [createOpen, setCreateOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false); // collapse the filter chips behind a toggle
   // Source filter only makes sense if the user actually has >1 source.
   const { data: quellenRaw } = useQuery({
     queryKey: ['receipt-quellen'],
@@ -71,11 +83,20 @@ export function Receipts() {
     return konten;
   }, [konten, effQuelle]);
   const updateKontoFilter = (id: string | null) => {
+    kontoInit.current = true; // any explicit change pins the choice (incl. "Alle Konten")
     setKontoFilter(id);
     const next = new URLSearchParams(params);
     if (id) next.set('konto', id); else next.delete('konto');
     setParams(next, { replace: true });
   };
+
+  // On first load with no explicit ?konto, scope to the household's main account so
+  // "no filter set" still means GKK till receipts. A param or any user choice wins.
+  useEffect(() => {
+    if (kontoInit.current || !konten.length) return;
+    kontoInit.current = true;
+    if (!params.get('konto') && defaultKontoId) updateKontoFilter(defaultKontoId);
+  }, [konten.length, defaultKontoId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Mirror the search text into the URL so entering a receipt and pressing Back
   // restores the search (store/konto already persist via their own updaters).
@@ -253,6 +274,13 @@ export function Receipts() {
   // Track which month each card belongs to so we can drop anchors before the first of each.
   let lastYm = '';
 
+  // A filter is "active" when it deviates from the clean default (a store, an account
+  // other than the household default, or a source other than the default till
+  // receipts) → show a dot even when the filters are collapsed.
+  const hasActiveFilters = !!storeFilter
+    || (showQuelle && quelleFilter !== 'zettel')
+    || (kontoFilter !== defaultKontoId);
+
   return (
     <div className="flex flex-col gap-3">
       <FirstVisitHint id="receipts" titleKey="hint.receipts.title" bodyKey="hint.receipts.body" />
@@ -308,8 +336,28 @@ export function Receipts() {
             className="w-16 accent-emerald-600 sm:w-24"
           />
         </div>
+        {/* filter toggle — collapses the source/konto/store chips so the page is calmer */}
+        <button
+          type="button"
+          onClick={() => setFiltersOpen(o => !o)}
+          title={t('receipts.filters')}
+          aria-pressed={filtersOpen}
+          className={cn(
+            'relative flex shrink-0 items-center rounded-xl border px-2.5 py-2 transition',
+            filtersOpen
+              ? 'border-emerald-500 bg-emerald-50 text-emerald-600 dark:border-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400'
+              : 'border-zinc-200 text-zinc-400 hover:text-zinc-600 dark:border-zinc-800',
+          )}
+        >
+          <SlidersHorizontal size={16} />
+          {hasActiveFilters && !filtersOpen && (
+            <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-zinc-950" />
+          )}
+        </button>
       </div>
 
+      {filtersOpen && (
+      <>
       {/* source filter — only when the user has more than one source; show only
           the sources that exist, plus "Alle" */}
       {showQuelle && (
@@ -416,6 +464,8 @@ export function Receipts() {
             </button>
           )}
         </div>
+      )}
+      </>
       )}
 
       {isLoading && <Spinner />}

@@ -58,7 +58,8 @@
     "allStores": "Alle Läden",
     "allKonten": "Alle Konten",
     "reviewProgress": "Belege geprüft",
-    "cardSize": "Kartengröße"
+    "cardSize": "Kartengröße",
+    "filters": "Filter"
   },
   "receiptEdit": {
     "title": "Beleg bearbeiten",

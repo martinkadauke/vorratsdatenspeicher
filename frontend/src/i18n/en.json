@@ -58,7 +58,8 @@
     "allStores": "All stores",
     "allKonten": "All accounts",
     "reviewProgress": "Receipts reviewed",
-    "cardSize": "Card size"
+    "cardSize": "Card size",
+    "filters": "Filters"
   },
   "receiptEdit": {
     "title": "Edit receipt",
