@@ -662,7 +662,7 @@
     }
   },
   "positionen": {
-    "search": "Search (item, store · laden: kategorie: preis>)",
+    "search": "Search…",
     "sort_date_desc": "Date, newest",
     "sort_date_asc": "Date, oldest",
     "sort_price_desc": "Price, highest",

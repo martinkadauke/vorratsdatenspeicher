@@ -57,7 +57,7 @@ export function Positionen() {
   // shown as its own active chip even when it isn't one of the chain keys.
   const { data: stores } = useQuery({
     queryKey: ['stores-min'],
-    queryFn: () => api<StoreRow[]>('/api/stores'),
+    queryFn: () => api<StoreRow[]>('/api/stores?shops=1'),
     staleTime: 60_000,
   });
   const chips = useMemo(() => {
@@ -183,8 +183,10 @@ export function Positionen() {
               </div>
               <div className="shrink-0 text-right">
                 <div className="tabular font-semibold text-emerald-600 dark:text-emerald-500">{eur(p.preis)}</div>
-                {p.menge != null && Number(p.menge) !== 1 && (
-                  <div className="text-[11px] text-zinc-400">{Number(p.menge)}{p.einheit ? ` ${p.einheit}` : ''}</div>
+                {(p.menge != null || p.einheit) && (
+                  <div className="text-[11px] text-zinc-400">
+                    {[p.menge != null ? Number(p.menge).toLocaleString(i18n.language, { maximumFractionDigits: 3 }) : null, p.einheit].filter(Boolean).join(' ')}
+                  </div>
                 )}
               </div>
               {p.private && <Lock size={14} className="shrink-0 text-rose-500" />}

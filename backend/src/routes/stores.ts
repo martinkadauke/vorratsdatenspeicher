@@ -119,15 +119,17 @@ export function storeRoutes(app: FastifyInstance): void {
 
   /** List all stores ever seen with receipt count + total spend. */
   app.get('/api/stores', async (req) => {
+    // E-mail receipts are online shops (filed as kind='shop'); by default they're
+    // kept out so the physical-Filialen list stays clean. `?shops=1` includes them
+    // too (used by the Positionen filter, which offers Läden AND Shops).
+    const includeShops = (req.query as { shops?: string }).shops === '1';
     const rows = await sql`
       SELECT e.roh_ladenname, COUNT(*)::int AS receipts, SUM(e.gesamt_betrag)::numeric(10,2) AS total,
              MAX(sb.id) AS branch_id
       FROM einkauf e
       LEFT JOIN store_branch sb ON sb.name = e.roh_ladenname AND sb.kind = 'filiale'
       WHERE e.roh_ladenname IS NOT NULL
-        -- E-mail receipts are online shops (the link_store_branch trigger files them
-        -- as kind='shop'); they belong in the Shops tab, not the physical-Filialen list.
-        AND e.quelle IS DISTINCT FROM 'email'
+        ${includeShops ? sql`` : sql`AND e.quelle IS DISTINCT FROM 'email'`}
         ${kontoScope(req.user, sql`e`)}
       GROUP BY e.roh_ladenname
       ORDER BY receipts DESC
