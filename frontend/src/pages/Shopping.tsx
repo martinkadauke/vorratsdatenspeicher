@@ -154,6 +154,14 @@ export function Shopping() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeData]);
   const activeList = storeData?.chains.find(c => c.chain_key === activeChain) ?? null;
+  // Manual reorder works in the finalized list too: a drag overrides the active
+  // store's category order (finalOrder), kept this session per store.
+  const [finalOrder, setFinalOrder] = useState<number[] | null>(null);
+  useEffect(() => { setFinalOrder(null); }, [activeChain]); // each store starts from its category order
+  const finalPos = finalOrder ? new Map(finalOrder.map((id, i) => [id, i])) : null;
+  const finalizedStoreItems = activeList
+    ? (finalPos ? [...activeList.items].sort((a, b) => (finalPos.get(a.id) ?? 1e9) - (finalPos.get(b.id) ?? 1e9)) : activeList.items)
+    : [];
 
   const send = useMutation({
     mutationFn: () => api<{ emailed: number; pushed: number; notified: number; smtp: boolean }>('/api/shopping-list/send', { method: 'POST' }),
@@ -178,6 +186,15 @@ export function Shopping() {
   const onDragEnd = (e: DragEndEvent) => {
     const { active, over } = e;
     if (!over || active.id === over.id) return;
+    if (sessionActive && activeList) { // finalized: reorder the active store's list
+      const ids = finalizedStoreItems.map(si => si.id);
+      const from = ids.indexOf(Number(active.id)), to = ids.indexOf(Number(over.id));
+      if (from < 0 || to < 0) return;
+      const next = arrayMove(ids, from, to);
+      setFinalOrder(next);
+      persistOrder.mutate(next);
+      return;
+    }
     setItems(prev => {
       const next = arrayMove(prev, prev.findIndex(x => x.id === active.id), prev.findIndex(x => x.id === over.id));
       persistOrder.mutate(next.map(x => x.id));
@@ -192,7 +209,7 @@ export function Shopping() {
   // comment/done/menge) with its store info (price/cheapest) when present.
   const itemById = new Map(items.map(i => [i.id, i]));
   const displayItems = sessionActive && activeList
-    ? activeList.items
+    ? finalizedStoreItems
         .map(si => ({ shop: itemById.get(si.id), store: si as StoreItem | undefined }))
         .filter((x): x is { shop: ShoppingItem; store: StoreItem } => !!x.shop)
     : items.map(s => ({ shop: s, store: undefined as StoreItem | undefined }));
@@ -290,7 +307,6 @@ export function Shopping() {
                 key={shop.id}
                 s={shop}
                 store={store}
-                dragDisabled={sessionActive}
                 t={t}
                 sessionActive={sessionActive}
                 onMenge={(m) => patchMenge.mutate({ id: shop.id, menge: m })}
@@ -392,7 +408,7 @@ function ShoppingRow({ s, store, dragDisabled, t, sessionActive, onMenge, onComm
                         ? <span className="font-semibold text-emerald-600 dark:text-emerald-500">{eur(store.expected)}</span>
                         : <span className="text-zinc-400">{t('shopping.noPrice')}</span>)
                     : <span className="italic text-zinc-400">
-                        {store.price != null ? `Ø ${eur(store.price)}${store.unit ? '/' + store.unit : ''} · ${t('shopping.notCarried')}` : t('shopping.notCarried')}
+                        {store.expected != null ? `≈ ${eur(store.expected)} · ${t('shopping.notCarried')}` : t('shopping.notCarried')}
                       </span>}
                   {store.carried && store.cheapest && (
                     <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400">
