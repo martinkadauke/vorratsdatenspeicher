@@ -38,18 +38,18 @@ type ScopeUser = Parameters<typeof kontoScope>[0];
 async function trackedVorrat(user: ScopeUser) {
   const tracked = (await sql`
     SELECT canonical_name, base_unit, reserve_min::float8 AS reserve_min, vorrat_sort,
-           consumption_per_week::float8 AS consumption_per_week
+           consumption_per_week::float8 AS consumption_per_week, expected_price::float8 AS expected_price
     FROM canonical_meta WHERE track_vorrat = TRUE
-  `).map(r => ({ canonical_name: r.canonical_name as string, base_unit: r.base_unit as string | null, reserve_min: r.reserve_min as number | null, vorrat_sort: r.vorrat_sort as number | null, consumption_per_week: r.consumption_per_week as number | null }));
+  `).map(r => ({ canonical_name: r.canonical_name as string, base_unit: r.base_unit as string | null, reserve_min: r.reserve_min as number | null, vorrat_sort: r.vorrat_sort as number | null, consumption_per_week: r.consumption_per_week as number | null, expected_price: r.expected_price as number | null }));
   if (!tracked.length) return [];
   const canons = tracked.map(tk => tk.canonical_name);
   const units = await loadUnits();
 
   // No menge filter: many receipt lines have no quantity — the estimator counts
   // those as one piece (for count/blank units) and skips them for mass/volume.
-  interface PLine { canonical_name: string; menge: string | null; einheit: string | null; datum: string }
+  interface PLine { canonical_name: string; preis: string | null; menge: string | null; einheit: string | null; datum: string }
   const lines = (await sql`
-    SELECT a.canonical_name, a.menge, a.einheit, e.datum::text AS datum
+    SELECT a.canonical_name, a.preis, a.menge, a.einheit, e.datum::text AS datum
     FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
     WHERE a.canonical_name IN ${sql(canons)}
       ${kontoScope(user, sql`e`)}
@@ -74,7 +74,7 @@ async function trackedVorrat(user: ScopeUser) {
   const catMap = new Map(catRows.map(r => [r.canonical_name as string, (r.cat as string | null) ?? null]));
 
   return tracked.map(tk => {
-    const est = estimateVorrat(byCanon.get(tk.canonical_name) ?? [], tk.base_unit, units, ovMap.get(tk.canonical_name) ?? null, tk.consumption_per_week);
+    const est = estimateVorrat(byCanon.get(tk.canonical_name) ?? [], tk.base_unit, units, ovMap.get(tk.canonical_name) ?? null, tk.consumption_per_week, tk.expected_price);
     const reserve = resMap.get(tk.canonical_name);
     return {
       canonical_name: tk.canonical_name,

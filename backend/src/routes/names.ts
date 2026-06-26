@@ -148,7 +148,7 @@ export function nameRoutes(app: FastifyInstance): void {
       const needs_weight = (buKey === 'kg' || buKey === 'l') && !groups.some(g => g.unit === buKey);
       // Avg weekly consumption — reuse the SAME unified estimator as Vorrat/suggestions/alerts
       // (stock-override=null → raw purchase-history rate; manual weekly override still applies).
-      const est = cn ? estimateVorrat(linesByCanon.get(cn) ?? [], baseUnit, units, null, (m?.consumption_per_week as number | null) ?? null) : null;
+      const est = cn ? estimateVorrat(linesByCanon.get(cn) ?? [], baseUnit, units, null, (m?.consumption_per_week as number | null) ?? null, (m?.expected_price as number | null) ?? null) : null;
       const weekly_consumption = est?.rate_per_day != null ? Math.round(est.rate_per_day * 7 * 100) / 100 : null;
       return {
         key: r.grp,
@@ -185,7 +185,7 @@ export function nameRoutes(app: FastifyInstance): void {
       SELECT a.preis, a.menge, a.einheit, e.datum::text AS datum
       FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
       WHERE a.canonical_name = ${name} ${kontoScope(req.user, sql`e`)}`;
-    const [meta] = await sql`SELECT base_unit, consumption_per_week::float8 AS consumption_per_week FROM canonical_meta WHERE canonical_name = ${name}`;
+    const [meta] = await sql`SELECT base_unit, consumption_per_week::float8 AS consumption_per_week, expected_price::float8 AS expected_price FROM canonical_meta WHERE canonical_name = ${name}`;
     const [ov] = await sql`SELECT menge::float8 AS menge, gesetzt_am::text AS gesetzt_am FROM vorrat_override WHERE canonical_name = ${name}`;
     const units = await loadUnits();
     const baseUnit = (meta?.base_unit as string | null) ?? null;
@@ -195,6 +195,7 @@ export function nameRoutes(app: FastifyInstance): void {
       units,
       ov ? { menge: ov.menge as number, gesetzt_am: ov.gesetzt_am as string } : null,
       (meta?.consumption_per_week as number | null) ?? null,
+      (meta?.expected_price as number | null) ?? null,
     );
     // History-derived unit price (€ / base_unit) — the SAME headline the shopping
     // list falls back to when no manual expected_price is set. Surfaced so the modal

@@ -7,7 +7,7 @@ import { normalizeEinheit, loadUnits } from './units.js';
 
 type Units = Awaited<ReturnType<typeof loadUnits>>;
 
-export interface VorratLine { menge: string | number | null; einheit: string | null; datum: string }
+export interface VorratLine { menge: string | number | null; einheit: string | null; datum: string; preis?: string | number | null }
 export interface VorratOverride { menge: number; gesetzt_am: string }
 export interface VorratEstimate {
   base_unit: string | null;       // display group: kg | l | Stück | …
@@ -31,7 +31,7 @@ const toNum = (v: string | number | null): number =>
 
 export function estimateVorrat(
   lines: VorratLine[], baseUnitName: string | null, units: Units, override: VorratOverride | null,
-  ratePerWeekOverride: number | null = null,
+  ratePerWeekOverride: number | null = null, expectedUnitPrice: number | null = null,
 ): VorratEstimate {
   // Manual consumption override (per week → per day) wins over the derived rate.
   const manualRate = ratePerWeekOverride != null && ratePerWeekOverride > 0 ? ratePerWeekOverride / 7 : null;
@@ -48,15 +48,44 @@ export function estimateVorrat(
   // a fresh buy with a blank quantity vanished, so the last-bought anchor never moved.
   // (We default to 1, not the group median — multipacks like a 24-can tuna case would
   // otherwise make every blank line count as a whole case and explode the rate.)
+  // €/base-unit used to impute the quantity of a weightless-but-priced line (e.g.
+  // "Bananen 2,18" with no kg): the manual expected price, else the average €/base-
+  // unit of the actually-weighed purchases. Internal to the estimate only — the raw
+  // line and the €/kg comparison stay untouched (no circular feedback).
+  let unitPrice = expectedUnitPrice != null && expectedUnitPrice > 0 ? expectedUnitPrice : null;
+  if (unitPrice == null && (buKey === 'kg' || buKey === 'l')) {
+    let sum = 0, cnt = 0;
+    for (const l of lines) {
+      const un = normalizeEinheit(l.einheit);
+      const u = un ? units.get(un) : undefined;
+      if (!u) continue;
+      const k = u.dimension === 'mass' ? 'kg' : u.dimension === 'volume' ? 'l' : u.name;
+      if (k !== buKey) continue;
+      const p = toNum(l.preis ?? null), mm = toNum(l.menge);
+      if (!(Number.isFinite(mm) && mm > 0)) continue; // only genuinely weighed purchases seed the price
+      const q = mm * u.to_base;
+      if (p > 0 && q > 0) { sum += p / q; cnt++; }
+    }
+    if (cnt) unitPrice = sum / cnt;
+  }
+
   const groups = new Map<string, Map<string, number>>();
   const groupLines = new Map<string, number>();
   for (const l of lines) {
     const un = normalizeEinheit(l.einheit);
     const u = un ? units.get(un) : undefined;
-    const key = keyOf(u);
     const m = toNum(l.menge);
-    const eff = Number.isFinite(m) && m > 0 ? m : 1;
-    const qty = u ? eff * u.to_base : eff;
+    const p = toNum(l.preis ?? null);
+    let key: string, qty: number;
+    if (!u && (buKey === 'kg' || buKey === 'l') && unitPrice && unitPrice > 0 && p > 0) {
+      // Weightless line on a mass/volume product → impute kg/l from its total price.
+      key = buKey;
+      qty = p / unitPrice;
+    } else {
+      key = keyOf(u);
+      const eff = Number.isFinite(m) && m > 0 ? m : 1;
+      qty = u ? eff * u.to_base : eff;
+    }
     if (qty <= 0) continue;
     if (!groups.has(key)) groups.set(key, new Map());
     const pd = groups.get(key)!;
@@ -80,6 +109,10 @@ export function estimateVorrat(
   // purchase). Without this the count purchases land in a separate Stück group and
   // get silently dropped from the rate, badly under-counting consumption.
   if (effKey === 'kg' || effKey === 'l') {
+    // packSize = median base-unit qty per purchase. NB: this group may also contain
+    // price-imputed weightless lines (legitimate mass estimates); on a product mixing
+    // those with separate count purchases the fold leans on the imputed median too —
+    // acceptable, and it's the only reference when nothing was actually weighed.
     const baseVals = [...(groups.get(effKey)?.values() ?? [])].sort((a, b) => a - b);
     const packSize = baseVals.length ? baseVals[Math.floor(baseVals.length / 2)] : null;
     if (packSize && packSize > 0) {
