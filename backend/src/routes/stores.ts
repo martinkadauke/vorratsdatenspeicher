@@ -101,7 +101,10 @@ export function storeRoutes(app: FastifyInstance): void {
       const cleaned = (wg as string[][])
         .map(tier => [...new Set(tier.map(c => c.trim()).filter(Boolean))])
         .filter(tier => tier.length);
-      updates.warengruppen = JSON.stringify(cleaned);
+      // sql.json() → stored as a real jsonb ARRAY. (JSON.stringify into a jsonb
+      // column gets re-encoded by postgres.js into a jsonb STRING, which then reads
+      // back as a string and the editor showed the saved order as empty.)
+      updates.warengruppen = sql.json(cleaned);
     }
     if (!Object.keys(updates).length) return reply.code(400).send({ error: 'nothing to update' });
     updates.updated_at = new Date();

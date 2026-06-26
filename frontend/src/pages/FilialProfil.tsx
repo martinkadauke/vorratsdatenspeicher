@@ -56,7 +56,11 @@ export function FilialProfil() {
     if (branch) {
       setAddress(branch.address ?? '');
       setHours(branch.opening_hours?.text ?? '');
-      setTiers(Array.isArray(branch.warengruppen) ? branch.warengruppen.map(t2 => [...t2]) : []);
+      // Tolerate either a jsonb array or a legacy double-encoded JSON string.
+      const raw: unknown = branch.warengruppen;
+      let wg: unknown = raw;
+      if (typeof raw === 'string') { try { wg = JSON.parse(raw); } catch { wg = null; } }
+      setTiers(Array.isArray(wg) ? (wg as string[][]).map(t2 => [...t2]) : []);
       setDirty(false);
     }
   }, [branch]);
