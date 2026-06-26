@@ -180,7 +180,6 @@
     "removeGoal": "Remove goal"
   },
   "pantry": {
-    "title": "Pantry",
     "alerts": "Running low",
     "daysLeft": "days left",
     "remaining": "Remaining",
@@ -208,6 +207,10 @@
     "consumptionReset": "Reset to automatic",
     "openPositions": "View line items",
     "search": "Search pantry…",
+    "sortManual": "Manual",
+    "sortCategory": "Category",
+    "sortBoughtDesc": "Last bought (newest)",
+    "sortBoughtAsc": "Last bought (oldest)",
     "noMatch": "No match"
   },
   "shopping": {
@@ -663,7 +666,6 @@
     }
   },
   "positionen": {
-    "title": "Line items",
     "search": "Search (item, store · laden: kategorie: preis>)",
     "sort_date_desc": "Date, newest",
     "sort_date_asc": "Date, oldest",
@@ -672,6 +674,7 @@
     "sort_name_asc": "Name A–Z",
     "dateRange": "Period",
     "allStores": "All stores",
+    "stores": "Stores",
     "empty": "No line items found",
     "fromStore": "Show this store's line items"
   },

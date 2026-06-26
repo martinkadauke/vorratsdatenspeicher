@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Search, X, Lock, Store as StoreIcn } from 'lucide-react';
+import { Search, X, Lock, Store as StoreIcn, SlidersHorizontal } from 'lucide-react';
 import { api } from '../api/client';
 import type { Position } from '../api/types';
-import { Card, Input, Select, Spinner } from '../components/ui';
+import { Card, Input, Select, Spinner, Label } from '../components/ui';
 import { cn, eur, fmtDate } from '../lib/utils';
 
 interface StoreRow { key: string; display: string; receipts: number }
@@ -25,6 +25,8 @@ export function Positionen() {
   const from = params.get('from') ?? '';
   const to = params.get('to') ?? '';
   const sort = params.get('sort') ?? 'date_desc';
+  const [filterOpen, setFilterOpen] = useState(false);
+  const filtersActive = !!(store || from || to || (sort && sort !== 'date_desc'));
 
   const setParam = useCallback((key: string, val: string | null) => {
     const next = new URLSearchParams(params);
@@ -77,11 +79,11 @@ export function Positionen() {
 
   return (
     <div className="flex flex-col gap-3">
-      <h1 className="text-lg font-bold">{t('positionen.title')}</h1>
-
+      {/* Search + Filter toggle on one row (same look as Artikel/Belege); the
+          toggle reveals sort, date range and stores. */}
       <div className="flex gap-2">
         <div className="relative min-w-0 flex-1">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+          <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
           <Input
             className="pl-9 pr-9"
             placeholder={t('positionen.search')}
@@ -95,44 +97,65 @@ export function Positionen() {
             </button>
           )}
         </div>
-        <Select value={sort} onChange={e => setParam('sort', e.target.value)} className="w-auto shrink-0">
-          <option value="date_desc">{t('positionen.sort_date_desc')}</option>
-          <option value="date_asc">{t('positionen.sort_date_asc')}</option>
-          <option value="price_desc">{t('positionen.sort_price_desc')}</option>
-          <option value="price_asc">{t('positionen.sort_price_asc')}</option>
-          <option value="name_asc">{t('positionen.sort_name_asc')}</option>
-        </Select>
+        <button
+          onClick={() => setFilterOpen(o => !o)}
+          className={cn('flex shrink-0 items-center gap-1.5 rounded-xl border px-3 py-2 text-sm font-medium',
+            filtersActive ? 'border-emerald-400 text-emerald-600' : 'border-zinc-200 text-zinc-500 dark:border-zinc-800')}
+        >
+          <SlidersHorizontal size={15} /> {t('artikel.filters')}
+          {filtersActive && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />}
+        </button>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <span className="text-zinc-500">{t('positionen.dateRange')}</span>
-        <Input type="date" value={from} onChange={e => setParam('from', e.target.value || null)} className="w-auto" />
-        <span className="text-zinc-400">–</span>
-        <Input type="date" value={to} onChange={e => setParam('to', e.target.value || null)} className="w-auto" />
-        {(from || to) && (
-          <button onClick={() => { const next = new URLSearchParams(params); next.delete('from'); next.delete('to'); setParams(next, { replace: true }); }} className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800" title={t('common.clear')}>
-            <X size={15} />
-          </button>
-        )}
-      </div>
+      {filterOpen && (
+        <div className="flex flex-col gap-3 rounded-xl border border-zinc-200 p-3 dark:border-zinc-800">
+          <div>
+            <Label>{t('artikel.filterSort')}</Label>
+            <Select value={sort} onChange={e => setParam('sort', e.target.value)}>
+              <option value="date_desc">{t('positionen.sort_date_desc')}</option>
+              <option value="date_asc">{t('positionen.sort_date_asc')}</option>
+              <option value="price_desc">{t('positionen.sort_price_desc')}</option>
+              <option value="price_asc">{t('positionen.sort_price_asc')}</option>
+              <option value="name_asc">{t('positionen.sort_name_asc')}</option>
+            </Select>
+          </div>
 
-      {chips.length > 0 && (
-        <div className="scrollbar-none -mx-1 flex gap-1.5 overflow-x-auto px-1">
-          <button
-            onClick={() => setParam('store', null)}
-            className={cn('shrink-0 rounded-full border px-3 py-1 text-xs font-medium', !store ? 'border-transparent bg-emerald-600 text-white' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700')}
-          >
-            {t('positionen.allStores')}
-          </button>
-          {chips.map(c => (
-            <button
-              key={c.key}
-              onClick={() => setParam('store', store === c.key ? null : c.key)}
-              className={cn('shrink-0 truncate rounded-full border px-3 py-1 text-xs font-medium', store === c.key ? 'border-transparent bg-emerald-600 text-white' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700')}
-            >
-              {c.label}
-            </button>
-          ))}
+          <div>
+            <Label>{t('positionen.dateRange')}</Label>
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <Input type="date" value={from} onChange={e => setParam('from', e.target.value || null)} className="w-auto" />
+              <span className="text-zinc-400">–</span>
+              <Input type="date" value={to} onChange={e => setParam('to', e.target.value || null)} className="w-auto" />
+              {(from || to) && (
+                <button onClick={() => { const next = new URLSearchParams(params); next.delete('from'); next.delete('to'); setParams(next, { replace: true }); }} className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800" title={t('common.clear')}>
+                  <X size={15} />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {chips.length > 0 && (
+            <div>
+              <Label>{t('positionen.stores')}</Label>
+              <div className="scrollbar-none -mx-1 flex gap-1.5 overflow-x-auto px-1">
+                <button
+                  onClick={() => setParam('store', null)}
+                  className={cn('shrink-0 rounded-full border px-3 py-1 text-xs font-medium', !store ? 'border-transparent bg-emerald-600 text-white' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700')}
+                >
+                  {t('positionen.allStores')}
+                </button>
+                {chips.map(c => (
+                  <button
+                    key={c.key}
+                    onClick={() => setParam('store', store === c.key ? null : c.key)}
+                    className={cn('shrink-0 truncate rounded-full border px-3 py-1 text-xs font-medium', store === c.key ? 'border-transparent bg-emerald-600 text-white' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700')}
+                  >
+                    {c.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

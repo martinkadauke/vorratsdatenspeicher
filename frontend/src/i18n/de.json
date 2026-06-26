@@ -180,7 +180,6 @@
     "removeGoal": "Ziel entfernen"
   },
   "pantry": {
-    "title": "Vorrat",
     "alerts": "Bald leer",
     "daysLeft": "Tage übrig",
     "remaining": "Restmenge",
@@ -208,6 +207,10 @@
     "consumptionReset": "Auf automatisch zurücksetzen",
     "openPositions": "Positionen ansehen",
     "search": "Vorrat durchsuchen…",
+    "sortManual": "Manuell",
+    "sortCategory": "Kategorie",
+    "sortBoughtDesc": "Zuletzt gekauft (neueste)",
+    "sortBoughtAsc": "Zuletzt gekauft (älteste)",
     "noMatch": "Kein Treffer"
   },
   "shopping": {
@@ -663,7 +666,6 @@
     }
   },
   "positionen": {
-    "title": "Positionen",
     "search": "Suche (Artikel, Laden · laden: kategorie: preis>)",
     "sort_date_desc": "Datum, neueste",
     "sort_date_asc": "Datum, älteste",
@@ -672,6 +674,7 @@
     "sort_name_asc": "Name A–Z",
     "dateRange": "Zeitraum",
     "allStores": "Alle Läden",
+    "stores": "Läden",
     "empty": "Keine Positionen gefunden",
     "fromStore": "Positionen dieses Ladens anzeigen"
   },

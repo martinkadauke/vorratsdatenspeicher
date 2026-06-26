@@ -67,6 +67,12 @@ async function trackedVorrat(user: ScopeUser) {
     FROM reserve_charge WHERE canonical_name IN ${sql(canons)} GROUP BY canonical_name`;
   const resMap = new Map(res.map(r => [r.canonical_name as string, { total: r.total as number, charges: r.charges as number }]));
 
+  // Most-common category per product (for the Vorrat category filter + sort).
+  const catRows = await sql`
+    SELECT canonical_name, mode() WITHIN GROUP (ORDER BY category_path) AS cat
+    FROM artikel WHERE canonical_name IN ${sql(canons)} GROUP BY canonical_name`;
+  const catMap = new Map(catRows.map(r => [r.canonical_name as string, (r.cat as string | null) ?? null]));
+
   return tracked.map(tk => {
     const est = estimateVorrat(byCanon.get(tk.canonical_name) ?? [], tk.base_unit, units, ovMap.get(tk.canonical_name) ?? null, tk.consumption_per_week);
     const reserve = resMap.get(tk.canonical_name);
@@ -78,6 +84,7 @@ async function trackedVorrat(user: ScopeUser) {
       reserve_total: reserve?.total ?? 0,
       reserve_charges: reserve?.charges ?? 0,
       vorrat_sort: tk.vorrat_sort,
+      category: catMap.get(tk.canonical_name) ?? null,
     };
   }).sort((a, b) =>
     ((b.vorrat_sort ?? -Infinity) - (a.vorrat_sort ?? -Infinity)) ||

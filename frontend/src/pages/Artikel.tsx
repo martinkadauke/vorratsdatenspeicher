@@ -338,25 +338,23 @@ export function Artikel() {
 
   return (
     <div className="flex flex-col gap-3 pb-20">
-      <h1 className="text-lg font-bold">{t('nav.names')}</h1>
       <FirstVisitHint id="artikel2" titleKey="hint.artikel.title" bodyKey="hint.artikel.body" bodyKeyMobile="hint.artikel.bodyMobile" />
 
-      <div className="relative">
-        <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
-        <Input id="artikel-search" className="pl-9 pr-9" placeholder={t('artikel.search')} title={`${t('common.searchOps')} · [F]`} value={search} onChange={e => setSearch(e.target.value)} />
-        {search && (
-          <button onClick={() => setSearch('')} className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
-            <X size={15} />
-          </button>
-        )}
-      </div>
-      {/* One Filter toggle holds everything that narrows the list (konto, sort,
-          membership, category, period) — like Belege. Always-visible: search,
-          select-all, show-hidden. Default scope: GKK. */}
-      <div className="flex items-center gap-2">
+      {/* Search + the Filter toggle (which holds konto/sort/membership/category/
+          period) on one row, like Belege. Default scope: GKK. */}
+      <div className="flex gap-2">
+        <div className="relative min-w-0 flex-1">
+          <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+          <Input id="artikel-search" className="pl-9 pr-9" placeholder={t('artikel.search')} title={`${t('common.searchOps')} · [F]`} value={search} onChange={e => setSearch(e.target.value)} />
+          {search && (
+            <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
+              <X size={15} />
+            </button>
+          )}
+        </div>
         <button
           onClick={() => setFilterOpen(o => !o)}
-          className={cn('flex items-center gap-1.5 rounded-xl border px-3 py-2 text-sm font-medium',
+          className={cn('flex shrink-0 items-center gap-1.5 rounded-xl border px-3 py-2 text-sm font-medium',
             filtersActive ? 'border-emerald-400 text-emerald-600' : 'border-zinc-200 text-zinc-500 dark:border-zinc-800')}
         >
           <SlidersHorizontal size={15} /> {t('artikel.filters')}

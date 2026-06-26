@@ -183,6 +183,7 @@ export interface Notification {
 export interface PantryItem {
   canonical_name: string;
   base_unit: string | null;
+  category: string | null;
   rate_per_day: number | null;
   est_remaining: number | null;
   days_until_empty: number | null;

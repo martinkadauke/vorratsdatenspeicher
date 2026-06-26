@@ -11,13 +11,14 @@ import {
   verticalListSortingStrategy, useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { TriangleAlert, Pencil, RotateCcw, Check, X, ChevronDown, Shield, Plus, Trash2, GripVertical, ShoppingCart, Gauge, List, Search } from 'lucide-react';
+import { TriangleAlert, Pencil, RotateCcw, Check, X, ChevronDown, Shield, Plus, Trash2, GripVertical, ShoppingCart, Gauge, List, Search, SlidersHorizontal } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { useUrlState } from '../hooks/useUrlState';
 import type { PantryItem, ShoppingItem } from '../api/types';
-import { Card, Spinner, EmptyState, Badge, Input, Button } from '../components/ui';
+import { Card, Spinner, EmptyState, Badge, Input, Button, Select, Label } from '../components/ui';
 import { CanonicalIcon } from '../components/IconPicker';
+import { CategoryPicker } from '../components/CategoryPicker';
 import { toast } from '../components/Toast';
 import { cn, fmtDate } from '../lib/utils';
 
@@ -31,6 +32,10 @@ export function Pantry() {
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({ queryKey: ['pantry'], queryFn: () => api<PantryItem[]>('/api/pantry') });
   const [q, setQ] = useUrlState('q', '');
+  const [cat, setCat] = useUrlState<string | null>('category', null);
+  const [sort, setSort] = useUrlState('sort', ''); // '' = manual drag order
+  const [filterOpen, setFilterOpen] = useState(false);
+  const filtersActive = !!(cat || sort);
 
   // Local order preserved across refetches (so a drag isn't undone by a refresh).
   const [items, setItems] = useState<PantryItem[]>([]);
@@ -84,7 +89,7 @@ export function Pantry() {
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
   const onDragEnd = (e: DragEndEvent) => {
-    if (q.trim()) return; // no reordering while the list is filtered
+    if (q.trim() || cat || sort) return; // no reordering while filtered/sorted
     const { active, over } = e;
     if (!over || active.id === over.id) return;
     setItems(prev => {
@@ -97,22 +102,60 @@ export function Pantry() {
   if (isLoading) return <Spinner />;
 
   const term = q.trim().toLowerCase();
-  const filtered = term ? items.filter(p => p.canonical_name.toLowerCase().includes(term)) : items;
+  let filtered = items.filter(p =>
+    (!term || p.canonical_name.toLowerCase().includes(term)) &&
+    (!cat || p.category === cat || (p.category ?? '').startsWith(cat + '/')),
+  );
+  if (sort === 'cat') filtered = [...filtered].sort((a, b) =>
+    (a.category ?? 'zzz').localeCompare(b.category ?? 'zzz', i18n.language) || a.canonical_name.localeCompare(b.canonical_name, i18n.language));
+  else if (sort === 'bought_desc') filtered = [...filtered].sort((a, b) => (b.last_bought ?? '').localeCompare(a.last_bought ?? ''));
+  else if (sort === 'bought_asc') filtered = [...filtered].sort((a, b) => (a.last_bought ?? '9999').localeCompare(b.last_bought ?? '9999'));
+  const dragLocked = !!term || !!cat || !!sort;
 
   return (
     <div className="flex max-w-2xl flex-col gap-3">
-      <h1 className="text-lg font-bold">{t('pantry.title')}</h1>
       {items.length > 0 && (
-        <div className="relative">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
-          <Input className="pl-9 pr-9" placeholder={t('pantry.search')} value={q} onChange={e => setQ(e.target.value)} />
-          {q && (
-            <button type="button" onClick={() => setQ('')} title={t('common.clear')}
-              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
-              <X size={15} />
+        <>
+          {/* Search + Filter toggle on one row (same look as Artikel/Belege);
+              the toggle reveals a category filter + sort. */}
+          <div className="flex gap-2">
+            <div className="relative min-w-0 flex-1">
+              <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+              <Input className="pl-9 pr-9" placeholder={t('pantry.search')} value={q} onChange={e => setQ(e.target.value)} />
+              {q && (
+                <button type="button" onClick={() => setQ('')} title={t('common.clear')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                  <X size={15} />
+                </button>
+              )}
+            </div>
+            <button
+              onClick={() => setFilterOpen(o => !o)}
+              className={cn('flex shrink-0 items-center gap-1.5 rounded-xl border px-3 py-2 text-sm font-medium',
+                filtersActive ? 'border-emerald-400 text-emerald-600' : 'border-zinc-200 text-zinc-500 dark:border-zinc-800')}
+            >
+              <SlidersHorizontal size={15} /> {t('artikel.filters')}
+              {filtersActive && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />}
             </button>
+          </div>
+          {filterOpen && (
+            <div className="flex flex-col gap-3 rounded-xl border border-zinc-200 p-3 dark:border-zinc-800">
+              <div>
+                <Label>{t('artikel.filterCategory')}</Label>
+                <CategoryPicker value={cat} onChange={setCat} />
+              </div>
+              <div>
+                <Label>{t('artikel.filterSort')}</Label>
+                <Select value={sort} onChange={e => setSort(e.target.value)}>
+                  <option value="">{t('pantry.sortManual')}</option>
+                  <option value="cat">{t('pantry.sortCategory')}</option>
+                  <option value="bought_desc">{t('pantry.sortBoughtDesc')}</option>
+                  <option value="bought_asc">{t('pantry.sortBoughtAsc')}</option>
+                </Select>
+              </div>
+            </div>
           )}
-        </div>
+        </>
       )}
       {!items.length && <EmptyState>{t('pantry.emptyTracked')}</EmptyState>}
       {items.length > 0 && !filtered.length && <EmptyState>{t('pantry.noMatch')}</EmptyState>}
@@ -121,7 +164,7 @@ export function Pantry() {
           <div className="flex flex-col gap-2">
             {filtered.map(p => (
               <VorratRow
-                key={p.canonical_name} p={p} t={t} lang={i18n.language} dragDisabled={!!term}
+                key={p.canonical_name} p={p} t={t} lang={i18n.language} dragDisabled={dragLocked}
                 onList={onListSet.has(p.canonical_name)}
                 onToggleList={() => toggleList.mutate({ name: p.canonical_name, add: !onListSet.has(p.canonical_name) })}
                 onSetOverride={(menge) => setOverride.mutate({ name: p.canonical_name, menge })}
