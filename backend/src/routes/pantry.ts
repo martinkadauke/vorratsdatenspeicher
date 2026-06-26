@@ -502,6 +502,7 @@ export function pantryRoutes(app: FastifyInstance): void {
               else if (off) { price = off.grundpreis; unit = off.unit; source = 'offer'; }
             }
           }
+          else if (r) { price = r.globalAvg; unit = r.unit; source = 'avg'; } // not carried here → article average
         } else {
           const off = offerMap.get(`${it.title} ${chainKey}`);
           if (off) { price = off.grundpreis; unit = off.unit; source = 'offer'; }
@@ -514,7 +515,9 @@ export function pantryRoutes(app: FastifyInstance): void {
       }
       out.sort((a, b) => a._sort - b._sort);
       const carriedItems = out.filter(x => x.carried);
-      const total = Math.round(carriedItems.reduce((s, x) => s + (x.expected ?? 0), 0) * 100) / 100;
+      // Total covers the whole list: carried items at the store price, the rest at
+      // the article average (set above) — so totals are comparable across stores.
+      const total = Math.round(out.reduce((s, x) => s + (x.expected ?? 0), 0) * 100) / 100;
       chains.push({ chain_key: chainKey, store: shortBranch(ch.name as string), item_count: carriedItems.length, total, items: out });
     }
     // Mark, per list item, the chain(s) where its carried price is lowest — only
@@ -528,7 +531,9 @@ export function pantryRoutes(app: FastifyInstance): void {
       const min = Math.min(...priced.map(r => r.price as number));
       for (const r of priced) if (Math.abs((r.price as number) - min) < 0.005) r.cheapest = true;
     }
-    chains.sort((a, b) => b.item_count - a.item_count || a.total - b.total);
+    // Cheapest store first (whole-list total); coverage breaks ties → the UI
+    // defaults to the cheapest place to shop the list.
+    chains.sort((a, b) => a.total - b.total || b.item_count - a.item_count);
     return { chains: chains.map(c => ({ ...c, items: c.items.map(({ _sort, ...x }) => x) })) };
   });
 

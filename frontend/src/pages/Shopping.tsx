@@ -12,11 +12,10 @@ import {
   verticalListSortingStrategy, useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { GripVertical, Minus, Plus, Trash2, Search, Sparkles, BarChart3, Send, TrendingDown, MessageSquare, CheckSquare, Square, ClipboardList, ShoppingBag, RotateCcw } from 'lucide-react';
+import { GripVertical, Minus, Plus, Trash2, Search, Sparkles, Send, TrendingDown, MessageSquare, CheckSquare, Square, ClipboardList, ShoppingBag, RotateCcw, Store } from 'lucide-react';
 import { api } from '../api/client';
 import type { ShoppingItem } from '../api/types';
 import { Card, Spinner, EmptyState, Button, Input, Badge } from '../components/ui';
-import { CanonicalIcon } from '../components/IconPicker';
 import { toast } from '../components/Toast';
 import { cn, eur } from '../lib/utils';
 
@@ -40,10 +39,15 @@ export function Shopping() {
   // Canonical names → typeahead suggestions (free text is still allowed).
   const { data: names } = useQuery({
     queryKey: ['names-mini'],
-    queryFn: () => api<{ canonical_name: string }[]>('/api/names'),
+    queryFn: () => api<{ canonical_name: string; artikel_count: number }[]>('/api/names'),
     staleTime: 60_000,
   });
   const nameSet = new Set((names ?? []).map(n => n.canonical_name));
+  // Add-item suggestions ordered by how often it's actually bought (most-bought
+  // first), so e.g. Katzennassfutter beats 3D-printer filament. Once the user types,
+  // the browser's datalist still filters by the input as before.
+  const nameOptions = (names ?? []).slice().sort((a, b) =>
+    (b.artikel_count ?? 0) - (a.artikel_count ?? 0) || a.canonical_name.localeCompare(b.canonical_name));
 
   const [title, setTitle] = useState('');
   // Local order preserved across refetches (so a drag isn't undone by a refresh).
@@ -62,6 +66,7 @@ export function Shopping() {
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ['shopping'] });
     void qc.invalidateQueries({ queryKey: ['shopping-list-mini'] });
+    void qc.invalidateQueries({ queryKey: ['shopping-by-store'] });
   };
 
   const add = useMutation({
@@ -79,7 +84,10 @@ export function Shopping() {
   const patchMenge = useMutation({
     mutationFn: ({ id, menge }: { id: number; menge: number | null }) =>
       api(`/api/shopping-list/${id}`, { method: 'PATCH', body: { menge } }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['shopping'] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['shopping'] });
+      void qc.invalidateQueries({ queryKey: ['shopping-by-store'] }); // quantity → store totals
+    },
   });
   const patchComment = useMutation({
     mutationFn: ({ id, comment }: { id: number; comment: string }) =>
@@ -99,22 +107,26 @@ export function Shopping() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['shopping'] }),
   });
   const startSession = useMutation({
-    mutationFn: () => api('/api/shopping-list/session/start', { method: 'POST' }),
-    onSuccess: () => { setByStore(null); setActiveChain(null); void qc.invalidateQueries({ queryKey: ['shopping-session'] }); invalidate(); },
+    // Finalizing runs the store comparison automatically: also register offer
+    // watches for the finalized items (best-effort); the by-store query then loads.
+    mutationFn: async () => {
+      await api('/api/shopping-list/session/start', { method: 'POST' });
+      try { await api('/api/shopping-list/compare', { method: 'POST' }); } catch { /* non-fatal */ }
+    },
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['shopping-session'] }); invalidate(); },
   });
   const finishSession = useMutation({
     mutationFn: () => api<{ removed: number }>('/api/shopping-list/session/finish', { method: 'POST' }),
     onSuccess: (r) => {
-      setByStore(null); setActiveChain(null);
       void qc.invalidateQueries({ queryKey: ['shopping-session'] });
       invalidate();
       toast(t('shopping.tripDone', { count: r.removed }), 'success');
     },
   });
-  // De-finalize: reopen the list for editing, keep all items.
+  // De-finalize ("Einkaufszettel bearbeiten"): reopen the list for editing, keep all items.
   const cancelSession = useMutation({
     mutationFn: () => api('/api/shopping-list/session/cancel', { method: 'POST' }),
-    onSuccess: () => { setByStore(null); setActiveChain(null); void qc.invalidateQueries({ queryKey: ['shopping-session'] }); invalidate(); },
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['shopping-session'] }); invalidate(); },
     onError: (e: Error) => toast(e.message, 'error'),
   });
   const remove = useMutation({
@@ -127,19 +139,21 @@ export function Shopping() {
     onError: (e: Error) => toast(e.message, 'error'),
   });
 
-  const [comparing, setComparing] = useState(false);
-  const [byStore, setByStore] = useState<StoreList[] | null>(null);
+  // Store comparison loads automatically while the trip is finalized; the list then
+  // becomes store-aware (prices, cheapest, store category order). Switching the store
+  // chips only changes the active chain. Defaults to the cheapest store (chains[0]).
+  const { data: storeData } = useQuery({
+    queryKey: ['shopping-by-store'],
+    queryFn: () => api<{ chains: StoreList[] }>('/api/shopping-list/by-store'),
+    enabled: sessionActive,
+  });
   const [activeChain, setActiveChain] = useState<string | null>(null);
-  const runCompare = async () => {
-    setComparing(true);
-    try {
-      await api('/api/shopping-list/compare', { method: 'POST' }); // register watches for the next offer refresh
-      const res = await api<{ chains: StoreList[] }>('/api/shopping-list/by-store');
-      setByStore(res.chains);
-      setActiveChain(res.chains[0]?.chain_key ?? null);
-    } catch (e) { toast((e as Error).message, 'error'); }
-    finally { setComparing(false); }
-  };
+  useEffect(() => {
+    const chains = storeData?.chains ?? [];
+    if (chains.length && !chains.some(c => c.chain_key === activeChain)) setActiveChain(chains[0].chain_key);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storeData]);
+  const activeList = storeData?.chains.find(c => c.chain_key === activeChain) ?? null;
 
   const send = useMutation({
     mutationFn: () => api<{ emailed: number; pushed: number; notified: number; smtp: boolean }>('/api/shopping-list/send', { method: 'POST' }),
@@ -173,7 +187,18 @@ export function Shopping() {
 
   if (isLoading) return <Spinner />;
 
-  const total = items.reduce((s, i) => s + (i.expected_price ?? 0), 0);
+  // In a finalized trip the list IS the active store's items (store-ordered, priced);
+  // otherwise the plain editable list. Each row pairs the shopping item (for
+  // comment/done/menge) with its store info (price/cheapest) when present.
+  const itemById = new Map(items.map(i => [i.id, i]));
+  const displayItems = sessionActive && activeList
+    ? activeList.items
+        .map(si => ({ shop: itemById.get(si.id), store: si as StoreItem | undefined }))
+        .filter((x): x is { shop: ShoppingItem; store: StoreItem } => !!x.shop)
+    : items.map(s => ({ shop: s, store: undefined as StoreItem | undefined }));
+  const total = sessionActive && activeList
+    ? activeList.total
+    : items.reduce((s, i) => s + (i.expected_price ?? 0), 0);
   const canAdd = title.trim().length > 0 && !add.isPending;
 
   return (
@@ -188,9 +213,6 @@ export function Shopping() {
           <>
             <Button variant="secondary" onClick={() => suggest.mutate()} disabled={suggest.isPending} className="grow basis-32 justify-center">
               <Sparkles size={15} /> {t('shopping.getSuggestions')}
-            </Button>
-            <Button variant="secondary" onClick={runCompare} disabled={comparing} className="grow basis-32 justify-center">
-              <BarChart3 size={15} /> {comparing ? t('shopping.comparing') : t('shopping.compareOffers')}
             </Button>
             <Button variant="secondary" onClick={() => send.mutate()} disabled={send.isPending || !items.length} className="grow basis-32 justify-center">
               <Send size={15} /> {t('shopping.send')}
@@ -225,7 +247,7 @@ export function Shopping() {
               className="pl-8"
             />
             <datalist id="shopping-canon">
-              {(names ?? []).map(n => <option key={n.canonical_name} value={n.canonical_name} />)}
+              {nameOptions.map(n => <option key={n.canonical_name} value={n.canonical_name} />)}
             </datalist>
           </div>
           <Button type="submit" disabled={!canAdd} className="shrink-0"><Plus size={16} /></Button>
@@ -239,21 +261,42 @@ export function Shopping() {
         </div>
       )}
 
+      {/* Finalized: switch the suggested stores (cheapest first) in a horizontal
+          scroller; the list below adopts that store's prices + category order. */}
+      {sessionActive && (storeData?.chains.length ?? 0) > 0 && (
+        <div className="flex flex-col gap-1">
+          <div className="scrollbar-none -mx-1 flex gap-1.5 overflow-x-auto px-1">
+            {storeData!.chains.map(c => (
+              <button
+                key={c.chain_key} type="button" onClick={() => setActiveChain(c.chain_key)}
+                className={cn('inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium',
+                  c.chain_key === activeChain ? 'border-transparent bg-violet-600 text-white' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700')}
+              >
+                <Store size={12} /> {c.store} · <span className="tabular">{eur(c.total)}</span>
+              </button>
+            ))}
+          </div>
+          <p className="px-0.5 text-[11px] text-zinc-400">{t('shopping.storeHint')}</p>
+        </div>
+      )}
+
       {!items.length && <EmptyState>{t('shopping.empty')}</EmptyState>}
 
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
-        <SortableContext items={items.map(i => i.id)} strategy={verticalListSortingStrategy}>
+        <SortableContext items={displayItems.map(d => d.shop.id)} strategy={verticalListSortingStrategy}>
           <div className="flex flex-col gap-1.5">
-            {items.map(s => (
+            {displayItems.map(({ shop, store }) => (
               <ShoppingRow
-                key={s.id}
-                s={s}
+                key={shop.id}
+                s={shop}
+                store={store}
+                dragDisabled={sessionActive}
                 t={t}
                 sessionActive={sessionActive}
-                onMenge={(m) => patchMenge.mutate({ id: s.id, menge: m })}
-                onComment={(c) => patchComment.mutate({ id: s.id, comment: c })}
-                onToggleDone={() => patchDone.mutate({ id: s.id, done: !s.done })}
-                onRemove={() => remove.mutate(s.id)}
+                onMenge={(m) => patchMenge.mutate({ id: shop.id, menge: m })}
+                onComment={(c) => patchComment.mutate({ id: shop.id, comment: c })}
+                onToggleDone={() => patchDone.mutate({ id: shop.id, done: !shop.done })}
+                onRemove={() => remove.mutate(shop.id)}
               />
             ))}
           </div>
@@ -262,7 +305,7 @@ export function Shopping() {
 
       {total > 0 && (
         <div className="flex items-center justify-between rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-sm dark:border-zinc-800 dark:bg-zinc-900">
-          <span className="font-medium text-zinc-500 dark:text-zinc-400">{t('shopping.expectedTotal')}</span>
+          <span className="font-medium text-zinc-500 dark:text-zinc-400">{sessionActive && activeList ? activeList.store : t('shopping.expectedTotal')}</span>
           <span className="tabular text-base font-bold">{eur(total)}</span>
         </div>
       )}
@@ -281,71 +324,15 @@ export function Shopping() {
           </Button>
         )}
 
-      {!sessionActive && byStore && (
-        <div className="mt-1 flex flex-col gap-2 border-t border-zinc-200 pt-3 dark:border-zinc-800">
-          <div className="flex items-center gap-2"><BarChart3 size={16} className="text-violet-500" /><h2 className="text-sm font-bold">{t('shopping.byStore')}</h2></div>
-          {!byStore.length && <EmptyState>{t('shopping.noStores')}</EmptyState>}
-          {byStore.length > 0 && (
-            <>
-              <div className="flex flex-wrap gap-1.5">
-                {byStore.map(c => (
-                  <button
-                    key={c.chain_key} type="button" onClick={() => setActiveChain(c.chain_key)}
-                    className={cn('rounded-full border px-3 py-1 text-xs font-medium',
-                      c.chain_key === activeChain ? 'border-transparent bg-violet-600 text-white' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700')}
-                  >
-                    {c.store} · {c.item_count} · {eur(c.total)}
-                  </button>
-                ))}
-              </div>
-              {byStore.filter(c => c.chain_key === activeChain).map(c => (
-                <Card key={c.chain_key} className="flex flex-col divide-y divide-zinc-100 p-0 dark:divide-zinc-800">
-                  {c.items.map(it => (
-                    <div key={it.id} className={cn('flex items-center gap-2 px-3 py-2', !it.carried && 'opacity-45')}>
-                      {it.canonical_name ? <CanonicalIcon name={it.canonical_name} size={26} /> : <span className="h-[26px] w-[26px] shrink-0" />}
-                      <div className="min-w-0 flex-1">
-                        <div className="flex min-w-0 items-center gap-1.5">
-                          <span className="truncate text-sm font-medium">{fmt(it.menge)}× {it.title}</span>
-                          {it.carried && it.cheapest && (
-                            <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400" aria-label={t('shopping.cheapest')}>
-                              <TrendingDown size={11} />{t('shopping.cheapest')}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex flex-wrap items-center gap-x-1.5 text-xs text-zinc-400">
-                          {it.carried
-                            ? <>
-                                {it.category && <span>{it.category.split('/').pop()}</span>}
-                                {it.source && <span>· {t(`shopping.src.${it.source}`)}</span>}
-                              </>
-                            : <span className="italic">{t('shopping.notCarried')}</span>}
-                        </div>
-                      </div>
-                      {!it.carried
-                        ? <span className="shrink-0 text-base text-zinc-300 dark:text-zinc-600">—</span>
-                        : it.expected != null
-                          ? <span className="tabular shrink-0 text-sm font-semibold">{eur(it.expected)}</span>
-                          : <span className="shrink-0 text-xs text-zinc-400">{t('shopping.noPrice')}</span>}
-                    </div>
-                  ))}
-                  <div className="flex items-center justify-between px-3 py-2.5 text-sm font-bold">
-                    <span>{t('shopping.expectedTotal')}</span><span className="tabular">{eur(c.total)}</span>
-                  </div>
-                </Card>
-              ))}
-            </>
-          )}
-        </div>
-      )}
     </div>
   );
 }
 
-function ShoppingRow({ s, t, sessionActive, onMenge, onComment, onToggleDone, onRemove }: {
-  s: ShoppingItem; t: TFunction; sessionActive: boolean;
+function ShoppingRow({ s, store, dragDisabled, t, sessionActive, onMenge, onComment, onToggleDone, onRemove }: {
+  s: ShoppingItem; store?: StoreItem; dragDisabled?: boolean; t: TFunction; sessionActive: boolean;
   onMenge: (m: number) => void; onComment: (c: string) => void; onToggleDone: () => void; onRemove: () => void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: s.id });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: s.id, disabled: dragDisabled });
   const style = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 10 : undefined };
   const navigate = useNavigate();
   const [commentOpen, setCommentOpen] = useState(false);
@@ -373,16 +360,18 @@ function ShoppingRow({ s, t, sessionActive, onMenge, onComment, onToggleDone, on
         isDragging && 'opacity-80 shadow-lg ring-2 ring-emerald-400')}
       >
         <div className="flex items-center gap-2 sm:gap-2.5">
-          <button
-            type="button"
-            {...attributes}
-            {...listeners}
-            aria-label="Verschieben"
-            className="shrink-0 cursor-grab touch-none rounded-md p-1 text-zinc-300 hover:bg-zinc-100 hover:text-zinc-500 active:cursor-grabbing dark:text-zinc-600 dark:hover:bg-zinc-800"
-          >
-            <GripVertical size={16} />
-          </button>
-          <div className={cn('min-w-0 flex-1', done && 'opacity-50')}>
+          {!dragDisabled && (
+            <button
+              type="button"
+              {...attributes}
+              {...listeners}
+              aria-label="Verschieben"
+              className="shrink-0 cursor-grab touch-none rounded-md p-1 text-zinc-300 hover:bg-zinc-100 hover:text-zinc-500 active:cursor-grabbing dark:text-zinc-600 dark:hover:bg-zinc-800"
+            >
+              <GripVertical size={16} />
+            </button>
+          )}
+          <div className={cn('min-w-0 flex-1', done && 'opacity-50', store && !store.carried && 'opacity-60')}>
             <div className="flex min-w-0 items-center gap-1.5">
               {s.canonical_name
                 ? <button
@@ -396,14 +385,33 @@ function ShoppingRow({ s, t, sessionActive, onMenge, onComment, onToggleDone, on
               {s.source === 'suggested' && <Sparkles size={12} className="shrink-0 text-amber-500" aria-label={t('shopping.suggested')} />}
             </div>
             <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-zinc-500 dark:text-zinc-400">
-              {s.avg_price != null && s.avg_unit && <span>Ø {eur(s.avg_price)}/{s.avg_unit}</span>}
-              {s.expected_price != null && (
-                <span className="font-semibold text-emerald-600 dark:text-emerald-500">≈ {eur(s.expected_price)}</span>
+              {store ? (
+                <>
+                  {store.carried
+                    ? (store.expected != null
+                        ? <span className="font-semibold text-emerald-600 dark:text-emerald-500">{eur(store.expected)}</span>
+                        : <span className="text-zinc-400">{t('shopping.noPrice')}</span>)
+                    : <span className="italic text-zinc-400">
+                        {store.price != null ? `Ø ${eur(store.price)}${store.unit ? '/' + store.unit : ''} · ${t('shopping.notCarried')}` : t('shopping.notCarried')}
+                      </span>}
+                  {store.carried && store.cheapest && (
+                    <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400">
+                      <TrendingDown size={11} /> {t('shopping.cheapest')}
+                    </span>
+                  )}
+                </>
+              ) : (
+                <>
+                  {s.avg_price != null && s.avg_unit && <span>Ø {eur(s.avg_price)}/{s.avg_unit}</span>}
+                  {s.expected_price != null && (
+                    <span className="font-semibold text-emerald-600 dark:text-emerald-500">≈ {eur(s.expected_price)}</span>
+                  )}
+                </>
               )}
               {hasComment && !commentOpen && <span className="truncate italic text-zinc-400">„{s.comment}"</span>}
             </div>
           </div>
-          <MengeStepper value={s.menge ?? 1} unit={s.avg_unit} onChange={onMenge} t={t} />
+          <MengeStepper value={s.menge ?? 1} unit={store ? store.unit : s.avg_unit} onChange={onMenge} t={t} />
           <button
             type="button"
             onClick={toggleComment}
