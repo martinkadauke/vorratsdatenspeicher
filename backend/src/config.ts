@@ -76,7 +76,10 @@ export interface AppConfig {
 }
 
 const DEFAULTS: AppConfig = {
-  'ollama.url': 'http://192.168.1.238:11434',
+  // No infra defaults: a fresh install has no local search/LLM host — the onboarding
+  // wizard collects these. (Non-empty defaults would leak the author's LAN + look
+  // "already configured".)
+  'ollama.url': '',
   'ollama.model': 'qwen2.5:14b',
   'deepseek.url': 'https://api.deepseek.com',
   'deepseek.api_key': '',
@@ -102,9 +105,9 @@ const DEFAULTS: AppConfig = {
   'churner.confidence': 0.85,
   'churner.batch_size': 200,
   'churner.hitl_mode': 'guarded',
-  'searxng.url': 'http://192.168.1.238:8089',
+  'searxng.url': '',
   'app.default_lang': 'de',
-  'app.base_url': 'http://192.168.1.238:8766',
+  'app.base_url': '',
   'smtp.host': '',
   'smtp.port': 587,
   'smtp.secure': false,
