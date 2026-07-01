@@ -749,6 +749,30 @@
       "namePlaceholder": "Account name",
       "types": { "bar": "Cash", "karte": "Card", "kreditkarte": "Credit card", "paypal": "PayPal" }
     },
+    "models": {
+      "title": "AI models per task",
+      "body": "Fine-tuning: which model for which task. The default is usually fine — local tasks use Ollama, demanding ones use Claude. Changeable anytime in Admin.",
+      "nlanalytics": "Analytics assistant"
+    },
+    "categories": {
+      "title": "Category detail level",
+      "body": "How fine-grained should your spending categories be? VDS then designs the tree with you via AI.",
+      "grob": "Coarse",
+      "mittel": "Medium",
+      "fein": "Fine",
+      "hint": "Just a preset — you build the actual category tree later in the Categories area with the AI, anytime."
+    },
+    "email": {
+      "title": "Send email (SMTP)",
+      "body": "So VDS can email shopping lists & offers. Optional.",
+      "host": "SMTP host", "port": "Port", "user": "User", "pass": "Password", "from": "Sender", "secure": "SSL/TLS (port 465)"
+    },
+    "imap": {
+      "title": "Email import (IMAP)",
+      "body": "VDS can pull receipts automatically from your mailbox (e.g. forwarded PDF invoices). Optional — your mailbox, password stored encrypted.",
+      "host": "IMAP host", "port": "Port", "user": "User", "pass": "Password", "secure": "SSL/TLS (port 993)",
+      "test": "Test connection", "save": "Save", "saved": "Mailbox saved", "testOk": "Connection successful"
+    },
     "done": {
       "title": "Done — all set!",
       "body": "Upload your first receipt now. VDS detects items, prices and the store automatically, and the rest follows. Enjoy!"

@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { useNavigate } from 'react-router-dom';
-import { Sparkles, Bot, Home, Users, Wallet, PartyPopper, Languages, Plus, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Sparkles, Bot, Cpu, Tags, Home, Users, Wallet, Mail, Inbox, PartyPopper, Languages, Plus, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { api } from '../api/client';
 import { Button, Input, Select, Label, Switch } from './ui';
 import { EmojiSelect } from './EmojiPicker';
@@ -13,14 +14,30 @@ import { cn } from '../lib/utils';
 
 interface Konto { id: number; name: string; is_shared: boolean; payment_type: string | null }
 const KONTO_TYPES = ['bar', 'karte', 'kreditkarte', 'paypal'];
+const DETAILS = ['grob', 'mittel', 'fein'];
+const PROVIDERS = ['ollama', 'deepseek', 'anthropic'];
+// task key → i18n label key (6 settable via /api/ai/tasks + nlanalytics via config)
+const AI_TASKS: [string, string][] = [
+  ['ocr', 'admin.taskOcr'],
+  ['categories_chat', 'admin.taskCategoriesChat'],
+  ['recategorize', 'admin.taskRecategorize'],
+  ['churner_stage1', 'admin.taskChurnerStage1'],
+  ['churner_stage2', 'admin.taskChurnerStage2'],
+  ['model_review', 'admin.taskModelReview'],
+  ['nlanalytics', 'onboarding.models.nlanalytics'],
+];
 
 const STEP_META = [
   { icon: Languages, emoji: '🌍', key: 'lang' },
   { icon: Sparkles, emoji: '👋', key: 'welcome' },
   { icon: Bot, emoji: '🤖', key: 'ai' },
+  { icon: Cpu, emoji: '🧠', key: 'models' },
+  { icon: Tags, emoji: '🗂️', key: 'categories' },
   { icon: Home, emoji: '🏡', key: 'household' },
   { icon: Users, emoji: '👨‍👩‍👧‍👦', key: 'family' },
   { icon: Wallet, emoji: '💳', key: 'konten' },
+  { icon: Mail, emoji: '✉️', key: 'email' },
+  { icon: Inbox, emoji: '📥', key: 'imap' },
   { icon: PartyPopper, emoji: '🎉', key: 'done' },
 ];
 
@@ -30,9 +47,6 @@ const composeAddr = (a: { street: string; nr: string; plz: string; city: string 
   return [l1, l2].filter(Boolean).join(', ');
 };
 
-/** First-run setup wizard for the admin of a fresh install. Self-gated: renders only
- *  for an admin whose household-global onboarding flag is unset. Reuses config/family/
- *  konten endpoints; on finish marks onboarding.done + refreshes the session. */
 export function Onboarding() {
   const { t, i18n } = useTranslation();
   const { user, refreshUser } = useAuth();
@@ -47,6 +61,17 @@ export function Onboarding() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['config'] }),
     onError: (e: Error) => toast(e.message, 'error'),
   });
+  const setTaskAi = useMutation({
+    mutationFn: (b: { task: string; provider: string; model: string }) => api(`/api/ai/tasks/${b.task}`, { method: 'PUT', body: { provider: b.provider, model: b.model } }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['config'] }),
+    onError: (e: Error) => toast(e.message, 'error'),
+  });
+  const saveTask = (task: string, provider: string, model: string) => {
+    if (task === 'nlanalytics') { setCfg.mutate({ key: 'ai.nlanalytics.provider', value: provider }); if (model) setCfg.mutate({ key: 'ai.nlanalytics.model', value: model }); }
+    else if (model) setTaskAi.mutate({ task, provider, model });
+    else setCfg.mutate({ key: `ai.${task}.provider`, value: provider });   // provider changed, model not chosen yet
+  };
+
   const { data: family } = useQuery({ queryKey: ['family'], queryFn: () => api<FamilyMember[]>('/api/family'), enabled: show });
   const { data: konten } = useQuery({ queryKey: ['konten-admin'], queryFn: () => api<Konto[]>('/api/admin/konten'), enabled: show });
 
@@ -92,19 +117,18 @@ export function Onboarding() {
   const cur = STEP_META[step];
   const Icon = cur.icon;
 
-  const cfgInput = (key: string, opts: { password?: boolean; placeholder?: string } = {}) => (
-    <Input type={opts.password ? 'password' : 'text'} autoComplete="off"
-      defaultValue={(config?.[key] as string) ?? ''} placeholder={opts.placeholder}
-      onBlur={e => e.target.value !== ((config?.[key] as string) ?? '') && setCfg.mutate({ key, value: e.target.value })} />
+  const cfgInput = (key: string, opts: { password?: boolean; placeholder?: string; type?: string } = {}) => (
+    <Input type={opts.type ?? (opts.password ? 'password' : 'text')} autoComplete="off"
+      defaultValue={(config?.[key] as string | number) ?? ''} placeholder={opts.placeholder}
+      onBlur={e => e.target.value !== String((config?.[key] as string | number) ?? '') && setCfg.mutate({ key, value: opts.type === 'number' ? Number(e.target.value) : e.target.value })} />
   );
   const addrField = (k: keyof typeof addr, ph: string, cls: string) => (
     <div className={cls}>
       <Label>{t(`onboarding.household.${k}`)}</Label>
-      <Input placeholder={ph} value={addr[k]}
-        onChange={e => setAddr(a => ({ ...a, [k]: e.target.value }))}
-        onBlur={() => saveAddr(addr)} />
+      <Input placeholder={ph} value={addr[k]} onChange={e => setAddr(a => ({ ...a, [k]: e.target.value }))} onBlur={() => saveAddr(addr)} />
     </div>
   );
+  const detail = (config?.['categories.detail'] as string) ?? 'mittel';
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-3 backdrop-blur-sm">
@@ -126,9 +150,7 @@ export function Onboarding() {
               {[['de', 'Deutsch'], ['en', 'English']].map(([code, label]) => (
                 <button key={code} type="button" onClick={() => pickLang(code)}
                   className={cn('flex-1 rounded-xl border px-4 py-3 text-sm font-medium transition-colors',
-                    i18n.language.startsWith(code) ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40' : 'border-zinc-300 hover:border-zinc-400 dark:border-zinc-700')}>
-                  {label}
-                </button>
+                    i18n.language.startsWith(code) ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40' : 'border-zinc-300 hover:border-zinc-400 dark:border-zinc-700')}>{label}</button>
               ))}
             </div>
           )}
@@ -147,6 +169,32 @@ export function Onboarding() {
               {provider === 'deepseek' && <div><Label>{t('onboarding.ai.apiKey')}</Label>{cfgInput('deepseek.api_key', { password: true, placeholder: 'sk-…' })}</div>}
               {provider === 'ollama' && <div><Label>{t('onboarding.ai.ollamaUrl')}</Label>{cfgInput('ollama.url', { placeholder: 'http://…:11434' })}<p className="mt-1 text-xs text-zinc-400">{t('onboarding.ai.ollamaHint')}</p></div>}
               <div><Label>{t('onboarding.ai.searxngUrl')}</Label>{cfgInput('searxng.url', { placeholder: 'http://…:8089' })}<p className="mt-1 text-xs text-zinc-400">{t('onboarding.ai.searxngHint')}</p></div>
+            </div>
+          )}
+
+          {cur.key === 'models' && (
+            <div className="flex flex-col gap-2">
+              {AI_TASKS.map(([task, labelKey]) => (
+                <TaskModelRow key={task} task={task} label={t(labelKey)}
+                  provider={(config?.[`ai.${task}.provider`] as string) ?? 'anthropic'}
+                  model={(config?.[`ai.${task}.model`] as string) ?? ''}
+                  onSave={saveTask} />
+              ))}
+            </div>
+          )}
+
+          {cur.key === 'categories' && (
+            <div className="flex flex-col gap-2">
+              <div className="grid grid-cols-3 gap-2">
+                {DETAILS.map(d => (
+                  <button key={d} type="button" onClick={() => setCfg.mutate({ key: 'categories.detail', value: d })}
+                    className={cn('rounded-xl border px-2 py-3 text-sm font-medium transition-colors',
+                      detail === d ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40' : 'border-zinc-300 hover:border-zinc-400 dark:border-zinc-700')}>
+                    {t(`onboarding.categories.${d}`)}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-zinc-400">{t('onboarding.categories.hint')}</p>
             </div>
           )}
 
@@ -206,10 +254,23 @@ export function Onboarding() {
             </div>
           )}
 
+          {cur.key === 'email' && (
+            <div className="grid grid-cols-6 gap-2">
+              <div className="col-span-4"><Label>{t('onboarding.email.host')}</Label>{cfgInput('smtp.host', { placeholder: 'smtp.gmail.com' })}</div>
+              <div className="col-span-2"><Label>{t('onboarding.email.port')}</Label>{cfgInput('smtp.port', { type: 'number', placeholder: '587' })}</div>
+              <div className="col-span-3"><Label>{t('onboarding.email.user')}</Label>{cfgInput('smtp.user')}</div>
+              <div className="col-span-3"><Label>{t('onboarding.email.pass')}</Label>{cfgInput('smtp.pass', { password: true })}</div>
+              <div className="col-span-6"><Label>{t('onboarding.email.from')}</Label>{cfgInput('smtp.from', { placeholder: 'VDS <vds@haushalt.de>' })}</div>
+              <label className="col-span-6 flex items-center gap-2 text-sm text-zinc-500"><Switch checked={!!config?.['smtp.secure']} onChange={v => setCfg.mutate({ key: 'smtp.secure', value: v })} />{t('onboarding.email.secure')}</label>
+            </div>
+          )}
+
+          {cur.key === 'imap' && <ImapStep t={t} />}
+
           <div className="flex justify-center gap-1.5 pt-2">
             {STEP_META.map((_, i) => (
               <button key={i} onClick={() => setStep(i)}
-                className={cn('h-1.5 rounded-full transition-all', i === step ? 'w-6 bg-emerald-600' : 'w-1.5 bg-zinc-300 dark:bg-zinc-700')}
+                className={cn('h-1.5 rounded-full transition-all', i === step ? 'w-5 bg-emerald-600' : 'w-1.5 bg-zinc-300 dark:bg-zinc-700')}
                 aria-label={`${t('tour.gotoStep')} ${i + 1}`} />
             ))}
           </div>
@@ -223,6 +284,55 @@ export function Onboarding() {
             </Button>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** One AI task's provider + model selector (models fetched per provider). */
+function TaskModelRow({ task, label, provider, model, onSave }: { task: string; label: string; provider: string; model: string; onSave: (task: string, provider: string, model: string) => void }) {
+  const { data: models } = useQuery({
+    queryKey: ['ai-models', provider],
+    queryFn: () => api<{ models: string[] }>(`/api/ai/models?provider=${provider}`).then(r => r.models).catch(() => [] as string[]),
+    staleTime: 5 * 60_000,
+  });
+  const opts = models ?? [];
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-28 shrink-0 truncate text-xs font-medium text-zinc-600 dark:text-zinc-300" title={label}>{label}</span>
+      <Select className="w-24 shrink-0" value={provider} onChange={e => onSave(task, e.target.value, '')}>
+        {PROVIDERS.map(p => <option key={p} value={p}>{p}</option>)}
+      </Select>
+      <Select className="flex-1" value={model} onChange={e => onSave(task, provider, e.target.value)}>
+        <option value="">—</option>
+        {model && !opts.includes(model) && <option value={model}>{model}</option>}
+        {opts.map(m => <option key={m} value={m}>{m}</option>)}
+      </Select>
+    </div>
+  );
+}
+
+/** The admin's own IMAP mailbox for automatic e-mail receipt import (optional). */
+function ImapStep({ t }: { t: TFunction }) {
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ['mailbox'], queryFn: () => api<{ configured: boolean; imap_host?: string; imap_port?: number; imap_secure?: boolean; imap_user?: string; folder?: string; enabled?: boolean }>('/api/me/mailbox') });
+  const [f, setF] = useState({ imap_host: '', imap_port: 993, imap_secure: true, imap_user: '', imap_pass: '', folder: 'INBOX', enabled: true });
+  useEffect(() => {
+    if (data?.configured) setF(v => ({ ...v, imap_host: data.imap_host ?? '', imap_port: data.imap_port ?? 993, imap_secure: data.imap_secure !== false, imap_user: data.imap_user ?? '', folder: data.folder ?? 'INBOX', enabled: data.enabled !== false }));
+  }, [data]);
+  const save = useMutation({ mutationFn: () => api('/api/me/mailbox', { method: 'PUT', body: f }), onSuccess: () => { toast(t('onboarding.imap.saved'), 'success'); void qc.invalidateQueries({ queryKey: ['mailbox'] }); }, onError: (e: Error) => toast(e.message, 'error') });
+  const test = useMutation({ mutationFn: () => api<{ ok?: boolean; error?: string }>('/api/me/mailbox/test', { method: 'POST', body: f }), onSuccess: (r) => toast(r.ok ? t('onboarding.imap.testOk') : (r.error ?? 'error'), r.ok ? 'success' : 'error'), onError: (e: Error) => toast(e.message, 'error') });
+  const F = (k: keyof typeof f) => (v: string | number) => setF(s => ({ ...s, [k]: v }));
+  return (
+    <div className="grid grid-cols-6 gap-2">
+      <div className="col-span-4"><Label>{t('onboarding.imap.host')}</Label><Input placeholder="imap.gmail.com" value={f.imap_host} onChange={e => F('imap_host')(e.target.value)} /></div>
+      <div className="col-span-2"><Label>{t('onboarding.imap.port')}</Label><Input type="number" value={f.imap_port} onChange={e => F('imap_port')(Number(e.target.value) || 993)} /></div>
+      <div className="col-span-3"><Label>{t('onboarding.imap.user')}</Label><Input autoComplete="off" value={f.imap_user} onChange={e => F('imap_user')(e.target.value)} /></div>
+      <div className="col-span-3"><Label>{t('onboarding.imap.pass')}</Label><Input type="password" autoComplete="off" placeholder={data?.configured ? '••••••' : ''} value={f.imap_pass} onChange={e => F('imap_pass')(e.target.value)} /></div>
+      <label className="col-span-6 flex items-center gap-2 text-sm text-zinc-500"><Switch checked={f.imap_secure} onChange={v => setF(s => ({ ...s, imap_secure: v }))} />{t('onboarding.imap.secure')}</label>
+      <div className="col-span-6 flex gap-2">
+        <Button variant="secondary" className="flex-1 justify-center" disabled={!f.imap_host || !f.imap_user || test.isPending} onClick={() => test.mutate()}>{t('onboarding.imap.test')}</Button>
+        <Button className="flex-1 justify-center" disabled={!f.imap_host || !f.imap_user || save.isPending} onClick={() => save.mutate()}>{t('onboarding.imap.save')}</Button>
       </div>
     </div>
   );

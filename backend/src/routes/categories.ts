@@ -3,6 +3,7 @@ import sql from '../db.js';
 import { requireAdmin } from '../auth/plugin.js';
 import { providerForTask } from '../llm/provider.js';
 import { parseLlmJson } from '../llm/ollama.js';
+import { getConfig } from '../config.js';
 
 const CATEGORY_DESIGNER_PROMPT = `Du bist ein Kategorien-Architekt für „Vorratsdatenspeicher" — eine Haushalts-App, die Kassenbons erfasst und Ausgaben nach Kategorien auswertet.
 
@@ -134,7 +135,9 @@ export function categoryRoutes(app: FastifyInstance): void {
       LIMIT 120
     `;
 
+    const detail = await getConfig('categories.detail');
     const context = JSON.stringify({
+      gewuenschter_detailgrad: detail, // 'grob' | 'mittel' | 'fein' — im Setup gewählt
       aktuelle_kategorien: cats.map(c => ({ path: c.path, artikel: c.artikel, meta: c.is_meta })),
       artikel_stichprobe: [...new Set(sample.map(s => s.n as string))],
     });
@@ -148,7 +151,7 @@ export function categoryRoutes(app: FastifyInstance): void {
     try {
       const llm = await providerForTask('categories_chat');
       const raw = await llm.chat({
-        system: CATEGORY_DESIGNER_PROMPT,
+        system: CATEGORY_DESIGNER_PROMPT + `\n\nGewünschter Detailgrad: „${detail}" — grob ≈ 5 Top-Level & max. 2 Ebenen, mittel ≈ 7 Top-Level & 3 Ebenen, fein ≈ 9 Top-Level & 3 Ebenen. Richte deinen Vorschlag danach aus.`,
         user: `KONTEXT AUS DER DATENBANK:\n${context}\n\nBISHERIGES GESPRÄCH:\n${transcript}\n\nAntworte auf die letzte Nutzer-Nachricht (als JSON).`,
         json: true,
       });

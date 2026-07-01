@@ -71,6 +71,8 @@ export interface AppConfig {
   'offers.push_enabled': boolean;
   'shopping.email_enabled': boolean;
   'shopping.push_enabled': boolean;
+  // category granularity chosen in onboarding — steers the category-designer prompt
+  'categories.detail': string;   // 'grob' | 'mittel' | 'fein'
   // first-run onboarding wizard completed (household-global; surfaced on /api/auth/me)
   'onboarding.done': boolean;
 }
@@ -133,6 +135,7 @@ const DEFAULTS: AppConfig = {
   'offers.push_enabled': true,
   'shopping.email_enabled': true,
   'shopping.push_enabled': true,
+  'categories.detail': 'mittel',
   'onboarding.done': false,
 };
 

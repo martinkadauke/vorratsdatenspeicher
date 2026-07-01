@@ -749,6 +749,30 @@
       "namePlaceholder": "Kontoname",
       "types": { "bar": "Bar", "karte": "Karte", "kreditkarte": "Kreditkarte", "paypal": "PayPal" }
     },
+    "models": {
+      "title": "KI-Modelle pro Aufgabe",
+      "body": "Feineinstellung: welches Modell für welche Aufgabe. Der Standard passt meist — lokale Aufgaben nutzen Ollama, anspruchsvolle Claude. Jederzeit im Admin änderbar.",
+      "nlanalytics": "Analyse-Assistent"
+    },
+    "categories": {
+      "title": "Kategorien-Detailgrad",
+      "body": "Wie fein sollen deine Ausgaben-Kategorien sein? VDS entwirft den Baum daraufhin mit dir per KI.",
+      "grob": "Grob",
+      "mittel": "Mittel",
+      "fein": "Fein",
+      "hint": "Nur eine Voreinstellung — den Kategorie-Baum baust du später im Kategorien-Bereich mit der KI, jederzeit neu."
+    },
+    "email": {
+      "title": "E-Mail senden (SMTP)",
+      "body": "Damit VDS Einkaufslisten & Angebote per E-Mail verschicken kann. Optional.",
+      "host": "SMTP-Host", "port": "Port", "user": "Benutzer", "pass": "Passwort", "from": "Absender", "secure": "SSL/TLS (Port 465)"
+    },
+    "imap": {
+      "title": "E-Mail-Import (IMAP)",
+      "body": "VDS kann Belege automatisch aus deinem Postfach holen (z. B. weitergeleitete PDF-Rechnungen). Optional — dein Postfach, Passwort verschlüsselt gespeichert.",
+      "host": "IMAP-Host", "port": "Port", "user": "Benutzer", "pass": "Passwort", "secure": "SSL/TLS (Port 993)",
+      "test": "Verbindung testen", "save": "Speichern", "saved": "Postfach gespeichert", "testOk": "Verbindung erfolgreich"
+    },
     "done": {
       "title": "Fertig — alles bereit!",
       "body": "Lade jetzt deinen ersten Kassenbon hoch. VDS erkennt Artikel, Preise und Laden automatisch und der Rest ergibt sich von selbst. Viel Spaß!"
