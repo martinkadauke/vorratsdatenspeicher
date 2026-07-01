@@ -10,6 +10,7 @@ export interface User {
   preferred_lang: string;
   emoji?: string | null;
   has_seen_tour?: boolean;
+  onboarding_done?: boolean;
   created_at?: string;
   invite_pending?: boolean;
   invite_expired?: boolean;

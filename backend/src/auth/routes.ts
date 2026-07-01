@@ -75,11 +75,14 @@ export function authRoutes(app: FastifyInstance): void {
         has_seen_tour: u.has_seen_tour,
         emoji: resolvedEmoji(u.emoji, u.member_emoji, u.is_admin),
         pinned_chains: u.pinned_chains,
+        onboarding_done: await getConfig('onboarding.done'),
       },
     };
   });
 
-  app.get('/api/auth/me', async (req) => ({ user: req.user }));
+  // Merge the household-global onboarding flag onto the current-user payload so the
+  // (non-admin-readable) config value drives the first-run wizard without a config GET.
+  app.get('/api/auth/me', async (req) => ({ user: { ...req.user, onboarding_done: await getConfig('onboarding.done') } }));
 
   /** Request a password reset. Always answers ok — no user enumeration. */
   app.post('/api/auth/forgot', async (req) => {

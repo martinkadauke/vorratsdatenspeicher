@@ -702,6 +702,45 @@
     "empty": "Keine Positionen gefunden",
     "fromStore": "Positionen dieses Ladens anzeigen"
   },
+  "onboarding": {
+    "skip": "Überspringen",
+    "finish": "Los geht's",
+    "welcome": {
+      "title": "Willkommen beim Vorratsdatenspeicher",
+      "body": "VDS liest deine Kassenbons per KI, versteht was du gekauft hast und macht daraus deine Ausgaben-Analyse, deinen Vorrat, passende Angebote und clevere Einkaufslisten.\n\nRichten wir dich in ein paar Schritten ein — du kannst alles später im Admin-Bereich ändern."
+    },
+    "ai": {
+      "title": "KI-Modell für die Belegerkennung",
+      "body": "VDS nutzt ein KI-Modell, um Belege zu lesen (OCR) und Produkte einzuordnen. Wähle einen Anbieter und hinterlege deinen Schlüssel — ohne KI läuft die Belegverarbeitung nicht.",
+      "provider": "Anbieter",
+      "recommended": "empfohlen",
+      "local": "lokal, kein Schlüssel",
+      "apiKey": "API-Schlüssel",
+      "ollamaUrl": "Ollama-Adresse",
+      "ollamaHint": "Lokales Modell auf deinem Server — kein API-Schlüssel nötig."
+    },
+    "household": {
+      "title": "Dein Haushalt",
+      "body": "Für lokale Angebote und die nächste Filiale brauchen wir deine Adresse. Optional — kannst du auch später setzen.",
+      "address": "Haushalts-Adresse",
+      "placeholder": "Straße Nr., PLZ Ort"
+    },
+    "family": {
+      "title": "Wer gehört zum Haushalt?",
+      "body": "Lege Personen an, um Verbrauch und Ausgaben zuzuordnen. Optional.",
+      "namePlaceholder": "Name"
+    },
+    "konten": {
+      "title": "Konten",
+      "body": "Konten bündeln Ausgaben — z. B. ein gemeinsames Haushaltskonto oder Bargeld pro Person. Ein gemeinsames Konto ist schon angelegt. Optional weitere hinzufügen.",
+      "shared": "gemeinsam",
+      "namePlaceholder": "Kontoname"
+    },
+    "done": {
+      "title": "Fertig — alles bereit!",
+      "body": "Lade jetzt deinen ersten Kassenbon hoch. VDS erkennt Artikel, Preise und Laden automatisch und der Rest ergibt sich von selbst. Viel Spaß!"
+    }
+  },
   "tour": {
     "next": "Weiter",
     "prev": "Zurück",

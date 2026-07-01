@@ -7,6 +7,7 @@ import { useAuth } from '../context/auth';
 import { api } from '../api/client';
 import { NotificationBell } from './NotificationBell';
 import { Tour } from './Tour';
+import { Onboarding } from './Onboarding';
 import { Toaster } from './Toast';
 import { ConfirmHost } from './Confirm';
 import { cn } from '../lib/utils';
@@ -44,13 +45,16 @@ export function Layout() {
   });
   const pruefenCount = pruefen?.count ?? 0;
 
-  // Auto-open tour on first login (after a tiny delay so the UI has settled)
+  // Auto-open tour on first login (after a tiny delay so the UI has settled).
+  // Suppressed while the admin first-run onboarding wizard is still pending — setup
+  // comes before the feature tour, then the tour opens once onboarding is done.
   useEffect(() => {
-    if (user && user.has_seen_tour === false) {
+    const onboardingPending = user?.is_admin && user?.onboarding_done === false;
+    if (user && user.has_seen_tour === false && !onboardingPending) {
       const id = window.setTimeout(() => setTourOpen(true), 400);
       return () => window.clearTimeout(id);
     }
-  }, [user?.has_seen_tour]);
+  }, [user?.has_seen_tour, user?.onboarding_done, user?.is_admin]);
 
   // Allow Profile page to re-open the tour via custom event
   useEffect(() => {
@@ -146,6 +150,7 @@ export function Layout() {
         {navItem('/more', MoreHorizontal, t('nav.more'), true)}
       </nav>
 
+      <Onboarding />
       <Tour open={tourOpen} onClose={() => setTourOpen(false)} />
       <Toaster />
       <ConfirmHost />

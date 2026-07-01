@@ -702,6 +702,45 @@
     "empty": "No line items found",
     "fromStore": "Show this store's line items"
   },
+  "onboarding": {
+    "skip": "Skip",
+    "finish": "Let's go",
+    "welcome": {
+      "title": "Welcome to Vorratsdatenspeicher",
+      "body": "VDS reads your receipts with AI, understands what you bought, and turns it into your spending analysis, pantry, matching offers and smart shopping lists.\n\nLet's get you set up in a few steps — you can change everything later in Admin."
+    },
+    "ai": {
+      "title": "AI model for receipt reading",
+      "body": "VDS uses an AI model to read receipts (OCR) and classify products. Pick a provider and add your key — receipt processing won't work without AI.",
+      "provider": "Provider",
+      "recommended": "recommended",
+      "local": "local, no key",
+      "apiKey": "API key",
+      "ollamaUrl": "Ollama URL",
+      "ollamaHint": "A local model on your server — no API key needed."
+    },
+    "household": {
+      "title": "Your household",
+      "body": "For local offers and your nearest branch we need your address. Optional — you can set it later.",
+      "address": "Household address",
+      "placeholder": "Street No., ZIP City"
+    },
+    "family": {
+      "title": "Who's in the household?",
+      "body": "Add people to attribute consumption and spending. Optional.",
+      "namePlaceholder": "Name"
+    },
+    "konten": {
+      "title": "Accounts",
+      "body": "Accounts group spending — e.g. a shared household account or cash per person. A shared account already exists. Optionally add more.",
+      "shared": "shared",
+      "namePlaceholder": "Account name"
+    },
+    "done": {
+      "title": "Done — all set!",
+      "body": "Upload your first receipt now. VDS detects items, prices and the store automatically, and the rest follows. Enjoy!"
+    }
+  },
   "tour": {
     "next": "Next",
     "prev": "Back",

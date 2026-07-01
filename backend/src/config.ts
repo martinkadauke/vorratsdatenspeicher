@@ -71,6 +71,8 @@ export interface AppConfig {
   'offers.push_enabled': boolean;
   'shopping.email_enabled': boolean;
   'shopping.push_enabled': boolean;
+  // first-run onboarding wizard completed (household-global; surfaced on /api/auth/me)
+  'onboarding.done': boolean;
 }
 
 const DEFAULTS: AppConfig = {
@@ -128,6 +130,7 @@ const DEFAULTS: AppConfig = {
   'offers.push_enabled': true,
   'shopping.email_enabled': true,
   'shopping.push_enabled': true,
+  'onboarding.done': false,
 };
 
 export async function getConfig<K extends keyof AppConfig>(key: K): Promise<AppConfig[K]> {
