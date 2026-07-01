@@ -323,33 +323,33 @@ function ProviderRow({ provider, cfgKey, label, config, setCfg, password, placeh
   );
 }
 
-/** One AI task's provider + model selector. Model options are the SELECTED provider's
- *  real models only (fetched live); switching provider clears the model and auto-picks
- *  a valid one, so no cross-provider model (e.g. qwen under Anthropic) can be shown. */
+/** One AI task's provider + model selector. Provider/model are derived from config (props)
+ *  each render, so an external config change reflects immediately. Model options are the
+ *  selected provider's real models only (fetched live); OCR is locked to Anthropic + the
+ *  vision-only list. Switching provider fetches the NEW provider's models and persists its
+ *  first model atomically, so no cross-provider model (e.g. qwen under Anthropic) survives. */
 function TaskModelRow({ task, label, cfgProvider, cfgModel, saveTask, visionOnly }: {
   task: string; label: string; cfgProvider: string; cfgModel: string; saveTask: (task: string, provider: string, model: string) => void; visionOnly?: boolean;
 }) {
-  // OCR runs vision → provider is locked to Anthropic (the only vision backend) and the model list is vision-only.
-  const [provider, setProvider] = useState(visionOnly ? 'anthropic' : cfgProvider);
-  const [model, setModel] = useState(cfgModel);
+  const provider = visionOnly ? 'anthropic' : cfgProvider;
+  const model = cfgModel;
   const { data, isFetching } = useQuery({
     queryKey: ['ai-models', provider, visionOnly ? 'vision' : 'all'],
     queryFn: () => api<{ models: string[] }>(`/api/ai/models?provider=${provider}${visionOnly ? '&vision=1' : ''}`).then(r => r.models),
     retry: false, staleTime: 60_000,
   });
   const models = data ?? [];
-  // Auto-pick the first real model after a provider switch (model === ''), or when the
-  // saved model isn't among the (vision) models the provider actually serves — a stale/
-  // invalid id would just make OCR fail, so snap to a valid one.
-  useEffect(() => {
-    if (isFetching || !models.length) return;
-    if (model === '' || (visionOnly && !models.includes(model))) { setModel(models[0]); saveTask(task, provider, models[0]); }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [models, isFetching]);
-  const onProvider = (p: string) => { setProvider(p); setModel(''); };
-  const onModel = (m: string) => { setModel(m); saveTask(task, provider, m); };
-  // Vision rows never surface a non-vision fallback; other rows keep a preset/legacy model visible.
-  const opts = visionOnly ? models : (model && !models.includes(model) ? [model, ...models] : models);
+  // Switching provider must not keep the old provider's model: fetch the new provider's
+  // list and persist its first model in one write (fall back to the current model only if
+  // the new provider serves none).
+  const onProvider = async (p: string) => {
+    try {
+      const list = await api<{ models: string[] }>(`/api/ai/models?provider=${p}`).then(r => r.models);
+      saveTask(task, p, list[0] ?? model);
+    } catch { saveTask(task, p, model); }
+  };
+  const onModel = (m: string) => saveTask(task, provider, m);
+  const opts = model && !models.includes(model) ? [model, ...models] : models;   // keep the current/legacy model visible + selectable
   return (
     <div className="flex items-center gap-2">
       <span className="w-24 shrink-0 truncate text-xs font-medium text-zinc-600 dark:text-zinc-300" title={label}>{label}</span>

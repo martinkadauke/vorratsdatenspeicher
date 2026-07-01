@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
@@ -321,13 +321,11 @@ function TaskRow({ task, taskLabel, taskDesc, config }: {
   const qc = useQueryClient();
   // OCR runs vision → provider is locked to Anthropic (the only vision backend) and the list is vision-only.
   const visionOnly = task === 'ocr';
-  const cfgProvider = (config[`ai.${task}.provider`] ?? 'ollama') as Provider;
-  const cfgModel = (config[`ai.${task}.model`] ?? '') as string;
+  // Derive from config each render so external config changes (e.g. model-review Apply) reflect immediately.
+  const provider = (visionOnly ? 'anthropic' : (config[`ai.${task}.provider`] ?? 'ollama')) as Provider;
+  const model = (config[`ai.${task}.model`] ?? '') as string;
 
-  const [provider, setProvider] = useState<Provider>(visionOnly ? 'anthropic' : cfgProvider);
-  const [model, setModel] = useState(cfgModel);
-
-  const { data: modelsData, isLoading: modelsLoading, isFetching } = useQuery({
+  const { data: modelsData, isLoading: modelsLoading } = useQuery({
     queryKey: ['ai-models', provider, visionOnly ? 'vision' : 'all'],
     queryFn: () => api<{ models: string[] }>(`/api/ai/models?provider=${provider}${visionOnly ? '&vision=1' : ''}`),
     retry: false,
@@ -340,19 +338,19 @@ function TaskRow({ task, taskLabel, taskDesc, config }: {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['config'] }),
   });
 
+  // Switching provider must not keep the old provider's model: fetch the new provider's
+  // list and persist its first model in one write (keep the current model only as a last
+  // resort if the new provider serves none).
+  const onProviderChange = async (next: Provider) => {
+    try {
+      const r = await api<{ models: string[] }>(`/api/ai/models?provider=${next}`);
+      setTask.mutate({ provider: next, model: r.models[0] ?? model });
+    } catch { setTask.mutate({ provider: next, model }); }
+  };
+  const onModelChange = (next: string) => setTask.mutate({ provider, model: next });
+
   const models = modelsData?.models ?? [];
-  // After a provider switch (model === '') pick the first real model; if the saved model
-  // isn't among the (vision) models the provider actually serves, snap to a valid one.
-  useEffect(() => {
-    if (isFetching || !models.length) return;
-    if (model === '' || (visionOnly && !models.includes(model))) { setModel(models[0]); setTask.mutate({ provider, model: models[0] }); }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [models, isFetching]);
-
-  const onProviderChange = (next: Provider) => { setProvider(next); setModel(''); };
-  const onModelChange = (next: string) => { setModel(next); setTask.mutate({ provider, model: next }); };
-
-  const modelOptions = visionOnly ? models : (!models.includes(model) && model ? [model, ...models] : models);
+  const modelOptions = !models.includes(model) && model ? [model, ...models] : models;
 
   return (
     <div className="rounded-xl border border-zinc-200 p-3 dark:border-zinc-800">

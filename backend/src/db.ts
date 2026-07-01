@@ -102,7 +102,10 @@ export async function ensureAdmin(): Promise<void> {
   if (martin.length) {
     if (force) {
       const hash = await bcrypt.hash(password, 12);
-      await sql`UPDATE users SET password_hash = ${hash}, is_admin = TRUE, sees_all_konten = TRUE WHERE username = 'martin'`;
+      // Recovery switch: reset the password only. Do NOT touch sees_all_konten here —
+      // an admin may have deliberately demoted themselves, and a password reset must
+      // not silently re-escalate super-admin visibility.
+      await sql`UPDATE users SET password_hash = ${hash}, is_admin = TRUE WHERE username = 'martin'`;
       console.log('[seed] ADMIN_RESET: password for "martin" has been reset');
     } else {
       console.log('[seed] admin user "martin" exists');
