@@ -709,32 +709,45 @@
       "title": "Willkommen beim Vorratsdatenspeicher",
       "body": "VDS liest deine Kassenbons per KI, versteht was du gekauft hast und macht daraus deine Ausgaben-Analyse, deinen Vorrat, passende Angebote und clevere Einkaufslisten.\n\nRichten wir dich in ein paar Schritten ein — du kannst alles später im Admin-Bereich ändern."
     },
+    "lang": {
+      "title": "Sprache",
+      "body": "In welcher Sprache möchtest du VDS nutzen? Jederzeit im Profil änderbar."
+    },
     "ai": {
-      "title": "KI-Modell für die Belegerkennung",
-      "body": "VDS nutzt ein KI-Modell, um Belege zu lesen (OCR) und Produkte einzuordnen. Wähle einen Anbieter und hinterlege deinen Schlüssel — ohne KI läuft die Belegverarbeitung nicht.",
-      "provider": "Anbieter",
+      "title": "KI & Suche",
+      "body": "VDS nutzt ein KI-Modell, um Belege zu lesen (OCR) und Produkte einzuordnen, plus eine Websuche für neue Produkte & Angebote. Wähle einen Anbieter und hinterlege den Schlüssel — ohne KI läuft die Belegverarbeitung nicht.",
+      "provider": "KI-Anbieter",
       "recommended": "empfohlen",
       "local": "lokal, kein Schlüssel",
       "apiKey": "API-Schlüssel",
       "ollamaUrl": "Ollama-Adresse",
-      "ollamaHint": "Lokales Modell auf deinem Server — kein API-Schlüssel nötig."
+      "ollamaHint": "Lokales Modell auf deinem Server — kein API-Schlüssel nötig.",
+      "searxngUrl": "SearXNG-Adresse (Websuche)",
+      "searxngHint": "VDS nutzt deine eigene SearXNG-Instanz für die Web-Recherche. Leer lassen, wenn (noch) keine vorhanden."
     },
     "household": {
       "title": "Dein Haushalt",
-      "body": "Für lokale Angebote und die nächste Filiale brauchen wir deine Adresse. Optional — kannst du auch später setzen.",
-      "address": "Haushalts-Adresse",
-      "placeholder": "Straße Nr., PLZ Ort"
+      "body": "Für lokale Angebote und die Anzeige der nächsten Filiale brauchen wir deine Adresse. Optional — auch später setzbar.",
+      "street": "Straße",
+      "nr": "Nr.",
+      "plz": "PLZ",
+      "city": "Stadt",
+      "streetPh": "Musterstraße",
+      "nrPh": "12a",
+      "plzPh": "72072",
+      "cityPh": "Tübingen"
     },
     "family": {
       "title": "Wer gehört zum Haushalt?",
-      "body": "Lege Personen an, um Verbrauch und Ausgaben zuzuordnen. Optional.",
+      "body": "Lege Personen an, um Verbrauch und Ausgaben zuzuordnen. Emoji per Klick wählen. Optional.",
       "namePlaceholder": "Name"
     },
     "konten": {
       "title": "Konten",
-      "body": "Konten bündeln Ausgaben — z. B. ein gemeinsames Haushaltskonto oder Bargeld pro Person. Ein gemeinsames Konto ist schon angelegt. Optional weitere hinzufügen.",
+      "body": "Konten bündeln Ausgaben — z. B. ein gemeinsames Haushaltskonto oder Bargeld pro Person. Ein Haushaltskonto ist schon angelegt (Name & Typ editierbar). Optional weitere hinzufügen.",
       "shared": "gemeinsam",
-      "namePlaceholder": "Kontoname"
+      "namePlaceholder": "Kontoname",
+      "types": { "bar": "Bar", "karte": "Karte", "kreditkarte": "Kreditkarte", "paypal": "PayPal" }
     },
     "done": {
       "title": "Fertig — alles bereit!",

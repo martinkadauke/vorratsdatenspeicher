@@ -12,7 +12,7 @@ export function kontoRoutes(app: FastifyInstance): void {
     // individual receipts can be private (the per-account count excludes others'
     // private receipts via kontoScope).
     return sql`
-      SELECT k.id, k.name, k.is_shared, k.is_cash, k.user_id, u.username AS owner,
+      SELECT k.id, k.name, k.is_shared, k.is_cash, k.payment_type, k.user_id, u.username AS owner,
              (SELECT COUNT(*)::int FROM einkauf e
               WHERE e.konto_id = k.id ${kontoScope(req.user, sql`e`)}) AS receipts
       FROM konto k LEFT JOIN users u ON u.id = k.user_id
@@ -23,7 +23,7 @@ export function kontoRoutes(app: FastifyInstance): void {
   /** Full account list (admin) with receipt counts. */
   app.get('/api/admin/konten', { preHandler: requireAdmin }, async (req) => {
     return sql`
-      SELECT k.id, k.name, k.is_shared, k.user_id, u.username AS owner, k.sort_order,
+      SELECT k.id, k.name, k.is_shared, k.payment_type, k.user_id, u.username AS owner, k.sort_order,
              (SELECT COUNT(*)::int FROM einkauf e
               WHERE e.konto_id = k.id ${kontoScope(req.user, sql`e`)}) AS receipts
       FROM konto k LEFT JOIN users u ON u.id = k.user_id
@@ -32,11 +32,11 @@ export function kontoRoutes(app: FastifyInstance): void {
   });
 
   app.post('/api/admin/konten', { preHandler: requireAdmin }, async (req, reply) => {
-    const { name, is_shared, user_id } = (req.body ?? {}) as { name?: string; is_shared?: boolean; user_id?: number | null };
+    const { name, is_shared, user_id, payment_type } = (req.body ?? {}) as { name?: string; is_shared?: boolean; user_id?: number | null; payment_type?: string | null };
     if (!name?.trim()) return reply.code(400).send({ error: 'name required' });
     const [row] = await sql`
-      INSERT INTO konto (name, is_shared, user_id)
-      VALUES (${name.trim()}, ${is_shared ?? false}, ${user_id ?? null})
+      INSERT INTO konto (name, is_shared, user_id, payment_type)
+      VALUES (${name.trim()}, ${is_shared ?? false}, ${user_id ?? null}, ${payment_type?.trim() || null})
       RETURNING id
     `;
     return { ok: true, id: row.id };
@@ -44,11 +44,12 @@ export function kontoRoutes(app: FastifyInstance): void {
 
   app.patch('/api/admin/konten/:id', { preHandler: requireAdmin }, async (req, reply) => {
     const id = parseInt((req.params as { id: string }).id, 10);
-    const body = (req.body ?? {}) as { name?: string; is_shared?: boolean; user_id?: number | null; sort_order?: number };
+    const body = (req.body ?? {}) as { name?: string; is_shared?: boolean; user_id?: number | null; sort_order?: number; payment_type?: string | null };
     const updates: Record<string, unknown> = {};
     if (body.name !== undefined) updates.name = body.name;
     if (body.is_shared !== undefined) updates.is_shared = body.is_shared;
     if ('user_id' in body) updates.user_id = body.user_id ?? null;
+    if ('payment_type' in body) updates.payment_type = body.payment_type?.trim() || null;
     if (body.sort_order !== undefined) updates.sort_order = body.sort_order;
     if (!Object.keys(updates).length) return reply.code(400).send({ error: 'nothing to update' });
     const rows = await sql`UPDATE konto SET ${sql(updates)} WHERE id = ${id} RETURNING id`;

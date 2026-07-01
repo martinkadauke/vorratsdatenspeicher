@@ -709,32 +709,45 @@
       "title": "Welcome to Vorratsdatenspeicher",
       "body": "VDS reads your receipts with AI, understands what you bought, and turns it into your spending analysis, pantry, matching offers and smart shopping lists.\n\nLet's get you set up in a few steps — you can change everything later in Admin."
     },
+    "lang": {
+      "title": "Language",
+      "body": "Which language would you like to use VDS in? Changeable anytime in your profile."
+    },
     "ai": {
-      "title": "AI model for receipt reading",
-      "body": "VDS uses an AI model to read receipts (OCR) and classify products. Pick a provider and add your key — receipt processing won't work without AI.",
-      "provider": "Provider",
+      "title": "AI & search",
+      "body": "VDS uses an AI model to read receipts (OCR) and classify products, plus a web search for new products & offers. Pick a provider and add your key — receipt processing won't work without AI.",
+      "provider": "AI provider",
       "recommended": "recommended",
       "local": "local, no key",
       "apiKey": "API key",
       "ollamaUrl": "Ollama URL",
-      "ollamaHint": "A local model on your server — no API key needed."
+      "ollamaHint": "A local model on your server — no API key needed.",
+      "searxngUrl": "SearXNG URL (web search)",
+      "searxngHint": "VDS uses your own SearXNG instance for web research. Leave empty if you don't have one (yet)."
     },
     "household": {
       "title": "Your household",
-      "body": "For local offers and your nearest branch we need your address. Optional — you can set it later.",
-      "address": "Household address",
-      "placeholder": "Street No., ZIP City"
+      "body": "For local offers and showing your nearest branch we need your address. Optional — you can set it later.",
+      "street": "Street",
+      "nr": "No.",
+      "plz": "ZIP",
+      "city": "City",
+      "streetPh": "Main Street",
+      "nrPh": "12a",
+      "plzPh": "72072",
+      "cityPh": "Tübingen"
     },
     "family": {
       "title": "Who's in the household?",
-      "body": "Add people to attribute consumption and spending. Optional.",
+      "body": "Add people to attribute consumption and spending. Pick an emoji by clicking. Optional.",
       "namePlaceholder": "Name"
     },
     "konten": {
       "title": "Accounts",
-      "body": "Accounts group spending — e.g. a shared household account or cash per person. A shared account already exists. Optionally add more.",
+      "body": "Accounts group spending — e.g. a shared household account or cash per person. A household account already exists (name & type editable). Optionally add more.",
       "shared": "shared",
-      "namePlaceholder": "Account name"
+      "namePlaceholder": "Account name",
+      "types": { "bar": "Cash", "karte": "Card", "kreditkarte": "Credit card", "paypal": "PayPal" }
     },
     "done": {
       "title": "Done — all set!",
