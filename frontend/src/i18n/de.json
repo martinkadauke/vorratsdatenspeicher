@@ -715,15 +715,9 @@
     },
     "ai": {
       "title": "KI & Suche",
-      "body": "VDS nutzt ein KI-Modell, um Belege zu lesen (OCR) und Produkte einzuordnen, plus eine Websuche für neue Produkte & Angebote. Wähle einen Anbieter und hinterlege den Schlüssel — ohne KI läuft die Belegverarbeitung nicht.",
-      "provider": "KI-Anbieter",
-      "recommended": "empfohlen",
-      "local": "lokal, kein Schlüssel",
-      "apiKey": "API-Schlüssel",
-      "ollamaUrl": "Ollama-Adresse",
-      "ollamaHint": "Lokales Modell auf deinem Server — kein API-Schlüssel nötig.",
-      "searxngUrl": "SearXNG-Adresse (Websuche)",
-      "searxngHint": "VDS nutzt deine eigene SearXNG-Instanz für die Web-Recherche. Leer lassen, wenn (noch) keine vorhanden."
+      "body": "VDS liest Belege per KI (OCR) und ordnet Produkte zu, plus Websuche für neue Produkte & Angebote. Trage die Zugänge deiner Anbieter ein — grün = erreichbar, rot = nicht erreichbar. Mindestens einen Anbieter brauchst du (Anthropic empfohlen).",
+      "reachable": "erreichbar",
+      "unreachable": "nicht erreichbar"
     },
     "household": {
       "title": "Dein Haushalt",
@@ -765,7 +759,8 @@
     "email": {
       "title": "E-Mail senden (SMTP)",
       "body": "Damit VDS Einkaufslisten & Angebote per E-Mail verschicken kann. Optional.",
-      "host": "SMTP-Host", "port": "Port", "user": "Benutzer", "pass": "Passwort", "from": "Absender", "secure": "SSL/TLS (Port 465)"
+      "host": "SMTP-Host", "port": "Port", "user": "Benutzer", "pass": "Passwort", "from": "Absender", "secure": "SSL/TLS (Port 465)",
+      "to": "Test-Mail an", "test": "Test senden", "testOk": "Testmail versendet"
     },
     "imap": {
       "title": "E-Mail-Import (IMAP)",

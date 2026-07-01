@@ -715,15 +715,9 @@
     },
     "ai": {
       "title": "AI & search",
-      "body": "VDS uses an AI model to read receipts (OCR) and classify products, plus a web search for new products & offers. Pick a provider and add your key — receipt processing won't work without AI.",
-      "provider": "AI provider",
-      "recommended": "recommended",
-      "local": "local, no key",
-      "apiKey": "API key",
-      "ollamaUrl": "Ollama URL",
-      "ollamaHint": "A local model on your server — no API key needed.",
-      "searxngUrl": "SearXNG URL (web search)",
-      "searxngHint": "VDS uses your own SearXNG instance for web research. Leave empty if you don't have one (yet)."
+      "body": "VDS reads receipts with AI (OCR) and classifies products, plus web search for new products & offers. Enter your providers' credentials — green = reachable, red = unreachable. You need at least one provider (Anthropic recommended).",
+      "reachable": "reachable",
+      "unreachable": "unreachable"
     },
     "household": {
       "title": "Your household",
@@ -765,7 +759,8 @@
     "email": {
       "title": "Send email (SMTP)",
       "body": "So VDS can email shopping lists & offers. Optional.",
-      "host": "SMTP host", "port": "Port", "user": "User", "pass": "Password", "from": "Sender", "secure": "SSL/TLS (port 465)"
+      "host": "SMTP host", "port": "Port", "user": "User", "pass": "Password", "from": "Sender", "secure": "SSL/TLS (port 465)",
+      "to": "Test email to", "test": "Send test", "testOk": "Test email sent"
     },
     "imap": {
       "title": "Email import (IMAP)",
