@@ -530,6 +530,8 @@
     "maintenance": "Nightly maintenance",
     "maintenanceHint": "Background AI jobs: categorize new items, clean up canonical names, fetch store logos.",
     "maintenanceEnabled": "Maintenance runs nightly",
+    "runAfterOcr": "Churn after every receipt",
+    "runAfterOcrHint": "Runs a churn pass right after a receipt is scanned (debounced), instead of waiting for the nightly run. Cleans up new receipts immediately.",
     "aiProviders": "AI Providers",
     "aiTasks": "AI Tasks",
     "aiTasksHint": "Each task uses a provider + model. You can switch per task (e.g. cheap model for simple classification, strong one for vision OCR).",

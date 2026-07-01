@@ -27,6 +27,10 @@ export interface AppConfig {
   'ai.nlanalytics.model': string;
   'churner.enabled': boolean;
   'churner.cron': string;
+  // Run a churn pass right after any receipt is OCR'd (debounced), so imports get
+  // cleaned up immediately instead of waiting for the nightly run. Independent of
+  // churner.enabled (which only gates the nightly cron).
+  'churner.run_after_ocr': boolean;
   'churner.confidence': number;
   'churner.batch_size': number;
   // How aggressively the churner auto-applies AI canonical names:
@@ -104,6 +108,7 @@ const DEFAULTS: AppConfig = {
   'ai.nlanalytics.model': 'claude-sonnet-5',
   'churner.enabled': true,
   'churner.cron': '0 3 * * *',
+  'churner.run_after_ocr': true,
   'churner.confidence': 0.85,
   'churner.batch_size': 200,
   'churner.hitl_mode': 'guarded',

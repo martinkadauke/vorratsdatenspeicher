@@ -10,6 +10,7 @@ import { ocrFromImage, type OcrResult } from '../llm/ocr.js';
 import { searchFilter, col, numCol, lk, type Frag } from '../lib/search.js';
 import { cleanMatch } from '../lib/canonicalMatch.js';
 import { ocrKey, loadAliasMap, loadUserAliasKeys, recordAliases } from '../lib/canonicalAlias.js';
+import { triggerChurnAfterOcr } from '../churner/index.js';
 
 /** Search config for the receipts list/nav: free text hits the store name or
  *  any of the receipt's items; supports laden:/kategorie: and preis> filters.
@@ -109,6 +110,9 @@ export async function storeOcrResult(id: number, parsed: OcrResult): Promise<{ i
     }
   });
   await recordAliases(learn);
+  // Kick a (debounced, config-gated) churn pass so the raw OCR items get canonicalized
+  // /categorized/deduped right away instead of waiting for the nightly run. Fire-and-forget.
+  void triggerChurnAfterOcr().catch(err => console.error('[churner] post-OCR trigger failed:', (err as Error).message));
   return { items: parsed.artikel?.length ?? 0, confidence: parsed.confidence };
 }
 

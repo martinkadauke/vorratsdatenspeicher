@@ -735,6 +735,17 @@ function ChurnerSection() {
           />
         </div>
 
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <span className="text-sm font-medium">{t('admin.runAfterOcr')}</span>
+            <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{t('admin.runAfterOcrHint')}</p>
+          </div>
+          <Switch
+            checked={config['churner.run_after_ocr'] !== false}
+            onChange={v => setCfg.mutate({ key: 'churner.run_after_ocr', value: v })}
+          />
+        </div>
+
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <Label>{t('admin.cron')}</Label>

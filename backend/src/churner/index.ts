@@ -26,9 +26,43 @@ interface Stage2Result {
 }
 
 let running = false;
+// Set when a receipt is OCR'd while a churn is already running, so we do one
+// trailing pass afterwards to pick up items imported mid-run (debounce).
+let rerunAfterFinish = false;
 
 export function isChurnRunning(): boolean {
   return running;
+}
+
+/** Called from every run's finally: clears the running flag and, if a receipt
+ *  arrived mid-run, kicks one trailing auto pass. */
+function finishRun(): void {
+  running = false;
+  if (rerunAfterFinish) {
+    rerunAfterFinish = false;
+    // triggerChurnAfterOcr never rejects, but re-arm the flag on the off chance it
+    // does, so the trailing pass is deferred rather than silently dropped.
+    void triggerChurnAfterOcr().catch(() => { rerunAfterFinish = true; });
+  }
+}
+
+/** Run a churn pass right after a receipt was OCR'd. Debounced: if a churn is
+ *  already running, mark a single trailing rerun instead of overlapping. Gated
+ *  by churner.run_after_ocr (independent of the nightly churner.enabled).
+ *  Called fire-and-forget (void) from finishRun and storeOcrResult, so it MUST
+ *  never reject — a stray rejection would be an unhandled promise rejection
+ *  (process crash under Node's default policy). */
+export async function triggerChurnAfterOcr(): Promise<void> {
+  try {
+    if (!(await getConfig('churner.run_after_ocr'))) return;
+    if (running) { rerunAfterFinish = true; return; }
+    await runChurn('auto_ocr');
+  } catch (err) {
+    // Transient DB error reading config, or runChurn lost a race to `running`:
+    // re-arm a trailing pass so the just-imported items still get churned.
+    rerunAfterFinish = true;
+    console.warn('[churner] auto-trigger deferred:', (err as Error).message);
+  }
 }
 
 /** The canonical a user previously assigned to the most textually-similar OCR text
@@ -95,7 +129,7 @@ class ChurnCancelled extends Error {
 }
 
 /** One churner pass: clean up weak canonical names. Returns the maintenance_event id. */
-export async function runChurn(trigger: 'cron' | 'manual'): Promise<number> {
+export async function runChurn(trigger: 'cron' | 'manual' | 'auto_ocr'): Promise<number> {
   if (running) throw new Error('churner already running');
   running = true;
 
@@ -107,7 +141,7 @@ export async function runChurn(trigger: 'cron' | 'manual'): Promise<number> {
   const eventId = event.id as number;
 
   // Fire-and-forget the actual work; the event row tracks progress.
-  void churnWork(eventId).catch(async err => {
+  void churnWork(eventId, trigger).catch(async err => {
     if (err instanceof ChurnCancelled) {
       await sql`UPDATE maintenance_event SET ended_at = NOW(), status = 'cancelled', progress = NULL,
                 summary = ${sql.json({ cancelled: true, ...(err.partial ?? {}) })} WHERE id = ${eventId}`;
@@ -116,7 +150,7 @@ export async function runChurn(trigger: 'cron' | 'manual'): Promise<number> {
     }
     await sql`UPDATE maintenance_event SET ended_at = NOW(), status = 'error', progress = NULL,
               summary = ${sql.json({ error: (err as Error).message })} WHERE id = ${eventId}`;
-  }).finally(() => { running = false; });
+  }).finally(finishRun);
 
   return eventId;
 }
@@ -146,11 +180,11 @@ export async function runIconFetch(): Promise<number> {
   })().catch(async err => {
     await sql`UPDATE maintenance_event SET ended_at = NOW(), status = 'error', progress = NULL,
               summary = ${sql.json({ error: (err as Error).message })} WHERE id = ${eventId}`;
-  }).finally(() => { running = false; });
+  }).finally(finishRun);
   return eventId;
 }
 
-async function churnWork(eventId: number): Promise<void> {
+async function churnWork(eventId: number, trigger: 'cron' | 'manual' | 'auto_ocr' = 'cron'): Promise<void> {
   const progress = new ProgressReporter(eventId);
 
   // Step 1: assign categories to any artikel with NULL category_path.
@@ -378,8 +412,11 @@ async function churnWork(eventId: number): Promise<void> {
   };
   await sql`UPDATE maintenance_event SET ended_at = NOW(), status = 'success', progress = NULL,
             summary = ${sql.json(summary)} WHERE id = ${eventId}`;
-  await notify('churner.run.summary', summary);
-  console.log('[churner] done:', JSON.stringify(summary));
+  // Auto (per-receipt) runs are frequent; only ping when something actually changed,
+  // so a routine import that produced nothing to review doesn't spam a summary.
+  const changed = autoApplied > 0 || queued > 0;
+  if (trigger !== 'auto_ocr' || changed) await notify('churner.run.summary', summary);
+  console.log(`[churner] done (${trigger}):`, JSON.stringify(summary));
 }
 
 /** Fetches a logo image for every store that's been seen but has no icon yet.

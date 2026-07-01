@@ -530,6 +530,8 @@
     "maintenance": "Nächtliche Wartung",
     "maintenanceHint": "Im Hintergrund laufende KI-Aufgaben: Kategorisierung neuer Artikel, Bereinigung kanonischer Namen, automatisches Holen von Laden-Logos.",
     "maintenanceEnabled": "Wartung nachts aktiv",
+    "runAfterOcr": "Nach jedem Beleg churnen",
+    "runAfterOcrHint": "Startet direkt nach dem Scannen eines Belegs einen Churn-Lauf (entprellt), statt bis zum nächtlichen Lauf zu warten. Bereinigt neue Belege sofort.",
     "aiProviders": "KI Provider",
     "aiTasks": "KI Aufgaben",
     "aiTasksHint": "Jede KI-Aufgabe nutzt einen Provider + Modell. Du kannst pro Aufgabe wechseln (z.B. günstiges Modell für einfache Klassifikation, starkes für Vision-OCR).",
