@@ -114,7 +114,9 @@ export async function ocrFromImage(source: string): Promise<OcrResult> {
     },
     body: JSON.stringify({
       model,
-      max_tokens: 8192, // long receipts (many line items) truncated the JSON at 4096
+      // Headroom for long receipts AND for thinking models (e.g. Sonnet 5) that spend
+      // part of the budget on a hidden thinking block before the JSON.
+      max_tokens: 16384,
       system: VISION_SYSTEM,
       messages: [{
         role: 'user',
@@ -130,8 +132,9 @@ export async function ocrFromImage(source: string): Promise<OcrResult> {
     const body = await res.text();
     throw new Error(`Anthropic HTTP ${res.status}: ${body.slice(0, 300)}`);
   }
-  const data = await res.json() as { content?: { text?: string }[]; usage?: { input_tokens: number; output_tokens: number } };
-  const text = data.content?.[0]?.text ?? '';
+  const data = await res.json() as { content?: { type?: string; text?: string }[]; usage?: { input_tokens: number; output_tokens: number } };
+  // Thinking models (Sonnet 5) return [thinking, text]; the JSON is the first TEXT block, not content[0].
+  const text = (data.content ?? []).find(c => c.type === 'text')?.text ?? '';
   const parsed = parseLlmJson<OcrResult>(text);
   parsed.usage = data.usage;
   await recordUsage('ocr', 'anthropic', model, data.usage?.input_tokens ?? 0, data.usage?.output_tokens ?? 0);
@@ -189,7 +192,7 @@ export async function ocrFromText(text: string): Promise<OcrResult> {
     },
     body: JSON.stringify({
       model,
-      max_tokens: 8192,
+      max_tokens: 16384,
       system: TEXT_SYSTEM,
       messages: [{ role: 'user', content: [{ type: 'text', text: text.slice(0, 24000) }] }],
     }),
@@ -199,8 +202,9 @@ export async function ocrFromText(text: string): Promise<OcrResult> {
     const body = await res.text();
     throw new Error(`Anthropic HTTP ${res.status}: ${body.slice(0, 300)}`);
   }
-  const data = await res.json() as { content?: { text?: string }[]; usage?: { input_tokens: number; output_tokens: number } };
-  const out = data.content?.[0]?.text ?? '';
+  const data = await res.json() as { content?: { type?: string; text?: string }[]; usage?: { input_tokens: number; output_tokens: number } };
+  // Thinking models (Sonnet 5) return [thinking, text]; take the first TEXT block, not content[0].
+  const out = (data.content ?? []).find(c => c.type === 'text')?.text ?? '';
   const parsed = parseLlmJson<OcrResult>(out);
   parsed.usage = data.usage;
   await recordUsage('ocr', 'anthropic', model, data.usage?.input_tokens ?? 0, data.usage?.output_tokens ?? 0);

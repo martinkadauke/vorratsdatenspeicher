@@ -163,16 +163,19 @@ class AnthropicProvider implements LlmProvider {
       },
       body: JSON.stringify({
         model: this.model,
-        max_tokens: 4096,
+        // Headroom for thinking models (Sonnet 5) that spend part of the budget on a
+        // hidden thinking block before the answer.
+        max_tokens: 8192,
         system: opts.system,
         messages: [{ role: 'user', content: opts.user }],
       }),
       signal: AbortSignal.timeout(180_000),
     });
     if (!res.ok) throw new Error(`Anthropic HTTP ${res.status}: ${await safeBody(res)}`);
-    const data = (await res.json()) as { content?: { text?: string }[]; usage?: { input_tokens?: number; output_tokens?: number } };
+    const data = (await res.json()) as { content?: { type?: string; text?: string }[]; usage?: { input_tokens?: number; output_tokens?: number } };
     await recordUsage(this.task, this.name, this.model, data.usage?.input_tokens ?? 0, data.usage?.output_tokens ?? 0);
-    return data.content?.[0]?.text ?? '';
+    // Thinking models return [thinking, text]; take the first TEXT block, not content[0].
+    return (data.content ?? []).find(c => c.type === 'text')?.text ?? '';
   }
 }
 
