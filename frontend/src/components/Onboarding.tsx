@@ -177,6 +177,7 @@ export function Onboarding() {
                 <TaskModelRow key={task} task={task} label={t(labelKey)}
                   cfgProvider={(config?.[`ai.${task}.provider`] as string) ?? 'anthropic'}
                   cfgModel={(config?.[`ai.${task}.model`] as string) ?? ''}
+                  visionOnly={task === 'ocr'}
                   saveTask={saveTask} />
               ))}
             </div>
@@ -325,30 +326,35 @@ function ProviderRow({ provider, cfgKey, label, config, setCfg, password, placeh
 /** One AI task's provider + model selector. Model options are the SELECTED provider's
  *  real models only (fetched live); switching provider clears the model and auto-picks
  *  a valid one, so no cross-provider model (e.g. qwen under Anthropic) can be shown. */
-function TaskModelRow({ task, label, cfgProvider, cfgModel, saveTask }: {
-  task: string; label: string; cfgProvider: string; cfgModel: string; saveTask: (task: string, provider: string, model: string) => void;
+function TaskModelRow({ task, label, cfgProvider, cfgModel, saveTask, visionOnly }: {
+  task: string; label: string; cfgProvider: string; cfgModel: string; saveTask: (task: string, provider: string, model: string) => void; visionOnly?: boolean;
 }) {
-  const [provider, setProvider] = useState(cfgProvider);
+  // OCR runs vision → provider is locked to Anthropic (the only vision backend) and the model list is vision-only.
+  const [provider, setProvider] = useState(visionOnly ? 'anthropic' : cfgProvider);
   const [model, setModel] = useState(cfgModel);
   const { data, isFetching } = useQuery({
-    queryKey: ['ai-models', provider],
-    queryFn: () => api<{ models: string[] }>(`/api/ai/models?provider=${provider}`).then(r => r.models),
+    queryKey: ['ai-models', provider, visionOnly ? 'vision' : 'all'],
+    queryFn: () => api<{ models: string[] }>(`/api/ai/models?provider=${provider}${visionOnly ? '&vision=1' : ''}`).then(r => r.models),
     retry: false, staleTime: 60_000,
   });
   const models = data ?? [];
-  // After a provider switch (model === '') auto-select the first real model for that provider.
+  // Auto-pick the first real model after a provider switch (model === ''), or when the
+  // saved model isn't among the (vision) models the provider actually serves — a stale/
+  // invalid id would just make OCR fail, so snap to a valid one.
   useEffect(() => {
-    if (model === '' && !isFetching && models.length) { setModel(models[0]); saveTask(task, provider, models[0]); }
+    if (isFetching || !models.length) return;
+    if (model === '' || (visionOnly && !models.includes(model))) { setModel(models[0]); saveTask(task, provider, models[0]); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [models, isFetching]);
   const onProvider = (p: string) => { setProvider(p); setModel(''); };
   const onModel = (m: string) => { setModel(m); saveTask(task, provider, m); };
-  const opts = model && !models.includes(model) ? [model, ...models] : models;   // keep a preset/legacy model visible
+  // Vision rows never surface a non-vision fallback; other rows keep a preset/legacy model visible.
+  const opts = visionOnly ? models : (model && !models.includes(model) ? [model, ...models] : models);
   return (
     <div className="flex items-center gap-2">
       <span className="w-24 shrink-0 truncate text-xs font-medium text-zinc-600 dark:text-zinc-300" title={label}>{label}</span>
-      <Select className="w-24 shrink-0" value={provider} onChange={e => onProvider(e.target.value)}>
-        {PROVIDERS.map(p => <option key={p} value={p}>{p}</option>)}
+      <Select className="w-24 shrink-0" value={provider} disabled={visionOnly} onChange={e => onProvider(e.target.value)}>
+        {(visionOnly ? ['anthropic'] : PROVIDERS).map(p => <option key={p} value={p}>{p}</option>)}
       </Select>
       {isFetching ? <Input className="flex-1" value="…" disabled />
         : opts.length ? (

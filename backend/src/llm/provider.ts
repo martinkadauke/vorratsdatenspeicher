@@ -227,6 +227,28 @@ export async function listModelsForProvider(provider: ProviderName): Promise<str
   return listOllamaModels();
 }
 
+/** Whether a model can accept image/PDF input (vision), per provider. Used to
+ *  keep non-vision models out of the OCR model picker — sending a receipt image
+ *  to a text-only model just fails. */
+export function isVisionModel(provider: ProviderName, model: string): boolean {
+  const m = model.toLowerCase();
+  if (provider === 'anthropic') {
+    // Every Claude 3+ model (sonnet/opus/haiku, incl. 4.x and 5) is multimodal.
+    return /claude/.test(m);
+  }
+  if (provider === 'ollama') {
+    return /(llava|bakllava|moondream|minicpm-?v|llama-?3\.2-vision|qwen2\.?5?-?vl|[-_]vl\b|vision|pixtral|granite.*vision|gemma3)/.test(m);
+  }
+  // deepseek: only the (rarely API-served) vl/vision models take images.
+  return /(vl|vision)/.test(m);
+}
+
+/** List only the vision-capable models for a provider. */
+export async function listVisionModelsForProvider(provider: ProviderName): Promise<string[]> {
+  const all = await listModelsForProvider(provider);
+  return all.filter(m => isVisionModel(provider, m));
+}
+
 /** Health check for a provider. */
 export async function healthForProvider(provider: ProviderName): Promise<HealthInfo> {
   if (provider === 'deepseek') return deepseekHealth();

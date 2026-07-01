@@ -30,6 +30,23 @@ Regeln:
 JSON-Schema:
 {"confidence": 0.0-1.0, "ladenkette": "...", "filiale": "..." | null, "datum": "YYYY-MM-DD", "uhrzeit": "HH:MM:SS" | null, "gesamt_betrag": 12.34, "artikel": [...]}`;
 
+/** Detect the real image type from magic bytes — phone photos often have a
+ *  misleading extension (a ".jpg" that's actually WEBP/HEIC), and Anthropic
+ *  rejects the request when the bytes don't match the declared media_type. */
+function sniffMediaType(buf: Buffer): string | null {
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+  if (buf.length >= 4 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png';
+  if (buf.length >= 4 && buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return 'image/gif';
+  if (buf.length >= 12 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
+  return null;
+}
+
+/** HEIC/HEIF (default iPhone photo format) is NOT accepted by the vision API. */
+function isHeic(buf: Buffer): boolean {
+  if (buf.length < 12 || buf.toString('ascii', 4, 8) !== 'ftyp') return false;
+  return /^(heic|heix|hevc|hevx|mif1|msf1)/.test(buf.toString('ascii', 8, 12));
+}
+
 export interface OcrArtikel {
   original_text?: string;
   name?: string;
@@ -75,8 +92,12 @@ export async function ocrFromImage(source: string): Promise<OcrResult> {
     buf = await readFile(source);
   }
   const b64 = buf.toString('base64');
-  const isPdf = /\.pdf$/i.test(source);
-  const mediaType = /\.png$/i.test(source) ? 'image/png' : 'image/jpeg';
+  const isPdf = (buf.length >= 4 && buf.toString('ascii', 0, 4) === '%PDF') || /\.pdf$/i.test(source);
+  if (!isPdf && isHeic(buf)) {
+    throw new Error('HEIC/HEIF-Fotos werden vom Vision-Modell nicht unterstützt — bitte als JPEG oder PNG hochladen (iPhone: Einstellungen → Kamera → Formate → "Maximale Kompatibilität").');
+  }
+  // Trust the actual bytes over the extension; fall back to the extension only if unrecognised.
+  const mediaType = sniffMediaType(buf) ?? (/\.png$/i.test(source) ? 'image/png' : 'image/jpeg');
   // A PDF invoice (common for utilities/telecom/online orders) is sent as a
   // `document` block — native PDF understanding, no rasteriser needed. An image
   // goes in an `image` block. Same vision model, same JSON contract.

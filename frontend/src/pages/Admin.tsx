@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
@@ -319,12 +319,17 @@ function TaskRow({ task, taskLabel, taskDesc, config }: {
   config: Record<string, unknown>;
 }) {
   const qc = useQueryClient();
-  const provider = (config[`ai.${task}.provider`] ?? 'ollama') as Provider;
-  const model = (config[`ai.${task}.model`] ?? '') as string;
+  // OCR runs vision → provider is locked to Anthropic (the only vision backend) and the list is vision-only.
+  const visionOnly = task === 'ocr';
+  const cfgProvider = (config[`ai.${task}.provider`] ?? 'ollama') as Provider;
+  const cfgModel = (config[`ai.${task}.model`] ?? '') as string;
 
-  const { data: modelsData, isLoading: modelsLoading } = useQuery({
-    queryKey: ['ai-models', provider],
-    queryFn: () => api<{ models: string[] }>(`/api/ai/models?provider=${provider}`),
+  const [provider, setProvider] = useState<Provider>(visionOnly ? 'anthropic' : cfgProvider);
+  const [model, setModel] = useState(cfgModel);
+
+  const { data: modelsData, isLoading: modelsLoading, isFetching } = useQuery({
+    queryKey: ['ai-models', provider, visionOnly ? 'vision' : 'all'],
+    queryFn: () => api<{ models: string[] }>(`/api/ai/models?provider=${provider}${visionOnly ? '&vision=1' : ''}`),
     retry: false,
     staleTime: 60_000,
   });
@@ -335,25 +340,35 @@ function TaskRow({ task, taskLabel, taskDesc, config }: {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['config'] }),
   });
 
-  const onProviderChange = (next: Provider) => {
-    setTask.mutate({ provider: next, model });
-  };
-  const onModelChange = (next: string) => {
-    setTask.mutate({ provider, model: next });
-  };
-
   const models = modelsData?.models ?? [];
-  const modelOptions = !models.includes(model) && model ? [model, ...models] : models;
+  // After a provider switch (model === '') pick the first real model; if the saved model
+  // isn't among the (vision) models the provider actually serves, snap to a valid one.
+  useEffect(() => {
+    if (isFetching || !models.length) return;
+    if (model === '' || (visionOnly && !models.includes(model))) { setModel(models[0]); setTask.mutate({ provider, model: models[0] }); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [models, isFetching]);
+
+  const onProviderChange = (next: Provider) => { setProvider(next); setModel(''); };
+  const onModelChange = (next: string) => { setModel(next); setTask.mutate({ provider, model: next }); };
+
+  const modelOptions = visionOnly ? models : (!models.includes(model) && model ? [model, ...models] : models);
 
   return (
     <div className="rounded-xl border border-zinc-200 p-3 dark:border-zinc-800">
       <div className="mb-0.5 text-sm font-medium">{taskLabel}</div>
       <p className="mb-2 text-xs text-zinc-500 dark:text-zinc-400">{taskDesc}</p>
       <div className="grid gap-2 sm:grid-cols-2">
-        <Select value={provider} onChange={e => onProviderChange(e.target.value as Provider)}>
-          <option value="ollama">Ollama</option>
-          <option value="deepseek">DeepSeek</option>
-          <option value="anthropic">Anthropic</option>
+        <Select value={provider} disabled={visionOnly} onChange={e => onProviderChange(e.target.value as Provider)}>
+          {visionOnly ? (
+            <option value="anthropic">Anthropic</option>
+          ) : (
+            <>
+              <option value="ollama">Ollama</option>
+              <option value="deepseek">DeepSeek</option>
+              <option value="anthropic">Anthropic</option>
+            </>
+          )}
         </Select>
         {modelsLoading ? (
           <Input value="…" disabled />

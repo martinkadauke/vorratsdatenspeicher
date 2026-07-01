@@ -12,7 +12,7 @@ import { searxngHealth } from '../llm/searxng.js';
 import { sendMail } from '../mailer.js';
 import { inviteEmail, resetEmail, noticeEmail, setEmailBaseUrl } from '../email/templates.js';
 import { createAuthToken } from '../auth/routes.js';
-import { listModelsForProvider, healthForProvider, setTaskAi, type ProviderName, type AiTask } from '../llm/provider.js';
+import { listModelsForProvider, listVisionModelsForProvider, healthForProvider, setTaskAi, type ProviderName, type AiTask } from '../llm/provider.js';
 import { matchExistingCanonical } from '../lib/canonicalMatch.js';
 
 const VALID_PROVIDERS: ProviderName[] = ['ollama', 'deepseek', 'anthropic'];
@@ -239,12 +239,16 @@ export function adminRoutes(app: FastifyInstance): void {
   }));
 
   app.get('/api/ai/models', { preHandler: requireAdmin }, async (req, reply) => {
-    const provider = (req.query as { provider?: string }).provider as ProviderName | undefined;
+    const q = req.query as { provider?: string; vision?: string };
+    const provider = q.provider as ProviderName | undefined;
     if (!provider || !VALID_PROVIDERS.includes(provider)) {
       return reply.code(400).send({ error: 'invalid provider' });
     }
     try {
-      return { models: await listModelsForProvider(provider) };
+      const models = q.vision === '1'
+        ? await listVisionModelsForProvider(provider)
+        : await listModelsForProvider(provider);
+      return { models };
     } catch (e) {
       return reply.code(502).send({ error: (e as Error).message });
     }

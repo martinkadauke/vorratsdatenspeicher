@@ -102,7 +102,7 @@ export async function ensureAdmin(): Promise<void> {
   if (martin.length) {
     if (force) {
       const hash = await bcrypt.hash(password, 12);
-      await sql`UPDATE users SET password_hash = ${hash}, is_admin = TRUE WHERE username = 'martin'`;
+      await sql`UPDATE users SET password_hash = ${hash}, is_admin = TRUE, sees_all_konten = TRUE WHERE username = 'martin'`;
       console.log('[seed] ADMIN_RESET: password for "martin" has been reset');
     } else {
       console.log('[seed] admin user "martin" exists');
@@ -117,6 +117,6 @@ export async function ensureAdmin(): Promise<void> {
   }
 
   const hash = await bcrypt.hash(password, 12);
-  await sql`INSERT INTO users (username, password_hash, is_admin) VALUES ('martin', ${hash}, TRUE)`;
+  await sql`INSERT INTO users (username, password_hash, is_admin, sees_all_konten) VALUES ('martin', ${hash}, TRUE, TRUE)`;
   console.log('[seed] created admin user "martin"');
 }
