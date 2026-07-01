@@ -218,8 +218,10 @@ async function churnWork(eventId: number): Promise<void> {
       const aKey = ocrKey(a.original_text ?? a.name);
       const fromAlias = aliases.get(aKey);
       // cleanMatch: only an unambiguous whole-word match (no other product noun)
-      // auto-applies; risky containment falls through to the LLM + Prüfen.
-      const pre = fromAlias ?? cleanMatch([a.original_text, a.name, a.ai_guess], existing);
+      // auto-applies; risky containment falls through to the LLM + Prüfen. The
+      // "no rival noun" guard runs on the RECEIPT text only (not ai_guess), so a
+      // wrong AI paraphrase can't block a clean receipt match.
+      const pre = fromAlias ?? cleanMatch([a.original_text, a.name, a.ai_guess], existing, [a.original_text, a.name]);
       if (pre) {
         // A deterministic match the human already rejected for this key must not
         // silently re-apply. (A learned alias is the user's own mapping → it wins.)

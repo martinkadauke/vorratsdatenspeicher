@@ -93,8 +93,9 @@ export async function storeOcrResult(id: number, parsed: OcrResult): Promise<{ i
       const key = ocrKey(a.original_text ?? a.name);
       const fromAlias = aliases.get(key);
       // Guarded: only inherit a deterministic match when it's unambiguous (no other
-      // significant product noun), else leave NULL for AI + Prüfen review.
-      const canon = fromAlias ?? cleanMatch([a.original_text, a.name, a.ai_guess], existing);
+      // significant product noun), else leave NULL for AI + Prüfen review. The guard
+      // uses the RECEIPT text only, so a wrong ai_guess can't block a clean match.
+      const canon = fromAlias ?? cleanMatch([a.original_text, a.name, a.ai_guess], existing, [a.original_text, a.name]);
       if (canon && !fromAlias) learn.push([a.original_text ?? a.name ?? null, canon]); // remember new matches
       const fromUser = !!fromAlias && userKeys.has(key); // inherited a user correction
       await tx`

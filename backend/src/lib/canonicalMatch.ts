@@ -44,15 +44,24 @@ const MODIFIERS = new Set([
  *  the canonical + known modifiers. Stops "dmBio Käse Tortellini" (a pasta) from
  *  silently inheriting the canonical "Käse", while still allowing "Bio Quetschie"
  *  → "Quetschie". Returns the match, or null when it is risky/absent — risky
- *  matches fall through to the AI + Prüfen review instead of auto-applying. */
+ *  matches fall through to the AI + Prüfen review instead of auto-applying.
+ *
+ *  `safeTexts` (optional): the texts the "no other product noun" guard is judged on.
+ *  Defaults to `texts`. Pass the RECEIPT text only (original_text/name, excluding the
+ *  AI's ai_guess) so a wrong AI paraphrase can't inject a phantom rival noun and block
+ *  an otherwise-clean receipt match — e.g. a receipt printing "Karotten 2kg" whose
+ *  ai_guess is "Möhren" should still cleanly match the existing canonical "Karotten".
+ *  The candidate is still *found* across all `texts` (ai_guess can name a cryptic line);
+ *  only the safety guard is restricted to the receipt text. */
 export function cleanMatch(
   texts: (string | null | undefined)[],
   existing: string[],
+  safeTexts?: (string | null | undefined)[],
 ): string | null {
   const match = matchExistingCanonical(texts, existing);
   if (!match) return null;
   const canonToks = new Set(fold(match).split(/[^0-9a-zäöüß]+/).filter(Boolean));
-  const ocrToks = fold(texts.filter(Boolean).join(' ')).split(/[^0-9a-zäöüß]+/).filter(Boolean);
+  const ocrToks = fold((safeTexts ?? texts).filter(Boolean).join(' ')).split(/[^0-9a-zäöüß]+/).filter(Boolean);
   const leftover = ocrToks.filter(tok =>
     tok.length >= 4 && /[a-zäöüß]/.test(tok) && !canonToks.has(tok) && !MODIFIERS.has(tok));
   return leftover.length ? null : match;
