@@ -80,7 +80,10 @@ export function Pantry() {
     mutationFn: ({ name, add }: { name: string; add: boolean }) => add
       ? api('/api/shopping-list', { method: 'POST', body: { canonical_name: name } })
       : api('/api/shopping-list/feedback', { method: 'POST', body: { action: 'done', canonical_name: name } }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['shopping-list-mini'] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['shopping-list-mini'] });
+      void qc.invalidateQueries({ queryKey: ['shopping-lists'] }); // keep the Shopping switcher badge in sync
+    },
     onError: (e: Error) => toast(e.message, 'error'),
   });
 

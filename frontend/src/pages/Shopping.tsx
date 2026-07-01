@@ -12,12 +12,15 @@ import {
   verticalListSortingStrategy, useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { GripVertical, Minus, Plus, Trash2, Search, Sparkles, Send, TrendingDown, MessageSquare, CheckSquare, Square, ClipboardList, ShoppingBag, RotateCcw, Store } from 'lucide-react';
+import { GripVertical, Minus, Plus, Trash2, Search, Sparkles, Send, TrendingDown, MessageSquare, CheckSquare, Square, ClipboardList, ShoppingBag, RotateCcw, Store, Pencil } from 'lucide-react';
 import { api } from '../api/client';
-import type { ShoppingItem } from '../api/types';
-import { Card, Spinner, EmptyState, Button, Input, Badge } from '../components/ui';
+import type { ShoppingItem, ShoppingList } from '../api/types';
+import { Card, Spinner, EmptyState, Button, Input, Badge, Modal, Select, Label } from '../components/ui';
 import { toast } from '../components/Toast';
 import { cn, eur } from '../lib/utils';
+import { useUrlState } from '../hooks/useUrlState';
+
+const STORE_TYPES = ['Supermarkt', 'Drogerie', 'Baumarkt', 'Tierbedarf', 'Apotheke', 'Bäckerei', 'Online', 'Sonstiges'];
 
 interface StoreItem { id: number; canonical_name: string | null; title: string; menge: number; category: string | null; price: number | null; unit: string | null; source: string | null; expected: number | null; carried: boolean; cheapest: boolean }
 interface StoreList { chain_key: string; store: string; item_count: number; total: number; items: StoreItem[] }
@@ -32,9 +35,22 @@ export function Shopping() {
   const { t, i18n } = useTranslation();
   const qc = useQueryClient();
 
+  // Multiple lists: a switcher up top; every list-scoped call carries list_id.
+  const [listSel, setListSel] = useUrlState('list', '');
+  const { data: lists } = useQuery({
+    queryKey: ['shopping-lists'],
+    queryFn: () => api<ShoppingList[]>('/api/shopping-lists'),
+  });
+  const activeListId = lists && lists.length
+    ? (lists.find(l => String(l.id) === listSel)?.id ?? lists[0].id)
+    : null;
+  const activeListObj = lists?.find(l => l.id === activeListId) ?? null;
+  const [listModal, setListModal] = useState<{ mode: 'create' | 'edit'; list?: ShoppingList } | null>(null);
+
   const { data, isLoading } = useQuery({
-    queryKey: ['shopping'],
-    queryFn: () => api<ShoppingItem[]>('/api/shopping-list'),
+    queryKey: ['shopping', activeListId],
+    queryFn: () => api<ShoppingItem[]>(`/api/shopping-list?list_id=${activeListId}`),
+    enabled: activeListId != null,
   });
   // Canonical names → typeahead suggestions (free text is still allowed).
   const { data: names } = useQuery({
@@ -65,6 +81,7 @@ export function Shopping() {
 
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ['shopping'] });
+    void qc.invalidateQueries({ queryKey: ['shopping-lists'] }); // switcher chips + item_count badges
     void qc.invalidateQueries({ queryKey: ['shopping-list-mini'] });
     void qc.invalidateQueries({ queryKey: ['shopping-by-store'] });
   };
@@ -74,7 +91,7 @@ export function Shopping() {
       const ti = title.trim();
       return api('/api/shopping-list', {
         method: 'POST',
-        body: { canonical_name: nameSet.has(ti) ? ti : null, title: ti },
+        body: { canonical_name: nameSet.has(ti) ? ti : null, title: ti, list_id: activeListId },
       });
     },
     onSuccess: () => { setTitle(''); invalidate(); },
@@ -97,8 +114,9 @@ export function Shopping() {
 
   // Einkaufszettel (shopping trip) state
   const { data: session } = useQuery({
-    queryKey: ['shopping-session'],
-    queryFn: () => api<{ active: boolean; created_at: string | null }>('/api/shopping-list/session'),
+    queryKey: ['shopping-session', activeListId],
+    queryFn: () => api<{ active: boolean; created_at: string | null }>(`/api/shopping-list/session?list_id=${activeListId}`),
+    enabled: activeListId != null,
   });
   const sessionActive = !!session?.active;
   const patchDone = useMutation({
@@ -110,13 +128,13 @@ export function Shopping() {
     // Finalizing runs the store comparison automatically: also register offer
     // watches for the finalized items (best-effort); the by-store query then loads.
     mutationFn: async () => {
-      await api('/api/shopping-list/session/start', { method: 'POST' });
-      try { await api('/api/shopping-list/compare', { method: 'POST' }); } catch { /* non-fatal */ }
+      await api('/api/shopping-list/session/start', { method: 'POST', body: { list_id: activeListId } });
+      try { await api('/api/shopping-list/compare', { method: 'POST', body: { list_id: activeListId } }); } catch { /* non-fatal */ }
     },
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ['shopping-session'] }); invalidate(); },
   });
   const finishSession = useMutation({
-    mutationFn: () => api<{ removed: number }>('/api/shopping-list/session/finish', { method: 'POST' }),
+    mutationFn: () => api<{ removed: number }>('/api/shopping-list/session/finish', { method: 'POST', body: { list_id: activeListId } }),
     onSuccess: (r) => {
       void qc.invalidateQueries({ queryKey: ['shopping-session'] });
       invalidate();
@@ -125,7 +143,7 @@ export function Shopping() {
   });
   // De-finalize ("Einkaufszettel bearbeiten"): reopen the list for editing, keep all items.
   const cancelSession = useMutation({
-    mutationFn: () => api('/api/shopping-list/session/cancel', { method: 'POST' }),
+    mutationFn: () => api('/api/shopping-list/session/cancel', { method: 'POST', body: { list_id: activeListId } }),
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ['shopping-session'] }); invalidate(); },
     onError: (e: Error) => toast(e.message, 'error'),
   });
@@ -134,7 +152,7 @@ export function Shopping() {
     onSuccess: invalidate,
   });
   const suggest = useMutation({
-    mutationFn: () => api<{ added: number }>('/api/shopping-list/suggest', { method: 'POST' }),
+    mutationFn: () => api<{ added: number }>('/api/shopping-list/suggest', { method: 'POST', body: { list_id: activeListId } }),
     onSuccess: (r) => { invalidate(); toast(r.added ? t('shopping.suggestionsAdded', { count: r.added }) : t('shopping.noSuggestions'), 'success'); },
     onError: (e: Error) => toast(e.message, 'error'),
   });
@@ -143,9 +161,9 @@ export function Shopping() {
   // becomes store-aware (prices, cheapest, store category order). Switching the store
   // chips only changes the active chain. Defaults to the cheapest store (chains[0]).
   const { data: storeData } = useQuery({
-    queryKey: ['shopping-by-store'],
-    queryFn: () => api<{ chains: StoreList[] }>('/api/shopping-list/by-store'),
-    enabled: sessionActive,
+    queryKey: ['shopping-by-store', activeListId],
+    queryFn: () => api<{ chains: StoreList[] }>(`/api/shopping-list/by-store?list_id=${activeListId}`),
+    enabled: sessionActive && activeListId != null,
   });
   const [activeChain, setActiveChain] = useState<string | null>(null);
   useEffect(() => {
@@ -164,7 +182,7 @@ export function Shopping() {
     : [];
 
   const send = useMutation({
-    mutationFn: () => api<{ emailed: number; pushed: number; notified: number; smtp: boolean }>('/api/shopping-list/send', { method: 'POST' }),
+    mutationFn: () => api<{ emailed: number; pushed: number; notified: number; smtp: boolean }>('/api/shopping-list/send', { method: 'POST', body: { list_id: activeListId } }),
     onSuccess: (r) => {
       const parts: string[] = [];
       if (r.emailed > 0) parts.push(t('shopping.sentEmail', { count: r.emailed }));
@@ -176,6 +194,23 @@ export function Shopping() {
   const persistOrder = useMutation({
     mutationFn: (order: number[]) => api('/api/shopping-list/order', { method: 'PUT', body: { order } }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['shopping'] }),
+    onError: (e: Error) => toast(e.message, 'error'),
+  });
+
+  // List management (create / rename+retype / delete).
+  const createList = useMutation({
+    mutationFn: (b: { name: string; store_type: string | null }) => api<ShoppingList>('/api/shopping-lists', { method: 'POST', body: b }),
+    onSuccess: (l) => { void qc.invalidateQueries({ queryKey: ['shopping-lists'] }); setListSel(String(l.id)); setListModal(null); },
+    onError: (e: Error) => toast(e.message, 'error'),
+  });
+  const updateList = useMutation({
+    mutationFn: ({ id, ...b }: { id: number; name?: string; store_type?: string | null }) => api(`/api/shopping-lists/${id}`, { method: 'PATCH', body: b }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['shopping-lists'] }); setListModal(null); },
+    onError: (e: Error) => toast(e.message, 'error'),
+  });
+  const deleteList = useMutation({
+    mutationFn: (id: number) => api(`/api/shopping-lists/${id}`, { method: 'DELETE' }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['shopping-lists'] }); setListSel(''); setListModal(null); },
     onError: (e: Error) => toast(e.message, 'error'),
   });
 
@@ -202,7 +237,7 @@ export function Shopping() {
     });
   };
 
-  if (isLoading) return <Spinner />;
+  if (!lists || isLoading) return <Spinner />;
 
   // In a finalized trip the list IS the active store's items (store-ordered, priced);
   // otherwise the plain editable list. Each row pairs the shopping item (for
@@ -221,6 +256,36 @@ export function Shopping() {
   return (
     <div className="flex max-w-2xl flex-col gap-3">
       <h1 className="text-lg font-bold">{t('shopping.title')}</h1>
+
+      {/* List switcher: pick / add / edit lists */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {(lists ?? []).map(l => (
+          <button
+            key={l.id} type="button" onClick={() => setListSel(String(l.id))}
+            className={cn('inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm font-medium',
+              l.id === activeListId ? 'border-transparent bg-emerald-600 text-white' : 'border-zinc-300 text-zinc-600 hover:border-zinc-400 dark:border-zinc-700 dark:text-zinc-300')}
+          >
+            {l.name}
+            {l.item_count > 0 && (
+              <span className={cn('rounded-full px-1.5 text-[11px]',
+                l.id === activeListId ? 'bg-emerald-500/50 text-white' : 'bg-zinc-200 text-zinc-500 dark:bg-zinc-700 dark:text-zinc-300')}>
+                {l.item_count}
+              </span>
+            )}
+          </button>
+        ))}
+        <button type="button" onClick={() => setListModal({ mode: 'create' })} title={t('shopping.lists.new')}
+          className="rounded-full border border-dashed border-zinc-300 p-1.5 text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700">
+          <Plus size={15} />
+        </button>
+        {activeListObj && (
+          <button type="button" onClick={() => setListModal({ mode: 'edit', list: activeListObj })} title={t('shopping.lists.edit')}
+            className="rounded-full p-1.5 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200">
+            <Pencil size={14} />
+          </button>
+        )}
+        {activeListObj?.store_type && <Badge className="ml-auto">{activeListObj.store_type}</Badge>}
+      </div>
 
       {/* Action toolbar — helper/share actions only. The state-advancing primary
           button (create slip / shopping done) lives full-width at the bottom.
@@ -340,7 +405,61 @@ export function Shopping() {
           </Button>
         )}
 
+      {listModal && (
+        <ListModal
+          modal={listModal}
+          onClose={() => setListModal(null)}
+          onSave={(b) => { listModal.mode === 'create' ? createList.mutate(b) : updateList.mutate({ id: listModal.list!.id, ...b }); }}
+          onDelete={() => { if (listModal.list) deleteList.mutate(listModal.list.id); }}
+          busy={createList.isPending || updateList.isPending || deleteList.isPending}
+          t={t}
+        />
+      )}
     </div>
+  );
+}
+
+/** Create or rename+retype a shopping list. The store-type scopes "Vorschläge holen":
+ *  only products bought at a store of that type before are suggested here. */
+function ListModal({ modal, onClose, onSave, onDelete, busy, t }: {
+  modal: { mode: 'create' | 'edit'; list?: ShoppingList };
+  onClose: () => void;
+  onSave: (b: { name: string; store_type: string | null }) => void;
+  onDelete: () => void;
+  busy: boolean;
+  t: TFunction;
+}) {
+  const [name, setName] = useState(modal.list?.name ?? '');
+  const [type, setType] = useState(modal.list?.store_type ?? '');
+  const canSave = name.trim().length > 0 && !busy;
+  return (
+    <Modal open onClose={onClose} title={modal.mode === 'create' ? t('shopping.lists.new') : t('shopping.lists.edit')}>
+      <div className="flex flex-col gap-3">
+        <div>
+          <Label>{t('shopping.lists.name')}</Label>
+          <Input autoFocus value={name} onChange={e => setName(e.target.value)} placeholder={t('shopping.lists.namePlaceholder')} />
+        </div>
+        <div>
+          <Label>{t('shopping.lists.type')}</Label>
+          <Select value={type} onChange={e => setType(e.target.value)}>
+            <option value="">{t('shopping.lists.typeNone')}</option>
+            {STORE_TYPES.map(ty => <option key={ty} value={ty}>{ty}</option>)}
+          </Select>
+          <p className="mt-1 text-xs text-zinc-400">{t('shopping.lists.typeHint')}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button className="flex-1 justify-center" disabled={!canSave} onClick={() => onSave({ name: name.trim(), store_type: type || null })}>
+            {t('common.save')}
+          </Button>
+          {modal.mode === 'edit' && (
+            <Button variant="danger" disabled={busy} title={t('shopping.lists.delete')}
+              onClick={() => { if (window.confirm(t('shopping.lists.confirmDelete'))) onDelete(); }}>
+              <Trash2 size={16} />
+            </Button>
+          )}
+        </div>
+      </div>
+    </Modal>
   );
 }
 

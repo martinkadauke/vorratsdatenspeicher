@@ -149,13 +149,74 @@ export function pantryRoutes(app: FastifyInstance): void {
     return { ok: true };
   });
 
+  // ── Shopping lists (multiple, each with an optional store-type) ──────────
+  /** First list by sort order — the fallback when a caller omits list_id
+   *  (legacy clients, the Pantry mini-list). */
+  const defaultListId = async (): Promise<number> => {
+    const [l] = await sql`SELECT id FROM shopping_list ORDER BY sort, id LIMIT 1`;
+    return (l?.id as number) ?? 0;
+  };
+  /** Resolve an explicit list_id, else fall back to the default list. */
+  const reqListId = async (v: unknown): Promise<number> => {
+    const n = parseInt(String(v ?? ''), 10);
+    return Number.isInteger(n) && n > 0 ? n : await defaultListId();
+  };
+
+  /** All lists with their item counts (for the switcher). */
+  app.get('/api/shopping-lists', async () => {
+    return sql`
+      SELECT l.id, l.name, l.store_type, l.sort,
+             COUNT(i.id)::int AS item_count
+      FROM shopping_list l
+      LEFT JOIN einkaufsliste_item i ON i.list_id = l.id
+      GROUP BY l.id ORDER BY l.sort, l.id`;
+  });
+
+  app.post('/api/shopping-lists', async (req, reply) => {
+    const b = (req.body ?? {}) as { name?: string; store_type?: string | null };
+    const name = (b.name ?? '').trim();
+    if (!name) return reply.code(400).send({ error: 'name required' });
+    const type = (b.store_type ?? '')?.trim() || null;
+    const [l] = await sql`
+      INSERT INTO shopping_list (name, store_type, sort, created_by)
+      VALUES (${name}, ${type}, (SELECT COALESCE(MAX(sort), 0) + 1 FROM shopping_list), ${req.user?.username ?? null})
+      RETURNING id, name, store_type, sort`;
+    return l;
+  });
+
+  app.patch('/api/shopping-lists/:id', async (req, reply) => {
+    const id = parseInt((req.params as { id: string }).id, 10);
+    if (!id) return reply.code(400).send({ error: 'id required' });
+    const b = (req.body ?? {}) as { name?: string; store_type?: string | null; sort?: number };
+    const setType = 'store_type' in b;
+    const type = setType ? ((b.store_type ?? '')?.trim() || null) : null;
+    await sql`
+      UPDATE shopping_list SET
+        name       = COALESCE(${b.name?.trim() || null}::text, name),
+        store_type = CASE WHEN ${setType} THEN ${type}::text ELSE store_type END,
+        sort       = COALESCE(${b.sort ?? null}::int, sort)
+      WHERE id = ${id}`;
+    return { ok: true };
+  });
+
+  app.delete('/api/shopping-lists/:id', async (req, reply) => {
+    const id = parseInt((req.params as { id: string }).id, 10);
+    if (!id) return reply.code(400).send({ error: 'id required' });
+    const [{ n }] = await sql`SELECT COUNT(*)::int AS n FROM shopping_list`;
+    if (n <= 1) return reply.code(400).send({ error: 'cannot delete the last list' });
+    await sql`DELETE FROM shopping_list WHERE id = ${id}`; // items + session cascade away
+    return { ok: true };
+  });
+
   /** The shopping list (rich): per entry a title, optional quantity, the
    *  household's average price for the linked product, and the resulting
    *  expected price. Free-text entries (canonical_name NULL) carry no price. */
   app.get('/api/shopping-list', async (req) => {
+    const listId = await reqListId((req.query as { list_id?: string }).list_id);
     const items = await sql`
       SELECT id, canonical_name, title, menge::float8 AS menge, einheit, source, done, priority, added_by, added_at, comment
       FROM einkaufsliste_item
+      WHERE list_id = ${listId}
       ORDER BY done ASC, priority DESC, added_at DESC
     `;
     const canons = [...new Set(items.map(i => i.canonical_name as string | null).filter((c): c is string => !!c))];
@@ -222,21 +283,22 @@ export function pantryRoutes(app: FastifyInstance): void {
   /** Add to the list. canonical_name → a known product (deduped); otherwise a
    *  free-text entry (title required). Optional menge/einheit. */
   app.post('/api/shopping-list', async (req, reply) => {
-    const b = (req.body ?? {}) as { canonical_name?: string; title?: string; menge?: number | null; einheit?: string | null };
+    const b = (req.body ?? {}) as { canonical_name?: string; title?: string; menge?: number | null; einheit?: string | null; list_id?: number };
     const canonical = b.canonical_name?.trim() || null;
     const title = (b.title?.trim() || canonical) ?? null;
     if (!title) return reply.code(400).send({ error: 'title or canonical_name required' });
-    const prio = sql`(SELECT COALESCE(MAX(priority), 0) + 1 FROM einkaufsliste_item)`; // new items to the top
+    const listId = await reqListId(b.list_id);
+    const prio = sql`(SELECT COALESCE(MAX(priority), 0) + 1 FROM einkaufsliste_item WHERE list_id = ${listId})`; // new items to the top of THIS list
     if (canonical) {
       await sql`
-        INSERT INTO einkaufsliste_item (canonical_name, title, menge, einheit, added_by, priority)
-        VALUES (${canonical}, ${title}, ${b.menge ?? 1}, ${b.einheit ?? null}, ${req.user!.username}, ${prio})
-        ON CONFLICT (canonical_name) WHERE canonical_name IS NOT NULL DO NOTHING
+        INSERT INTO einkaufsliste_item (list_id, canonical_name, title, menge, einheit, added_by, priority)
+        VALUES (${listId}, ${canonical}, ${title}, ${b.menge ?? 1}, ${b.einheit ?? null}, ${req.user!.username}, ${prio})
+        ON CONFLICT (list_id, canonical_name) WHERE canonical_name IS NOT NULL DO NOTHING
       `;
     } else {
       await sql`
-        INSERT INTO einkaufsliste_item (canonical_name, title, menge, einheit, added_by, priority)
-        VALUES (NULL, ${title}, ${b.menge ?? 1}, ${b.einheit ?? null}, ${req.user!.username}, ${prio})
+        INSERT INTO einkaufsliste_item (list_id, canonical_name, title, menge, einheit, added_by, priority)
+        VALUES (${listId}, NULL, ${title}, ${b.menge ?? 1}, ${b.einheit ?? null}, ${req.user!.username}, ${prio})
       `;
     }
     return { ok: true };
@@ -284,40 +346,44 @@ export function pantryRoutes(app: FastifyInstance): void {
   });
 
   // ── Einkaufszettel (shopping trip) ──────────────────────────────────────
-  /** Is a shopping trip currently open? (at most one) */
-  app.get('/api/shopping-list/session', async () => {
-    const [s] = await sql`SELECT created_at FROM shopping_session WHERE closed_at IS NULL ORDER BY id DESC LIMIT 1`;
+  /** Is a shopping trip currently open for this list? (at most one per list) */
+  app.get('/api/shopping-list/session', async (req) => {
+    const listId = await reqListId((req.query as { list_id?: string }).list_id);
+    const [s] = await sql`SELECT created_at FROM shopping_session WHERE closed_at IS NULL AND list_id = ${listId} ORDER BY id DESC LIMIT 1`;
     return { active: !!s, created_at: s ? (s.created_at as Date).toISOString() : null };
   });
 
-  /** Start a shopping trip: freeze the current list with a date; from now items
+  /** Start a shopping trip for a list: freeze it with a date; from now its items
    *  are checked off instead of deleted. Resets any stale done flags. Idempotent. */
   app.post('/api/shopping-list/session/start', async (req) => {
-    const [existing] = await sql`SELECT created_at FROM shopping_session WHERE closed_at IS NULL ORDER BY id DESC LIMIT 1`;
+    const listId = await reqListId((req.body as { list_id?: number } | undefined)?.list_id);
+    const [existing] = await sql`SELECT created_at FROM shopping_session WHERE closed_at IS NULL AND list_id = ${listId} ORDER BY id DESC LIMIT 1`;
     if (existing) return { active: true, created_at: (existing.created_at as Date).toISOString() };
-    await sql`UPDATE einkaufsliste_item SET done = FALSE WHERE done = TRUE`;
-    const [s] = await sql`INSERT INTO shopping_session (created_by) VALUES (${req.user?.username ?? null}) RETURNING created_at`;
+    await sql`UPDATE einkaufsliste_item SET done = FALSE WHERE done = TRUE AND list_id = ${listId}`;
+    const [s] = await sql`INSERT INTO shopping_session (created_by, list_id) VALUES (${req.user?.username ?? null}, ${listId}) RETURNING created_at`;
     return { active: true, created_at: (s.created_at as Date).toISOString() };
   });
 
-  /** Finish the trip: remove the checked-off (bought) items, keep the rest, close
-   *  the session. */
-  app.post('/api/shopping-list/session/finish', async () => {
+  /** Finish the trip: remove the checked-off (bought) items of this list, keep the
+   *  rest, close the session. */
+  app.post('/api/shopping-list/session/finish', async (req) => {
+    const listId = await reqListId((req.body as { list_id?: number } | undefined)?.list_id);
     const removed = await sql.begin(async tx => {
-      const del = await tx`DELETE FROM einkaufsliste_item WHERE done = TRUE RETURNING id`;
-      await tx`UPDATE shopping_session SET closed_at = NOW() WHERE closed_at IS NULL`;
+      const del = await tx`DELETE FROM einkaufsliste_item WHERE done = TRUE AND list_id = ${listId} RETURNING id`;
+      await tx`UPDATE shopping_session SET closed_at = NOW() WHERE closed_at IS NULL AND list_id = ${listId}`;
       return del.length;
     });
     return { ok: true, removed };
   });
 
-  /** De-finalize ("definalisieren"): reopen the list for editing without buying
-   *  anything. Closes the open session but keeps every item; clears stale done
+  /** De-finalize ("definalisieren"): reopen this list for editing without buying
+   *  anything. Closes its open session but keeps every item; clears stale done
    *  flags so the next trip starts clean. */
-  app.post('/api/shopping-list/session/cancel', async () => {
+  app.post('/api/shopping-list/session/cancel', async (req) => {
+    const listId = await reqListId((req.body as { list_id?: number } | undefined)?.list_id);
     await sql.begin(async tx => {
-      await tx`UPDATE shopping_session SET closed_at = NOW() WHERE closed_at IS NULL`;
-      await tx`UPDATE einkaufsliste_item SET done = FALSE WHERE done = TRUE`;
+      await tx`UPDATE shopping_session SET closed_at = NOW() WHERE closed_at IS NULL AND list_id = ${listId}`;
+      await tx`UPDATE einkaufsliste_item SET done = FALSE WHERE done = TRUE AND list_id = ${listId}`;
     });
     return { ok: true };
   });
@@ -326,6 +392,10 @@ export function pantryRoutes(app: FastifyInstance): void {
    *  (out / ≤5 days / below the iron-reserve minimum), skipping anything already
    *  on the list, snoozed, or excluded. Adds them as 'suggested'. */
   app.post('/api/shopping-list/suggest', async (req) => {
+    const listId = await reqListId((req.body as { list_id?: number } | undefined)?.list_id);
+    const [list] = await sql`SELECT store_type FROM shopping_list WHERE id = ${listId}`;
+    const listType = (list?.store_type as string | null) ?? null;
+
     const all = await trackedVorrat(req.user);
     const due = all.filter(p =>
       (p.est_remaining != null && p.est_remaining <= 0) ||
@@ -333,20 +403,46 @@ export function pantryRoutes(app: FastifyInstance): void {
       (p.reserve_min != null && p.est_remaining != null && p.est_remaining <= p.reserve_min));
     if (!due.length) return { ok: true, added: 0 };
 
-    const onList = new Set((await sql`SELECT canonical_name FROM einkaufsliste_item WHERE canonical_name IS NOT NULL`).map(r => r.canonical_name as string));
+    const onList = new Set((await sql`SELECT canonical_name FROM einkaufsliste_item WHERE list_id = ${listId} AND canonical_name IS NOT NULL`).map(r => r.canonical_name as string));
     const snoozed = new Set((await sql`SELECT canonical_name FROM vorschlag_snooze WHERE snooze_bis > CURRENT_DATE`).map(r => r.canonical_name as string));
     const excluded = new Set((await sql`SELECT canonical_name FROM artikel_ausschluss`).map(r => r.canonical_name as string));
-    const toAdd = due.filter(p => !onList.has(p.canonical_name) && !snoozed.has(p.canonical_name) && !excluded.has(p.canonical_name));
+
+    // Store-type scoping: on a TYPED list (e.g. Drogerie), only suggest a product that
+    // was actually bought at a store of that type before — Waschmittel bought at dm AND
+    // rewe surfaces on both Drogerie and Supermarkt; Bananen never bought at a Baumarkt
+    // never surface there. A product with NO classified purchase-store history is kept
+    // everywhere (cash-only / unclassified chain → don't silently lose it).
+    let typeOk: (cn: string) => boolean = () => true;
+    if (listType) {
+      const stRows = await sql`
+        SELECT DISTINCT a.canonical_name, sm.store_type
+        FROM artikel a
+        JOIN einkauf e ON e.id = a.einkauf_id
+        JOIN store_branch sb ON sb.id = e.branch_id
+        JOIN store_meta sm ON sm.store_key = sb.chain_key
+        WHERE a.canonical_name IS NOT NULL AND sm.store_type IS NOT NULL ${kontoScope(req.user, sql`e`)}`;
+      const typesByCanon = new Map<string, Set<string>>();
+      for (const r of stRows) {
+        const s = typesByCanon.get(r.canonical_name as string) ?? new Set<string>();
+        s.add(r.store_type as string);
+        typesByCanon.set(r.canonical_name as string, s);
+      }
+      typeOk = (cn) => { const s = typesByCanon.get(cn); return !s || s.has(listType); };
+    }
+
+    const toAdd = due.filter(p =>
+      !onList.has(p.canonical_name) && !snoozed.has(p.canonical_name) &&
+      !excluded.has(p.canonical_name) && typeOk(p.canonical_name));
     if (!toAdd.length) return { ok: true, added: 0 };
 
     await sql.begin(async tx => {
       for (const p of toAdd) {
         const m = p.typ_qty != null && p.typ_qty > 0 ? Math.round(p.typ_qty * 10) / 10 : 1; // typical bought qty
         await tx`
-          INSERT INTO einkaufsliste_item (canonical_name, title, menge, source, priority, added_by)
-          VALUES (${p.canonical_name}, ${p.canonical_name}, ${m}, 'suggested',
-                  (SELECT COALESCE(MAX(priority), 0) + 1 FROM einkaufsliste_item), ${req.user!.username})
-          ON CONFLICT (canonical_name) WHERE canonical_name IS NOT NULL DO NOTHING`;
+          INSERT INTO einkaufsliste_item (list_id, canonical_name, title, menge, source, priority, added_by)
+          VALUES (${listId}, ${p.canonical_name}, ${p.canonical_name}, ${m}, 'suggested',
+                  (SELECT COALESCE(MAX(priority), 0) + 1 FROM einkaufsliste_item WHERE list_id = ${listId}), ${req.user!.username})
+          ON CONFLICT (list_id, canonical_name) WHERE canonical_name IS NOT NULL DO NOTHING`;
       }
     });
     return { ok: true, added: toAdd.length };
@@ -355,7 +451,8 @@ export function pantryRoutes(app: FastifyInstance): void {
   /** Register the list's products as offer "watches" so the next refresh fetches
    *  offers for them (the frontend then POSTs /api/offers/refresh + polls). */
   app.post('/api/shopping-list/compare', async (req) => {
-    const rows = await sql`SELECT canonical_name, title FROM einkaufsliste_item`;
+    const listId = await reqListId((req.body as { list_id?: number } | undefined)?.list_id);
+    const rows = await sql`SELECT canonical_name, title FROM einkaufsliste_item WHERE list_id = ${listId}`;
     const names = [...new Set(rows.map(r => (r.canonical_name as string | null) ?? (r.title as string)).filter(Boolean))];
     if (names.length) {
       await sql.begin(async tx => {
@@ -372,9 +469,10 @@ export function pantryRoutes(app: FastifyInstance): void {
    *  ordered by the chain's category order (warengruppen tiers → else global
    *  sort_order), priced offer → chain-average → global-average. */
   app.get('/api/shopping-list/by-store', async (req) => {
+    const listId = await reqListId((req.query as { list_id?: string }).list_id);
     const items = (await sql`
       SELECT id, canonical_name, title, menge::float8 AS menge
-      FROM einkaufsliste_item ORDER BY priority DESC, added_at DESC
+      FROM einkaufsliste_item WHERE list_id = ${listId} ORDER BY priority DESC, added_at DESC
     `) as unknown as { id: number; canonical_name: string | null; title: string; menge: number | null }[];
     if (!items.length) return { chains: [] };
     const canons = [...new Set(items.map(i => i.canonical_name).filter((c): c is string => !!c))];
@@ -540,7 +638,8 @@ export function pantryRoutes(app: FastifyInstance): void {
   /** Share the list: email it to every household user that has an email address,
    *  and drop an in-app notification for everyone else. */
   app.post('/api/shopping-list/send', async (req, reply) => {
-    const items = (await sql`SELECT title, menge::float8 AS menge FROM einkaufsliste_item ORDER BY priority DESC, added_at DESC`) as unknown as { title: string; menge: number | null }[];
+    const listId = await reqListId((req.body as { list_id?: number } | undefined)?.list_id);
+    const items = (await sql`SELECT title, menge::float8 AS menge FROM einkaufsliste_item WHERE list_id = ${listId} ORDER BY priority DESC, added_at DESC`) as unknown as { title: string; menge: number | null }[];
     if (!items.length) return reply.code(400).send({ error: 'Liste ist leer' });
     const by = req.user!.username;
     const appUrl = await getConfig('app.base_url');
@@ -577,15 +676,21 @@ export function pantryRoutes(app: FastifyInstance): void {
     return { ok: true, emailed, pushed, notified, smtp, emailEnabled };
   });
 
-  /** Canonical-keyed feedback (used by the offers "on list" toggle). */
+  /** Canonical-keyed feedback (used by the offers "on list" toggle + Pantry mini-list).
+   *  The item removal is scoped to ONE list (the passed list_id, else the default) so a
+   *  product legitimately sitting on several lists isn't wiped from all of them by a
+   *  single toggle. Offers/Pantry omit list_id and their on-list indicator reads the
+   *  default list, so removal stays symmetric with what they show. The snooze/exclude
+   *  memories are product-global (correct — they gate future suggestions everywhere). */
   app.post('/api/shopping-list/feedback', async (req, reply) => {
-    const { action, canonical_name, snooze_days } = (req.body ?? {}) as {
-      action?: string; canonical_name?: string; snooze_days?: number;
+    const { action, canonical_name, snooze_days, list_id } = (req.body ?? {}) as {
+      action?: string; canonical_name?: string; snooze_days?: number; list_id?: number;
     };
     if (!action || !canonical_name) return reply.code(400).send({ error: 'action and canonical_name required' });
+    const listId = await reqListId(list_id);
 
     if (action === 'done') {
-      await sql`DELETE FROM einkaufsliste_item WHERE canonical_name = ${canonical_name}`;
+      await sql`DELETE FROM einkaufsliste_item WHERE canonical_name = ${canonical_name} AND list_id = ${listId}`;
     } else if (action === 'snooze') {
       const days = snooze_days ?? 7;
       await sql.begin(async tx => {
@@ -594,12 +699,12 @@ export function pantryRoutes(app: FastifyInstance): void {
           VALUES (${canonical_name}, CURRENT_DATE + ${days})
           ON CONFLICT (canonical_name) DO UPDATE SET snooze_bis = EXCLUDED.snooze_bis
         `;
-        await tx`DELETE FROM einkaufsliste_item WHERE canonical_name = ${canonical_name}`;
+        await tx`DELETE FROM einkaufsliste_item WHERE canonical_name = ${canonical_name} AND list_id = ${listId}`;
       });
     } else if (action === 'exclude') {
       await sql.begin(async tx => {
         await tx`INSERT INTO artikel_ausschluss (canonical_name) VALUES (${canonical_name}) ON CONFLICT DO NOTHING`;
-        await tx`DELETE FROM einkaufsliste_item WHERE canonical_name = ${canonical_name}`;
+        await tx`DELETE FROM einkaufsliste_item WHERE canonical_name = ${canonical_name} AND list_id = ${listId}`;
       });
     } else {
       return reply.code(400).send({ error: 'unknown action' });

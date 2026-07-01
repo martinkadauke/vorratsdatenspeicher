@@ -209,6 +209,14 @@ export interface PantryItem {
   reserve_charges: number;
 }
 
+export interface ShoppingList {
+  id: number;
+  name: string;
+  store_type: string | null;
+  sort: number;
+  item_count: number;
+}
+
 export interface ShoppingItem {
   id: number;
   canonical_name: string | null;

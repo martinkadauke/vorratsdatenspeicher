@@ -14,11 +14,15 @@ interface Filiale { name: string; receipts: number; total: number; branch_id: nu
 interface StoreRow {
   key: string;
   display: string;
+  store_type: string | null;
   receipts: number;
   total: number;
   raw: string[];
   filialen?: Filiale[];
 }
+
+// Store-type vocabulary shared with the shopping-list scoping (Supermarkt/Drogerie/…).
+const STORE_TYPES = ['Supermarkt', 'Drogerie', 'Baumarkt', 'Tierbedarf', 'Apotheke', 'Bäckerei', 'Online', 'Sonstiges'];
 
 export function Stores() {
   const { t } = useTranslation();
@@ -47,6 +51,13 @@ export function Stores() {
   });
   const chainFor = (key: string) => (offerChains ?? []).find(c =>
     c.chain_slug === key || c.chain_slug.startsWith(key) || key.startsWith(c.chain_slug));
+
+  const qc = useQueryClient();
+  const setType = useMutation({
+    mutationFn: ({ key, store_type }: { key: string; store_type: string | null }) =>
+      api(`/api/stores/${encodeURIComponent(key)}/type`, { method: 'PUT', body: { store_type } }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['stores'] }),
+  });
 
   const filtered = useMemo(() => {
     if (!data) return [];
@@ -159,6 +170,20 @@ export function Stores() {
                   </div>
                   <ChevronRight size={14} className="text-zinc-300 group-hover:text-emerald-500" />
                 </button>
+              </div>
+
+              {/* Ladentyp — scopes shopping-list suggestions (only products bought at a
+                  store of this type surface on a list of that type). */}
+              <div className="mt-1.5 flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                <span className="shrink-0 text-xs text-zinc-400">{t('stores.typeLabel')}</span>
+                <select
+                  value={s.store_type ?? ''}
+                  onChange={e => setType.mutate({ key: s.key, store_type: e.target.value || null })}
+                  className="rounded-lg border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+                >
+                  <option value="">{t('stores.typeNone')}</option>
+                  {STORE_TYPES.map(ty => <option key={ty} value={ty}>{ty}</option>)}
+                </select>
               </div>
 
               {isOpen && s.filialen && (

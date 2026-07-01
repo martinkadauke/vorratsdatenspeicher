@@ -147,11 +147,14 @@ export function storeRoutes(app: FastifyInstance): void {
       e.filialen.push({ name: r.roh_ladenname as string, receipts: r.receipts, total: Number(r.total ?? 0), branch_id: (r.branch_id as number | null) ?? null });
       grouped.set(key, e);
     }
+    const typeMap = new Map((await sql`SELECT store_key, store_type FROM store_meta WHERE store_type IS NOT NULL`)
+      .map(r => [r.store_key as string, r.store_type as string]));
     return [...grouped.entries()]
       .map(([key, v]) => {
         const filialen = v.filialen.sort((a, b) => b.receipts - a.receipts);
         return {
           key,
+          store_type: typeMap.get(key) ?? null, // drives shopping-list suggestion scoping
           // Chain display = the common leading word(s) across all branches
           // ("LIDL Tübingen" + "Lidl Gomaringen" → "LIDL"). A single branch
           // keeps its full name (don't truncate "Café Bäcker Mayer").
@@ -162,6 +165,21 @@ export function storeRoutes(app: FastifyInstance): void {
         };
       })
       .sort((a, b) => b.receipts - a.receipts);
+  });
+
+  /** Set/clear a chain's store-type (Supermarkt/Drogerie/…) — drives which shopping
+   *  list a low product is suggested on (history × list type). */
+  app.put('/api/stores/:key/type', async (req, reply) => {
+    const key = decodeURIComponent((req.params as { key: string }).key).toLowerCase();
+    const { store_type } = (req.body ?? {}) as { store_type?: string | null };
+    if (store_type === undefined) return reply.code(400).send({ error: 'store_type required (or null to clear)' });
+    const type = (store_type ?? '').trim() || null;
+    await sql`
+      INSERT INTO store_meta (store_key, store_type, updated_at, updated_by)
+      VALUES (${key}, ${type}, NOW(), ${req.user?.id ?? null})
+      ON CONFLICT (store_key) DO UPDATE
+        SET store_type = EXCLUDED.store_type, updated_at = NOW(), updated_by = EXCLUDED.updated_by`;
+    return { ok: true };
   });
 
   /** Store icon: get one. */
@@ -177,7 +195,8 @@ export function storeRoutes(app: FastifyInstance): void {
     const { icon_url, source } = (req.body ?? {}) as { icon_url?: string | null; source?: string };
     if (icon_url === undefined) return reply.code(400).send({ error: 'icon_url required (or null to clear)' });
     if (!icon_url) {
-      await sql`DELETE FROM store_meta WHERE store_key = ${key}`;
+      // Null the icon but KEEP the row — store_type now lives here too and must survive.
+      await sql`UPDATE store_meta SET icon_url = NULL, source = NULL, updated_at = NOW(), updated_by = ${req.user?.id ?? null} WHERE store_key = ${key}`;
       return { ok: true, cleared: true };
     }
     await sql`
