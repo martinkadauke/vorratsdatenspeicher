@@ -222,10 +222,22 @@ export function nameRoutes(app: FastifyInstance): void {
       return reply.code(400).send({ error: 'nothing to update' });
     }
     if ('base_unit' in body) {
-      await sql`
-        INSERT INTO canonical_meta (canonical_name, base_unit, updated_at, updated_by)
-        VALUES (${name}, ${body.base_unit ?? null}, NOW(), ${req.user!.id})
-        ON CONFLICT (canonical_name) DO UPDATE SET base_unit = EXCLUDED.base_unit, updated_at = NOW(), updated_by = EXCLUDED.updated_by`;
+      const bu = body.base_unit ?? null;
+      if (bu != null) {
+        // Setting a concrete unit is itself a confirmation → stamp base_unit_confirmed_at
+        // so unit-review (Prüfung) stops surfacing this product.
+        await sql`
+          INSERT INTO canonical_meta (canonical_name, base_unit, base_unit_confirmed_at, updated_at, updated_by)
+          VALUES (${name}, ${bu}, NOW(), NOW(), ${req.user!.id})
+          ON CONFLICT (canonical_name) DO UPDATE SET base_unit = EXCLUDED.base_unit, base_unit_confirmed_at = NOW(), updated_at = NOW(), updated_by = EXCLUDED.updated_by`;
+      } else {
+        // Clearing the unit means "let VDS re-suggest" — leave it review-eligible
+        // (don't touch base_unit_confirmed_at).
+        await sql`
+          INSERT INTO canonical_meta (canonical_name, base_unit, updated_at, updated_by)
+          VALUES (${name}, NULL, NOW(), ${req.user!.id})
+          ON CONFLICT (canonical_name) DO UPDATE SET base_unit = EXCLUDED.base_unit, updated_at = NOW(), updated_by = EXCLUDED.updated_by`;
+      }
     }
     if ('hidden' in body) {
       await sql`

@@ -15,6 +15,8 @@ const EINHEIT_ALIASES: Record<string, string> = {
   stueck: 'Stück', 'stück': 'Stück', stk_: 'Stück', x: 'Stück', stg: 'Stück',
   pack: 'Packung', pck: 'Packung', pkg: 'Packung', packung: 'Packung', pkt: 'Packung',
   dose: 'Dose', dosen: 'Dose', dse: 'Dose',
+  flasche: 'Flasche', flaschen: 'Flasche', fl: 'Flasche', 'fl.': 'Flasche',
+  glas: 'Glas', gläser: 'Glas', glaeser: 'Glas',
   kg: 'kg', kilo: 'kg', kilogramm: 'kg',
   g: 'g', gr: 'g', gramm: 'g', '100g': '100g',
   l: 'l', liter: 'l', ltr: 'l',

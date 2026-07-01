@@ -427,7 +427,22 @@
     "countOpen": "{{count}} offen",
     "showing": "zeige {{n}}",
     "times": "{{count}}×",
-    "bulkDone": "{{count}} verarbeitet"
+    "bulkDone": "{{count}} verarbeitet",
+    "tabNames": "Namen",
+    "tabUnits": "Einheiten",
+    "units": {
+      "title": "Einheiten prüfen",
+      "intro": "VDS hat aus der Kaufhistorie eine passende Einheit vorgeschlagen (schwankendes Gewicht → kg, feste Packung → Stück, Getränk → Flasche/Dose). Übernimm oder behalte die aktuelle.",
+      "current": "aktuell",
+      "suggested": "Vorschlag",
+      "noUnit": "keine",
+      "apply": "Übernehmen",
+      "keep": "Behalten",
+      "priceHint": "≈ {{price}} €/{{unit}}",
+      "empty": "Alle Einheiten geprüft 🎉",
+      "search": "Produkt suchen …",
+      "bulkKept": "{{count}} behalten"
+    }
   },
   "bell": {
     "title": "Benachrichtigungen",

@@ -170,6 +170,20 @@ export interface PruefenGroup {
   confidence: string | null;
 }
 
+/** One unit-review row: a canonical product whose recommended pricing/tracking unit
+ *  (from purchase-history variance) differs from the stored base_unit. */
+export interface UnitPruefenRow {
+  canonical_name: string;
+  current_unit: string | null;
+  suggested_unit: string;
+  kind: string;
+  confidence: string;
+  rationale: string;
+  occurrences: number;
+  current_price: number | null;
+  suggested_price: number | null;
+}
+
 export interface Notification {
   id: number;
   type: string;

@@ -427,7 +427,22 @@
     "countOpen": "{{count}} open",
     "showing": "showing {{n}}",
     "times": "{{count}}×",
-    "bulkDone": "{{count}} processed"
+    "bulkDone": "{{count}} processed",
+    "tabNames": "Names",
+    "tabUnits": "Units",
+    "units": {
+      "title": "Review units",
+      "intro": "VDS suggested a fitting unit from the purchase history (variable weight → kg, constant pack → piece, drink → bottle/can). Apply it or keep the current one.",
+      "current": "current",
+      "suggested": "suggested",
+      "noUnit": "none",
+      "apply": "Apply",
+      "keep": "Keep",
+      "priceHint": "≈ {{price}} €/{{unit}}",
+      "empty": "All units reviewed 🎉",
+      "search": "Search product …",
+      "bulkKept": "{{count}} kept"
+    }
   },
   "bell": {
     "title": "Notifications",
