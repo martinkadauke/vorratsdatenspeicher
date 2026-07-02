@@ -131,9 +131,13 @@ async function importOne(sourceName: string, buf: Buffer, konto: number | null):
   const bildPfad = `/receipts/${filename}`;
 
   const label = sourceName.replace(/\.[a-z0-9]+$/i, '').slice(0, 200); // filename (sans ext) until OCR fills the store
+  // quelle='email' — same bucket as e-mail invoices (they're the same kind of thing:
+  // online invoices, not in-store receipts). Provenance stays in the imported_file
+  // ledger; the e-mail-specific backfill/reocr queries also require an imported_email
+  // row, which these never have, so they're not affected.
   const [row] = await sql`
     INSERT INTO einkauf (datum, roh_ladenname, quelle, konto_id, bild_pfad, private_for_user_id, ocr_pending)
-    VALUES (${todayISO()}, ${label}, 'upload', ${konto}, ${bildPfad}, ${null}, TRUE)
+    VALUES (${todayISO()}, ${label}, 'email', ${konto}, ${bildPfad}, ${null}, TRUE)
     RETURNING id`;
   const einkaufId = row.id as number;
 
