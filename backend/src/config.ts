@@ -65,6 +65,12 @@ export interface AppConfig {
   // kill-switch + schedule. Inert when no mailbox is configured.
   'mailimport.enabled': boolean;
   'mailimport.cron': string;
+  // drop-folder invoice import: scans a watched directory (e.g. invoices pulled
+  // manually from a vendor portal) and treats each PDF/image like an e-mail
+  // attachment (vision OCR → receipt). Deduped by file content hash.
+  'dropfolder.enabled': boolean;
+  'dropfolder.cron': string;
+  'dropfolder.path': string;
   // web push (browser notifications) — VAPID keypair, generated + stored on first use
   'push.vapid_public': string;
   'push.vapid_private': string;
@@ -133,6 +139,9 @@ const DEFAULTS: AppConfig = {
   'model_review.cron': '0 5 1,15 * *', // ~bi-weekly: 1st & 15th, 05:00
   'mailimport.enabled': true,
   'mailimport.cron': '*/15 * * * *', // every 15 min — snappy "I forwarded it → it appears"
+  'dropfolder.enabled': true,
+  'dropfolder.cron': '*/15 * * * *', // every 15 min — "I dropped an invoice → it appears"
+  'dropfolder.path': '/receipts/invoices', // subfolder of the mounted receipts store
   'push.vapid_public': '',
   'push.vapid_private': '',
   'push.vapid_subject': '',

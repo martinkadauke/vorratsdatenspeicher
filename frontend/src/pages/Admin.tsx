@@ -81,6 +81,7 @@ export function Admin() {
     { id: 'family', title: t('admin.family'), keywords: 'familie family mitglieder members verbraucher consumer haushalt personen', el: <FamilySection /> },
     { id: 'users', title: t('admin.users'), keywords: 'benutzer users nutzer einladen invite admin rolle role zugang access passwort', el: <UsersSection /> },
     { id: 'smtp', title: 'SMTP / E-Mail', keywords: 'smtp email e-mail mail benachrichtigung notification versand digest server port', el: <SmtpSection /> },
+    { id: 'dropfolder', title: t('admin.dropfolderTitle'), keywords: 'rechnung invoice ordner folder drop watch scan strato pdf upload import automatisch', el: <DropfolderSection /> },
     { id: 'notifications', title: t('admin.notifTitle'), keywords: 'benachrichtigung notification push email e-mail angebote offers einkaufsliste shopping kanal channel global', el: <NotificationsSection /> },
   ];
   const byId = new Map(sections.filter(s => s.show !== false).map(s => [s.id, s] as const));
@@ -679,6 +680,77 @@ function PhaseProgress({ progress }: { progress: JobProgress }) {
       value={indeterminate ? undefined : progress.current}
       max={indeterminate ? undefined : progress.total}
     />
+  );
+}
+
+/** Drop-folder invoice importer: scan a watched directory for PDFs/images and
+ *  turn each into a receipt via vision OCR (like an e-mail attachment). */
+function DropfolderSection() {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const [result, setResult] = useState<string | null>(null);
+
+  const { data: config, isLoading } = useQuery({
+    queryKey: ['config'],
+    queryFn: () => api<Record<string, unknown>>('/api/config'),
+  });
+  const setCfg = useMutation({
+    mutationFn: ({ key, value }: { key: string; value: unknown }) =>
+      api(`/api/config/${key}`, { method: 'PUT', body: { value } }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['config'] }),
+  });
+  const scanNow = useMutation({
+    mutationFn: () => api<{ scanned?: number; imported?: number; failed?: number; skipped?: number; running?: boolean }>('/api/dropfolder/scan', { method: 'POST' }),
+    onSuccess: r => setResult(r.running
+      ? t('admin.dropfolderRunning')
+      : t('admin.dropfolderResult', { scanned: r.scanned ?? 0, imported: r.imported ?? 0, failed: r.failed ?? 0, skipped: r.skipped ?? 0 })),
+    onError: (e: Error) => setResult(e.message),
+  });
+
+  if (isLoading || !config) return <Section title={t('admin.dropfolderTitle')}><Spinner /></Section>;
+  const cronStr = (config['dropfolder.cron'] as string) ?? '';
+  const lang = (config['app.default_lang'] as string) === 'en' ? 'en' : 'de';
+
+  return (
+    <Section title={t('admin.dropfolderTitle')}>
+      <div className="flex flex-col gap-4">
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('admin.dropfolderHint')}</p>
+
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium">{t('admin.dropfolderEnabled')}</span>
+          <Switch
+            checked={config['dropfolder.enabled'] !== false}
+            onChange={v => setCfg.mutate({ key: 'dropfolder.enabled', value: v })}
+          />
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <Label>{t('admin.dropfolderPath')}</Label>
+            <Input
+              defaultValue={(config['dropfolder.path'] as string) ?? ''}
+              onBlur={e => e.target.value !== config['dropfolder.path'] && setCfg.mutate({ key: 'dropfolder.path', value: e.target.value })}
+            />
+            <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{t('admin.dropfolderPathHint')}</p>
+          </div>
+          <div>
+            <Label>{t('admin.cron')}</Label>
+            <Input
+              defaultValue={cronStr}
+              onBlur={e => e.target.value !== config['dropfolder.cron'] && setCfg.mutate({ key: 'dropfolder.cron', value: e.target.value })}
+            />
+            <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{cronToHuman(cronStr, lang)}</p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Button onClick={() => { setResult(null); scanNow.mutate(); }} disabled={scanNow.isPending}>
+            <Play size={15} /> {scanNow.isPending ? t('admin.running') : t('admin.dropfolderScanNow')}
+          </Button>
+          {result && <span className="text-xs text-zinc-500 dark:text-zinc-400">{result}</span>}
+        </div>
+      </div>
+    </Section>
   );
 }
 

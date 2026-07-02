@@ -40,6 +40,7 @@ import { rescheduleChurner } from './churner/scheduler.js';
 import { rescheduleSupermarket } from './supermarket/scheduler.js';
 import { rescheduleModelReview } from './maintenance/modelReview.js';
 import { rescheduleMailImport } from './mail/scheduler.js';
+import { rescheduleDropfolder } from './dropfolder/scheduler.js';
 import { modelReviewRoutes } from './routes/modelReview.js';
 import { analyticsRoutes } from './routes/analytics.js';
 import { mailboxRoutes } from './routes/mailbox.js';
@@ -178,6 +179,7 @@ async function main(): Promise<void> {
   await rescheduleModelReview();
   setEmailBaseUrl(await getConfig('app.base_url')); // hosted logo URL for emails
   await rescheduleMailImport();
+  await rescheduleDropfolder();
 
   await app.listen({ port: PORT, host: '0.0.0.0' });
   app.log.info(`Vorratsdatenspeicher listening on :${PORT}`);

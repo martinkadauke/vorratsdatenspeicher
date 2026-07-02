@@ -7,6 +7,9 @@ import { getAllConfig, setConfig, getConfig } from '../config.js';
 import { rescheduleChurner } from '../churner/scheduler.js';
 import { rescheduleSupermarket } from '../supermarket/scheduler.js';
 import { rescheduleModelReview } from '../maintenance/modelReview.js';
+import { rescheduleMailImport } from '../mail/scheduler.js';
+import { rescheduleDropfolder } from '../dropfolder/scheduler.js';
+import { runDropfolderImport, isDropfolderRunning } from '../dropfolder/importer.js';
 import { listOllamaModels, ollamaHealth } from '../llm/ollama.js';
 import { searxngHealth } from '../llm/searxng.js';
 import { sendMail } from '../mailer.js';
@@ -53,7 +56,15 @@ export function adminRoutes(app: FastifyInstance): void {
     if (key.startsWith('churner.')) await rescheduleChurner();
     if (key.startsWith('supermarket.')) await rescheduleSupermarket();
     if (key.startsWith('model_review.')) await rescheduleModelReview();
+    if (key.startsWith('mailimport.')) await rescheduleMailImport();
+    if (key.startsWith('dropfolder.')) await rescheduleDropfolder();
     return { ok: true };
+  });
+
+  /** Manual "scan now" for the drop-folder invoice importer → returns counts. */
+  app.post('/api/dropfolder/scan', { preHandler: requireAdmin }, async () => {
+    if (isDropfolderRunning()) return { running: true };
+    return runDropfolderImport('manual');
   });
 
   // ── users (invite-only) ─────────────────────────────────────────────────
