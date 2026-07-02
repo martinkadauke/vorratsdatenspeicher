@@ -71,6 +71,9 @@ export function estimateVorrat(
 
   const groups = new Map<string, Map<string, number>>();
   const groupLines = new Map<string, number>();
+  // Lines with a RECOGNIZED unit, per group — blank/unknown-unit lines fall back to
+  // Stück but are unit-AGNOSTIC, so they must not out-vote real units (see below).
+  const explicitLines = new Map<string, number>();
   for (const l of lines) {
     const un = normalizeEinheit(l.einheit);
     const u = un ? units.get(un) : undefined;
@@ -91,12 +94,19 @@ export function estimateVorrat(
     const pd = groups.get(key)!;
     pd.set(l.datum, (pd.get(l.datum) ?? 0) + qty);
     groupLines.set(key, (groupLines.get(key) ?? 0) + 1);
+    if (u) explicitLines.set(key, (explicitLines.get(key) ?? 0) + 1);
   }
 
-  // Effective unit: the declared base_unit when we actually bought in it; else
-  // the unit we most often bought in (so a base_unit of kg with only per-Stück
-  // purchases still shows + counts in Stück); else the declared unit / Stück.
+  // Effective unit: the declared base_unit when we actually bought in it; else the
+  // unit we most often EXPLICITLY bought in; else the biggest group overall (all
+  // lines blank → Stück, as before). Explicit units only: blank-unit lines default
+  // to Stück without meaning "pieces", and letting them out-vote real "2 kg" lines
+  // made effKey=Stück, which silently DROPPED every kg purchase from the estimate
+  // (the fold below only folds count→mass, not the reverse). Real-world case: 5×
+  // "Möhren" (no unit) + 3× "Karotten 2kg" → Stück won, yesterday's 2 kg purchase
+  // vanished, and Karotten were suggested the day after buying them.
   let effKey = buKey && groups.has(buKey) ? buKey : null;
+  if (!effKey && explicitLines.size) effKey = [...explicitLines.entries()].sort((a, b) => b[1] - a[1])[0][0];
   if (!effKey && groupLines.size) effKey = [...groupLines.entries()].sort((a, b) => b[1] - a[1])[0][0];
   if (!effKey) effKey = buKey ?? 'Stück';
 
