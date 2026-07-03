@@ -77,7 +77,7 @@ export function estimateVorrat(
 
   // Pass 1: classify every line into (group key, qty) WITHOUT summing yet — the
   // count-group sub-item fold below needs the median count quantity first.
-  const buffered: { key: string; datum: string; qty: number; explicit: boolean }[] = [];
+  const buffered: { key: string; datum: string; qty: number; preis: number; explicit: boolean }[] = [];
   for (const l of lines) {
     const un = normalizeEinheit(l.einheit);
     const u = un ? units.get(un) : undefined;
@@ -94,23 +94,33 @@ export function estimateVorrat(
       qty = u ? eff * u.to_base : eff;
     }
     // Price-leak guard: OCR sometimes writes the PRICE into menge ("5,49 stk" is a
-    // 5,49 € line, not 5.49 packs). A count quantity ≥3 that equals the line's own
-    // price to the cent is that leak → it's one item.
-    if (key === 'Stück' && qty >= 3 && p > 0 && Math.abs(qty - p) < 0.005) qty = 1;
+    // 5,49 € line, not 5.49 packs). A NON-INTEGER count quantity ≥3 that equals the
+    // line's own price to the cent is that leak → it's one item. (Integer counts are
+    // spared: "3 stk à 1,00 € = 3,00" is a real triple buy, not a leak.)
+    if (key === 'Stück' && qty >= 3 && !Number.isInteger(qty) && p > 0 && Math.abs(qty - p) < 0.005) qty = 1;
     if (qty <= 0) continue;
-    buffered.push({ key, datum: l.datum, qty, explicit: !!u });
+    buffered.push({ key, datum: l.datum, qty, preis: p, explicit: !!u });
   }
 
   // Sub-item fold: receipts sometimes record the CONTENT count instead of the
   // container count — "Eier 18er" as menge=18 (eggs, ONE carton), "Cachet 8x85g"
-  // as 8 (pouches, one multipack). A count quantity that's a hard outlier
-  // (≥8 and ≥4× the median count line) is such a content count → one container.
-  // Genuine multi-buys ("3 stk Kaffee", "x 4") stay untouched.
-  const countQtys = buffered.filter(b => b.key === 'Stück').map(b => b.qty).sort((a, b) => a - b);
-  const countMedian = countQtys.length ? countQtys[Math.floor(countQtys.length / 2)] : null;
+  // as 8 (pouches, one multipack). A count quantity that's a hard outlier (≥8 and
+  // ≥4× the LOWER-median count line — lower middle, so [1, 18] folds too) is a
+  // content-count CANDIDATE. The price disambiguates it from a genuine bulk buy:
+  // a content count costs about the same as ONE typical item ("18er Eier" 4,19 €
+  // ≈ one carton), so its per-piece price is far below typical, while a real
+  // 10-piece stock-up scales with the quantity. Without a price, assume content
+  // count (empirically the dominant error).
+  const countLines = buffered.filter(b => b.key === 'Stück');
+  const countQtys = countLines.map(b => b.qty).sort((a, b) => a - b);
+  const countMedian = countQtys.length ? countQtys[Math.floor((countQtys.length - 1) / 2)] : null;
   if (countMedian && countMedian > 0) {
+    const perPiece = countLines.filter(b => b.preis > 0 && b.qty > 0).map(b => b.preis / b.qty).sort((a, b) => a - b);
+    const typPiecePrice = perPiece.length ? perPiece[Math.floor((perPiece.length - 1) / 2)] : null;
     for (const b of buffered) {
-      if (b.key === 'Stück' && b.qty >= 8 && b.qty >= 4 * countMedian) b.qty = 1;
+      if (b.key !== 'Stück' || b.qty < 8 || b.qty < 4 * countMedian) continue;
+      const linePiece = b.preis > 0 ? b.preis / b.qty : null;
+      if (typPiecePrice == null || linePiece == null || linePiece < 0.5 * typPiecePrice) b.qty = 1;
     }
   }
 
@@ -160,15 +170,20 @@ export function estimateVorrat(
   // vanishing from the rate (the root cause behind Karotten/Kaffeepulver being
   // suggested or shown empty right after buying them).
   if (effKey === 'kg' || effKey === 'l') {
-    // Count → mass/volume: each piece = one typical pack (median real base-unit
-    // purchase per DATE). NB: the base group may contain price-imputed weightless
-    // lines (legitimate mass estimates); the fold may lean on that median too —
-    // acceptable, and the only reference when nothing was actually weighed.
-    const baseVals = [...(groups.get(effKey)?.values() ?? [])].sort((a, b) => a - b);
-    const packSize = baseVals.length ? baseVals[Math.floor(baseVals.length / 2)] : null;
-    if (packSize && packSize > 0) {
-      for (const [k, pd] of groups) {
-        if (k === effKey) continue;
+    // Count → mass/volume: each piece = one typical pack (median base-unit qty per
+    // receipt LINE — a date with two 1kg packs is two 1kg lines, not one 2kg pack).
+    // NB: the base group may contain price-imputed weightless lines (legitimate
+    // mass estimates); the fold may lean on that median too — acceptable, and the
+    // only reference when nothing was actually weighed.
+    const baseVals = [...(lineQtys.get(effKey) ?? [])].sort((a, b) => a - b);
+    const packSize = baseVals.length ? baseVals[Math.floor((baseVals.length - 1) / 2)] : null;
+    for (const [k, pd] of groups) {
+      if (k === effKey) continue;
+      if (k === 'kg' || k === 'l') {
+        // The OTHER continuous dimension (same product as "500 g" vs "500 ml"):
+        // groceries are ≈ water density, so 1 kg ↔ 1 l — NOT a pack count.
+        for (const [d, q] of pd) perDate.set(d, (perDate.get(d) ?? 0) + q);
+      } else if (packSize && packSize > 0) {
         for (const [d, q] of pd) perDate.set(d, (perDate.get(d) ?? 0) + q * packSize);
       }
     }
@@ -180,7 +195,7 @@ export function estimateVorrat(
     for (const [k, pd] of groups) {
       if (k === effKey) continue;
       const vals = [...(lineQtys.get(k) ?? [])].sort((a, b) => a - b);
-      const packUnit = vals.length ? vals[Math.floor(vals.length / 2)] : null;
+      const packUnit = vals.length ? vals[Math.floor((vals.length - 1) / 2)] : null;
       if (!packUnit || packUnit <= 0) continue;
       for (const [d, q] of pd) perDate.set(d, (perDate.get(d) ?? 0) + q / packUnit);
     }
