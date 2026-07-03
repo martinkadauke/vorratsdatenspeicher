@@ -91,6 +91,39 @@ async function trackedVorrat(user: ScopeUser) {
     ((a.days_until_empty ?? 1e9) - (b.days_until_empty ?? 1e9)));
 }
 
+/** Live estimates for ARBITRARY canonicals (shopping-list enrichment) — same
+ *  algorithm + inputs as trackedVorrat, minus the track_vorrat gate. Replaces
+ *  the legacy pre-computed vorrat_status table (unmaintained since mig 037),
+ *  which fed the list stale/missing numbers while pantry+suggest computed live. */
+async function liveVorratFor(user: ScopeUser, canons: string[], units: Units): Promise<Map<string, { days_until_empty: number | null; est_remaining: number | null }>> {
+  const out = new Map<string, { days_until_empty: number | null; est_remaining: number | null }>();
+  if (!canons.length) return out;
+  interface PLine { canonical_name: string; preis: string | null; menge: string | null; einheit: string | null; datum: string }
+  const lines = (await sql`
+    SELECT a.canonical_name, a.preis, a.menge, a.einheit, e.datum::text AS datum
+    FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
+    WHERE a.canonical_name IN ${sql(canons)}
+      ${kontoScope(user, sql`e`)}
+  `) as unknown as PLine[];
+  const byCanon = new Map<string, PLine[]>();
+  for (const l of lines) { const arr = byCanon.get(l.canonical_name) ?? []; arr.push(l); byCanon.set(l.canonical_name, arr); }
+  const metas = await sql`
+    SELECT canonical_name, base_unit, consumption_per_week::float8 AS consumption_per_week, expected_price::float8 AS expected_price
+    FROM canonical_meta WHERE canonical_name IN ${sql(canons)}`;
+  const metaMap = new Map(metas.map(m => [m.canonical_name as string, m]));
+  const ov = await sql`
+    SELECT canonical_name, menge::float8 AS menge, gesetzt_am::text AS gesetzt_am
+    FROM vorrat_override WHERE canonical_name IN ${sql(canons)}`;
+  const ovMap = new Map(ov.map(o => [o.canonical_name as string, { menge: o.menge as number, gesetzt_am: o.gesetzt_am as string }]));
+  for (const c of canons) {
+    const m = metaMap.get(c);
+    const est = estimateVorrat(byCanon.get(c) ?? [], (m?.base_unit as string | null) ?? null, units, ovMap.get(c) ?? null,
+      (m?.consumption_per_week as number | null) ?? null, (m?.expected_price as number | null) ?? null);
+    out.set(c, { days_until_empty: est.days_until_empty, est_remaining: est.est_remaining });
+  }
+  return out;
+}
+
 export function pantryRoutes(app: FastifyInstance): void {
   /** Live stock estimate for the products opted into tracking (track_vorrat). */
   app.get('/api/pantry', async (req) => trackedVorrat(req.user));
@@ -253,13 +286,9 @@ export function pantryRoutes(app: FastifyInstance): void {
         const g = (buKey ? groups.find(x => x.unit === buKey) : undefined) ?? groups[0];
         if (g && g.avg > 0) avgByCanon.set(c, { price: g.avg, unit: g.unit });
       }
-      const vs = await sql`
-        SELECT canonical_name, days_until_empty::float8 AS days_until_empty, est_remaining::float8 AS est_remaining
-        FROM vorrat_status WHERE canonical_name IN ${sql(canons)}
-      `;
-      for (const r of vs) vorratByCanon.set(r.canonical_name as string, {
-        days_until_empty: r.days_until_empty as number | null, est_remaining: r.est_remaining as number | null,
-      });
+      // Live estimate (same estimator as pantry/suggest) — NOT the legacy
+      // vorrat_status table, which nothing maintains since mig 037.
+      for (const [c, v] of await liveVorratFor(req.user, canons, units)) vorratByCanon.set(c, v);
     }
 
     return items.map(it => {

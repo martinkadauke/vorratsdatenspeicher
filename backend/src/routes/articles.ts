@@ -208,9 +208,6 @@ export function articleRoutes(app: FastifyInstance): void {
         await tx`UPDATE einkaufsliste SET canonical_name = ${new_name}
                  WHERE canonical_name = ${name} AND NOT EXISTS (SELECT 1 FROM einkaufsliste WHERE canonical_name = ${new_name})`;
         await tx`DELETE FROM einkaufsliste WHERE canonical_name = ${name}`;
-        await tx`UPDATE vorrat_status SET canonical_name = ${new_name}
-                 WHERE canonical_name = ${name} AND NOT EXISTS (SELECT 1 FROM vorrat_status WHERE canonical_name = ${new_name})`;
-        await tx`DELETE FROM vorrat_status WHERE canonical_name = ${name}`;
         await tx`UPDATE canonical_consumer c SET canonical_name = ${new_name}
                  WHERE c.canonical_name = ${name} AND NOT EXISTS (
                    SELECT 1 FROM canonical_consumer c2 WHERE c2.canonical_name = ${new_name} AND c2.family_member_id = c.family_member_id)`;
