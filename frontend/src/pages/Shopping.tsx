@@ -551,7 +551,12 @@ function ShoppingRow({ s, store, dragDisabled, t, sessionActive, onMenge, onComm
       <Card className={cn('flex flex-col gap-2 px-1.5 py-2.5 sm:px-2.5',
         isDragging && 'opacity-80 shadow-lg ring-2 ring-emerald-400')}
       >
-        <div className="flex items-center gap-2 sm:gap-2.5">
+        {/* Row 1: the NAME gets (almost) the full card width. The old single-row
+            layout squeezed it to ~130px next to stepper+icons, which broke even
+            medium German compounds mid-word ("Katzentrockenfut/ter"). The
+            suggested-sparkle sits INLINE after the last word instead of floating
+            vertically centered beside a wrapped name. */}
+        <div className="flex items-start gap-2 sm:gap-2.5">
           {!dragDisabled && (
             <button
               type="button"
@@ -564,60 +569,23 @@ function ShoppingRow({ s, store, dragDisabled, t, sessionActive, onMenge, onComm
             </button>
           )}
           <div className={cn('min-w-0 flex-1', done && 'opacity-50', store && !store.carried && 'opacity-60')}>
-            <div className="flex min-w-0 items-center gap-1.5">
-              {/* Two lines before truncating — the product NAME is the point of a
-                  shopping list; "Gouda in Sc…" vs "Gouda mittelalt" must stay
-                  distinguishable in the store. */}
-              {s.canonical_name
-                ? <button
-                    type="button"
-                    onPointerDown={e => e.stopPropagation()}
-                    onClick={() => navigate(`/warenstamm/artikel?open=${encodeURIComponent(s.canonical_name!)}`)}
-                    className={cn('line-clamp-2 break-words text-left font-medium hover:text-emerald-600 hover:underline dark:hover:text-emerald-400', done && 'line-through')}
-                  >{s.title}</button>
-                : <span className={cn('line-clamp-2 break-words font-medium', done && 'line-through')}>{s.title}</span>}
-              {s.canonical_name == null && <Badge>{t('shopping.freeText')}</Badge>}
-              {s.source === 'suggested' && <Sparkles size={12} className="shrink-0 text-amber-500" aria-label={t('shopping.suggested')} />}
-            </div>
-            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-zinc-500 dark:text-zinc-400">
-              {store ? (
-                <>
-                  {store.carried
-                    ? (store.expected != null
-                        ? <span className="font-semibold text-emerald-600 dark:text-emerald-500">{eur(store.expected)}</span>
-                        : <span className="text-zinc-400">{t('shopping.noPrice')}</span>)
-                    : <span className="italic text-zinc-400">
-                        {store.expected != null ? `≈ ${eur(store.expected)} · ${t('shopping.notCarried')}` : t('shopping.notCarried')}
-                      </span>}
-                  {store.carried && store.cheapest && (
-                    <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400">
-                      <TrendingDown size={11} /> {t('shopping.cheapest')}
-                    </span>
-                  )}
-                </>
-              ) : (
-                /* One non-breaking price phrase per row: "8 × 1,29 €/Dose ≈ 10,32 €".
-                 * For qty 1 the total equals the unit price → show it once (green).
-                 * whitespace-nowrap keeps the phrase from wrapping mid-way (uneven
-                 * card heights were pure noise). The unit lives HERE, not in the
-                 * stepper. */
-                s.avg_price != null && s.avg_unit && ((s.menge ?? 1) === 1 ? (
-                  <span className="whitespace-nowrap font-semibold text-emerald-600 dark:text-emerald-500">
-                    {eur(s.avg_price)}/{s.avg_unit}
-                  </span>
-                ) : (
-                  <span className="whitespace-nowrap">
-                    {fmt(s.menge ?? 1)} × {eur(s.avg_price)}/{s.avg_unit}
-                    {s.expected_price != null && (
-                      <span className="font-semibold text-emerald-600 dark:text-emerald-500"> ≈ {eur(s.expected_price)}</span>
-                    )}
-                  </span>
-                ))
-              )}
-              {hasComment && !commentOpen && <span className="truncate italic text-zinc-400">„{s.comment}"</span>}
-            </div>
+            {s.canonical_name
+              ? <button
+                  type="button"
+                  lang="de"
+                  onPointerDown={e => e.stopPropagation()}
+                  onClick={() => navigate(`/warenstamm/artikel?open=${encodeURIComponent(s.canonical_name!)}`)}
+                  className={cn('line-clamp-2 hyphens-auto break-words text-left font-medium hover:text-emerald-600 hover:underline dark:hover:text-emerald-400', done && 'line-through')}
+                >
+                  {s.title}
+                  {s.source === 'suggested' && <Sparkles size={12} className="-mt-0.5 ml-1 inline text-amber-500" aria-label={t('shopping.suggested')} />}
+                </button>
+              : <span lang="de" className={cn('line-clamp-2 hyphens-auto break-words font-medium', done && 'line-through')}>
+                  {s.title}
+                  {' '}<Badge>{t('shopping.freeText')}</Badge>
+                  {s.source === 'suggested' && <Sparkles size={12} className="-mt-0.5 ml-1 inline text-amber-500" aria-label={t('shopping.suggested')} />}
+                </span>}
           </div>
-          <MengeStepper value={s.menge ?? 1} onChange={onMenge} t={t} />
           <button
             type="button"
             onClick={toggleComment}
@@ -652,6 +620,46 @@ function ShoppingRow({ s, store, dragDisabled, t, sessionActive, onMenge, onComm
               <Trash2 size={16} />
             </button>
           )}
+        </div>
+
+        {/* Row 2: price phrase left, stepper right — they no longer fight the
+            name for horizontal space. */}
+        <div className={cn('flex items-center justify-between gap-2', !dragDisabled && 'pl-8', done && 'opacity-50', store && !store.carried && 'opacity-60')}>
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 text-xs text-zinc-500 dark:text-zinc-400">
+            {store ? (
+              <>
+                {store.carried
+                  ? (store.expected != null
+                      ? <span className="font-semibold text-emerald-600 dark:text-emerald-500">{eur(store.expected)}</span>
+                      : <span className="text-zinc-400">{t('shopping.noPrice')}</span>)
+                  : <span className="italic text-zinc-400">
+                      {store.expected != null ? `≈ ${eur(store.expected)} · ${t('shopping.notCarried')}` : t('shopping.notCarried')}
+                    </span>}
+                {store.carried && store.cheapest && (
+                  <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400">
+                    <TrendingDown size={11} /> {t('shopping.cheapest')}
+                  </span>
+                )}
+              </>
+            ) : (
+              /* "8 × 1,29 €/Dose ≈ 10,32 €" — one phrase, unit lives here (not in
+               * the stepper). Qty 1 shows the price exactly once (green). */
+              s.avg_price != null && s.avg_unit && ((s.menge ?? 1) === 1 ? (
+                <span className="whitespace-nowrap font-semibold text-emerald-600 dark:text-emerald-500">
+                  {eur(s.avg_price)}/{s.avg_unit}
+                </span>
+              ) : (
+                <span className="whitespace-nowrap">
+                  {fmt(s.menge ?? 1)} × {eur(s.avg_price)}/{s.avg_unit}
+                  {s.expected_price != null && (
+                    <span className="font-semibold text-emerald-600 dark:text-emerald-500"> ≈ {eur(s.expected_price)}</span>
+                  )}
+                </span>
+              ))
+            )}
+            {hasComment && !commentOpen && <span className="truncate italic text-zinc-400">„{s.comment}"</span>}
+          </div>
+          <MengeStepper value={s.menge ?? 1} onChange={onMenge} t={t} />
         </div>
 
         {commentOpen && (
