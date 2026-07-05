@@ -454,7 +454,11 @@
       "priceHint": "≈ {{price}} €/{{unit}}",
       "empty": "All units reviewed 🎉",
       "search": "Search product …",
-      "bulkKept": "{{count}} kept"
+      "bulkKept": "{{count}} kept",
+      "mixedTitle": "Inconsistent positions",
+      "mixedIntro": "These products were recorded sometimes with, sometimes without, or with different units. “Normalize” sets every position with no unit or a count unit to the chosen unit (weight/volume lines like “400 g” stay untouched) and adopts it as the base price unit.",
+      "normalize": "Normalize",
+      "normalizeDone": "{{count}} positions updated"
     }
   },
   "bell": {

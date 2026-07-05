@@ -141,6 +141,114 @@ async function buildUnitReviewRows(user: User): Promise<UnitReviewRow[]> {
   return rows.slice(0, 200);
 }
 
+export interface MixedUnitRow {
+  canonical_name: string;
+  histogram: { label: string | null; n: number }[]; // null = blank/no unit (frontend translates); order by n desc
+  suggested_unit: string;                           // count unit the normalize action pre-selects
+  lines: number;
+}
+
+/** Products whose POSITIONS disagree about the unit — the data-quality view the
+ *  base-unit review above can't see (it only compares recommendation vs stored
+ *  base_unit and goes silent once confirmed). Flagged when the positions mix
+ *  more than one COUNT unit name (stk vs Packung) or mix blank/unknown lines
+ *  with explicit ones. Mass/volume lines coexisting with count lines are NOT
+ *  flagged — that's legitimate recording ("Gouda 400g" next to "1 Stück") and
+ *  the Vorrat estimator folds them. Rows disappear by themselves once
+ *  normalized (criteria-based, no review flag needed). */
+async function buildMixedRows(user: User): Promise<MixedUnitRow[]> {
+  const units = await loadUnits();
+  const lineRows = (await sql`
+    SELECT a.canonical_name, a.einheit
+    FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
+    WHERE a.canonical_name IS NOT NULL ${kontoScope(user, sql`e`)}
+  `) as unknown as { canonical_name: string; einheit: string | null }[];
+  const metaRows = await sql`SELECT canonical_name, base_unit, hidden FROM canonical_meta`;
+  const metaMap = new Map(metaRows.map(r => [r.canonical_name as string, r]));
+
+  const byCanon = new Map<string, (string | null)[]>();
+  for (const l of lineRows) {
+    const arr = byCanon.get(l.canonical_name) ?? [];
+    arr.push(l.einheit);
+    byCanon.set(l.canonical_name, arr);
+  }
+
+  const rows: MixedUnitRow[] = [];
+  for (const [name, einheiten] of byCanon) {
+    if (einheiten.length < MIN_OCCUR) continue;
+    if (metaMap.get(name)?.hidden) continue;
+    const hist = new Map<string, number>();          // display label → n
+    const countNames = new Set<string>();            // distinct normalized COUNT units
+    let blanks = 0, explicit = 0;
+    for (const raw of einheiten) {
+      const un = normalizeEinheit(raw);
+      const u = un ? units.get(un) : undefined;
+      const label = u ? u.name : (raw ?? '').trim() ? `"${(raw ?? '').trim()}"` : '(ohne)';
+      hist.set(label, (hist.get(label) ?? 0) + 1);
+      if (u) {
+        explicit++;
+        if (u.dimension === 'count') countNames.add(u.name);
+      } else {
+        blanks++;                                    // blank OR unrecognized → unit-agnostic
+      }
+    }
+    const mixed = countNames.size > 1 || (blanks > 0 && explicit > 0);
+    if (!mixed) continue;
+    // Pre-select: stored base_unit when it's a count unit, else the most-bought
+    // count unit, else Stück.
+    const baseUnit = (metaMap.get(name)?.base_unit as string | null) ?? null;
+    let suggested = baseUnit && units.get(baseUnit)?.dimension === 'count' ? baseUnit : null;
+    if (!suggested && countNames.size) {
+      suggested = [...countNames].sort((a, b) => (hist.get(b) ?? 0) - (hist.get(a) ?? 0))[0];
+    }
+    rows.push({
+      canonical_name: name,
+      histogram: [...hist.entries()].map(([label, n]) => ({ label: label === '(ohne)' ? null : label, n })).sort((a, b) => b.n - a.n),
+      suggested_unit: suggested ?? 'Stück',
+      lines: einheiten.length,
+    });
+  }
+  rows.sort((a, b) => b.lines - a.lines);
+  return rows.slice(0, 200);
+}
+
+/** Normalize a product's positions to ONE count unit — the bulk repair for mixed
+ *  recording ("Alle mit diesem Namen" in the article editor never propagated the
+ *  unit). SAFE by construction: only blank/unknown lines and lines already in a
+ *  COUNT unit are relabelled (their menge is a piece count either way). Mass and
+ *  volume lines are NEVER touched — "Gouda 400g" must not become "400 Stück";
+ *  the Vorrat estimator folds those. Also sets the product's base_unit (+ median
+ *  price, + reviewed stamp) via applyUnit so Grundpreis and positions agree. */
+async function normalizeUnits(user: User, name: string, unit: string): Promise<number> {
+  const units = await loadUnits();
+  const target = units.get(unit);
+  if (!target || target.dimension !== 'count') throw new Error('unit must be a count unit');
+
+  const distinct = (await sql`
+    SELECT DISTINCT einheit FROM artikel WHERE canonical_name = ${name}
+  `) as unknown as { einheit: string | null }[];
+  // Raw einheit values safe to relabel: blank/unknown (unit-agnostic) + count units.
+  const rewrite: string[] = [];
+  let hasNullOrBlank = false;
+  for (const d of distinct) {
+    const raw = d.einheit;
+    if (raw == null || !raw.trim()) { hasNullOrBlank = true; if (raw != null) rewrite.push(raw); continue; }
+    const un = normalizeEinheit(raw);
+    const u = un ? units.get(un) : undefined;
+    // Unknown units are unit-agnostic OCR noise; count units carry a piece count
+    // either way. Both are safe to relabel. raw === unit is already a no-op.
+    if ((!u || u.dimension === 'count') && raw !== unit) rewrite.push(raw);
+  }
+  const updated = await sql`
+    UPDATE artikel SET einheit = ${unit}
+    WHERE canonical_name = ${name}
+      AND (${hasNullOrBlank ? sql`einheit IS NULL` : sql`FALSE`}
+           OR ${rewrite.length ? sql`einheit IN ${sql(rewrite)}` : sql`FALSE`})
+    RETURNING id`;
+  await applyUnit(user, name, unit);
+  return updated.length;
+}
+
 /** Apply a chosen unit to a product: set base_unit, refresh expected_price for that unit,
  *  and stamp it reviewed. expected_price means €/base_unit, so it is coupled to the unit —
  *  when the unit changes we recompute the median €/new-unit (else a €/Stück figure would be
@@ -173,8 +281,23 @@ async function keepUnit(user: User, name: string): Promise<void> {
 
 export function pruefenUnitRoutes(app: FastifyInstance): void {
   app.get('/api/pruefen-units', async (req) => {
-    const items = await buildUnitReviewRows(req.user);
-    return { items, total: items.length };
+    const [items, mixed] = await Promise.all([buildUnitReviewRows(req.user), buildMixedRows(req.user)]);
+    return { items, total: items.length, mixed };
+  });
+
+  /** Normalize all safely-relabelable positions of a product to ONE count unit
+   *  (+ base_unit/price/reviewed via applyUnit). Mass/volume lines untouched. */
+  app.post('/api/pruefen-units/normalize', async (req, reply) => {
+    const { name, unit } = (req.body ?? {}) as { name?: string; unit?: string };
+    const nm = (name ?? '').trim();
+    const u = (unit ?? '').trim();
+    if (!nm || !u) return reply.code(400).send({ error: 'name and unit required' });
+    try {
+      const updated = await normalizeUnits(req.user, nm, u);
+      return { ok: true, updated };
+    } catch (e) {
+      return reply.code(400).send({ error: (e as Error).message });
+    }
   });
 
   app.post('/api/pruefen-units/decide', async (req, reply) => {

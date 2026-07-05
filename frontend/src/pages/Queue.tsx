@@ -4,8 +4,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { ReceiptText, Search, X, CheckSquare, Square, Check, Ban, ArrowRight } from 'lucide-react';
 import { api } from '../api/client';
-import type { PruefenGroup, UnitPruefenRow } from '../api/types';
-import { Card, Spinner, EmptyState, Button, Input } from '../components/ui';
+import type { PruefenGroup, UnitPruefenRow, MixedUnitRow } from '../api/types';
+import { Card, Spinner, EmptyState, Button, Input, Select } from '../components/ui';
 import { UnitSelect } from '../components/UnitSelect';
 import { CanonicalIcon } from '../components/IconPicker';
 import { FirstVisitHint } from '../components/FirstVisitHint';
@@ -226,10 +226,11 @@ function UnitReview() {
 
   const { data, isLoading } = useQuery({
     queryKey: ['pruefen-units'],
-    queryFn: () => api<{ items: UnitPruefenRow[]; total: number }>('/api/pruefen-units'),
+    queryFn: () => api<{ items: UnitPruefenRow[]; total: number; mixed?: MixedUnitRow[] }>('/api/pruefen-units'),
   });
   const all = data?.items ?? [];
   const total = data?.total ?? 0;
+  const mixed = data?.mixed ?? [];
 
   const items = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -354,6 +355,8 @@ function UnitReview() {
         })}
       </div>
 
+      <MixedUnits mixed={mixed} onDone={invalidate} />
+
       {selected.size > 0 && (
         <div className="fixed inset-x-0 bottom-16 z-20 mx-auto flex max-w-2xl items-center gap-2 rounded-2xl border border-zinc-200 bg-white/95 px-3 py-2 shadow-lg backdrop-blur dark:border-zinc-700 dark:bg-zinc-900/95 md:bottom-4">
           <span className="text-sm font-medium">{selected.size} {t('artikel.selected')}</span>
@@ -370,6 +373,62 @@ function UnitReview() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** "Uneinheitliche Positionen": products whose receipt lines mix units (stk vs
+ *  Packung vs blank). One click relabels the safely-relabelable lines (blank/
+ *  unknown/count) to ONE count unit and sets the Grundpreis unit to match —
+ *  mass/volume lines stay untouched. Rows vanish once the data is consistent. */
+function MixedUnits({ mixed, onDone }: { mixed: MixedUnitRow[]; onDone: () => void }) {
+  const { t } = useTranslation();
+  const [unitEdits, setUnitEdits] = useState<Record<string, string>>({});
+  const { data: units } = useQuery({
+    queryKey: ['units'],
+    queryFn: () => api<{ name: string; dimension: string }[]>('/api/units'),
+  });
+  const countUnits = (units ?? []).filter(u => u.dimension === 'count').map(u => u.name);
+  const normalize = useMutation({
+    mutationFn: (b: { name: string; unit: string }) =>
+      api<{ updated: number }>('/api/pruefen-units/normalize', { method: 'POST', body: b }),
+    onSuccess: (r) => { toast(t('queue.units.normalizeDone', { count: r.updated }), 'success'); onDone(); },
+    onError: (e) => toast((e as Error).message, 'error'),
+  });
+  if (!mixed.length) return null;
+  return (
+    <div className="mt-2 flex flex-col gap-2">
+      <div>
+        <h3 className="text-sm font-semibold">
+          {t('queue.units.mixedTitle')} <span className="font-normal text-zinc-400">({mixed.length})</span>
+        </h3>
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('queue.units.mixedIntro')}</p>
+      </div>
+      {mixed.map(r => {
+        const chosen = unitEdits[r.canonical_name] ?? r.suggested_unit;
+        return (
+          <Card key={r.canonical_name} className="flex flex-col gap-2 p-3">
+            <div className="flex items-start gap-2">
+              <CanonicalIcon name={r.canonical_name} size={28} />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium">{r.canonical_name}</div>
+                <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                  {r.histogram.map(h => `${h.n}× ${h.label ?? t('queue.units.noUnit')}`).join(' · ')}
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Select className="min-w-[8rem] flex-1" value={chosen} onChange={e => setUnitEdits(prev => ({ ...prev, [r.canonical_name]: e.target.value }))}>
+                {!countUnits.includes(chosen) && <option value={chosen}>{chosen}</option>}
+                {countUnits.map(u => <option key={u} value={u}>{u}</option>)}
+              </Select>
+              <Button className="min-w-[8rem]" disabled={normalize.isPending} onClick={() => normalize.mutate({ name: r.canonical_name, unit: chosen })}>
+                {t('queue.units.normalize')}
+              </Button>
+            </div>
+          </Card>
+        );
+      })}
     </div>
   );
 }

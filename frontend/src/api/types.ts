@@ -185,6 +185,14 @@ export interface UnitPruefenRow {
   suggested_price: number | null;
 }
 
+/** A product whose POSITIONS mix units (stk vs Packung vs blank) — Prüfen→Einheiten. */
+export interface MixedUnitRow {
+  canonical_name: string;
+  histogram: { label: string | null; n: number }[]; // null = no unit
+  suggested_unit: string;
+  lines: number;
+}
+
 export interface Notification {
   id: number;
   type: string;
