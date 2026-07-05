@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type TouchEvent as ReactTouchEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
@@ -147,9 +147,25 @@ export function Shopping() {
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ['shopping-session'] }); invalidate(); },
     onError: (e: Error) => toast(e.message, 'error'),
   });
-  const remove = useMutation({
-    mutationFn: (id: number) => api(`/api/shopping-list/${id}`, { method: 'DELETE' }),
+  // Delete with UNDO: the toast offers to re-add the item with all its fields
+  // (canonical/title/menge/einheit/comment) — protects against fat-finger
+  // deletes, especially via the new swipe gesture.
+  const readd = useMutation({
+    mutationFn: (it: ShoppingItem) => api('/api/shopping-list', {
+      method: 'POST',
+      body: { canonical_name: it.canonical_name, title: it.title, menge: it.menge ?? 1, einheit: it.einheit, comment: it.comment, list_id: activeListId },
+    }),
     onSuccess: invalidate,
+    onError: (e: Error) => toast(e.message, 'error'),
+  });
+  const remove = useMutation({
+    mutationFn: (it: ShoppingItem) => api(`/api/shopping-list/${it.id}`, { method: 'DELETE' }),
+    onSuccess: (_r, it) => {
+      invalidate();
+      toast(t('shopping.removedToast', { title: it.title }), 'info', 6000,
+        { label: t('shopping.undo'), onClick: () => readd.mutate(it) });
+    },
+    onError: (e: Error) => toast(e.message, 'error'),
   });
   const suggest = useMutation({
     mutationFn: () => api<{ added: number }>('/api/shopping-list/suggest', { method: 'POST', body: { list_id: activeListId } }),
@@ -377,7 +393,7 @@ export function Shopping() {
                 onMenge={(m) => patchMenge.mutate({ id: shop.id, menge: m })}
                 onComment={(c) => patchComment.mutate({ id: shop.id, comment: c })}
                 onToggleDone={() => patchDone.mutate({ id: shop.id, done: !shop.done })}
-                onRemove={() => remove.mutate(shop.id)}
+                onRemove={() => remove.mutate(shop)}
               />
             ))}
           </div>
@@ -489,8 +505,49 @@ function ShoppingRow({ s, store, dragDisabled, t, sessionActive, onMenge, onComm
     if (v !== (s.comment ?? '').trim()) onComment(v);   // '' clears it
   };
 
+  // Swipe-left to delete (touch only; the trash button covers mouse). Engages
+  // only on clear horizontal intent so vertical list scrolling wins; committing
+  // past ~90px removes the item — the undo toast is the safety net.
+  const [dx, setDx] = useState(0);
+  const swipe = useRef<{ x: number; y: number; active: boolean } | null>(null);
+  const onSwipeStart = (e: ReactTouchEvent) => {
+    const t0 = e.touches[0];
+    swipe.current = { x: t0.clientX, y: t0.clientY, active: false };
+  };
+  const onSwipeMove = (e: ReactTouchEvent) => {
+    const sw = swipe.current;
+    if (!sw) return;
+    const t0 = e.touches[0];
+    const ddx = t0.clientX - sw.x, ddy = t0.clientY - sw.y;
+    if (!sw.active) {
+      if (ddx < -12 && Math.abs(ddx) > Math.abs(ddy) * 1.5) sw.active = true;
+      else if (Math.abs(ddy) > 12) { swipe.current = null; return; } // scrolling
+      else return;
+    }
+    setDx(Math.min(0, Math.max(-120, ddx)));
+  };
+  const onSwipeEnd = () => {
+    const commit = dx < -90;
+    swipe.current = null;
+    setDx(0);
+    if (commit) onRemove();
+  };
+
   return (
-    <div ref={setNodeRef} style={style}>
+    <div ref={setNodeRef} style={style} className="relative">
+      {dx < 0 && (
+        <div className="absolute inset-0 flex items-center justify-end rounded-2xl bg-red-500 pr-5 text-white">
+          <Trash2 size={18} />
+        </div>
+      )}
+      <div
+        className="relative"
+        style={dx < 0 ? { transform: `translateX(${dx}px)` } : undefined}
+        onTouchStart={onSwipeStart}
+        onTouchMove={onSwipeMove}
+        onTouchEnd={onSwipeEnd}
+        onTouchCancel={onSwipeEnd}
+      >
       <Card className={cn('flex flex-col gap-2 px-1.5 py-2.5 sm:px-2.5',
         isDragging && 'opacity-80 shadow-lg ring-2 ring-emerald-400')}
       >
@@ -508,14 +565,17 @@ function ShoppingRow({ s, store, dragDisabled, t, sessionActive, onMenge, onComm
           )}
           <div className={cn('min-w-0 flex-1', done && 'opacity-50', store && !store.carried && 'opacity-60')}>
             <div className="flex min-w-0 items-center gap-1.5">
+              {/* Two lines before truncating — the product NAME is the point of a
+                  shopping list; "Gouda in Sc…" vs "Gouda mittelalt" must stay
+                  distinguishable in the store. */}
               {s.canonical_name
                 ? <button
                     type="button"
                     onPointerDown={e => e.stopPropagation()}
                     onClick={() => navigate(`/warenstamm/artikel?open=${encodeURIComponent(s.canonical_name!)}`)}
-                    className={cn('truncate text-left font-medium hover:text-emerald-600 hover:underline dark:hover:text-emerald-400', done && 'line-through')}
+                    className={cn('line-clamp-2 break-words text-left font-medium hover:text-emerald-600 hover:underline dark:hover:text-emerald-400', done && 'line-through')}
                   >{s.title}</button>
-                : <span className={cn('truncate font-medium', done && 'line-through')}>{s.title}</span>}
+                : <span className={cn('line-clamp-2 break-words font-medium', done && 'line-through')}>{s.title}</span>}
               {s.canonical_name == null && <Badge>{t('shopping.freeText')}</Badge>}
               {s.source === 'suggested' && <Sparkles size={12} className="shrink-0 text-amber-500" aria-label={t('shopping.suggested')} />}
             </div>
@@ -536,17 +596,28 @@ function ShoppingRow({ s, store, dragDisabled, t, sessionActive, onMenge, onComm
                   )}
                 </>
               ) : (
-                <>
-                  {s.avg_price != null && s.avg_unit && <span>Ø {eur(s.avg_price)}/{s.avg_unit}</span>}
-                  {s.expected_price != null && (
-                    <span className="font-semibold text-emerald-600 dark:text-emerald-500">≈ {eur(s.expected_price)}</span>
-                  )}
-                </>
+                /* One non-breaking price phrase per row: "8 × 1,29 €/Dose ≈ 10,32 €".
+                 * For qty 1 the total equals the unit price → show it once (green).
+                 * whitespace-nowrap keeps the phrase from wrapping mid-way (uneven
+                 * card heights were pure noise). The unit lives HERE, not in the
+                 * stepper. */
+                s.avg_price != null && s.avg_unit && ((s.menge ?? 1) === 1 ? (
+                  <span className="whitespace-nowrap font-semibold text-emerald-600 dark:text-emerald-500">
+                    {eur(s.avg_price)}/{s.avg_unit}
+                  </span>
+                ) : (
+                  <span className="whitespace-nowrap">
+                    {fmt(s.menge ?? 1)} × {eur(s.avg_price)}/{s.avg_unit}
+                    {s.expected_price != null && (
+                      <span className="font-semibold text-emerald-600 dark:text-emerald-500"> ≈ {eur(s.expected_price)}</span>
+                    )}
+                  </span>
+                ))
               )}
               {hasComment && !commentOpen && <span className="truncate italic text-zinc-400">„{s.comment}"</span>}
             </div>
           </div>
-          <MengeStepper value={s.menge ?? 1} unit={store ? store.unit : s.avg_unit} onChange={onMenge} t={t} />
+          <MengeStepper value={s.menge ?? 1} onChange={onMenge} t={t} />
           <button
             type="button"
             onClick={toggleComment}
@@ -595,15 +666,17 @@ function ShoppingRow({ s, store, dragDisabled, t, sessionActive, onMenge, onComm
           />
         )}
       </Card>
+      </div>
     </div>
   );
 }
 
 /** Quantity stepper: − / value / + (step 1, floor 0). Long-press a button — or
- *  tap the value — to type an exact amount (e.g. 1,5). Defaults to one base-unit
- *  package; `unit` (kg/l/Stück) is shown next to the number. */
-function MengeStepper({ value, unit, onChange, t }: {
-  value: number; unit: string | null; onChange: (m: number) => void; t: TFunction;
+ *  tap the value — to type an exact amount (e.g. 1,5). Bare number only — the
+ *  unit lives in the price line (…€/Einheit), not here (it doubled up and made
+ *  the steppers unevenly wide). */
+function MengeStepper({ value, onChange, t }: {
+  value: number; onChange: (m: number) => void; t: TFunction;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
@@ -644,7 +717,7 @@ function MengeStepper({ value, unit, onChange, t }: {
       </button>
       <button type="button" onClick={openEdit} onContextMenu={e => e.preventDefault()} title={t('shopping.holdToType')}
         className="tabular min-w-[3rem] px-1 py-1.5 text-center text-sm font-medium">
-        {fmt(value)}{unit && <span className="ml-0.5 text-xs font-normal text-zinc-400">{unit}</span>}
+        {fmt(value)}
       </button>
       <button type="button" aria-label="+" title={t('shopping.holdToType')}
         onPointerDown={startHold} onPointerUp={cancelHold} onPointerLeave={cancelHold}

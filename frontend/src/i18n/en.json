@@ -250,6 +250,8 @@
       "confirmDelete": "Delete this list and its items?"
     },
     "suggestionsAdded": "{{count}} suggestions added",
+    "removedToast": "Removed “{{title}}”",
+    "undo": "Undo",
     "noSuggestions": "No tracked items running low",
     "noPrice": "no price",
     "notCarried": "not carried here",

@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { CheckCircle2, AlertTriangle, Info, X } from 'lucide-react';
 
 export type ToastType = 'success' | 'error' | 'info';
-interface ToastItem { id: number; type: ToastType; message: string }
+export interface ToastAction { label: string; onClick: () => void }
+interface ToastItem { id: number; type: ToastType; message: string; action?: ToastAction }
 
 // ── tiny module-level pub/sub (no context needed) ──
 let counter = 0;
@@ -11,10 +12,11 @@ let items: ToastItem[] = [];
 
 function emit() { for (const l of listeners) l(items); }
 
-/** Show a toast from anywhere. Auto-dismisses after `ms` (0 = sticky). */
-export function toast(message: string, type: ToastType = 'info', ms = 4000): number {
+/** Show a toast from anywhere. Auto-dismisses after `ms` (0 = sticky).
+ *  `action` renders an inline button (e.g. "Rückgängig") that dismisses on click. */
+export function toast(message: string, type: ToastType = 'info', ms = 4000, action?: ToastAction): number {
   const id = ++counter;
-  items = [...items, { id, type, message }];
+  items = [...items, { id, type, message, action }];
   emit();
   if (ms > 0) setTimeout(() => dismiss(id), ms);
   return id;
@@ -62,6 +64,14 @@ export function Toaster() {
           >
             <Icon size={18} className={`mt-0.5 shrink-0 ${ICON_COLOR[t.type]}`} />
             <span className="min-w-0 flex-1 whitespace-pre-wrap">{t.message}</span>
+            {t.action && (
+              <button
+                onClick={() => { t.action!.onClick(); dismiss(t.id); }}
+                className="shrink-0 rounded-md px-2 py-0.5 font-semibold text-emerald-600 hover:bg-black/5 dark:text-emerald-400 dark:hover:bg-white/10"
+              >
+                {t.action.label}
+              </button>
+            )}
             <button onClick={() => dismiss(t.id)} className="shrink-0 rounded-md p-0.5 text-current/60 hover:bg-black/5 dark:hover:bg-white/10">
               <X size={15} />
             </button>

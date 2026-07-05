@@ -316,22 +316,23 @@ export function pantryRoutes(app: FastifyInstance): void {
   /** Add to the list. canonical_name → a known product (deduped); otherwise a
    *  free-text entry (title required). Optional menge/einheit. */
   app.post('/api/shopping-list', async (req, reply) => {
-    const b = (req.body ?? {}) as { canonical_name?: string; title?: string; menge?: number | null; einheit?: string | null; list_id?: number };
+    const b = (req.body ?? {}) as { canonical_name?: string; title?: string; menge?: number | null; einheit?: string | null; comment?: string | null; list_id?: number };
     const canonical = b.canonical_name?.trim() || null;
     const title = (b.title?.trim() || canonical) ?? null;
     if (!title) return reply.code(400).send({ error: 'title or canonical_name required' });
     const listId = await reqListId(b.list_id);
+    const comment = b.comment?.trim() || null;   // undo-restore brings the comment back too
     const prio = sql`(SELECT COALESCE(MAX(priority), 0) + 1 FROM einkaufsliste_item WHERE list_id = ${listId})`; // new items to the top of THIS list
     if (canonical) {
       await sql`
-        INSERT INTO einkaufsliste_item (list_id, canonical_name, title, menge, einheit, added_by, priority)
-        VALUES (${listId}, ${canonical}, ${title}, ${b.menge ?? 1}, ${b.einheit ?? null}, ${req.user!.username}, ${prio})
+        INSERT INTO einkaufsliste_item (list_id, canonical_name, title, menge, einheit, comment, added_by, priority)
+        VALUES (${listId}, ${canonical}, ${title}, ${b.menge ?? 1}, ${b.einheit ?? null}, ${comment}, ${req.user!.username}, ${prio})
         ON CONFLICT (list_id, canonical_name) WHERE canonical_name IS NOT NULL DO NOTHING
       `;
     } else {
       await sql`
-        INSERT INTO einkaufsliste_item (list_id, canonical_name, title, menge, einheit, added_by, priority)
-        VALUES (${listId}, NULL, ${title}, ${b.menge ?? 1}, ${b.einheit ?? null}, ${req.user!.username}, ${prio})
+        INSERT INTO einkaufsliste_item (list_id, canonical_name, title, menge, einheit, comment, added_by, priority)
+        VALUES (${listId}, NULL, ${title}, ${b.menge ?? 1}, ${b.einheit ?? null}, ${comment}, ${req.user!.username}, ${prio})
       `;
     }
     return { ok: true };

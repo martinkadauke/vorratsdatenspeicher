@@ -250,6 +250,8 @@
       "confirmDelete": "Diese Liste und ihre Einträge löschen?"
     },
     "suggestionsAdded": "{{count}} Vorschläge hinzugefügt",
+    "removedToast": "„{{title}}“ entfernt",
+    "undo": "Rückgängig",
     "noSuggestions": "Keine fälligen Artikel im Vorrat",
     "noPrice": "kein Preis",
     "notCarried": "führt die Kette nicht",
