@@ -395,6 +395,14 @@ function MixedUnits({ mixed, onDone }: { mixed: MixedUnitRow[]; onDone: () => vo
     onSuccess: (r) => { toast(t('queue.units.normalizeDone', { count: r.updated }), 'success'); onDone(); },
     onError: (e) => toast((e as Error).message, 'error'),
   });
+  // Accept the discrepancy as-is (e.g. a kg product with a few blank lines):
+  // hides the row for good, positions stay untouched.
+  const accept = useMutation({
+    mutationFn: (name: string) =>
+      api('/api/pruefen-units/mixed-accept', { method: 'POST', body: { name } }),
+    onSuccess: () => { toast(t('queue.units.mixedAccepted'), 'success'); onDone(); },
+    onError: (e) => toast((e as Error).message, 'error'),
+  });
   if (!mixed.length) return null;
   return (
     <div className="mt-2 flex flex-col gap-2">
@@ -424,6 +432,9 @@ function MixedUnits({ mixed, onDone }: { mixed: MixedUnitRow[]; onDone: () => vo
               </Select>
               <Button className="min-w-[8rem]" disabled={normalize.isPending} onClick={() => normalize.mutate({ name: r.canonical_name, unit: chosen })}>
                 {t('queue.units.normalize')}
+              </Button>
+              <Button variant="ghost" className="min-w-[5rem]" disabled={accept.isPending} onClick={() => accept.mutate(r.canonical_name)}>
+                {t('queue.units.mixedAccept')}
               </Button>
             </div>
           </Card>

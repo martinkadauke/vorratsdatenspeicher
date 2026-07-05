@@ -458,7 +458,9 @@
       "mixedTitle": "Inconsistent positions",
       "mixedIntro": "These products were recorded sometimes with, sometimes without, or with different units. “Normalize” sets every position with no unit or a count unit to the chosen unit (weight/volume lines like “400 g” stay untouched) and adopts it as the base price unit.",
       "normalize": "Normalize",
-      "normalizeDone": "{{count}} positions updated"
+      "normalizeDone": "{{count}} positions updated",
+      "mixedAccept": "Accept as is",
+      "mixedAccepted": "Discrepancy accepted – won't be shown again"
     }
   },
   "bell": {

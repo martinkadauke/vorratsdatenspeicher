@@ -163,7 +163,7 @@ async function buildMixedRows(user: User): Promise<MixedUnitRow[]> {
     FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
     WHERE a.canonical_name IS NOT NULL ${kontoScope(user, sql`e`)}
   `) as unknown as { canonical_name: string; einheit: string | null }[];
-  const metaRows = await sql`SELECT canonical_name, base_unit, hidden FROM canonical_meta`;
+  const metaRows = await sql`SELECT canonical_name, base_unit, hidden, mixed_accepted_at FROM canonical_meta`;
   const metaMap = new Map(metaRows.map(r => [r.canonical_name as string, r]));
 
   const byCanon = new Map<string, (string | null)[]>();
@@ -177,6 +177,7 @@ async function buildMixedRows(user: User): Promise<MixedUnitRow[]> {
   for (const [name, einheiten] of byCanon) {
     if (einheiten.length < MIN_OCCUR) continue;
     if (metaMap.get(name)?.hidden) continue;
+    if (metaMap.get(name)?.mixed_accepted_at) continue;  // user accepted the discrepancy → never nag again
     const hist = new Map<string, number>();          // display label → n
     const countNames = new Set<string>();            // distinct normalized COUNT units
     let blanks = 0, explicit = 0;
@@ -283,6 +284,20 @@ export function pruefenUnitRoutes(app: FastifyInstance): void {
   app.get('/api/pruefen-units', async (req) => {
     const [items, mixed] = await Promise.all([buildUnitReviewRows(req.user), buildMixedRows(req.user)]);
     return { items, total: items.length, mixed };
+  });
+
+  /** Accept a product's unit discrepancy as-is: hide it from the mixed list for
+   *  good WITHOUT touching any position (e.g. Bananen — 46× kg + a few blanks;
+   *  normalizing to a count unit would be wrong, the estimator imputes blanks). */
+  app.post('/api/pruefen-units/mixed-accept', async (req, reply) => {
+    const nm = (((req.body ?? {}) as { name?: string }).name ?? '').trim();
+    if (!nm) return reply.code(400).send({ error: 'name required' });
+    await sql`
+      INSERT INTO canonical_meta (canonical_name, mixed_accepted_at, updated_at, updated_by)
+      VALUES (${nm}, NOW(), NOW(), ${req.user?.id ?? null})
+      ON CONFLICT (canonical_name) DO UPDATE SET
+        mixed_accepted_at = NOW(), updated_at = NOW(), updated_by = EXCLUDED.updated_by`;
+    return { ok: true };
   });
 
   /** Normalize all safely-relabelable positions of a product to ONE count unit

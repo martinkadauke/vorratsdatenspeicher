@@ -458,7 +458,9 @@
       "mixedTitle": "Uneinheitliche Positionen",
       "mixedIntro": "Diese Artikel wurden mal mit, mal ohne bzw. mit unterschiedlichen Einheiten erfasst. „Vereinheitlichen“ setzt alle Positionen ohne/mit Zähl-Einheit auf die gewählte Einheit (Gewichts-/Volumen-Zeilen wie „400 g“ bleiben unverändert) und übernimmt sie als Grundpreis-Einheit.",
       "normalize": "Vereinheitlichen",
-      "normalizeDone": "{{count}} Positionen angepasst"
+      "normalizeDone": "{{count}} Positionen angepasst",
+      "mixedAccept": "Passt so",
+      "mixedAccepted": "Diskrepanz akzeptiert – wird nicht mehr angezeigt"
     }
   },
   "bell": {
