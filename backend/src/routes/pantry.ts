@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import sql from '../db.js';
 import { kontoScope } from '../auth/konto.js';
-import { loadUnits, normalizeEinheit, comparisonGroups, type PriceLine } from '../lib/units.js';
+import { loadUnits, normalizeEinheit, comparisonGroups, unitGroup, unitGroupOf, type PriceLine } from '../lib/units.js';
 import { estimateVorrat } from '../lib/vorrat.js';
 import { sendMail, smtpConfigured } from '../mailer.js';
 import { notify } from '../notify.js';
@@ -22,12 +22,16 @@ function parsePrice(s: string | null): number | null {
 
 type Units = Awaited<ReturnType<typeof loadUnits>>;
 
-/** Comparison-group key for a unit name: mass→kg, volume→l, count→itself. */
+/** Comparison-group key for a unit name — delegates to the central unitGroup
+ *  (mass→kg, volume→l, ALL count units→one 'Stück' family). */
 function unitKey(units: Units, name: string | null | undefined): string | null {
-  if (!name) return null;
-  const u = units.get(name);
-  if (!u) return null;
-  return u.dimension === 'mass' ? 'kg' : u.dimension === 'volume' ? 'l' : u.name;
+  return unitGroupOf(units, name ?? null);
+}
+
+/** Display label for a comparison unit: the internal count group is 'Stück', but
+ *  when the product's declared base_unit is a count unit, show THAT (€/Packung). */
+function unitLabel(units: Units, groupUnit: string, baseUnit: string | null): string {
+  return groupUnit === 'Stück' && baseUnit && units.get(baseUnit)?.dimension === 'count' ? baseUnit : groupUnit;
 }
 
 type ScopeUser = Parameters<typeof kontoScope>[0];
@@ -276,15 +280,15 @@ export function pantryRoutes(app: FastifyInstance): void {
       for (const c of canons) {
         const bu = baseUnit.get(c) ?? null;
         const ov = overridePrice.get(c);
+        const buKey = unitKey(units, bu ?? undefined);
         if (ov != null && ov > 0) {
           // Manual override (€ per base_unit) — wins over the history average.
-          avgByCanon.set(c, { price: ov, unit: unitKey(units, bu ?? undefined) ?? bu ?? 'Einheit' });
+          avgByCanon.set(c, { price: ov, unit: buKey ? unitLabel(units, buKey, bu) : (bu ?? 'Einheit') });
           continue;
         }
         const groups = comparisonGroups((byCanon.get(c) ?? []) as unknown as PriceLine[], units);
-        const buKey = unitKey(units, bu ?? undefined);
         const g = (buKey ? groups.find(x => x.unit === buKey) : undefined) ?? groups[0];
-        if (g && g.avg > 0) avgByCanon.set(c, { price: g.avg, unit: g.unit });
+        if (g && g.avg > 0) avgByCanon.set(c, { price: g.avg, unit: unitLabel(units, g.unit, bu) });
       }
       // Live estimate (same estimator as pantry/suggest) — NOT the legacy
       // vorrat_status table, which nothing maintains since mig 037.
@@ -508,10 +512,7 @@ export function pantryRoutes(app: FastifyInstance): void {
     const offerKeys = [...new Set([...canons, ...items.filter(i => !i.canonical_name).map(i => i.title)])];
 
     const units = await loadUnits();
-    const keyFor = (n: string | null | undefined): string | null => {
-      if (!n) return null; const u = units.get(n);
-      return u ? (u.dimension === 'mass' ? 'kg' : u.dimension === 'volume' ? 'l' : u.name) : null;
-    };
+    const keyFor = (n: string | null | undefined): string | null => unitKey(units, n);
 
     const catRows = canons.length ? await sql`
       SELECT canonical_name, mode() WITHIN GROUP (ORDER BY category_path) AS cat
@@ -578,7 +579,7 @@ export function pantryRoutes(app: FastifyInstance): void {
       const u = un ? units.get(un) : undefined;
       const raw = o.ref_price != null ? Number(o.ref_price) : parsePrice(o.price as string | null);
       if (raw == null || !Number.isFinite(raw)) continue;
-      const ogroup = u ? (u.dimension === 'mass' ? 'kg' : u.dimension === 'volume' ? 'l' : u.name) : null;
+      const ogroup = unitGroup(u);
       if (!ogroup) continue;
       const grundpreis = Math.round((u ? raw / u.to_base : raw) * 100) / 100;
       const k = `${o.canonical_name} ${ck}`;

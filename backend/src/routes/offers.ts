@@ -3,7 +3,7 @@ import sql from '../db.js';
 import { requireAdmin } from '../auth/plugin.js';
 import { kontoScope } from '../auth/konto.js';
 import { runOfferSearch, sendOfferDigests, isOfferSearchRunning, debugOfferSearch } from '../offers/index.js';
-import { loadUnits, normalizeEinheit, comparisonGroups, type PriceLine } from '../lib/units.js';
+import { loadUnits, normalizeEinheit, comparisonGroups, unitGroup, unitGroupOf, type PriceLine } from '../lib/units.js';
 import { estimateVorrat, type VorratLine, type VorratOverride } from '../lib/vorrat.js';
 import { PROGRESS_FRESH_MS } from '../maintenance/progress.js';
 import { haversineKm } from '../lib/geo.js';
@@ -60,13 +60,8 @@ export function offerRoutes(app: FastifyInstance): void {
       overrideRows.map(o => [o.canonical_name as string, { menge: o.menge as number, gesetzt_am: o.gesetzt_am as string }]),
     );
 
-    // The comparison-group key for a unit name: mass→'kg', volume→'l', count→itself.
-    const keyFor = (unitName: string | null | undefined): string | null => {
-      if (!unitName) return null;
-      const u = units.get(unitName);
-      if (!u) return null;
-      return u.dimension === 'mass' ? 'kg' : u.dimension === 'volume' ? 'l' : u.name;
-    };
+    // Comparison-group key — central unitGroup (ALL count units = one family).
+    const keyFor = (unitName: string | null | undefined): string | null => unitGroupOf(units, unitName ?? null);
 
     interface Line { canonical_name: string; preis: string | null; menge: string | null; einheit: string | null; datum: string }
     const byCanon = new Map<string, Line[]>();
@@ -121,7 +116,7 @@ export function offerRoutes(app: FastifyInstance): void {
       // group base (€/kg, €/l) by dividing out the unit's to_base factor.
       const raw = o.ref_price != null ? Number(o.ref_price) : parsePrice(o.price as string | null);
       const grundpreis = raw != null && Number.isFinite(raw) && u ? raw / u.to_base : (raw ?? null);
-      const offerKey = u ? (u.dimension === 'mass' ? 'kg' : u.dimension === 'volume' ? 'l' : u.name) : null;
+      const offerKey = unitGroup(u);
       const buKey = keyFor(baseUnit.get(c) ?? null);
       // Only judge an offer in the product's declared comparison unit (base_unit).
       // If the offer's unit differs (e.g. Marktguru gives Thunfisch per kg but we

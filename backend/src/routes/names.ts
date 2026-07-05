@@ -3,7 +3,7 @@ import sql from '../db.js';
 import { kontoScope } from '../auth/konto.js';
 import { searchFilter, col, numCol, lk } from '../lib/search.js';
 import { recordAliases } from '../lib/canonicalAlias.js';
-import { loadUnits, comparisonGroups, type PriceLine } from '../lib/units.js';
+import { loadUnits, comparisonGroups, unitGroup, unitGroupOf, type PriceLine } from '../lib/units.js';
 import { estimateVorrat, type VorratLine } from '../lib/vorrat.js';
 
 export function nameRoutes(app: FastifyInstance): void {
@@ -119,11 +119,8 @@ export function nameRoutes(app: FastifyInstance): void {
     ` : [];
     const metaMap = new Map(meta.map(m => [m.canonical_name as string, m]));
     const units = await loadUnits();
-    const keyFor = (n: string | null | undefined): string | null => {
-      if (!n) return null;
-      const u = units.get(n);
-      return u ? (u.dimension === 'mass' ? 'kg' : u.dimension === 'volume' ? 'l' : u.name) : null;
-    };
+    // Central unitGroup: ALL count units are one comparison family.
+    const keyFor = (n: string | null | undefined): string | null => unitGroupOf(units, n ?? null);
     const lineRows = canonicals.length ? await sql`
       SELECT a.canonical_name, a.preis, a.menge, a.einheit, e.datum::text AS datum
       FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
@@ -201,7 +198,7 @@ export function nameRoutes(app: FastifyInstance): void {
     // list falls back to when no manual expected_price is set. Surfaced so the modal
     // can show it as the expected-price placeholder (no need to write it down).
     const bu = baseUnit ? units.get(baseUnit) : undefined;
-    const buKey = bu ? (bu.dimension === 'mass' ? 'kg' : bu.dimension === 'volume' ? 'l' : bu.name) : null;
+    const buKey = unitGroup(bu);
     const groups = comparisonGroups(lines as unknown as PriceLine[], units);
     const headline = (buKey ? groups.find(g => g.unit === buKey) : undefined) ?? groups[0] ?? null;
     return {
