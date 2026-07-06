@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, ReceiptText, ShoppingCart, BadgePercent, Boxes, Store,
-  ListChecks, ChartPie, Settings, UserCircle, type LucideIcon,
+  ListChecks, ChartPie, Settings, UserCircle, Wallet, type LucideIcon,
 } from 'lucide-react';
 
 export interface NavItem { to: string; icon: LucideIcon; key: string }
@@ -15,6 +15,7 @@ export const NAV: NavItem[] = [
   { to: '/stores', icon: Store, key: 'nav.stores' },                 // läden
   { to: '/queue', icon: ListChecks, key: 'nav.queue' },              // prüfung
   { to: '/stats', icon: ChartPie, key: 'nav.stats' },                // statistik
+  { to: '/finanzen', icon: Wallet, key: 'nav.finanzen' },            // fixkosten / einkommen / budgets
   { to: '/analytics', icon: LayoutDashboard, key: 'nav.analytics' }, // analytics (ganz hinten)
 ];
 

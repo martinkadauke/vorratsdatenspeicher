@@ -16,6 +16,7 @@ import { Stores } from './pages/Stores';
 import { FilialProfil } from './pages/FilialProfil';
 import { Offers } from './pages/Offers';
 import { Ziele } from './pages/Ziele';
+import { Finanzen } from './pages/Finanzen';
 import { Queue } from './pages/Queue';
 import { Admin } from './pages/Admin';
 import { CategoriesAdmin } from './pages/CategoriesAdmin';
@@ -71,6 +72,7 @@ export function App() {
           <Route path="/filialen/:id" element={<FilialProfil />} />
           <Route path="/offers" element={<Offers />} />
           <Route path="/ziele" element={<Ziele />} />
+          <Route path="/finanzen" element={<Finanzen />} />
           <Route path="/queue" element={<Queue />} />
           <Route path="/admin" element={<AdminOnly><Admin /></AdminOnly>} />
           <Route path="/admin/categories" element={<AdminOnly><CategoriesAdmin /></AdminOnly>} />
