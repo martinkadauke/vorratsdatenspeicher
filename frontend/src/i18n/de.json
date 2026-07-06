@@ -59,7 +59,8 @@
     "allKonten": "Alle Konten",
     "reviewProgress": "Belege geprüft",
     "cardSize": "Kartengröße",
-    "filters": "Filter"
+    "filters": "Filter",
+    "onlyHidden": "Nur versteckte"
   },
   "receiptEdit": {
     "title": "Beleg bearbeiten",

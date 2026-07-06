@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useInfiniteQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Search, CheckCircle2, Rows3, X, ChevronLeft, ChevronRight, Plus, Lock, Mail, SlidersHorizontal } from 'lucide-react';
+import { Search, CheckCircle2, Rows3, X, ChevronLeft, ChevronRight, Plus, Lock, Mail, SlidersHorizontal, EyeOff } from 'lucide-react';
 import { api } from '../api/client';
 import type { Receipt } from '../api/types';
 import { Card, Input, Spinner, EmptyState } from '../components/ui';
@@ -64,6 +64,9 @@ export function Receipts() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false); // collapse the filter chips behind a toggle
+  // "Nur versteckte": super-admin-only filter → show ONLY private receipts.
+  const [hiddenOnly, setHiddenOnly] = useState(params.get('hidden') === '1');
+  const canSeeHidden = !!user?.sees_all_konten;
   // Source filter only makes sense if the user actually has >1 source.
   const { data: quellenRaw } = useQuery({
     queryKey: ['receipt-quellen'],
@@ -124,9 +127,10 @@ export function Receipts() {
     if (kontoFilter) p.set('konto', kontoFilter);
     if (search.trim()) p.set('q', search.trim());
     if (effQuelle !== 'alle') p.set('quelle', effQuelle);
+    if (canSeeHidden && hiddenOnly) p.set('hidden', '1');
     const s = p.toString();
     return s ? `?${s}` : '';
-  }, [storeFilter, kontoFilter, search, effQuelle]);
+  }, [storeFilter, kontoFilter, search, effQuelle, canSeeHidden, hiddenOnly]);
 
   const gridRef = useRef<HTMLDivElement>(null);
   const [cols, setCols] = useState(3);
@@ -205,12 +209,13 @@ export function Receipts() {
 
   const storeParam = storeFilter ? `&store=${encodeURIComponent(storeFilter)}` : '';
   const kontoParam = kontoFilter ? `&konto=${encodeURIComponent(kontoFilter)}` : '';
+  const hiddenParam = canSeeHidden && hiddenOnly ? '&hidden=1' : '';
   const {
     data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage,
   } = useInfiniteQuery({
-    queryKey: ['receipts', search, storeFilter, kontoFilter, effQuelle],
+    queryKey: ['receipts', search, storeFilter, kontoFilter, effQuelle, hiddenParam],
     queryFn: ({ pageParam }) =>
-      api<Receipt[]>(`/api/receipts?limit=${PAGE}&offset=${pageParam}&q=${encodeURIComponent(search)}${storeParam}${kontoParam}${quelleParam}`),
+      api<Receipt[]>(`/api/receipts?limit=${PAGE}&offset=${pageParam}&q=${encodeURIComponent(search)}${storeParam}${kontoParam}${quelleParam}${hiddenParam}`),
     initialPageParam: 0,
     getNextPageParam: (last, all) => (last.length === PAGE ? all.length * PAGE : undefined),
   });
@@ -279,7 +284,8 @@ export function Receipts() {
   // receipts) → show a dot even when the filters are collapsed.
   const hasActiveFilters = !!storeFilter
     || (showQuelle && quelleFilter !== 'zettel')
-    || (kontoFilter !== defaultKontoId);
+    || (kontoFilter !== defaultKontoId)
+    || (canSeeHidden && hiddenOnly);
 
   return (
     <div className="flex flex-col gap-3">
@@ -463,6 +469,25 @@ export function Receipts() {
               <ChevronRight size={16} />
             </button>
           )}
+        </div>
+      )}
+
+      {/* Super-admin only: show ONLY hidden (private) receipts — the ones normally
+          invisible to everyone else. Sits with the other filters. */}
+      {canSeeHidden && (
+        <div className="-mx-1 flex px-1">
+          <button
+            onClick={() => setHiddenOnly(v => !v)}
+            aria-pressed={hiddenOnly}
+            className={cn(
+              'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium',
+              hiddenOnly
+                ? 'border-transparent bg-amber-600 text-white'
+                : 'border-zinc-300 text-zinc-500 dark:border-zinc-700',
+            )}
+          >
+            <EyeOff size={13} /> {t('receipts.onlyHidden')}
+          </button>
         </div>
       )}
       </>

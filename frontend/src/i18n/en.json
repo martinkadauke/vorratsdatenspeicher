@@ -59,7 +59,8 @@
     "allKonten": "All accounts",
     "reviewProgress": "Receipts reviewed",
     "cardSize": "Card size",
-    "filters": "Filters"
+    "filters": "Filters",
+    "onlyHidden": "Only hidden"
   },
   "receiptEdit": {
     "title": "Edit receipt",

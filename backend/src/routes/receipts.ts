@@ -145,21 +145,25 @@ export function receiptRoutes(app: FastifyInstance): void {
   async function guardReceipt(req: import('fastify').FastifyRequest, reply: import('fastify').FastifyReply, id: number): Promise<boolean> {
     const [row] = await sql`SELECT private_for_user_id FROM einkauf WHERE id = ${id}`;
     if (!row) { void reply.code(404).send({ error: 'not found' }); return false; }
-    // Per-receipt privacy: a private receipt is reachable only by its owner (even a
-    // super-admin can't open another user's private receipt by id).
+    // Per-receipt privacy: a private receipt is reachable by its owner, or by a
+    // super-admin (sees_all_konten = "kann alles sehen", no exception).
     const pf = row.private_for_user_id as number | null;
-    if (pf !== null && pf !== (req.user?.id ?? null)) { void reply.code(403).send({ error: 'forbidden' }); return false; }
+    if (pf !== null && pf !== (req.user?.id ?? null) && !req.user?.sees_all_konten) { void reply.code(403).send({ error: 'forbidden' }); return false; }
     return true;
   }
 
   app.get('/api/receipts', async (req) => {
-    const q = req.query as { limit?: string; offset?: string; q?: string; from?: string; to?: string; store?: string; konto?: string; quelle?: string };
+    const q = req.query as { limit?: string; offset?: string; q?: string; from?: string; to?: string; store?: string; konto?: string; quelle?: string; hidden?: string };
     const limit = Math.min(parseInt(q.limit ?? '50', 10) || 50, 200);
     const offset = parseInt(q.offset ?? '0', 10) || 0;
     const search = (q.q ?? '').trim();
     const storeLike = q.store ? `%${q.store}%` : null;
     const kontoId = q.konto ? parseInt(q.konto, 10) : null;
     const quellen = q.quelle ? q.quelle.split(',').filter(Boolean) : null;
+    // "Nur versteckte": show ONLY private receipts. Meaningful for super-admins
+    // (kontoScope is bypassed for them, so this surfaces everyone's private ones);
+    // for a normal user kontoScope still limits it to their own private receipts.
+    const onlyHidden = q.hidden === '1';
 
     const rows = await sql`
       SELECT e.id, e.datum, e.roh_ladenname, e.bild_pfad, e.gesamt_betrag, e.geprueft,
@@ -174,6 +178,7 @@ export function receiptRoutes(app: FastifyInstance): void {
         ${storeLike ? sql`AND e.roh_ladenname ILIKE ${storeLike}` : sql``}
         ${kontoId ? sql`AND e.konto_id = ${kontoId}` : sql``}
         ${quellen ? sql`AND e.quelle IN ${sql(quellen)}` : sql``}
+        ${onlyHidden ? sql`AND e.private_for_user_id IS NOT NULL` : sql``}
         ${q.from ? sql`AND e.datum >= ${q.from}` : sql``}
         ${q.to ? sql`AND e.datum <= ${q.to}` : sql``}
         ${kontoScope(req.user, sql`e`)}
@@ -557,9 +562,10 @@ export function receiptRoutes(app: FastifyInstance): void {
       WHERE e.id = ${id}
     `;
     if (!receipts.length) return reply.code(404).send({ error: 'not found' });
-    // Per-receipt privacy: another user's private receipt is 404-equivalent.
+    // Per-receipt privacy: another user's private receipt is forbidden — unless the
+    // caller is a super-admin (sees_all_konten = "kann alles sehen", no exception).
     const pf = receipts[0].private_for_user_id as number | null;
-    if (pf !== null && pf !== (req.user?.id ?? null)) {
+    if (pf !== null && pf !== (req.user?.id ?? null) && !req.user?.sees_all_konten) {
       return reply.code(403).send({ error: 'forbidden' });
     }
 

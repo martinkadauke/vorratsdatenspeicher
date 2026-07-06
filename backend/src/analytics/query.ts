@@ -32,9 +32,10 @@ function asNum(v: unknown, field: string): number {
 }
 
 /** Replicate kontoScope() as bound params (analyticsRead takes raw text + params).
- *  Per-receipt privacy: a private transaction is visible only to its owner. */
+ *  Per-receipt privacy: a private transaction is visible to its owner and to a
+ *  super-admin (sees_all_konten = "kann alles sehen", no exception). */
 function kontoWhere(user: User | undefined, params: unknown[]): string | null {
-  if (!user) return null;
+  if (!user || user.sees_all_konten) return null;
   return `(t.private_for_user_id IS NULL OR t.private_for_user_id = $${params.push(user.id)})`;
 }
 

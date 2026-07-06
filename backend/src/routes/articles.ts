@@ -21,7 +21,7 @@ export function articleRoutes(app: FastifyInstance): void {
     const [row] = await sql`SELECT e.private_for_user_id FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id WHERE a.id = ${artikelId}`;
     if (!row) { void reply.code(404).send({ error: 'not found' }); return false; }
     const pf = row.private_for_user_id as number | null;
-    if (pf !== null && pf !== (req.user?.id ?? null)) { void reply.code(403).send({ error: 'forbidden' }); return false; }
+    if (pf !== null && pf !== (req.user?.id ?? null) && !req.user?.sees_all_konten) { void reply.code(403).send({ error: 'forbidden' }); return false; }
     return true;
   }
 
@@ -33,7 +33,7 @@ export function articleRoutes(app: FastifyInstance): void {
     const [exists] = await sql`SELECT id, private_for_user_id FROM einkauf WHERE id = ${einkaufId}`;
     if (!exists) return reply.code(404).send({ error: 'einkauf not found' });
     const epf = exists.private_for_user_id as number | null;
-    if (epf !== null && epf !== (req.user?.id ?? null)) return reply.code(403).send({ error: 'forbidden' });
+    if (epf !== null && epf !== (req.user?.id ?? null) && !req.user?.sees_all_konten) return reply.code(403).send({ error: 'forbidden' });
 
     const name = String(body.name ?? '').trim();
     if (!name && !body.canonical_name) return reply.code(400).send({ error: 'name or canonical_name required' });
