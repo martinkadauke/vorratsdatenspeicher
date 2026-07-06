@@ -28,6 +28,18 @@ const SIZES = [
 ];
 const SIZE_KEY = 'vds.receiptCardSize';
 
+// Persist the user's CHOSEN konto/quelle filters across sessions (device-local).
+// `konto: null` is stored explicitly and means "Alle Konten" — distinct from "no
+// preference yet" (key absent), which keeps the household-default scoping.
+const FILTER_KEY = 'vds.receiptFilters';
+interface StoredFilters { quelle?: string; konto?: string | null }
+function loadStoredFilters(): StoredFilters {
+  try { return JSON.parse(localStorage.getItem(FILTER_KEY) ?? '{}') as StoredFilters; } catch { return {}; }
+}
+function saveStoredFilter(patch: StoredFilters): void {
+  try { localStorage.setItem(FILTER_KEY, JSON.stringify({ ...loadStoredFilters(), ...patch })); } catch { /* storage unavailable */ }
+}
+
 const monthKeyOf = (datum: string) => (datum ?? '').slice(0, 7); // "YYYY-MM"
 
 export function Receipts() {
@@ -40,8 +52,9 @@ export function Receipts() {
   const [storeFilter, setStoreFilter] = useState<string | null>(params.get('store'));
   const [kontoFilter, setKontoFilter] = useState<string | null>(params.get('konto'));
   // Source filter — default to till receipts (Kassenbon) so cash/email don't
-  // clutter the everyday list; 'alle' shows everything.
-  const [quelleFilter, setQuelleFilter] = useState<string>(params.get('quelle') ?? 'zettel');
+  // clutter the everyday list; 'alle' shows everything. A previously CHOSEN
+  // source (persisted across sessions) beats the default; a URL param beats both.
+  const [quelleFilter, setQuelleFilter] = useState<string>(params.get('quelle') ?? loadStoredFilters().quelle ?? 'zettel');
 
   const { data: kontenRaw } = useQuery({
     queryKey: ['konten'],
@@ -92,13 +105,21 @@ export function Receipts() {
     if (id) next.set('konto', id); else next.delete('konto');
     setParams(next, { replace: true });
   };
+  // User CLICKS persist the preference across sessions; programmatic updates
+  // (default scoping, cleanup) go through updateKontoFilter and don't.
+  const chooseKonto = (id: string | null) => { saveStoredFilter({ konto: id }); updateKontoFilter(id); };
+  const chooseQuelle = (qv: string) => { saveStoredFilter({ quelle: qv }); setQuelleFilter(qv); };
 
-  // On first load with no explicit ?konto, scope to the household's main account so
-  // "no filter set" still means GKK till receipts. A param or any user choice wins.
+  // On first load with no explicit ?konto: a persisted preference (incl. "Alle
+  // Konten" = null) wins, else scope to the household's main account so "no
+  // filter set" still means GKK till receipts.
   useEffect(() => {
     if (kontoInit.current || !konten.length) return;
     kontoInit.current = true;
-    if (!params.get('konto') && defaultKontoId) updateKontoFilter(defaultKontoId);
+    if (params.get('konto')) return;
+    const stored = loadStoredFilters();
+    if ('konto' in stored) updateKontoFilter(stored.konto ?? null);
+    else if (defaultKontoId) updateKontoFilter(defaultKontoId);
   }, [konten.length, defaultKontoId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Mirror the search text into the URL so entering a receipt and pressing Back
@@ -373,7 +394,7 @@ export function Receipts() {
             .map(qv => (
               <button
                 key={qv}
-                onClick={() => setQuelleFilter(qv)}
+                onClick={() => chooseQuelle(qv)}
                 className={cn(
                   'shrink-0 rounded-full border px-3 py-1 text-xs font-medium',
                   quelleFilter === qv
@@ -390,7 +411,7 @@ export function Receipts() {
       {visibleKonten.length > 1 && (
         <div className="scrollbar-none -mx-1 flex gap-1.5 overflow-x-auto px-1">
           <button
-            onClick={() => updateKontoFilter(null)}
+            onClick={() => chooseKonto(null)}
             className={cn(
               'shrink-0 rounded-full border px-3 py-1 text-xs font-medium',
               kontoFilter === null
@@ -403,7 +424,7 @@ export function Receipts() {
           {visibleKonten.map(k => (
             <button
               key={k.id}
-              onClick={() => updateKontoFilter(kontoFilter === String(k.id) ? null : String(k.id))}
+              onClick={() => chooseKonto(kontoFilter === String(k.id) ? null : String(k.id))}
               className={cn(
                 'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium',
                 kontoFilter === String(k.id)
