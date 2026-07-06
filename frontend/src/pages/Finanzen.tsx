@@ -30,12 +30,9 @@ export function Finanzen() {
   const { data: costs, isLoading } = useQuery({ queryKey: ['fixed-costs'], queryFn: () => api<FixedCost[]>('/api/fixed-costs') });
   const { data: konten } = useQuery({ queryKey: ['konten'], queryFn: () => api<KontoLite[]>('/api/konten') });
 
-  // Scope options for fixed costs: the shared household account + each personal
-  // (non-cash) account. Cash accounts don't carry standing costs.
-  const scopeKonten = useMemo(
-    () => (konten ?? []).filter(k => k.is_shared || (k.user_id != null && !k.is_cash)),
-    [konten],
-  );
+  // Scope options: every non-cash account. Shared = household (rent, loan…),
+  // the rest = per person/account. Cash accounts don't carry standing costs.
+  const scopeKonten = useMemo(() => (konten ?? []).filter(k => !k.is_cash), [konten]);
   const invalidate = () => void qc.invalidateQueries({ queryKey: ['fixed-costs'] });
 
   const save = useMutation({
@@ -87,7 +84,10 @@ export function Finanzen() {
   }, [costs, konten, scopeKonten]);
 
   const monthlyTotal = (costs ?? []).filter(c => c.active).reduce((s, c) => s + c.monthly_eur, 0);
-  const scopeLabel = (k: KontoLite | undefined) => k?.is_shared ? t('finances.household') : (k?.owner ?? k?.name ?? '?');
+  // Shared "Haushaltskonto" → "Haushalt"; other shared accounts keep their name
+  // (e.g. "Paypal"); personal accounts show the owner, else the account name.
+  const scopeLabel = (k: KontoLite | undefined) =>
+    !k ? '?' : k.is_shared ? (/haushalt/i.test(k.name) ? t('finances.household') : k.name) : (k.owner ?? k.name);
 
   if (isLoading || !konten) return <Spinner />;
 
@@ -176,7 +176,7 @@ export function Finanzen() {
                 <Label>{t('finances.scope')}</Label>
                 <Select value={modal.konto_id} onChange={e => setModal({ ...modal, konto_id: e.target.value })}>
                   <option value="" disabled>–</option>
-                  {scopeKonten.map(k => <option key={k.id} value={k.id}>{k.is_shared ? t('finances.household') : (k.owner ?? k.name)}</option>)}
+                  {scopeKonten.map(k => <option key={k.id} value={k.id}>{scopeLabel(k)}</option>)}
                 </Select>
               </div>
             </div>
