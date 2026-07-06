@@ -119,7 +119,7 @@ export function financeRoutes(app: FastifyInstance): void {
              f.konto_id, k.name AS konto_name, k.is_shared, u.username AS owner,
              c.id AS check_id, c.status AS check_status, c.einkauf_id AS check_einkauf_id,
              c.amount::float8 AS check_amount,
-             ce.roh_ladenname AS check_laden, ce.datum AS check_datum
+             ce.roh_ladenname AS check_laden, ce.datum::text AS check_datum
       FROM fixed_cost f
       LEFT JOIN konto k ON k.id = f.konto_id
       LEFT JOIN users u ON u.id = k.user_id
@@ -131,7 +131,7 @@ export function financeRoutes(app: FastifyInstance): void {
 
     // 2) Candidate receipts of the month (visibility-scoped) for suggestion matching.
     const receipts = await sql`
-      SELECT e.id, e.datum, e.roh_ladenname, e.gesamt_betrag::float8 AS gesamt_betrag
+      SELECT e.id, e.datum::text AS datum, e.roh_ladenname, e.gesamt_betrag::float8 AS gesamt_betrag
       FROM einkauf e
       WHERE e.datum BETWEEN ${b.first} AND ${b.last} AND e.gesamt_betrag IS NOT NULL
         ${kontoScope(req.user, sql`e`)}
@@ -163,7 +163,7 @@ export function financeRoutes(app: FastifyInstance): void {
           fixedId: f.id as number, einkaufId: r.id as number,
           score: (merchantOk ? 2 : 0) + (amountOk ? 1 : 0) + (needle && laden.includes(needle) ? 1 : 0),
           laden: r.roh_ladenname as string | null, betrag: r.gesamt_betrag as number,
-          datum: (r.datum as Date | string).toString().slice(0, 10), amountOk, merchantOk,
+          datum: String(r.datum), amountOk, merchantOk,
         });
       }
     }
@@ -192,7 +192,7 @@ export function financeRoutes(app: FastifyInstance): void {
     `;
     const prevFirst = new Date(Date.UTC(Number(m.slice(0, 4)), Number(m.slice(5, 7)) - 1 - 3, 1)).toISOString().slice(0, 10);
     const sums = await sql`
-      SELECT bu.id AS budget_id, date_trunc('month', e.datum)::date AS mon, SUM(a.preis)::float8 AS total
+      SELECT bu.id AS budget_id, date_trunc('month', e.datum)::date::text AS mon, SUM(a.preis)::float8 AS total
       FROM budget bu
       JOIN budget_category bc ON bc.budget_id = bu.id
       JOIN artikel a ON a.preis IS NOT NULL AND a.category_path IS NOT NULL
@@ -209,7 +209,7 @@ export function financeRoutes(app: FastifyInstance): void {
     const actualBy = new Map<number, number>();
     const histBy = new Map<number, number[]>();
     for (const s of sums) {
-      const mon = (s.mon as Date | string).toString().slice(0, 10);
+      const mon = String(s.mon);
       if (mon === b.first) actualBy.set(s.budget_id as number, s.total as number);
       else {
         const arr = histBy.get(s.budget_id as number) ?? [];
@@ -231,7 +231,7 @@ export function financeRoutes(app: FastifyInstance): void {
         is_shared: f.is_shared, owner: f.owner,
         check: f.check_id ? {
           status: f.check_status, einkauf_id: f.check_einkauf_id, amount: f.check_amount,
-          laden: f.check_laden, datum: f.check_datum ? (f.check_datum as Date | string).toString().slice(0, 10) : null,
+          laden: f.check_laden, datum: f.check_datum ? String(f.check_datum) : null,
         } : null,
         suggestion: sugByFixed.has(f.id as number) ? (() => {
           const s = sugByFixed.get(f.id as number)!;
