@@ -40,7 +40,7 @@ export function financeRoutes(app: FastifyInstance): void {
     const end = toDate(b.end_date);
     const category = (b.category_path ?? '').toString().trim() || null;
     if (!label) return reply.code(400).send({ error: 'label required' });
-    if (monthly == null || monthly < 0) return reply.code(400).send({ error: 'monthly_eur must be >= 0' });
+    if (monthly == null) return reply.code(400).send({ error: 'monthly_eur required' }); // negatives allowed (= recurring credit/income)
     if (!kontoId) return reply.code(400).send({ error: 'konto_id required' });
     const [row] = await sql`
       INSERT INTO fixed_cost (label, category_path, monthly_eur, konto_id, start_date, end_date, active, created_by)
@@ -61,7 +61,7 @@ export function financeRoutes(app: FastifyInstance): void {
     }
     if ('monthly_eur' in b) {
       const m = toNum(b.monthly_eur);
-      if (m == null || m < 0) return reply.code(400).send({ error: 'monthly_eur must be >= 0' });
+      if (m == null) return reply.code(400).send({ error: 'monthly_eur invalid' }); // negatives allowed
       updates.monthly_eur = m;
     }
     if ('konto_id' in b) {

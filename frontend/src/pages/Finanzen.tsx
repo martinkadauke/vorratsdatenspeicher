@@ -144,7 +144,7 @@ export function Finanzen() {
                       {c.end_date && <span>{t('finances.until')} {c.end_date}</span>}
                     </div>
                   </div>
-                  <span className="shrink-0 text-sm font-semibold">{eur(c.monthly_eur)}<span className="text-xs font-normal text-zinc-400">{t('finances.perMonth')}</span></span>
+                  <span className={cn('shrink-0 text-sm font-semibold', c.monthly_eur < 0 && 'text-sky-600 dark:text-sky-400')}>{eur(c.monthly_eur)}<span className="text-xs font-normal text-zinc-400">{t('finances.perMonth')}</span></span>
                   <button onClick={() => setModal({ id: c.id, label: c.label, monthly_eur: String(c.monthly_eur).replace('.', ','), konto_id: String(c.konto_id ?? ''), category_path: c.category_path, start_date: c.start_date, end_date: c.end_date ?? '', active: c.active })}
                     className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800" title={t('common.edit')}>
                     <Pencil size={15} />
