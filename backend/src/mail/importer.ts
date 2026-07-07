@@ -413,17 +413,18 @@ export async function debugImportedEmail(ledgerId: number): Promise<Record<strin
     const html = parsed.html ? stripHtml(parsed.html) : '';
     const chosen = pickBody(parsed);
     const atts = (parsed.attachments ?? []).map(a => ({ filename: a.filename ?? '', type: a.contentType, size: a.size ?? (a.content?.length ?? 0), related: !!(a as { related?: boolean }).related }));
-    let extraction: unknown = null;
-    try {
-      const ex = await ocrFromText(`Betreff: ${parsed.subject ?? ''}\nVon: ${parsed.from?.text ?? ''}\n\n${chosen}`);
-      extraction = { confidence: ex.confidence, ladenkette: ex.ladenkette, artikelCount: ex.artikel?.length ?? 0, gesamt: ex.gesamt_betrag };
-    } catch (e) { extraction = { error: (e as Error).message.slice(0, 200) }; }
+    const extract = async (label: string, body: string) => {
+      try { const ex = await ocrFromText(`Betreff: ${parsed.subject ?? ''}\nVon: ${parsed.from?.text ?? ''}\n\n${body}`); return { label, confidence: ex.confidence, ladenkette: ex.ladenkette, artikelCount: ex.artikel?.length ?? 0, gesamt: ex.gesamt_betrag }; }
+      catch (e) { return { label, error: (e as Error).message.slice(0, 150) }; }
+    };
+    const extractionPlain = await extract('plain', plain);
+    const extractionHtml = await extract('html', html);
     return {
       subject: parsed.subject, hasHtmlPart: !!parsed.html, hasTextPart: !!parsed.text,
-      plainLen: plain.length, plainSignals: priceSignal(plain), plainPreview: plain.slice(0, 300),
-      htmlLen: html.length, htmlSignals: priceSignal(html), htmlPreview: html.slice(0, 300),
-      chosenBody: chosen === plain ? 'plain' : (chosen === html ? 'html' : 'other'), chosenLen: chosen.length, chosenSignals: priceSignal(chosen),
-      attachments: atts, extraction,
+      plainLen: plain.length, plainSignals: priceSignal(plain), plainFull: plain.slice(0, 2000),
+      htmlLen: html.length, htmlSignals: priceSignal(html), htmlFull: html.slice(0, 2000),
+      chosenBody: chosen === plain ? 'plain' : (chosen === html ? 'html' : 'other'),
+      attachments: atts, extractionPlain, extractionHtml,
     };
   } finally {
     try { await client.logout(); } catch { /* ignore */ }
