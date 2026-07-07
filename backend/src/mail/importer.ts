@@ -5,7 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import sql from '../db.js';
 import { decryptSecret } from '../lib/crypto.js';
-import { ocrFromText } from '../llm/ocr.js';
+import { ocrFromText, type OcrResult } from '../llm/ocr.js';
 import { ocrAndStore, storeOcrResult } from '../routes/receipts.js';
 
 /** Local mount where receipt photos/PDFs are persisted (shared with receipts.ts;
@@ -52,25 +52,49 @@ function stripHtml(html: string): string {
     .trim();
 }
 
-/** Count money-like tokens ("99,95", "0,00", "1.234,50") — a cheap proxy for
- *  "does this text actually carry the invoice's line items and total?". */
+/** Count NON-ZERO money tokens ("99,95", "1.234,50") — a cheap proxy for "does
+ *  this text actually carry the invoice's line items and total?". Zeros ("0,00")
+ *  are ignored on purpose: some shops (OBI via Emarsys) send a text/plain part
+ *  whose amounts are all placeholders (0,00 €) while the real prices live only in
+ *  the HTML part — counting zeros would make the two parts look equal. */
 function priceSignal(s: string): number {
-  return (s.match(/\d{1,3}(?:[.\s]\d{3})*[.,]\d{2}(?!\d)/g) ?? []).length;
+  return (s.match(/\d{1,3}(?:[.\s]\d{3})*[.,]\d{2}(?!\d)/g) ?? [])
+    .filter(t => !/^0+[.,]00$/.test(t)).length;
 }
 
-/** Choose the body text to extract from. Many shops (OBI, …) send a text/plain
- *  part that is just a thank-you stub while the itemised order lives in the HTML
- *  part; picking the stub makes the extractor return "no receipt data" and the
- *  mail is skipped. So prefer whichever part actually carries the prices, and on
- *  a tie the richer (longer) one. Plain-text-only mails are unaffected (no HTML). */
-function pickBody(parsed: ParsedMail): string {
+/** The two candidate bodies (plain text, stripped HTML) ordered best-first: the
+ *  one that actually carries the prices comes first; on a tie the structured HTML
+ *  wins (a text/plain part is often marketing clutter / tracking URLs). Returns
+ *  only non-empty, distinct candidates. */
+function bodyCandidates(parsed: ParsedMail): string[] {
   const plain = (parsed.text ?? '').trim();
   const html = parsed.html ? stripHtml(parsed.html) : '';
-  if (!html) return plain;
-  if (!plain) return html;
+  if (!html) return plain ? [plain] : [];
+  if (!plain) return [html];
   const ph = priceSignal(html), pp = priceSignal(plain);
-  if (ph !== pp) return ph > pp ? html : plain;   // whichever body holds the amounts
-  return html.length > plain.length ? html : plain;
+  const htmlFirst = ph !== pp ? ph > pp : true;   // tie → prefer HTML
+  return htmlFirst ? [html, plain] : [plain, html];
+}
+
+/** Primary body to extract from (best candidate). */
+function pickBody(parsed: ParsedMail): string {
+  return bodyCandidates(parsed)[0] ?? '';
+}
+
+/** Extract receipt data from the e-mail body, trying each candidate body in
+ *  best-first order and returning the FIRST that yields data. This is the safety
+ *  net for the OBI/Emarsys case: if the primary body (say the text/plain part) is
+ *  a broken/zeroed placeholder, the HTML part still gets a shot before we skip.
+ *  Returns the last (empty) attempt if nothing yields, so callers' existing
+ *  "no ladenkette && no artikel ⇒ skip" check is unchanged. */
+async function extractBody(parsed: ParsedMail): Promise<OcrResult> {
+  const header = `Betreff: ${parsed.subject ?? ''}\nVon: ${parsed.from?.text ?? ''}\n\n`;
+  let last: OcrResult | null = null;
+  for (const body of bodyCandidates(parsed)) {
+    last = await ocrFromText(header + body);
+    if (last.ladenkette || last.artikel?.length) return last; // first usable wins
+  }
+  return last ?? { confidence: 0, ladenkette: '', filiale: null, datum: '', uhrzeit: null, gesamt_betrag: 0, artikel: [] };
 }
 
 /** The (non-cash) account to attribute this user's imported receipts to: their own
@@ -187,7 +211,6 @@ async function processMessage(mb: MailboxRow, kontoId: number | null, raw: Buffe
   const pdf = usable.find(a => isPdf(a) && INVOICE.test(a.filename ?? '')) ?? usable.find(a => isPdf(a));
   const img = usable.find(a => isImg(a));
   const bodyText = pickBody(parsed);
-  const bodyPrompt = `Betreff: ${parsed.subject ?? ''}\nVon: ${parsed.from?.text ?? ''}\n\n${bodyText}`;
 
   let einkaufId: number | null = null;
   let status = 'imported';
@@ -218,7 +241,7 @@ async function processMessage(mb: MailboxRow, kontoId: number | null, raw: Buffe
       } else if (bodyText) {
         // The attachment wasn't the invoice — the real one is in the body. Fill the
         // same receipt from it (correct items + date) and drop the misleading image.
-        const extracted = await ocrFromText(bodyPrompt);
+        const extracted = await extractBody(parsed);
         if (extracted.ladenkette || extracted.artikel?.length) {
           madeItems = (await storeOcrResult(einkaufId, extracted)).items > 0;
           if (madeItems) await sql`UPDATE einkauf SET bild_pfad = NULL WHERE id = ${einkaufId}`.catch(() => {});
@@ -228,7 +251,7 @@ async function processMessage(mb: MailboxRow, kontoId: number | null, raw: Buffe
         reason = 'attachment OCR returned no line items';
       }
     } else if (bodyText) {
-      const extracted = await ocrFromText(bodyPrompt);
+      const extracted = await extractBody(parsed);
       if (!extracted.ladenkette && !(extracted.artikel?.length)) {
         status = 'skipped';
         reason = 'no receipt data found in e-mail body';
@@ -380,56 +403,6 @@ export async function runMailImportForUser(userId: number): Promise<{ imported: 
 /** Refuse to scan absurdly large folders (the point at which an envelope scan
  *  itself gets expensive); the import is meant for a dedicated invoice folder. */
 const BACKFILL_MAX_SCAN = 20000;
-
-/** TEMP DEBUG (admin-only): fetch one ledger entry's mail and report exactly what
- *  the pipeline sees — plain vs HTML body, price signals, which body pickBody
- *  chooses, attachments, and the extraction result — WITHOUT writing anything.
- *  Used to diagnose a stubborn "no receipt data in body" skip. Remove when done. */
-export async function debugImportedEmail(ledgerId: number): Promise<Record<string, unknown>> {
-  const [row] = await sql`SELECT message_id, status, einkauf_id, user_id FROM imported_email WHERE id = ${ledgerId}`;
-  if (!row) return { error: 'ledger row not found' };
-  const mid = normMid(row.message_id as string);
-  const [mb] = await sql<MailboxRow[]>`SELECT * FROM user_mailbox WHERE user_id = ${row.user_id}`;
-  if (!mb) return { error: 'no mailbox for owner' };
-  const client = await openMailbox({
-    imap_host: mb.imap_host, imap_port: mb.imap_port, imap_secure: mb.imap_secure,
-    imap_user: mb.imap_user, pass: decryptSecret(mb.imap_pass_enc),
-  });
-  try {
-    const lock = await client.getMailboxLock(mb.folder || 'INBOX');
-    let source: Buffer | null = null;
-    try {
-      let uid = 0;
-      for await (const m of client.fetch('1:*', { uid: true, envelope: true }, { uid: true })) {
-        if (normMid(m.envelope?.messageId) === mid) uid = Number(m.uid); // collect first, don't nest a fetch
-      }
-      if (uid) {
-        for await (const f of client.fetch(String(uid), { uid: true, source: true }, { uid: true })) { if (f.source) source = f.source as Buffer; break; }
-      }
-    } finally { lock.release(); }
-    if (!source) return { error: 'message not found in folder', folder: mb.folder };
-    const parsed = await simpleParser(source);
-    const plain = (parsed.text ?? '').trim();
-    const html = parsed.html ? stripHtml(parsed.html) : '';
-    const chosen = pickBody(parsed);
-    const atts = (parsed.attachments ?? []).map(a => ({ filename: a.filename ?? '', type: a.contentType, size: a.size ?? (a.content?.length ?? 0), related: !!(a as { related?: boolean }).related }));
-    const extract = async (label: string, body: string) => {
-      try { const ex = await ocrFromText(`Betreff: ${parsed.subject ?? ''}\nVon: ${parsed.from?.text ?? ''}\n\n${body}`); return { label, confidence: ex.confidence, ladenkette: ex.ladenkette, artikelCount: ex.artikel?.length ?? 0, gesamt: ex.gesamt_betrag }; }
-      catch (e) { return { label, error: (e as Error).message.slice(0, 150) }; }
-    };
-    const extractionPlain = await extract('plain', plain);
-    const extractionHtml = await extract('html', html);
-    return {
-      subject: parsed.subject, hasHtmlPart: !!parsed.html, hasTextPart: !!parsed.text,
-      plainLen: plain.length, plainSignals: priceSignal(plain), plainFull: plain.slice(0, 2000),
-      htmlLen: html.length, htmlSignals: priceSignal(html), htmlFull: html.slice(0, 2000),
-      chosenBody: chosen === plain ? 'plain' : (chosen === html ? 'html' : 'other'),
-      attachments: atts, extractionPlain, extractionHtml,
-    };
-  } finally {
-    try { await client.logout(); } catch { /* ignore */ }
-  }
-}
 
 /** Re-fetch and re-process ONE previously skipped/failed mail (the import-log
  *  "Retry" button) — e.g. after an extractor improvement. Normal incremental

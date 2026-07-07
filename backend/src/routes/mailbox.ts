@@ -1,8 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import sql from '../db.js';
 import { encryptSecret, decryptSecret } from '../lib/crypto.js';
-import { testMailbox, runMailImportForUser, backfillEmails, retryImportedEmail, debugImportedEmail } from '../mail/importer.js';
-import { requireAdmin } from '../auth/plugin.js';
+import { testMailbox, runMailImportForUser, backfillEmails, retryImportedEmail } from '../mail/importer.js';
 import { ocrAndStore } from './receipts.js';
 
 /** Re-run OCR (with the now invoice-aware prompt) on the given PDF receipts,
@@ -133,14 +132,6 @@ export function mailboxRoutes(app: FastifyInstance): void {
       ORDER BY ie.created_at DESC
       LIMIT ${limit}`;
     return { entries: rows };
-  });
-
-  // TEMP DEBUG (admin-only): reveal the MIME/body structure + pickBody choice +
-  // extraction for one ledger entry, no writes. Remove after the OBI diagnosis.
-  app.get('/api/me/mailbox/log/:id/debug', { preHandler: requireAdmin }, async (req, reply) => {
-    const id = Number((req.params as { id: string }).id);
-    if (!Number.isInteger(id)) return reply.code(400).send({ error: 'bad id' });
-    return debugImportedEmail(id);
   });
 
   // Retry ONE skipped/failed mail from the log — re-fetches it by Message-ID and
