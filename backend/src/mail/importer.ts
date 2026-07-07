@@ -399,8 +399,12 @@ export async function debugImportedEmail(ledgerId: number): Promise<Record<strin
     const lock = await client.getMailboxLock(mb.folder || 'INBOX');
     let source: Buffer | null = null;
     try {
+      let uid = 0;
       for await (const m of client.fetch('1:*', { uid: true, envelope: true }, { uid: true })) {
-        if (normMid(m.envelope?.messageId) === mid) { for await (const f of client.fetch(String(m.uid), { uid: true, source: true }, { uid: true })) { if (f.source) source = f.source as Buffer; break; } }
+        if (normMid(m.envelope?.messageId) === mid) uid = Number(m.uid); // collect first, don't nest a fetch
+      }
+      if (uid) {
+        for await (const f of client.fetch(String(uid), { uid: true, source: true }, { uid: true })) { if (f.source) source = f.source as Buffer; break; }
       }
     } finally { lock.release(); }
     if (!source) return { error: 'message not found in folder', folder: mb.folder };
