@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { api, getToken, setToken } from '../api/client';
 import type { User } from '../api/types';
 import { setLanguage } from '../i18n';
@@ -14,6 +15,7 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue>(null!);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -35,20 +37,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    const onLogout = () => setUser(null);
+    // A 401 (expired/invalid token) logs out — also drop the cache so the next
+    // user in this browser never sees the previous user's queries.
+    const onLogout = () => { setUser(null); queryClient.clear(); };
     window.addEventListener('vds:logout', onLogout);
     (async () => {
       if (getToken()) await refreshUser();
       setLoading(false);
     })();
     return () => window.removeEventListener('vds:logout', onLogout);
-  }, []);
+  }, [queryClient]);
 
   const login = async (username: string, password: string) => {
     const res = await api<{ token: string; user: User }>('/api/auth/login', {
       method: 'POST',
       body: { username, password },
     });
+    // Drop any cached queries from a previous session BEFORE the new user's data
+    // loads — otherwise the last user's cached results (mailbox, receipts, konten,
+    // …) bleed into this account until each query happens to refetch.
+    queryClient.clear();
     setToken(res.token);
     applyUser(res.user);
   };
@@ -56,6 +64,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = () => {
     setToken(null);
     setUser(null);
+    queryClient.clear();
   };
 
   return (
