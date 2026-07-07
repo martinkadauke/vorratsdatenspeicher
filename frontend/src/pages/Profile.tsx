@@ -358,7 +358,6 @@ interface LogEntry {
   created_at: string;
   subject: string | null;
   roh_ladenname: string | null;
-  ladenname: string | null;
   items: number;
 }
 
@@ -428,7 +427,7 @@ function ImportLog() {
 function LogRow({ e, onOpen }: { e: LogEntry; onOpen: () => void }) {
   const { t, i18n } = useTranslation();
   const m = statusMeta(e);
-  const laden = (e.ladenname || e.roh_ladenname || '').trim();
+  const laden = (e.roh_ladenname || '').trim();
   const title = (e.subject || laden || t('profile.mailbox.log.noSubject')).trim();
   const date = new Date(e.created_at).toLocaleDateString(i18n.language, { day: '2-digit', month: '2-digit', year: '2-digit' });
   return (

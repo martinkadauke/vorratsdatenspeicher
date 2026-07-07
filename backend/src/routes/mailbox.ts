@@ -124,7 +124,7 @@ export function mailboxRoutes(app: FastifyInstance): void {
     const rows = await sql`
       SELECT ie.id, ie.status, ie.reason, ie.einkauf_id, ie.created_at::text AS created_at,
              LEFT(ie.subject, 200) AS subject,
-             e.roh_ladenname, e.ladenname,
+             e.roh_ladenname,
              COALESCE((SELECT COUNT(*)::int FROM artikel a WHERE a.einkauf_id = ie.einkauf_id), 0) AS items
       FROM imported_email ie
       LEFT JOIN einkauf e ON e.id = ie.einkauf_id
