@@ -41,13 +41,28 @@ function stripHtml(html: string): string {
   return html
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<\/(td|th)>/gi, '\t')                    // keep table columns (name … price) apart
     .replace(/<\/(p|div|tr|li|h[1-6]|table)>/gi, '\n')
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<[^>]+>/g, ' ')
     .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&euro;/gi, '€')
+    .replace(/&#0*39;|&#x0*27;/gi, "'").replace(/&quot;/gi, '"')
     .replace(/[ \t]+/g, ' ')
     .replace(/\n\s*\n+/g, '\n')
     .trim();
+}
+
+/** Choose the body text to extract from. Prefer the plain-text part, BUT many
+ *  shops send a thin text/plain stub ("Bitte im HTML-Format ansehen" / a one-line
+ *  summary) while the itemised order actually lives in the HTML part — using the
+ *  stub makes the extractor return "no receipt data" and the mail is skipped. So
+ *  when the plain text is too short to hold a receipt, fall back to the (usually
+ *  much richer) stripped HTML. */
+function pickBody(parsed: ParsedMail): string {
+  const plain = (parsed.text ?? '').trim();
+  const html = parsed.html ? stripHtml(parsed.html) : '';
+  if (plain.length >= 400) return plain;          // substantial plain text → trust it
+  return html.length > plain.length ? html : plain;
 }
 
 /** The (non-cash) account to attribute this user's imported receipts to: their own
@@ -163,7 +178,7 @@ async function processMessage(mb: MailboxRow, kontoId: number | null, raw: Buffe
   });
   const pdf = usable.find(a => isPdf(a) && INVOICE.test(a.filename ?? '')) ?? usable.find(a => isPdf(a));
   const img = usable.find(a => isImg(a));
-  const bodyText = (parsed.text && parsed.text.trim()) || (parsed.html ? stripHtml(parsed.html) : '');
+  const bodyText = pickBody(parsed);
   const bodyPrompt = `Betreff: ${parsed.subject ?? ''}\nVon: ${parsed.from?.text ?? ''}\n\n${bodyText}`;
 
   let einkaufId: number | null = null;
