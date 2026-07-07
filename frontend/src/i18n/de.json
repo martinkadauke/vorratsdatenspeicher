@@ -777,6 +777,11 @@
         "refresh": "Aktualisieren",
         "empty": "Noch keine E-Mails abgerufen.",
         "view": "Beleg öffnen",
+        "retry": "Erneut versuchen",
+        "retrying": "Läuft…",
+        "retryImported": "Als Beleg importiert.",
+        "retryNone": "Weiterhin keine Belegdaten in dieser Mail gefunden.",
+        "retryFail": "Wiederholung fehlgeschlagen: {{error}}",
         "noSubject": "(ohne Betreff)",
         "status": {
           "imported": "Importiert · {{n}} Pos.",

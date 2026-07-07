@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import sql from '../db.js';
 import { encryptSecret, decryptSecret } from '../lib/crypto.js';
-import { testMailbox, runMailImportForUser, backfillEmails } from '../mail/importer.js';
+import { testMailbox, runMailImportForUser, backfillEmails, retryImportedEmail } from '../mail/importer.js';
 import { ocrAndStore } from './receipts.js';
 
 /** Re-run OCR (with the now invoice-aware prompt) on the given PDF receipts,
@@ -132,6 +132,15 @@ export function mailboxRoutes(app: FastifyInstance): void {
       ORDER BY ie.created_at DESC
       LIMIT ${limit}`;
     return { entries: rows };
+  });
+
+  // Retry ONE skipped/failed mail from the log — re-fetches it by Message-ID and
+  // runs it through the pipeline again (e.g. after an extractor fix). Guarded to
+  // this user's rows without a receipt, so it can never duplicate an import.
+  app.post('/api/me/mailbox/log/:id/retry', async (req, reply) => {
+    const id = Number((req.params as { id: string }).id);
+    if (!Number.isInteger(id)) return reply.code(400).send({ error: 'bad id' });
+    return retryImportedEmail(req.user!.id, id);
   });
 
   // Re-OCR this user's e-mail-imported PDF receipts that ended up with NO line

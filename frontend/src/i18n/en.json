@@ -777,6 +777,11 @@
         "refresh": "Refresh",
         "empty": "No e-mails fetched yet.",
         "view": "Open receipt",
+        "retry": "Retry",
+        "retrying": "Working…",
+        "retryImported": "Imported as a receipt.",
+        "retryNone": "Still no receipt data found in this mail.",
+        "retryFail": "Retry failed: {{error}}",
         "noSubject": "(no subject)",
         "status": {
           "imported": "Imported · {{n}} items",

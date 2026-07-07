@@ -373,6 +373,59 @@ export async function runMailImportForUser(userId: number): Promise<{ imported: 
  *  itself gets expensive); the import is meant for a dedicated invoice folder. */
 const BACKFILL_MAX_SCAN = 20000;
 
+/** Re-fetch and re-process ONE previously skipped/failed mail (the import-log
+ *  "Retry" button) — e.g. after an extractor improvement. Normal incremental
+ *  polling won't re-touch it (its UID is already below last_uid), so we find it
+ *  by Message-ID via a header scan and run it through processMessage again, which
+ *  re-claims a 'skipped'/'failed' ledger row and imports it if it now yields data.
+ *  Guarded to rows without a receipt yet, so it can never duplicate an import. */
+export async function retryImportedEmail(userId: number, ledgerId: number): Promise<{ status: string; einkauf_id: number | null; reason: string | null } | { error: string }> {
+  const [row] = await sql`SELECT message_id, status, einkauf_id FROM imported_email WHERE id = ${ledgerId} AND user_id = ${userId}`;
+  if (!row) return { error: 'not found' };
+  if (row.einkauf_id != null) return { error: 'already has a receipt — use "re-scan PDFs" instead' };
+  const mid = normMid(row.message_id as string);
+  if (!mid || mid.startsWith('nomsgid-')) return { error: 'this mail has no Message-ID and cannot be re-fetched' };
+  const [mb] = await sql<MailboxRow[]>`SELECT * FROM user_mailbox WHERE user_id = ${userId} AND enabled = TRUE`;
+  if (!mb) return { error: 'no enabled mailbox configured' };
+
+  let client: ImapFlow | null = null;
+  try {
+    client = await openMailbox({
+      imap_host: mb.imap_host, imap_port: mb.imap_port, imap_secure: mb.imap_secure,
+      imap_user: mb.imap_user, pass: decryptSecret(mb.imap_pass_enc),
+    });
+    const lock = await client.getMailboxLock(mb.folder || 'INBOX');
+    let source: Buffer | null = null;
+    try {
+      const box = client.mailbox;
+      if (box && box.exists > BACKFILL_MAX_SCAN) return { error: `mailbox too large to scan (${box.exists} messages)` };
+      if (box && box.exists > 0) {
+        let uid = 0;
+        for await (const m of client.fetch('1:*', { uid: true, envelope: true }, { uid: true })) {
+          if (normMid(m.envelope?.messageId) === mid) uid = Number(m.uid); // last match wins (newest label copy)
+        }
+        if (uid) {
+          for await (const m of client.fetch(String(uid), { uid: true, source: true }, { uid: true })) {
+            if (m.source) source = m.source as Buffer;
+            break;
+          }
+        }
+      }
+    } finally {
+      lock.release();
+    }
+    if (!source) return { error: 'message no longer found in the mailbox folder' };
+    const kontoId = await defaultKontoFor(userId);
+    await processMessage(mb, kontoId, source);
+  } catch (e) {
+    return { error: (e as Error).message.slice(0, 300) };
+  } finally {
+    if (client) { try { await client.logout(); } catch { /* ignore */ } }
+  }
+  const [after] = await sql`SELECT status, einkauf_id, reason FROM imported_email WHERE id = ${ledgerId}`;
+  return { status: after.status as string, einkauf_id: (after.einkauf_id as number | null) ?? null, reason: (after.reason as string | null) ?? null };
+}
+
 /** Normalise a Message-ID for matching: strip the angle brackets + lowercase, so
  *  the IMAP envelope id lines up with however mailparser stored it at import. */
 function normMid(m: string | null | undefined): string {

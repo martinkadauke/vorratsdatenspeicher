@@ -11,6 +11,7 @@ import { Card, Button, Input, Label, Select, Switch } from '../components/ui';
 import { cn } from '../lib/utils';
 import { EmojiPicker } from '../components/EmojiPicker';
 import { confirm } from '../components/Confirm';
+import { toast } from '../components/Toast';
 
 export function Profile() {
   const { t } = useTranslation();
@@ -378,6 +379,7 @@ function statusMeta(e: LogEntry): { cls: string; key: string } {
 function ImportLog() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const { data, isLoading, refetch, isFetching } = useQuery<{ entries: LogEntry[] }>({
     queryKey: ['mailbox-log'],
@@ -385,6 +387,17 @@ function ImportLog() {
     enabled: open,
   });
   const entries = data?.entries ?? [];
+
+  const retry = useMutation({
+    mutationFn: (id: number) => api<{ status?: string; einkauf_id?: number | null; error?: string }>(`/api/me/mailbox/log/${id}/retry`, { method: 'POST' }),
+    onSuccess: (r) => {
+      if (r.error) toast(t('profile.mailbox.log.retryFail', { error: r.error }), 'error');
+      else if (r.einkauf_id) toast(t('profile.mailbox.log.retryImported'), 'success');
+      else toast(t('profile.mailbox.log.retryNone'), 'info');
+      void qc.invalidateQueries({ queryKey: ['mailbox-log'] });
+    },
+    onError: (e) => toast(t('profile.mailbox.log.retryFail', { error: (e as Error).message }), 'error'),
+  });
 
   return (
     <div className="border-t border-zinc-200 pt-3 dark:border-zinc-800">
@@ -414,7 +427,13 @@ function ImportLog() {
           ) : (
             <ul className="flex flex-col divide-y divide-zinc-100 dark:divide-zinc-800">
               {entries.map(e => (
-                <LogRow key={e.id} e={e} onOpen={() => e.einkauf_id && navigate(`/receipts/${e.einkauf_id}`)} />
+                <LogRow
+                  key={e.id}
+                  e={e}
+                  onOpen={() => e.einkauf_id && navigate(`/receipts/${e.einkauf_id}`)}
+                  onRetry={() => retry.mutate(e.id)}
+                  retrying={retry.isPending && retry.variables === e.id}
+                />
               ))}
             </ul>
           )}
@@ -424,12 +443,15 @@ function ImportLog() {
   );
 }
 
-function LogRow({ e, onOpen }: { e: LogEntry; onOpen: () => void }) {
+function LogRow({ e, onOpen, onRetry, retrying }: { e: LogEntry; onOpen: () => void; onRetry: () => void; retrying: boolean }) {
   const { t, i18n } = useTranslation();
   const m = statusMeta(e);
   const laden = (e.roh_ladenname || '').trim();
   const title = (e.subject || laden || t('profile.mailbox.log.noSubject')).trim();
   const date = new Date(e.created_at).toLocaleDateString(i18n.language, { day: '2-digit', month: '2-digit', year: '2-digit' });
+  // A skipped/failed mail that produced no receipt can be re-fetched and retried
+  // (e.g. after an extractor fix). Rows that already made a receipt link instead.
+  const canRetry = !e.einkauf_id && (e.status === 'skipped' || e.status === 'failed');
   return (
     <li className="py-1.5">
       <div className="flex items-start gap-2">
@@ -442,11 +464,15 @@ function LogRow({ e, onOpen }: { e: LogEntry; onOpen: () => void }) {
         </div>
         <div className="shrink-0 text-right">
           <p className="text-[10px] text-zinc-400">{date}</p>
-          {e.einkauf_id && (
+          {e.einkauf_id ? (
             <button onClick={onOpen} className="text-[11px] text-emerald-600 hover:underline">
               {t('profile.mailbox.log.view')}
             </button>
-          )}
+          ) : canRetry ? (
+            <button onClick={onRetry} disabled={retrying} className="text-[11px] text-sky-600 hover:underline disabled:opacity-50">
+              {retrying ? t('profile.mailbox.log.retrying') : t('profile.mailbox.log.retry')}
+            </button>
+          ) : null}
         </div>
       </div>
     </li>
