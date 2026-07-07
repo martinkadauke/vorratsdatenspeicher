@@ -770,7 +770,22 @@
       "backfill": "Backfill e-mails",
       "backfillDone": "{{n}} e-mails backfilled",
       "reocr": "Re-scan PDF invoices",
-      "reocrQueued": "Re-scanning {{n}} PDF invoices…"
+      "reocrQueued": "Re-scanning {{n}} PDF invoices…",
+      "log": {
+        "heading": "Import log",
+        "intro": "What became of the most recently fetched e-mails.",
+        "refresh": "Refresh",
+        "empty": "No e-mails fetched yet.",
+        "view": "Open receipt",
+        "noSubject": "(no subject)",
+        "status": {
+          "imported": "Imported · {{n}} items",
+          "importedEmpty": "Detected empty",
+          "skipped": "Skipped",
+          "failed": "Failed",
+          "processing": "Working…"
+        }
+      }
     }
   },
   "positionen": {

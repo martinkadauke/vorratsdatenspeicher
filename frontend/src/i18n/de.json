@@ -770,7 +770,22 @@
       "backfill": "Mails nachladen",
       "backfillDone": "{{n}} Mails nachgeladen",
       "reocr": "PDF-Rechnungen neu auslesen",
-      "reocrQueued": "{{n}} PDF-Rechnungen werden neu ausgelesen…"
+      "reocrQueued": "{{n}} PDF-Rechnungen werden neu ausgelesen…",
+      "log": {
+        "heading": "Import-Protokoll",
+        "intro": "Was aus den zuletzt abgerufenen E-Mails geworden ist.",
+        "refresh": "Aktualisieren",
+        "empty": "Noch keine E-Mails abgerufen.",
+        "view": "Beleg öffnen",
+        "noSubject": "(ohne Betreff)",
+        "status": {
+          "imported": "Importiert · {{n}} Pos.",
+          "importedEmpty": "Leer erkannt",
+          "skipped": "Übersprungen",
+          "failed": "Fehler",
+          "processing": "Läuft…"
+        }
+      }
     }
   },
   "positionen": {

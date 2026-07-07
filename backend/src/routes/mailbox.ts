@@ -115,6 +115,25 @@ export function mailboxRoutes(app: FastifyInstance): void {
     return backfillEmails(req.user!.id);
   });
 
+  // Import log: what each fetched mail produced (imported / skipped / failed +
+  // reason), newest first, with a link to the resulting receipt and its item
+  // count. This is the user-facing answer to "why didn't my invoice show up?".
+  app.get('/api/me/mailbox/log', async (req) => {
+    const userId = req.user!.id;
+    const limit = Math.min(Number((req.query as { limit?: string }).limit) || 60, 200);
+    const rows = await sql`
+      SELECT ie.id, ie.status, ie.reason, ie.einkauf_id, ie.created_at::text AS created_at,
+             LEFT(ie.subject, 200) AS subject,
+             e.roh_ladenname, e.ladenname,
+             COALESCE((SELECT COUNT(*)::int FROM artikel a WHERE a.einkauf_id = ie.einkauf_id), 0) AS items
+      FROM imported_email ie
+      LEFT JOIN einkauf e ON e.id = ie.einkauf_id
+      WHERE ie.user_id = ${userId}
+      ORDER BY ie.created_at DESC
+      LIMIT ${limit}`;
+    return { entries: rows };
+  });
+
   // Re-OCR this user's e-mail-imported PDF receipts that ended up with NO line
   // items (e.g. PDFs that the old Kassenbon-tuned prompt rejected). Only touches
   // 0-item receipts, so it can't overwrite anything the user corrected. Runs in

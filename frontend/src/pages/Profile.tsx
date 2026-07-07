@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Sparkles, Inbox, Bell } from 'lucide-react';
+import { LogOut, Sparkles, Inbox, Bell, ChevronDown, ChevronRight } from 'lucide-react';
 import { api } from '../api/client';
 import { useAuth } from '../context/auth';
 import { setLanguage } from '../i18n';
 import { pushSupported, pushStatus, enablePush, disablePush } from '../lib/push';
 import { Card, Button, Input, Label, Select, Switch } from '../components/ui';
+import { cn } from '../lib/utils';
 import { EmojiPicker } from '../components/EmojiPicker';
 import { confirm } from '../components/Confirm';
 
@@ -331,6 +332,8 @@ function MailboxSettings() {
 
       <p className="text-[11px] text-zinc-400">{t('profile.mailbox.hint')}</p>
 
+      {configured && <ImportLog />}
+
       {configured && (
         <button
           className="self-start text-xs text-red-500 hover:underline"
@@ -344,5 +347,109 @@ function MailboxSettings() {
         </button>
       )}
     </Card>
+  );
+}
+
+interface LogEntry {
+  id: number;
+  status: string;            // imported | skipped | failed | processing
+  reason: string | null;
+  einkauf_id: number | null; // set only if the receipt still exists
+  created_at: string;
+  subject: string | null;
+  roh_ladenname: string | null;
+  ladenname: string | null;
+  items: number;
+}
+
+/** Pick a coloured badge + label key for an import-log row. An 'imported' row
+ *  with zero line items is called out separately — it made a receipt shell but
+ *  the extractor found nothing, which is exactly the case a user needs to see. */
+function statusMeta(e: LogEntry): { cls: string; key: string } {
+  if (e.status === 'processing') return { cls: 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300', key: 'processing' };
+  if (e.status === 'failed') return { cls: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300', key: 'failed' };
+  if (e.status === 'skipped') return { cls: 'bg-zinc-200 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300', key: 'skipped' };
+  if (e.items > 0) return { cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300', key: 'imported' };
+  return { cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300', key: 'importedEmpty' };
+}
+
+/** Collapsible per-user log of what the e-mail import did with each fetched mail
+ *  — the answer to "I labelled the invoice but no receipt appeared". Lazy-loads
+ *  when opened so it costs nothing on a normal Profile visit. */
+function ImportLog() {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const { data, isLoading, refetch, isFetching } = useQuery<{ entries: LogEntry[] }>({
+    queryKey: ['mailbox-log'],
+    queryFn: () => api('/api/me/mailbox/log'),
+    enabled: open,
+  });
+  const entries = data?.entries ?? [];
+
+  return (
+    <div className="border-t border-zinc-200 pt-3 dark:border-zinc-800">
+      <button
+        className="flex items-center gap-1.5 text-sm font-medium text-zinc-700 dark:text-zinc-200"
+        onClick={() => setOpen(o => !o)}
+      >
+        {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+        {t('profile.mailbox.log.heading')}
+      </button>
+      {open && (
+        <div className="mt-2 flex flex-col gap-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[11px] text-zinc-400">{t('profile.mailbox.log.intro')}</p>
+            <button
+              className="shrink-0 text-[11px] text-emerald-600 hover:underline disabled:opacity-50"
+              onClick={() => void refetch()}
+              disabled={isFetching}
+            >
+              {t('profile.mailbox.log.refresh')}
+            </button>
+          </div>
+          {isLoading ? (
+            <p className="text-xs text-zinc-500">{t('common.loading')}</p>
+          ) : entries.length === 0 ? (
+            <p className="text-xs text-zinc-500">{t('profile.mailbox.log.empty')}</p>
+          ) : (
+            <ul className="flex flex-col divide-y divide-zinc-100 dark:divide-zinc-800">
+              {entries.map(e => (
+                <LogRow key={e.id} e={e} onOpen={() => e.einkauf_id && navigate(`/receipts/${e.einkauf_id}`)} />
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LogRow({ e, onOpen }: { e: LogEntry; onOpen: () => void }) {
+  const { t, i18n } = useTranslation();
+  const m = statusMeta(e);
+  const laden = (e.ladenname || e.roh_ladenname || '').trim();
+  const title = (e.subject || laden || t('profile.mailbox.log.noSubject')).trim();
+  const date = new Date(e.created_at).toLocaleDateString(i18n.language, { day: '2-digit', month: '2-digit', year: '2-digit' });
+  return (
+    <li className="py-1.5">
+      <div className="flex items-start gap-2">
+        <span className={cn('mt-0.5 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium', m.cls)}>
+          {t(`profile.mailbox.log.status.${m.key}`, { n: e.items })}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-xs font-medium text-zinc-700 dark:text-zinc-200">{title}</p>
+          {e.reason && <p className="text-[11px] leading-tight text-zinc-500">{e.reason}</p>}
+        </div>
+        <div className="shrink-0 text-right">
+          <p className="text-[10px] text-zinc-400">{date}</p>
+          {e.einkauf_id && (
+            <button onClick={onOpen} className="text-[11px] text-emerald-600 hover:underline">
+              {t('profile.mailbox.log.view')}
+            </button>
+          )}
+        </div>
+      </div>
+    </li>
   );
 }
