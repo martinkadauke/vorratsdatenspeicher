@@ -52,16 +52,24 @@ function stripHtml(html: string): string {
     .trim();
 }
 
-/** Choose the body text to extract from. Prefer the plain-text part, BUT many
- *  shops send a thin text/plain stub ("Bitte im HTML-Format ansehen" / a one-line
- *  summary) while the itemised order actually lives in the HTML part — using the
- *  stub makes the extractor return "no receipt data" and the mail is skipped. So
- *  when the plain text is too short to hold a receipt, fall back to the (usually
- *  much richer) stripped HTML. */
+/** Count money-like tokens ("99,95", "0,00", "1.234,50") — a cheap proxy for
+ *  "does this text actually carry the invoice's line items and total?". */
+function priceSignal(s: string): number {
+  return (s.match(/\d{1,3}(?:[.\s]\d{3})*[.,]\d{2}(?!\d)/g) ?? []).length;
+}
+
+/** Choose the body text to extract from. Many shops (OBI, …) send a text/plain
+ *  part that is just a thank-you stub while the itemised order lives in the HTML
+ *  part; picking the stub makes the extractor return "no receipt data" and the
+ *  mail is skipped. So prefer whichever part actually carries the prices, and on
+ *  a tie the richer (longer) one. Plain-text-only mails are unaffected (no HTML). */
 function pickBody(parsed: ParsedMail): string {
   const plain = (parsed.text ?? '').trim();
   const html = parsed.html ? stripHtml(parsed.html) : '';
-  if (plain.length >= 400) return plain;          // substantial plain text → trust it
+  if (!html) return plain;
+  if (!plain) return html;
+  const ph = priceSignal(html), pp = priceSignal(plain);
+  if (ph !== pp) return ph > pp ? html : plain;   // whichever body holds the amounts
   return html.length > plain.length ? html : plain;
 }
 
