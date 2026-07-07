@@ -381,6 +381,51 @@ export async function runMailImportForUser(userId: number): Promise<{ imported: 
  *  itself gets expensive); the import is meant for a dedicated invoice folder. */
 const BACKFILL_MAX_SCAN = 20000;
 
+/** TEMP DEBUG (admin-only): fetch one ledger entry's mail and report exactly what
+ *  the pipeline sees — plain vs HTML body, price signals, which body pickBody
+ *  chooses, attachments, and the extraction result — WITHOUT writing anything.
+ *  Used to diagnose a stubborn "no receipt data in body" skip. Remove when done. */
+export async function debugImportedEmail(ledgerId: number): Promise<Record<string, unknown>> {
+  const [row] = await sql`SELECT message_id, status, einkauf_id, user_id FROM imported_email WHERE id = ${ledgerId}`;
+  if (!row) return { error: 'ledger row not found' };
+  const mid = normMid(row.message_id as string);
+  const [mb] = await sql<MailboxRow[]>`SELECT * FROM user_mailbox WHERE user_id = ${row.user_id}`;
+  if (!mb) return { error: 'no mailbox for owner' };
+  const client = await openMailbox({
+    imap_host: mb.imap_host, imap_port: mb.imap_port, imap_secure: mb.imap_secure,
+    imap_user: mb.imap_user, pass: decryptSecret(mb.imap_pass_enc),
+  });
+  try {
+    const lock = await client.getMailboxLock(mb.folder || 'INBOX');
+    let source: Buffer | null = null;
+    try {
+      for await (const m of client.fetch('1:*', { uid: true, envelope: true }, { uid: true })) {
+        if (normMid(m.envelope?.messageId) === mid) { for await (const f of client.fetch(String(m.uid), { uid: true, source: true }, { uid: true })) { if (f.source) source = f.source as Buffer; break; } }
+      }
+    } finally { lock.release(); }
+    if (!source) return { error: 'message not found in folder', folder: mb.folder };
+    const parsed = await simpleParser(source);
+    const plain = (parsed.text ?? '').trim();
+    const html = parsed.html ? stripHtml(parsed.html) : '';
+    const chosen = pickBody(parsed);
+    const atts = (parsed.attachments ?? []).map(a => ({ filename: a.filename ?? '', type: a.contentType, size: a.size ?? (a.content?.length ?? 0), related: !!(a as { related?: boolean }).related }));
+    let extraction: unknown = null;
+    try {
+      const ex = await ocrFromText(`Betreff: ${parsed.subject ?? ''}\nVon: ${parsed.from?.text ?? ''}\n\n${chosen}`);
+      extraction = { confidence: ex.confidence, ladenkette: ex.ladenkette, artikelCount: ex.artikel?.length ?? 0, gesamt: ex.gesamt_betrag };
+    } catch (e) { extraction = { error: (e as Error).message.slice(0, 200) }; }
+    return {
+      subject: parsed.subject, hasHtmlPart: !!parsed.html, hasTextPart: !!parsed.text,
+      plainLen: plain.length, plainSignals: priceSignal(plain), plainPreview: plain.slice(0, 300),
+      htmlLen: html.length, htmlSignals: priceSignal(html), htmlPreview: html.slice(0, 300),
+      chosenBody: chosen === plain ? 'plain' : (chosen === html ? 'html' : 'other'), chosenLen: chosen.length, chosenSignals: priceSignal(chosen),
+      attachments: atts, extraction,
+    };
+  } finally {
+    try { await client.logout(); } catch { /* ignore */ }
+  }
+}
+
 /** Re-fetch and re-process ONE previously skipped/failed mail (the import-log
  *  "Retry" button) — e.g. after an extractor improvement. Normal incremental
  *  polling won't re-touch it (its UID is already below last_uid), so we find it
