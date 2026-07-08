@@ -210,3 +210,72 @@ export async function ocrFromText(text: string): Promise<OcrResult> {
   await recordUsage('ocr', 'anthropic', model, data.usage?.input_tokens ?? 0, data.usage?.output_tokens ?? 0);
   return parsed;
 }
+
+const PAYSLIP_SYSTEM = `Du bist ein Datenextraktions-Assistent für deutsche Gehaltsabrechnungen / Lohnabrechnungen (z.B. DATEV).
+Antworte AUSSCHLIESSLICH mit gültigem JSON ohne Markdown-Fence, ohne Kommentare.
+
+Aus der Abrechnung (Bild ODER PDF) extrahieren:
+- arbeitgeber: Name des Arbeitgebers/der Firma (oben auf der Abrechnung), sonst null
+- arbeitnehmer: Name des Beschäftigten, sonst null
+- monat: Abrechnungsmonat als "YYYY-MM" (aus "Abrechnung 07/2026", "Juli 2026", Abrechnungszeitraum …)
+- brutto: Gesamt-Brutto/Steuerbrutto als Zahl in Euro (Komma → Punkt)
+- netto: AUSZAHLUNGSBETRAG — der tatsächlich überwiesene Netto-Betrag ("Auszahlungsbetrag", "Überweisung", "Netto-Verdienst", "Auszahlung"). Das ist der wichtigste Wert.
+
+Regeln:
+- Wenn das Dokument KEINE Gehalts-/Lohnabrechnung ist (Werbung, anderer Beleg): confidence < 0.3 und netto/brutto null.
+- Bei klar lesbarer Abrechnung: confidence 0.85-1.0.
+- Nimm bei mehreren Beträgen für "netto" den AUSZAHLUNGSBETRAG (was auf dem Konto ankommt), NICHT das Netto vor Abzügen wie Sachbezügen.
+
+JSON-Schema:
+{"confidence": 0.0-1.0, "arbeitgeber": "..." | null, "arbeitnehmer": "..." | null, "monat": "YYYY-MM" | null, "brutto": 1234.56 | null, "netto": 987.65 | null}`;
+
+export interface PayslipResult {
+  confidence: number;
+  arbeitgeber: string | null;
+  arbeitnehmer: string | null;
+  monat: string | null;
+  brutto: number | null;
+  netto: number | null;
+  usage?: { input_tokens: number; output_tokens: number };
+}
+
+/** Extract salary data from an uploaded pay-slip PDF/image (Anthropic Vision).
+ *  Same provider/model/contract as the receipt OCR; the caller turns a usable
+ *  result into an `income` row. Takes the raw bytes (from a web upload). */
+export async function extractPayslip(buf: Buffer): Promise<PayslipResult> {
+  const provider = await getConfig('ai.ocr.provider');
+  const model = await getConfig('ai.ocr.model');
+  if (provider !== 'anthropic') throw new Error(`OCR provider "${provider}" not implemented yet — only "anthropic" is supported`);
+  const url = await getConfig('anthropic.url');
+  const apiKey = await getConfig('anthropic.api_key');
+  if (!apiKey) throw new Error('anthropic.api_key not configured');
+
+  const b64 = buf.toString('base64');
+  const isPdf = (buf.length >= 4 && buf.toString('ascii', 0, 4) === '%PDF');
+  if (!isPdf && isHeic(buf)) {
+    throw new Error('HEIC/HEIF-Fotos werden vom Vision-Modell nicht unterstützt — bitte als PDF, JPEG oder PNG hochladen.');
+  }
+  const mediaType = sniffMediaType(buf) ?? 'image/jpeg';
+  const docBlock = isPdf
+    ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } }
+    : { type: 'image', source: { type: 'base64', media_type: mediaType, data: b64 } };
+
+  const res = await fetch(`${url}/v1/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify({
+      model,
+      max_tokens: 8192,
+      system: PAYSLIP_SYSTEM,
+      messages: [{ role: 'user', content: [docBlock, { type: 'text', text: 'Extrahiere die Gehaltsdaten als JSON.' }] }],
+    }),
+    signal: AbortSignal.timeout(120_000),
+  });
+  if (!res.ok) throw new Error(`Anthropic HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  const data = await res.json() as { content?: { type?: string; text?: string }[]; usage?: { input_tokens: number; output_tokens: number } };
+  const out = (data.content ?? []).find(c => c.type === 'text')?.text ?? '';
+  const parsed = parseLlmJson<PayslipResult>(out);
+  parsed.usage = data.usage;
+  await recordUsage('ocr', 'anthropic', model, data.usage?.input_tokens ?? 0, data.usage?.output_tokens ?? 0);
+  return parsed;
+}

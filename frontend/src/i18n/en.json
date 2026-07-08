@@ -68,6 +68,17 @@
     "pickerTitle": "Assign invoice",
     "pickerSearch": "Search merchant …",
     "pickerEmpty": "No invoices this month. Fixed costs are only backed by invoices (e-mail/upload) – till receipts don't count.",
+    "income": {
+      "heading": "Upload pay slips",
+      "intro": "Upload pay slips (DATEV etc.) as PDF – VDS reads the net payout and records it as income. Several files at once are fine.",
+      "account": "Account (person)",
+      "choose": "Choose PDFs",
+      "working": "Reading …",
+      "unreadable": "No salary data detected",
+      "pickAccount": "Pick an account first",
+      "importedToast": "{{n}} pay slip(s) recorded as income",
+      "hint": "Bank-statement CSV import (comdirect etc.) is coming next – as its own evidence source."
+    },
     "addBudgetTitle": "Add budget",
     "editBudget": "Edit budget",
     "budgetLabel": "Label",

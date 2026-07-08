@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Wallet, Plus, Pencil, Trash2, Home, User as UserIcon, Info,
-  ChevronLeft, ChevronRight, CheckCircle2, Circle, CircleDot, Search, X,
+  ChevronLeft, ChevronRight, CheckCircle2, Circle, CircleDot, Search, X, Upload,
 } from 'lucide-react';
 import { api } from '../api/client';
 import { Card, Spinner, Button, Input, Label, Select, Switch, Modal, EmptyState, Badge } from '../components/ui';
@@ -387,6 +387,96 @@ const emptyDraft = (kontoId?: number): Draft => ({
   start_date: today(), end_date: '', active: true, expect_receipt: true, match_merchant: '',
 });
 
+/** Upload one or more pay slips (DATEV etc.) → each is OCR'd and filed as an
+ *  income row for the chosen account. Files upload sequentially with a per-file
+ *  result line. Bank-statement CSV import is a separate (upcoming) evidence path. */
+function PayslipUpload({ scopeKonten }: { scopeKonten: KontoLite[] }) {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const [kontoId, setKontoId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [results, setResults] = useState<{ name: string; ok: boolean; text: string }[]>([]);
+
+  // Default to the first personal (non-shared) account — a salary belongs to a person.
+  const defaultKonto = useMemo(() => {
+    const personal = scopeKonten.find(k => !k.is_shared);
+    return String((personal ?? scopeKonten[0])?.id ?? '');
+  }, [scopeKonten]);
+  const effKonto = kontoId || defaultKonto;
+
+  const readB64 = (file: File) => new Promise<string>((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(String(r.result));
+    r.onerror = () => rej(new Error('read failed'));
+    r.readAsDataURL(file);
+  });
+
+  async function onFiles(list: FileList | null) {
+    if (!list?.length) return;
+    if (!effKonto) { toast(t('finances.income.pickAccount'), 'error'); return; }
+    setBusy(true);
+    const out: { name: string; ok: boolean; text: string }[] = [];
+    for (const file of Array.from(list)) {
+      try {
+        const b64 = await readB64(file);
+        const r = await api<{ ok: boolean; netto?: number; monat?: string; arbeitgeber?: string | null; reason?: string }>(
+          '/api/finances/income/upload', { method: 'POST', body: { filename: file.name, data_b64: b64, konto_id: Number(effKonto) } });
+        out.push(r.ok
+          ? { name: file.name, ok: true, text: `${eur(r.netto!)} · ${r.monat ?? '?'}${r.arbeitgeber ? ' · ' + r.arbeitgeber : ''}` }
+          : { name: file.name, ok: false, text: r.reason ?? t('finances.income.unreadable') });
+      } catch (e) {
+        out.push({ name: file.name, ok: false, text: (e as Error).message });
+      }
+      setResults([...out]);
+    }
+    setBusy(false);
+    void qc.invalidateQueries({ queryKey: ['fin-month'] });
+    void qc.invalidateQueries({ queryKey: ['fin-income'] });
+    const n = out.filter(o => o.ok).length;
+    if (n) toast(t('finances.income.importedToast', { n }), 'success');
+  }
+
+  return (
+    <Card className="flex flex-col gap-3 p-4">
+      <div className="flex items-center gap-2">
+        <Upload size={16} className="text-emerald-600 dark:text-emerald-500" />
+        <h2 className="text-base font-semibold">{t('finances.income.heading')}</h2>
+      </div>
+      <p className="text-xs text-zinc-500">{t('finances.income.intro')}</p>
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="min-w-[9rem] flex-1">
+          <Label>{t('finances.income.account')}</Label>
+          <Select value={effKonto} onChange={e => setKontoId(e.target.value)}>
+            {scopeKonten.map(k => <option key={k.id} value={k.id}>{scopeLabelOf(t, k)}</option>)}
+          </Select>
+        </div>
+        <label className={cn(
+          'inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700',
+          busy && 'pointer-events-none opacity-50',
+        )}>
+          <Upload size={15} />
+          {busy ? t('finances.income.working') : t('finances.income.choose')}
+          <input type="file" accept="application/pdf,image/*" multiple className="hidden" disabled={busy}
+            onChange={e => { void onFiles(e.target.files); e.target.value = ''; }} />
+        </label>
+      </div>
+      {results.length > 0 && (
+        <ul className="flex flex-col gap-1 border-t border-zinc-100 pt-2 dark:border-zinc-800">
+          {results.map((r, i) => (
+            <li key={i} className="flex items-start gap-2 text-xs">
+              {r.ok
+                ? <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-emerald-600" />
+                : <X size={14} className="mt-0.5 shrink-0 text-red-500" />}
+              <span className="min-w-0 flex-1"><span className="text-zinc-400">{r.name}</span> — {r.text}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="text-[11px] text-zinc-400">{t('finances.income.hint')}</p>
+    </Card>
+  );
+}
+
 function ManageTab() {
   const { t } = useTranslation();
   const qc = useQueryClient();
@@ -459,6 +549,8 @@ function ManageTab() {
 
   return (
     <div className="flex flex-col gap-4">
+      <PayslipUpload scopeKonten={scopeKonten} />
+
       <div className="flex justify-end">
         <Button onClick={() => setModal(emptyDraft(scopeKonten[0]?.id))}>
           <Plus size={16} /> {t('finances.add')}

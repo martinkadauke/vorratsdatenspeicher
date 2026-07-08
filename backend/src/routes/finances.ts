@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import sql from '../db.js';
 import { kontoScope } from '../auth/konto.js';
+import { extractPayslip } from '../llm/ocr.js';
 
 /** Fixed costs (recurring monthly expenses) CRUD — the manual-entry UI the
  *  analytics foundation (mig 040 `fixed_cost` → `v_transactions`) always expected.
@@ -296,6 +297,72 @@ export function financeRoutes(app: FastifyInstance): void {
       ON CONFLICT (fixed_cost_id, month) DO UPDATE SET
         status = EXCLUDED.status, einkauf_id = EXCLUDED.einkauf_id, amount = EXCLUDED.amount,
         decided_by = EXCLUDED.decided_by, decided_at = NOW()`;
+    return { ok: true };
+  });
+
+  // ── Income (pay-slip upload → income row) ─────────────────────────────────
+
+  /** List income entries of a month (konto-scoped), newest first. */
+  app.get('/api/finances/income', async (req, reply) => {
+    const b = monthBounds(((req.query as { month?: string }).month ?? '').trim());
+    if (!b) return reply.code(400).send({ error: 'month must be YYYY-MM' });
+    const rows = await sql`
+      SELECT i.id, i.datum::text AS datum, i.amount::float8 AS amount, i.source, i.description,
+             i.konto_id, k.name AS konto_name, k.is_shared, u.username AS owner
+      FROM income i
+      LEFT JOIN konto k ON k.id = i.konto_id
+      LEFT JOIN users u ON u.id = k.user_id
+      WHERE i.datum BETWEEN ${b.first} AND ${b.last}
+      ORDER BY i.datum DESC, i.id DESC`;
+    return { income: rows };
+  });
+
+  /** Upload a pay slip (DATEV etc.) as base64 → extract salary via Vision → create
+   *  an income row (source='salary', amount = Auszahlungsbetrag/net). The client
+   *  sends one file per request (so several PDFs upload sequentially). */
+  app.post('/api/finances/income/upload', { bodyLimit: 25 * 1024 * 1024 }, async (req, reply) => {
+    const bdy = (req.body ?? {}) as { filename?: string; data_b64?: string; konto_id?: number };
+    const kontoId = parseInt(String(bdy.konto_id ?? ''), 10);
+    if (!kontoId) return reply.code(400).send({ error: 'konto_id required' });
+    if (!bdy.data_b64) return reply.code(400).send({ error: 'data_b64 required' });
+    // Every account is visible to every user (finances are shared); just require
+    // a real non-cash account (cash accounts don't carry a salary).
+    const [k] = await sql`SELECT id FROM konto WHERE id = ${kontoId} AND is_cash = FALSE`;
+    if (!k) return reply.code(404).send({ error: 'account not found' });
+
+    let buf: Buffer;
+    try { buf = Buffer.from(bdy.data_b64.replace(/^data:[^,]*,/, ''), 'base64'); }
+    catch { return reply.code(400).send({ error: 'bad base64' }); }
+    if (!buf.length) return reply.code(400).send({ error: 'empty file' });
+
+    let ex;
+    try { ex = await extractPayslip(buf); }
+    catch (e) { return reply.code(502).send({ error: (e as Error).message.slice(0, 300) }); }
+
+    // Not a readable pay slip → report back, create nothing.
+    if ((ex.confidence ?? 0) < 0.3 || ex.netto == null || !(ex.netto > 0)) {
+      return { ok: false, filename: bdy.filename ?? null, extracted: ex, reason: 'no readable pay-slip data (net amount not found)' };
+    }
+    const datum = /^\d{4}-\d{2}$/.test(ex.monat ?? '') ? `${ex.monat}-01` : new Date().toISOString().slice(0, 10);
+    const descr = [ex.arbeitgeber?.trim() || 'Gehalt', ex.brutto != null ? `Brutto ${ex.brutto.toFixed(2)} €` : null]
+      .filter(Boolean).join(' · ');
+    const [row] = await sql`
+      INSERT INTO income (datum, amount, category_path, konto_id, source, description, created_by)
+      VALUES (${datum}::date, ${ex.netto}, 'Gehalt', ${kontoId}, 'salary', ${descr}, ${req.user?.id ?? null})
+      RETURNING id`;
+    return {
+      ok: true, income_id: row.id, filename: bdy.filename ?? null,
+      datum, netto: ex.netto, brutto: ex.brutto, monat: ex.monat, arbeitgeber: ex.arbeitgeber,
+    };
+  });
+
+  /** Delete an income entry (e.g. a mis-read pay slip). Konto-scoped. */
+  app.delete('/api/finances/income/:id', async (req, reply) => {
+    const id = parseInt(String((req.params as { id: string }).id), 10);
+    if (!id) return reply.code(400).send({ error: 'bad id' });
+    const [row] = await sql`SELECT id FROM income WHERE id = ${id}`;
+    if (!row) return reply.code(404).send({ error: 'not found' });
+    await sql`DELETE FROM income WHERE id = ${id}`;
     return { ok: true };
   });
 

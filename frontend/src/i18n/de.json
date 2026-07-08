@@ -68,6 +68,17 @@
     "pickerTitle": "Rechnung zuordnen",
     "pickerSearch": "Händler suchen …",
     "pickerEmpty": "Keine Rechnungen in diesem Monat. Fixkosten werden nur mit Rechnungen belegt (E-Mail/Upload) – Kassenbons zählen nicht.",
+    "income": {
+      "heading": "Gehaltszettel hochladen",
+      "intro": "Lade Gehaltsabrechnungen (DATEV o. ä.) als PDF hoch – VDS liest den Auszahlungsbetrag aus und legt ihn als Einkommen an. Mehrere Dateien auf einmal möglich.",
+      "account": "Konto (Person)",
+      "choose": "PDFs wählen",
+      "working": "Liest …",
+      "unreadable": "Keine Gehaltsdaten erkannt",
+      "pickAccount": "Bitte zuerst ein Konto wählen",
+      "importedToast": "{{n}} Gehaltszettel als Einkommen übernommen",
+      "hint": "Bank-CSV-Import (comdirect etc.) kommt als Nächstes – als eigene Evidenzquelle."
+    },
     "addBudgetTitle": "Budget anlegen",
     "editBudget": "Budget bearbeiten",
     "budgetLabel": "Bezeichnung",
