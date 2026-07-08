@@ -130,10 +130,15 @@ export function financeRoutes(app: FastifyInstance): void {
     `;
 
     // 2) Candidate receipts of the month (visibility-scoped) for suggestion matching.
+    //    Fixed costs (rent, internet, subscriptions …) NEVER appear on a till
+    //    receipt — they arrive as e-mail invoices (quelle='email'), later as
+    //    bank-CSV rows, or have no receipt at all. So Kassenbons ('zettel') and
+    //    cash ('bar') must never be offered as evidence: only e-mail invoices.
     const receipts = await sql`
       SELECT e.id, e.datum::text AS datum, e.roh_ladenname, e.gesamt_betrag::float8 AS gesamt_betrag
       FROM einkauf e
       WHERE e.datum BETWEEN ${b.first} AND ${b.last} AND e.gesamt_betrag IS NOT NULL
+        AND e.quelle = 'email'
         ${kontoScope(req.user, sql`e`)}
     `;
     const usedByCheck = new Set(fixed.map(f => f.check_einkauf_id as number | null).filter(Boolean));
@@ -270,9 +275,12 @@ export function financeRoutes(app: FastifyInstance): void {
     let amount: number | null = null;
     if (bdy.action === 'confirm' && bdy.einkauf_id) {
       const [e] = await sql`
-        SELECT e.id, e.gesamt_betrag::float8 AS betrag, e.roh_ladenname FROM einkauf e
+        SELECT e.id, e.gesamt_betrag::float8 AS betrag, e.roh_ladenname, e.quelle FROM einkauf e
         WHERE e.id = ${bdy.einkauf_id} ${kontoScope(req.user, sql`e`)}`;
       if (!e) return reply.code(404).send({ error: 'receipt not found' });
+      // Guard: a fixed cost can only be backed by an e-mail invoice, never a
+      // till/cash receipt — even if the client somehow passes one.
+      if (e.quelle !== 'email') return reply.code(400).send({ error: 'fixed costs can only be matched to e-mail invoices, not till receipts' });
       einkaufId = e.id as number;
       amount = e.betrag as number | null;
       // Learn the merchant for future auto-suggestions ("Internet" ↔ "Telekom").
