@@ -267,12 +267,13 @@ function ReceiptPicker({ month, fix, onClose, onPick }: {
   const [q, setQ] = useState('');
   const [y, mo] = month.split('-').map(Number);
   const last = new Date(Date.UTC(y, mo, 0)).toISOString().slice(0, 10);
-  // Fixed costs are only ever backed by e-mail invoices (never Kassenbons), so the
-  // manual picker is scoped to quelle=email to match the backend guard.
+  // Fixed costs are only ever backed by invoices (e-mail import or a dropped PDF),
+  // never Kassenbons/cash — so the picker is scoped to those sources to match the
+  // backend guard.
   const { data, isLoading } = useQuery({
     queryKey: ['fin-picker', month],
     queryFn: () => api<{ id: number; datum: string; roh_ladenname: string | null; gesamt_betrag: number | null }[]>(
-      `/api/receipts?limit=200&from=${month}-01&to=${last}&quelle=email`),
+      `/api/receipts?limit=200&from=${month}-01&to=${last}&quelle=email,upload`),
   });
   const rows = (data ?? []).filter(r => !q.trim() || (r.roh_ladenname ?? '').toLowerCase().includes(q.trim().toLowerCase()));
   return (
