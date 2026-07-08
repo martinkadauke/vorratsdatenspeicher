@@ -52,6 +52,8 @@
     "noReceiptAuto": "no receipt (standing order)",
     "skippedMonth": "ok for this month",
     "receiptShort": "Receipt",
+    "bankShort": "Bank",
+    "bankBadge": "Bank",
     "confirmedNoReceipt": "confirmed without receipt",
     "suggestion": "Suggestion:",
     "noReceiptFound": "no receipt found",

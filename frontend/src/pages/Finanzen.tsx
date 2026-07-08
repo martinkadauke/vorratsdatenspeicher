@@ -25,8 +25,8 @@ interface KontoLite { id: number; name: string; is_shared: boolean; is_cash: boo
 interface MonthFix {
   id: number; label: string; monthly_eur: number; expect_receipt: boolean; match_merchant: string | null;
   konto_id: number | null; konto_name: string | null; is_shared: boolean | null; owner: string | null;
-  check: { status: 'confirmed' | 'skipped'; einkauf_id: number | null; amount: number | null; laden: string | null; datum: string | null } | null;
-  suggestion: { einkauf_id: number; laden: string | null; betrag: number; datum: string; amount_ok: boolean; merchant_ok: boolean } | null;
+  check: { status: 'confirmed' | 'skipped'; source: 'receipt' | 'bank' | 'none'; einkauf_id: number | null; bank_tx_id: number | null; amount: number | null; laden: string | null; datum: string | null } | null;
+  suggestion: { source: 'receipt' | 'bank'; einkauf_id: number | null; bank_tx_id: number | null; laden: string | null; betrag: number; datum: string; amount_ok: boolean; merchant_ok: boolean } | null;
 }
 interface MonthBudget {
   id: number; label: string; monthly_target: number; konto_id: number | null;
@@ -98,7 +98,7 @@ function MonthTab() {
   const invalidate = () => void qc.invalidateQueries({ queryKey: ['fin-month'] });
 
   const check = useMutation({
-    mutationFn: (b: { fixed_cost_id: number; month: string; action: 'confirm' | 'skip' | 'clear'; einkauf_id?: number | null }) =>
+    mutationFn: (b: { fixed_cost_id: number; month: string; action: 'confirm' | 'skip' | 'clear'; einkauf_id?: number | null; bank_tx_id?: number | null }) =>
       api('/api/finances/check', { method: 'POST', body: b }),
     onSuccess: () => { invalidate(); setPicker(null); },
     onError: (e: Error) => toast(e.message, 'error'),
@@ -153,7 +153,7 @@ function MonthTab() {
             <h2 className="px-1 text-sm font-semibold">{t('finances.checkTitle')}</h2>
             {!fixed.length && <Card className="p-3 text-xs text-zinc-400">{t('finances.noFixThisMonth')}</Card>}
             {fixed.map(f => <FixCheckRow key={f.id} f={f} month={month} t={t}
-              onConfirmSuggestion={() => check.mutate({ fixed_cost_id: f.id, month, action: 'confirm', einkauf_id: f.suggestion!.einkauf_id })}
+              onConfirmSuggestion={() => check.mutate({ fixed_cost_id: f.id, month, action: 'confirm', einkauf_id: f.suggestion!.source === 'receipt' ? f.suggestion!.einkauf_id : null, bank_tx_id: f.suggestion!.source === 'bank' ? f.suggestion!.bank_tx_id : null })}
               onConfirmNoReceipt={() => check.mutate({ fixed_cost_id: f.id, month, action: 'confirm' })}
               onSkip={() => check.mutate({ fixed_cost_id: f.id, month, action: 'skip' })}
               onClear={() => check.mutate({ fixed_cost_id: f.id, month, action: 'clear' })}
@@ -206,11 +206,11 @@ function FixCheckRow({ f, t, onConfirmSuggestion, onConfirmNoReceipt, onSkip, on
           <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
             {autoOk && t('finances.noReceiptAuto')}
             {f.check?.status === 'skipped' && t('finances.skippedMonth')}
-            {f.check?.status === 'confirmed' && (f.check.einkauf_id
-              ? <>{t('finances.receiptShort')} {f.check.datum} „{f.check.laden}“ · {eur(f.check.amount)}{delta != null && Math.abs(delta) >= 0.01 && <span className={cn('ml-1', delta > 0 ? 'text-amber-600' : 'text-emerald-600')}>Δ {delta > 0 ? '+' : ''}{eur(delta)}</span>}</>
-              : t('finances.confirmedNoReceipt'))}
+            {f.check?.status === 'confirmed' && (f.check.source === 'none'
+              ? t('finances.confirmedNoReceipt')
+              : <>{f.check.source === 'bank' ? t('finances.bankShort') : t('finances.receiptShort')} {f.check.datum} „{f.check.laden}“ · {eur(f.check.amount)}{delta != null && Math.abs(delta) >= 0.01 && <span className={cn('ml-1', delta > 0 ? 'text-amber-600' : 'text-emerald-600')}>Δ {delta > 0 ? '+' : ''}{eur(delta)}</span>}</>)}
             {state === 'suggest' && f.suggestion && (
-              <>{t('finances.suggestion')} „{f.suggestion.laden}“ {eur(f.suggestion.betrag)} · {f.suggestion.datum.slice(8, 10)}.{f.suggestion.datum.slice(5, 7)}.</>
+              <>{t('finances.suggestion')} „{f.suggestion.laden}“ {eur(f.suggestion.betrag)} · {f.suggestion.datum.slice(8, 10)}.{f.suggestion.datum.slice(5, 7)}.{f.suggestion.source === 'bank' && <Badge className="ml-1.5">{t('finances.bankBadge')}</Badge>}</>
             )}
             {state === 'open' && t('finances.noReceiptFound')}
           </div>

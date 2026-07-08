@@ -52,6 +52,8 @@
     "noReceiptAuto": "ohne Beleg (Dauerauftrag)",
     "skippedMonth": "diesen Monat ok",
     "receiptShort": "Beleg",
+    "bankShort": "Bank",
+    "bankBadge": "Bank",
     "confirmedNoReceipt": "ohne Beleg bestätigt",
     "suggestion": "Vorschlag:",
     "noReceiptFound": "kein Beleg gefunden",
