@@ -1160,11 +1160,14 @@ function BankGenerateModal({ tx, t, onClose, onDone }: {
   tx: BankTx; t: (k: string, o?: Record<string, unknown>) => string; onClose: () => void; onDone: () => void;
 }) {
   const credit = tx.amount > 0;
-  const [mode, setMode] = useState<'einkauf' | 'fixed'>(credit ? 'fixed' : 'einkauf');
+  const debit = tx.amount < 0; // only true outflows can become a purchase receipt
+  const [mode, setMode] = useState<'einkauf' | 'fixed'>(debit ? 'einkauf' : 'fixed');
   const [laden, setLaden] = useState(tx.counterparty ?? '');
   const [label, setLabel] = useState(tx.counterparty ?? '');
   const [kind, setKind] = useState<'expense' | 'income'>(credit ? 'income' : 'expense');
-  const [isTransfer, setIsTransfer] = useState(false);
+  // A homed CREDIT is almost always an internal top-up/transfer → default the
+  // Umbuchung guard ON so it doesn't inflate the month's income total.
+  const [isTransfer, setIsTransfer] = useState(credit);
   const [oneMonth, setOneMonth] = useState(true);
 
   const genReceipt = useMutation({
@@ -1184,7 +1187,7 @@ function BankGenerateModal({ tx, t, onClose, onDone }: {
       <div className="flex flex-col gap-3">
         <div className="text-xs text-zinc-500 dark:text-zinc-400">{tx.counterparty || '—'} · {eur(tx.amount)} · {ddmmyyyy(tx.booking_date)}</div>
         <div className="flex gap-1.5">
-          {(credit ? (['fixed'] as const) : (['einkauf', 'fixed'] as const)).map(m => (
+          {(debit ? (['einkauf', 'fixed'] as const) : (['fixed'] as const)).map(m => (
             <button key={m} type="button" onClick={() => setMode(m)}
               className={cn('flex-1 rounded-xl border px-3 py-2 text-sm font-medium',
                 mode === m ? 'border-transparent bg-emerald-600 text-white' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700')}>
