@@ -1,16 +1,17 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Wallet, Plus, Pencil, Trash2, Home, User as UserIcon, Info,
   ChevronLeft, ChevronRight, ChevronDown, CheckCircle2, Circle, CircleDot, Search, X, Upload, Layers, Lock,
-  Link2, Link2Off, RefreshCw,
+  Link2, Link2Off, RefreshCw, Landmark,
 } from 'lucide-react';
 import { api } from '../api/client';
 import { Card, Spinner, Button, Input, Label, Select, Switch, Modal, EmptyState, Badge } from '../components/ui';
 import { CategoryPicker } from '../components/CategoryPicker';
 import { toast } from '../components/Toast';
+import { confirm } from '../components/Confirm';
 import { eur, cn } from '../lib/utils';
 import { useUrlState } from '../hooks/useUrlState';
 
@@ -199,21 +200,39 @@ function MonthTab() {
   // excluded from the gross totals in the whole-household view; in a single-account
   // scope only one leg is present, so they count (Martin −2000 / Haushalt +2000).
   const counts = (f: MonthFix) => !isAll || !f.is_transfer;
-  const incomeTotal = incomes.reduce((s, f) => s + (counts(f) ? amortized(f.monthly_eur, f.frequency) : 0), 0);
-  const fixTotal = fixed.reduce((s, f) => s + (counts(f) ? amortized(f.monthly_eur, f.frequency) : 0), 0);
+  // Effective amount for the summary: once a match is CONFIRMED, the real value (from
+  // the receipt / bank / pay slip) replaces the plan value (e.g. a salary with a bonus,
+  // or a month where it was less than planned). Falls back to the plan (Soll) until then.
+  const effEur = (f: MonthFix) => amortized(f.check?.status === 'confirmed' && f.check.amount != null ? f.check.amount : f.monthly_eur, f.frequency);
+  const incomeTotal = incomes.reduce((s, f) => s + (counts(f) ? effEur(f) : 0), 0);
+  const fixTotal = fixed.reduce((s, f) => s + (counts(f) ? effEur(f) : 0), 0);
   const isOk = (f: MonthFix) => !!f.check || f.expect_receipt === false;
   const okCount = fixed.filter(isOk).length;
   const varActual = budgets.reduce((s, b) => s + b.actual, 0);
   const varTarget = budgets.reduce((s, b) => s + b.monthly_target, 0);
   const net = Math.round((incomeTotal - fixTotal - varActual) * 100) / 100;
 
+  // When the evidence amount differs from the plan (a bonus on the salary, a cheaper
+  // month …), ask whether to accept the delta; the real value then replaces the plan.
+  const okDelta = async (f: MonthFix, actual: number | null | undefined): Promise<boolean> => {
+    if (actual == null) return true;
+    if (Math.abs(Math.round((actual - f.monthly_eur) * 100) / 100) < 0.01) return true;
+    return confirm({
+      title: t('finances.deltaTitle'),
+      message: t('finances.deltaMsg', { plan: eur(f.monthly_eur), actual: eur(actual) }),
+      confirmLabel: t('finances.deltaAccept'), cancelLabel: t('common.cancel'),
+    });
+  };
   // Confirm the auto-suggestion, passing the id of whichever evidence kind it is.
-  const confirmSug = (f: MonthFix) => check.mutate({
-    fixed_cost_id: f.id, month, action: 'confirm',
-    einkauf_id: f.suggestion!.source === 'receipt' ? f.suggestion!.einkauf_id : null,
-    bank_tx_id: f.suggestion!.source === 'bank' ? f.suggestion!.bank_tx_id : null,
-    income_id: f.suggestion!.source === 'income' ? f.suggestion!.income_id : null,
-  });
+  const confirmSug = async (f: MonthFix) => {
+    if (!(await okDelta(f, f.suggestion?.betrag))) return;
+    check.mutate({
+      fixed_cost_id: f.id, month, action: 'confirm',
+      einkauf_id: f.suggestion!.source === 'receipt' ? f.suggestion!.einkauf_id : null,
+      bank_tx_id: f.suggestion!.source === 'bank' ? f.suggestion!.bank_tx_id : null,
+      income_id: f.suggestion!.source === 'income' ? f.suggestion!.income_id : null,
+    });
+  };
 
   return (
     <div className="flex flex-col gap-4">
@@ -314,7 +333,11 @@ function MonthTab() {
 
       {picker && (
         <ReceiptPicker month={month} fix={picker} onClose={() => setPicker(null)}
-          onPick={(ev) => check.mutate({ fixed_cost_id: picker.id, month, action: 'confirm', ...ev })} />
+          onPick={async (ev, amount) => {
+            if (!(await okDelta(picker, amount))) return;
+            check.mutate({ fixed_cost_id: picker.id, month, action: 'confirm', ...ev });
+            setPicker(null);
+          }} />
       )}
       {budgetModal && <BudgetModal initial={budgetModal} onClose={() => setBudgetModal(null)} onSaved={invalidate} />}
       {posBudget && <BudgetPositions budget={posBudget} month={month} onClose={() => setPosBudget(null)} />}
@@ -565,32 +588,26 @@ type PickEv = { einkauf_id?: number; income_id?: number; bank_tx_id?: number };
  *  and bank credits — from /income-evidence. onPick returns the id of the chosen
  *  evidence kind. */
 function ReceiptPicker({ month, fix, onClose, onPick }: {
-  month: string; fix: MonthFix; onClose: () => void; onPick: (ev: PickEv) => void;
+  month: string; fix: MonthFix; onClose: () => void; onPick: (ev: PickEv, amount: number | null) => void;
 }) {
   const { t } = useTranslation();
   const [q, setQ] = useState('');
-  const [y, mo] = month.split('-').map(Number);
-  const last = new Date(Date.UTC(y, mo, 0)).toISOString().slice(0, 10);
   const isIncome = fix.kind === 'income';
 
-  const receiptsQ = useQuery({
-    queryKey: ['fin-picker', 'receipt', month],
-    queryFn: () => api<{ id: number; datum: string; roh_ladenname: string | null; gesamt_betrag: number | null }[]>(
-      `/api/receipts?limit=200&from=${month}-01&to=${last}&quelle=email,upload`),
-    enabled: !isIncome,
+  // Both kinds return {items:[{source,id,datum,amount,label}]}: income → pay-slip rows
+  // + bank credits; expense → invoices + bank debits (wide window for booking lag).
+  const evidenceQ = useQuery({
+    queryKey: ['fin-picker', fix.kind, month],
+    queryFn: () => api<{ items: { source: 'income' | 'bank' | 'receipt'; id: number; datum: string; amount: number; label: string }[] }>(
+      isIncome ? `/api/finances/income-evidence?month=${month}` : `/api/finances/expense-evidence?month=${month}`),
   });
-  const incomeQ = useQuery({
-    queryKey: ['fin-picker', 'income', month],
-    queryFn: () => api<{ items: { source: 'income' | 'bank'; id: number; datum: string; amount: number; label: string }[] }>(
-      `/api/finances/income-evidence?month=${month}`),
-    enabled: isIncome,
-  });
-  const isLoading = isIncome ? incomeQ.isLoading : receiptsQ.isLoading;
+  const isLoading = evidenceQ.isLoading;
 
   type Row = { key: string; datum: string | null; label: string; amount: number | null; ev: PickEv };
-  const all: Row[] = isIncome
-    ? (incomeQ.data?.items ?? []).map(i => ({ key: `${i.source}:${i.id}`, datum: i.datum, label: i.label, amount: i.amount, ev: i.source === 'income' ? { income_id: i.id } : { bank_tx_id: i.id } }))
-    : (receiptsQ.data ?? []).map(r => ({ key: `r:${r.id}`, datum: r.datum, label: r.roh_ladenname ?? '–', amount: r.gesamt_betrag, ev: { einkauf_id: r.id } }));
+  const all: Row[] = (evidenceQ.data?.items ?? []).map(i => ({
+    key: `${i.source}:${i.id}`, datum: i.datum, label: i.label, amount: i.amount,
+    ev: i.source === 'income' ? { income_id: i.id } : i.source === 'bank' ? { bank_tx_id: i.id } : { einkauf_id: i.id },
+  }));
   const rows = all.filter(r => !q.trim() || r.label.toLowerCase().includes(q.trim().toLowerCase()));
 
   return (
@@ -604,7 +621,7 @@ function ReceiptPicker({ month, fix, onClose, onPick }: {
         {!isLoading && !rows.length && <EmptyState>{t(isIncome ? 'finances.incomePickerEmpty' : 'finances.pickerEmpty')}</EmptyState>}
         <div className="flex max-h-80 flex-col gap-1 overflow-y-auto">
           {rows.map(r => (
-            <button key={r.key} onClick={() => onPick(r.ev)}
+            <button key={r.key} onClick={() => onPick(r.ev, r.amount)}
               className="flex items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2 text-left hover:border-emerald-400 hover:bg-emerald-50/50 dark:border-zinc-800 dark:hover:bg-emerald-950/20">
               <span className="w-14 shrink-0 text-xs text-zinc-400">{r.datum?.slice(8, 10)}.{r.datum?.slice(5, 7)}.</span>
               <span className="min-w-0 flex-1 truncate text-sm">{r.label}</span>
@@ -799,6 +816,7 @@ interface IncomeEntry {
   id: number; datum: string; amount: number; source: string; description: string | null;
   konto_id: number | null; konto_name: string | null; is_shared: boolean | null;
   owner: string | null; owner_name: string | null;
+  bank: { id: number; booking_date: string; amount: number; counterparty: string | null } | null;
 }
 
 function IncomeList() {
@@ -842,10 +860,16 @@ function IncomeList() {
             <li key={r.id} className="flex items-center gap-3 py-2">
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium">{r.description || t('finances.income.entryFallback')}</div>
-                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-zinc-500 dark:text-zinc-400">
+                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400">
                   <span>{ddmmyyyy(r.datum)}</span>
                   <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">{srcLabel(r.source)}</span>
                   {r.konto_id && <span className="truncate">{scopeLabelOf(t, r)}</span>}
+                  {r.bank && (
+                    <Link to={`/finanzen?tab=bank&bm=${r.bank.booking_date.slice(0, 7)}`} onClick={e => e.stopPropagation()}
+                      className="inline-flex items-center gap-1 rounded-full bg-teal-100 px-1.5 py-0.5 text-[10px] text-teal-700 hover:bg-teal-200 dark:bg-teal-900/40 dark:text-teal-300">
+                      <Landmark size={10} /> {t('finances.bank.matched')}
+                    </Link>
+                  )}
                 </div>
               </div>
               <span className="shrink-0 text-sm font-semibold text-emerald-600 dark:text-emerald-500">+{eur(r.amount)}</span>
@@ -868,9 +892,10 @@ function IncomeList() {
 interface BankTx {
   id: number; konto_id: number | null; konto_name: string | null;
   booking_date: string; purchase_date: string | null; amount: number;
-  counterparty: string | null; description: string;
-  status: 'open' | 'fixed' | 'receipt';
+  counterparty: string | null; description: string | null; private: boolean;
+  status: 'open' | 'fixed' | 'receipt' | 'income';
   receipt: { id: number | null; laden: string | null; betrag: number | null; private: boolean } | null;
+  income: { id: number; description: string | null; betrag: number } | null;
   fixed: { id: number; label: string } | null;
 }
 
@@ -953,28 +978,32 @@ function BankRow({ tx, t, onOpen, onLink, onUnlink }: {
 }) {
   const credit = tx.amount > 0;
   const canOpen = tx.status === 'receipt' && tx.receipt?.id != null && !tx.receipt.private;
-  const canLink = tx.status === 'open' && tx.amount < 0;
-  const badge = tx.status === 'receipt'
-    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
-    : tx.status === 'fixed' ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300'
-      : 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300';
+  const canLink = tx.status === 'open'; // debit → receipt, credit → income row
+  const isLinked = tx.status === 'receipt' || tx.status === 'income';
+  const badge = tx.status === 'receipt' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+    : tx.status === 'income' ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300'
+      : tx.status === 'fixed' ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300'
+        : 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300';
   const onClick = canOpen ? () => onOpen(tx.receipt!.id!) : canLink ? () => onLink(tx) : undefined;
   return (
     <Card onClick={onClick} className="flex items-center gap-3 p-3">
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium">{tx.counterparty || '—'}</div>
+        <div className="truncate text-sm font-medium">
+          {tx.private
+            ? <span className="inline-flex items-center gap-1 italic text-zinc-500 dark:text-zinc-400"><Lock size={12} />{t('finances.privatePurchase')}</span>
+            : (tx.counterparty || '—')}
+        </div>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400">
           <span>{ddmmyyyy(tx.booking_date)}</span>
           <span className={cn('rounded-full px-1.5 py-0.5 text-[10px]', badge)}>{t(`finances.bank.status_${tx.status}`)}</span>
-          {tx.status === 'receipt' && tx.receipt && (tx.receipt.private
-            ? <span className="inline-flex items-center gap-1 truncate italic"><Lock size={11} />{t('finances.privatePurchase')}</span>
-            : tx.receipt.laden && <span className="truncate">→ {tx.receipt.laden}</span>)}
+          {tx.status === 'receipt' && tx.receipt && !tx.receipt.private && tx.receipt.laden && <span className="truncate">→ {tx.receipt.laden}</span>}
+          {tx.status === 'income' && tx.income && <span className="truncate">→ {tx.income.description || t('finances.income.entryFallback')}</span>}
           {tx.status === 'fixed' && tx.fixed && <span className="truncate">→ {tx.fixed.label}</span>}
-          {canLink && <span className="text-zinc-400">{t('finances.bank.tapToLink')}</span>}
+          {canLink && <span className="text-zinc-400">{credit ? t('finances.bank.tapToLinkIncome') : t('finances.bank.tapToLink')}</span>}
         </div>
       </div>
       <span className={cn('shrink-0 text-sm font-semibold', credit && 'text-emerald-600 dark:text-emerald-500')}>{credit ? '+' : ''}{eur(tx.amount)}</span>
-      {tx.status === 'receipt' && !tx.receipt?.private && (
+      {isLinked && !tx.receipt?.private && (
         <button onClick={e => { e.stopPropagation(); onUnlink(tx.id); }} title={t('finances.bank.unlink')}
           className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-red-500 dark:hover:bg-zinc-800"><Link2Off size={15} /></button>
       )}
@@ -984,18 +1013,18 @@ function BankRow({ tx, t, onOpen, onLink, onUnlink }: {
   );
 }
 
-/** Pick a scanned receipt to link to a bank transaction (candidates = unlinked
- *  receipts near the amount + date window). */
+/** Pick a receipt (debit) or income row (credit) to link to a bank transaction.
+ *  Candidates come pre-filtered by amount + date window from the backend. */
 function BankLinkPicker({ tx, t, onClose, onPick }: {
-  tx: BankTx; t: (k: string, o?: Record<string, unknown>) => string; onClose: () => void; onPick: (einkaufId: number) => void;
+  tx: BankTx; t: (k: string, o?: Record<string, unknown>) => string; onClose: () => void; onPick: (id: number) => void;
 }) {
   const { data, isLoading } = useQuery({
     queryKey: ['bank-candidates', tx.id],
-    queryFn: () => api<{ candidates: { id: number; laden: string | null; betrag: number; datum: string }[] }>(`/api/finances/bank/${tx.id}/candidates`),
+    queryFn: () => api<{ kind: 'receipt' | 'income'; candidates: { id: number; label: string | null; betrag: number; datum: string }[] }>(`/api/finances/bank/${tx.id}/candidates`),
   });
   const cands = data?.candidates ?? [];
   return (
-    <Modal open onClose={onClose} title={t('finances.bank.linkTitle')}>
+    <Modal open onClose={onClose} title={tx.amount > 0 ? t('finances.bank.linkIncomeTitle') : t('finances.bank.linkTitle')}>
       <div className="flex flex-col gap-3">
         <div className="text-xs text-zinc-500 dark:text-zinc-400">{tx.counterparty} · {eur(tx.amount)} · {ddmmyyyy(tx.booking_date)}</div>
         {isLoading ? <Spinner /> : !cands.length ? (
@@ -1006,7 +1035,7 @@ function BankLinkPicker({ tx, t, onClose, onPick }: {
               <li key={c.id}>
                 <button onClick={() => onPick(c.id)} className="flex w-full items-center gap-2 rounded-lg px-1 py-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium">{c.laden || '–'}</div>
+                    <div className="truncate text-sm font-medium">{c.label || '–'}</div>
                     <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{ddmmyyyy(c.datum)}</div>
                   </div>
                   <span className="shrink-0 text-sm font-semibold">{eur(c.betrag)}</span>
@@ -1036,14 +1065,15 @@ function BankTab() {
   if (status !== 'all') qs.set('status', status);
   const { data, isLoading } = useQuery({
     queryKey: ['bank-tx', konto, month, status],
-    queryFn: () => api<{ items: BankTx[]; counts: { all: number; open: number; fixed: number; receipt: number } }>(`/api/finances/bank?${qs.toString()}`),
+    queryFn: () => api<{ items: BankTx[]; counts: { all: number; open: number; fixed: number; receipt: number; income: number } }>(`/api/finances/bank?${qs.toString()}`),
   });
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ['bank-tx'] });
     void qc.invalidateQueries({ queryKey: ['bank-candidates'] });
   };
   const link = useMutation({
-    mutationFn: (einkauf_id: number) => api(`/api/finances/bank/${linkTx!.id}/link`, { method: 'POST', body: { einkauf_id } }),
+    // Debit → receipt (einkauf_id); credit → income row (income_id).
+    mutationFn: (id: number) => api(`/api/finances/bank/${linkTx!.id}/link`, { method: 'POST', body: linkTx!.amount > 0 ? { income_id: id } : { einkauf_id: id } }),
     onSuccess: () => { invalidate(); setLinkTx(null); toast(t('finances.bank.linkedToast'), 'success'); },
     onError: (e: Error) => toast(e.message, 'error'),
   });
@@ -1058,8 +1088,8 @@ function BankTab() {
   });
   const items = data?.items ?? [];
   const c = data?.counts;
-  const chips: { key: 'all' | 'open' | 'fixed' | 'receipt'; n?: number }[] = [
-    { key: 'all', n: c?.all }, { key: 'open', n: c?.open }, { key: 'fixed', n: c?.fixed }, { key: 'receipt', n: c?.receipt },
+  const chips: { key: 'all' | 'open' | 'fixed' | 'receipt' | 'income'; n?: number }[] = [
+    { key: 'all', n: c?.all }, { key: 'open', n: c?.open }, { key: 'receipt', n: c?.receipt }, { key: 'income', n: c?.income }, { key: 'fixed', n: c?.fixed },
   ];
   return (
     <div className="flex flex-col gap-4">

@@ -199,18 +199,20 @@ export function financeRoutes(app: FastifyInstance): void {
       LEFT JOIN users u ON u.id = k.user_id
       WHERE i.datum BETWEEN ${b.first} AND ${b.last}
       ORDER BY i.amount DESC, i.id DESC`;
-    const bankText = (cp: unknown, desc: unknown): string | null => [cp, desc].filter(Boolean).join(' ') || null;
-
     // Two evidence pools; a candidate is keyed "<source>:<id>" so one piece of
     // evidence never serves two positions and a confirmed one is never re-suggested.
     type Ev = { source: 'receipt' | 'bank' | 'income'; id: number; laden: string | null; betrag: number; datum: string };
+    // Match merchant on the COUNTERPARTY only, not counterparty+description: card
+    // payments carry "Kartenzahlung comdirect Visa-Debitkarte …" boilerplate in the
+    // description, which would false-match e.g. a "Comdirect" fixed cost to every card
+    // purchase. The counterparty is the real vendor ("Lidl sagt Danke", "Telekom …").
     const evExpense: Ev[] = [
       ...receipts.map(r => ({ source: 'receipt' as const, id: r.id as number, laden: r.roh_ladenname as string | null, betrag: r.gesamt_betrag as number, datum: String(r.datum) })),
-      ...banktx.filter(bt => (bt.amount as number) < 0).map(bt => ({ source: 'bank' as const, id: bt.id as number, laden: bankText(bt.counterparty, bt.description), betrag: Math.abs(bt.amount as number), datum: String(bt.datum) })),
+      ...banktx.filter(bt => (bt.amount as number) < 0).map(bt => ({ source: 'bank' as const, id: bt.id as number, laden: bt.counterparty as string | null, betrag: Math.abs(bt.amount as number), datum: String(bt.datum) })),
     ];
     const evIncome: Ev[] = [
       ...income.map(i => ({ source: 'income' as const, id: i.id as number, laden: i.description as string | null, betrag: i.amount as number, datum: String(i.datum) })),
-      ...banktx.filter(bt => (bt.amount as number) > 0).map(bt => ({ source: 'bank' as const, id: bt.id as number, laden: bankText(bt.counterparty, bt.description), betrag: bt.amount as number, datum: String(bt.datum) })),
+      ...banktx.filter(bt => (bt.amount as number) > 0).map(bt => ({ source: 'bank' as const, id: bt.id as number, laden: bt.counterparty as string | null, betrag: bt.amount as number, datum: String(bt.datum) })),
     ];
     const usedKeys = new Set<string>();
     for (const f of fixed) {
@@ -427,13 +429,20 @@ export function financeRoutes(app: FastifyInstance): void {
     const rows = await sql`
       SELECT i.id, i.datum::text AS datum, i.amount::float8 AS amount, i.source, i.description,
              i.konto_id, k.name AS konto_name, k.is_shared, u.username AS owner,
-             (SELECT fm.name FROM family_member fm WHERE fm.user_id = k.user_id ORDER BY fm.sort_order, fm.id LIMIT 1) AS owner_name
+             (SELECT fm.name FROM family_member fm WHERE fm.user_id = k.user_id ORDER BY fm.sort_order, fm.id LIMIT 1) AS owner_name,
+             i.bank_tx_id, bt.booking_date::text AS bank_booking, bt.amount::float8 AS bank_amount, bt.counterparty AS bank_counterparty
       FROM income i
       LEFT JOIN konto k ON k.id = i.konto_id
       LEFT JOIN users u ON u.id = k.user_id
+      LEFT JOIN bank_tx bt ON bt.id = i.bank_tx_id
       ${b ? sql`WHERE i.datum BETWEEN ${b.first} AND ${b.last}` : sql``}
       ORDER BY i.datum DESC, i.id DESC`;
-    return { income: rows };
+    return {
+      income: rows.map(r => ({
+        ...r,
+        bank: r.bank_tx_id ? { id: r.bank_tx_id, booking_date: r.bank_booking, amount: r.bank_amount, counterparty: r.bank_counterparty } : null,
+      })),
+    };
   });
 
   /** Income-evidence candidates of a month for the manual picker on an income plan:
@@ -447,6 +456,34 @@ export function financeRoutes(app: FastifyInstance): void {
       items: [
         ...inc.map(i => ({ source: 'income' as const, id: i.id, datum: String(i.datum), amount: i.amount, label: (i.description as string | null) || 'Einnahme' })),
         ...bank.map(bt => ({ source: 'bank' as const, id: bt.id, datum: String(bt.datum), amount: bt.amount, label: [bt.counterparty, bt.description].filter(Boolean).join(' ') || 'Gutschrift' })),
+      ],
+    };
+  });
+
+  /** Expense-evidence candidates for the manual picker on a fixed-cost (expense) plan:
+   *  invoices of the month (e-mail/upload) + bank DEBITS in a WIDE window. The window
+   *  spills a few days into the neighbouring months because bank bookings lag — e.g. a
+   *  loan installment due end-of-month often books on the 1st of the next month. */
+  app.get('/api/finances/expense-evidence', async (req, reply) => {
+    const b = monthBounds(((req.query as { month?: string }).month ?? '').trim());
+    if (!b) return reply.code(400).send({ error: 'month must be YYYY-MM' });
+    const rec = await sql`
+      SELECT e.id, e.datum::text AS datum, e.gesamt_betrag::float8 AS amount, e.roh_ladenname
+      FROM einkauf e
+      WHERE e.datum BETWEEN ${b.first} AND ${b.last} AND e.gesamt_betrag IS NOT NULL
+        AND e.quelle IN ('email', 'upload')
+        ${kontoScope(req.user, sql`e`)}
+      ORDER BY e.datum DESC`;
+    const lo = isoMinusDays(b.first, 7);
+    const hi = isoPlusDays(b.last, 12);
+    const bank = await sql`
+      SELECT id, booking_date::text AS datum, amount::float8 AS amount, counterparty
+      FROM bank_tx WHERE booking_date BETWEEN ${lo} AND ${hi} AND amount < 0
+      ORDER BY booking_date DESC`;
+    return {
+      items: [
+        ...rec.map(r => ({ source: 'receipt' as const, id: r.id, datum: String(r.datum), amount: r.amount, label: (r.roh_ladenname as string | null) || 'Beleg' })),
+        ...bank.map(bt => ({ source: 'bank' as const, id: bt.id, datum: String(bt.datum), amount: Math.abs(bt.amount as number), label: (bt.counterparty as string | null) || 'Kontobewegung' })),
       ],
     };
   });
@@ -550,12 +587,67 @@ export function financeRoutes(app: FastifyInstance): void {
         const recNorm = normMerchant((r.roh_ladenname as string | null) ?? '');
         return bankToks.some(tk => recNorm.includes(tk));
       });
-      const sameKonto = all.filter(r => r.konto_id === d.konto_id);
-      const cands = sameKonto.length ? sameKonto : all;
-      // Auto-link ONLY when there is exactly one true candidate and it's still free.
-      if (cands.length === 1 && !used.has(cands[0].id as number)) {
-        await sql`UPDATE einkauf SET bank_tx_id = ${d.id} WHERE id = ${cands[0].id}`;
-        used.add(cands[0].id as number);
+      // Auto-link ONLY when unambiguous: exactly one candidate on the bank_tx's own
+      // account with NO competitor elsewhere, or (receipt scanned to the "wrong"
+      // account) exactly one anywhere with none on this account. Any competition —
+      // including one same-konto + one other-konto — is left for the manual picker,
+      // so the same-konto tiebreak can never silently paper over a real ambiguity.
+      const same = all.filter(r => r.konto_id === d.konto_id);
+      const other = all.filter(r => r.konto_id !== d.konto_id);
+      const pick = same.length === 1 && other.length === 0 ? same[0]
+        : same.length === 0 && other.length === 1 ? other[0] : null;
+      if (pick && !used.has(pick.id as number)) {
+        await sql`UPDATE einkauf SET bank_tx_id = ${d.id} WHERE id = ${pick.id}`;
+        used.add(pick.id as number);
+        linked++;
+      }
+    }
+    return linked;
+  };
+
+  /** Auto-link bank GUTSCHRIFTEN (credits) to actual income rows — the mirror of the
+   *  debit↔receipt matcher. Income rows (pay slips) are dated month-01 while the bank
+   *  books the pay day mid/end month, so the date window is wide (income −45..+10 of
+   *  booking). Same amount + shared token + unambiguous + same-konto preference. */
+  const autoMatchBankCredits = async (kontoId?: number | null): Promise<number> => {
+    const credits = await sql`
+      SELECT bt.id, bt.konto_id, bt.amount::float8 AS amount, bt.counterparty, bt.booking_date::text AS booking
+      FROM bank_tx bt
+      WHERE bt.amount > 0
+        AND NOT EXISTS (SELECT 1 FROM income i WHERE i.bank_tx_id = bt.id)
+        ${kontoId ? sql`AND bt.konto_id = ${kontoId}` : sql``}
+      ORDER BY bt.booking_date, bt.id`;
+    if (!credits.length) return 0;
+    const incomes = await sql`
+      SELECT i.id, i.konto_id, i.amount::float8 AS amount, i.description, i.datum::text AS datum
+      FROM income i WHERE i.bank_tx_id IS NULL`;
+    const used = new Set<number>();
+    let linked = 0;
+    for (const c of credits) {
+      const target = c.amount as number;
+      const toks = normMerchant((c.counterparty as string | null) ?? '').split(' ').filter(w => w.length >= 4);
+      if (!toks.length) continue;
+      const booking = String(c.booking);
+      const lo = isoMinusDays(booking, 45);
+      const hi = isoPlusDays(booking, 10);
+      const all = incomes.filter(i => {
+        if (Math.abs((i.amount as number) - target) >= 0.005) return false;
+        const d = String(i.datum);
+        if (d < lo || d > hi) return false;
+        const rn = normMerchant((i.description as string | null) ?? '');
+        return toks.some(tk => rn.includes(tk));
+      });
+      // Same unambiguous rule as the debit matcher: exactly one same-konto candidate
+      // with no competitor elsewhere, or exactly one anywhere with none same-konto.
+      // The wide credit window over constant monthly salary makes a same-konto tiebreak
+      // over a genuine cross-month/-konto ambiguity dangerous, so we never take it.
+      const same = all.filter(i => i.konto_id === c.konto_id);
+      const other = all.filter(i => i.konto_id !== c.konto_id);
+      const pick = same.length === 1 && other.length === 0 ? same[0]
+        : same.length === 0 && other.length === 1 ? other[0] : null;
+      if (pick && !used.has(pick.id as number)) {
+        await sql`UPDATE income SET bank_tx_id = ${c.id} WHERE id = ${pick.id}`;
+        used.add(pick.id as number);
         linked++;
       }
     }
@@ -594,7 +686,7 @@ export function financeRoutes(app: FastifyInstance): void {
         ON CONFLICT DO NOTHING RETURNING id`;
       if (ins.length) imported++; else skipped++;
     }
-    const matched = imported ? await autoMatchBank(kontoId) : 0;
+    const matched = imported ? (await autoMatchBank(kontoId)) + (await autoMatchBankCredits(kontoId)) : 0;
     return { ok: true, filename: bdy.filename ?? null, account: parsed.account, period: parsed.period, imported, skipped, matched, total: parsed.rows.length };
   });
 
@@ -616,13 +708,16 @@ export function financeRoutes(app: FastifyInstance): void {
              bt.amount::float8 AS amount, bt.counterparty, bt.description,
              re.id AS receipt_id, re.roh_ladenname AS receipt_laden, re.gesamt_betrag::float8 AS receipt_betrag,
              re.private_for_user_id AS receipt_priv,
+             inc.id AS income_id, inc.description AS income_desc, inc.amount::float8 AS income_betrag,
              fx.fixed_id, fx.fixed_label
       FROM bank_tx bt
       LEFT JOIN konto k ON k.id = bt.konto_id
       -- LATERAL … LIMIT 1: a bank_tx may back more than one fixed-cost check (or be
-      -- linked to a receipt); take one so the row never fans out / double-counts.
+      -- linked to a receipt / income row); take one so the row never fans out.
       LEFT JOIN LATERAL (SELECT e.id, e.roh_ladenname, e.gesamt_betrag, e.private_for_user_id
                          FROM einkauf e WHERE e.bank_tx_id = bt.id LIMIT 1) re ON TRUE
+      LEFT JOIN LATERAL (SELECT i.id, i.description, i.amount
+                         FROM income i WHERE i.bank_tx_id = bt.id LIMIT 1) inc ON TRUE
       LEFT JOIN LATERAL (SELECT fc.fixed_cost_id AS fixed_id, f.label AS fixed_label
                          FROM fixed_cost_check fc JOIN fixed_cost f ON f.id = fc.fixed_cost_id
                          WHERE fc.bank_tx_id = bt.id LIMIT 1) fx ON TRUE
@@ -635,25 +730,32 @@ export function financeRoutes(app: FastifyInstance): void {
     const seesAll = !!req.user?.sees_all_konten;
     const items = rows.map(r => {
       const priv = r.receipt_priv as number | null;
+      // A bank_tx linked to another user's PRIVATE receipt is masked for them: the
+      // AMOUNT stays visible but the text (counterparty/description) is hidden, so a
+      // private purchase's merchant (e.g. the shop of a gift) doesn't leak.
       const masked = priv != null && priv !== uid && !seesAll;
-      const status = r.receipt_id ? 'receipt' : r.fixed_id ? 'fixed' : 'open';
+      const status = r.receipt_id ? 'receipt' : r.income_id ? 'income' : r.fixed_id ? 'fixed' : 'open';
       return {
         id: r.id, konto_id: r.konto_id, konto_name: r.konto_name,
         booking_date: r.booking_date, purchase_date: r.purchase_date,
-        amount: r.amount, counterparty: r.counterparty, description: r.description,
+        amount: r.amount,
+        counterparty: masked ? null : r.counterparty,
+        description: masked ? null : r.description,
+        private: masked,
         status,
         receipt: r.receipt_id
           ? (masked ? { id: null, laden: null, betrag: r.receipt_betrag, private: true }
             : { id: r.receipt_id, laden: r.receipt_laden, betrag: r.receipt_betrag, private: false })
           : null,
+        income: r.income_id ? { id: r.income_id, description: r.income_desc, betrag: r.income_betrag } : null,
         fixed: r.fixed_id ? { id: r.fixed_id, label: r.fixed_label } : null,
       };
     });
-    const filtered = q.status && ['fixed', 'receipt', 'open'].includes(q.status)
+    const filtered = q.status && ['fixed', 'receipt', 'income', 'open'].includes(q.status)
       ? items.filter(i => i.status === q.status) : items;
     // Summary counts (over the current konto/month scope, before status filter).
-    const counts = { all: items.length, open: 0, fixed: 0, receipt: 0 };
-    for (const i of items) counts[i.status as 'open' | 'fixed' | 'receipt']++;
+    const counts = { all: items.length, open: 0, fixed: 0, receipt: 0, income: 0 };
+    for (const i of items) counts[i.status as 'open' | 'fixed' | 'receipt' | 'income']++;
     return { items: filtered, counts };
   });
 
@@ -670,13 +772,14 @@ export function financeRoutes(app: FastifyInstance): void {
   app.post('/api/finances/bank/rematch', async (req) => {
     const kraw = (req.body as { konto_id?: number } | undefined)?.konto_id;
     const kontoId = kraw != null ? parseInt(String(kraw), 10) : null;
-    const linked = await autoMatchBank(kontoId);
+    const linked = (await autoMatchBank(kontoId)) + (await autoMatchBankCredits(kontoId));
     return { ok: true, linked };
   });
 
-  /** Candidate receipts to manually link to a bank transaction: unlinked receipts
-   *  near the amount (±2 %) and within a plausible date window (up to booking day,
-   *  ~14 days back). Private receipts the caller can't see are excluded. */
+  /** Candidates to manually link to a bank transaction. A DEBIT (< 0) offers scanned
+   *  receipts near the amount + purchase-date window (private ones the caller can't
+   *  see are excluded); a CREDIT (> 0) offers actual income rows near the amount with
+   *  a wide date window (pay slips are dated month-01, the bank books the pay day). */
   app.get('/api/finances/bank/:id/candidates', async (req, reply) => {
     const id = parseInt(String((req.params as { id: string }).id), 10);
     if (!id) return reply.code(400).send({ error: 'bad id' });
@@ -684,54 +787,83 @@ export function financeRoutes(app: FastifyInstance): void {
     if (!bt) return reply.code(404).send({ error: 'not found' });
     const target = Math.abs(bt.amount as number);
     const tol = Math.max(0.5, target * 0.02);
-    const hi = isoPlusDays(String(bt.booking), 1);
-    const lo = isoMinusDays(bt.purchase ? String(bt.purchase) : String(bt.booking), 14);
+    if ((bt.amount as number) < 0) {
+      const hi = isoPlusDays(String(bt.booking), 1);
+      const lo = isoMinusDays(bt.purchase ? String(bt.purchase) : String(bt.booking), 14);
+      const rows = await sql`
+        SELECT e.id, e.roh_ladenname AS label, e.gesamt_betrag::float8 AS betrag, e.datum::text AS datum
+        FROM einkauf e
+        WHERE e.bank_tx_id IS NULL AND e.gesamt_betrag IS NOT NULL
+          AND ABS(e.gesamt_betrag - ${target}) <= ${tol}
+          AND e.datum BETWEEN ${lo} AND ${hi}
+          ${kontoScope(req.user, sql`e`)}
+        ORDER BY ABS(e.gesamt_betrag - ${target}), e.datum DESC
+        LIMIT 40`;
+      return { kind: 'receipt', candidates: rows };
+    }
+    const hi = isoPlusDays(String(bt.booking), 10);
+    const lo = isoMinusDays(String(bt.booking), 45);
     const rows = await sql`
-      SELECT e.id, e.roh_ladenname AS laden, e.gesamt_betrag::float8 AS betrag, e.datum::text AS datum, e.konto_id
-      FROM einkauf e
-      WHERE e.bank_tx_id IS NULL AND e.gesamt_betrag IS NOT NULL
-        AND ABS(e.gesamt_betrag - ${target}) <= ${tol}
-        AND e.datum BETWEEN ${lo} AND ${hi}
-        ${kontoScope(req.user, sql`e`)}
-      ORDER BY ABS(e.gesamt_betrag - ${target}), e.datum DESC
+      SELECT i.id, i.description AS label, i.amount::float8 AS betrag, i.datum::text AS datum
+      FROM income i
+      WHERE i.bank_tx_id IS NULL
+        AND ABS(i.amount - ${target}) <= ${tol}
+        AND i.datum BETWEEN ${lo} AND ${hi}
+      ORDER BY ABS(i.amount - ${target}), i.datum DESC
       LIMIT 40`;
-    return { candidates: rows };
+    return { kind: 'income', candidates: rows };
   });
 
-  /** Manually link a bank transaction to a receipt (one-to-one). Atomic: verify the
-   *  target is visible + still unlinked BEFORE detaching the old one, so a bad/stale
-   *  target never destroys a valid existing link. A slot already held by another
-   *  user's PRIVATE receipt can't be hijacked. */
+  /** Manually link a bank transaction to a receipt (debit) or income row (credit),
+   *  one-to-one. Atomic: verify the target is visible + still unlinked BEFORE
+   *  detaching the old one, so a bad/stale target never destroys a valid link; a slot
+   *  held by another user's PRIVATE receipt can't be hijacked. */
   app.post('/api/finances/bank/:id/link', async (req, reply) => {
     const id = parseInt(String((req.params as { id: string }).id), 10);
-    const eid = parseInt(String((req.body as { einkauf_id?: number } | undefined)?.einkauf_id ?? ''), 10);
-    if (!id || !eid) return reply.code(400).send({ error: 'bank id and einkauf_id required' });
-    const [bt] = await sql`SELECT id FROM bank_tx WHERE id = ${id}`;
+    const body = (req.body ?? {}) as { einkauf_id?: number; income_id?: number };
+    if (!id) return reply.code(400).send({ error: 'bad id' });
+    const [bt] = await sql`SELECT id, amount::float8 AS amount FROM bank_tx WHERE id = ${id}`;
     if (!bt) return reply.code(404).send({ error: 'bank tx not found' });
     const uid = req.user?.id ?? -1;
     const seesAll = !!req.user?.sees_all_konten;
+    if ((bt.amount as number) < 0) {
+      const eid = parseInt(String(body.einkauf_id ?? ''), 10);
+      if (!eid) return reply.code(400).send({ error: 'einkauf_id required' });
+      return await sql.begin(async tx => {
+        const [cur] = await tx`SELECT id, private_for_user_id AS priv FROM einkauf WHERE bank_tx_id = ${id}`;
+        if (cur && cur.priv != null && cur.priv !== uid && !seesAll) {
+          reply.code(403); return { error: 'bank transaction already linked to a private receipt' };
+        }
+        const [target] = await tx`
+          SELECT id FROM einkauf
+          WHERE id = ${eid} AND bank_tx_id IS NULL
+            AND (${seesAll} OR private_for_user_id IS NULL OR private_for_user_id = ${uid})
+          FOR UPDATE`;
+        if (!target) { reply.code(404); return { error: 'receipt not found or already linked' }; }
+        if (cur) await tx`UPDATE einkauf SET bank_tx_id = NULL WHERE id = ${cur.id}`;
+        await tx`UPDATE einkauf SET bank_tx_id = ${id} WHERE id = ${target.id}`;
+        return { ok: true };
+      });
+    }
+    // Credit → income row (income is shared finance data, no per-row privacy).
+    const iid = parseInt(String(body.income_id ?? ''), 10);
+    if (!iid) return reply.code(400).send({ error: 'income_id required' });
     return await sql.begin(async tx => {
-      const [cur] = await tx`SELECT id, private_for_user_id AS priv FROM einkauf WHERE bank_tx_id = ${id}`;
-      if (cur && cur.priv != null && cur.priv !== uid && !seesAll) {
-        reply.code(403); return { error: 'bank transaction already linked to a private receipt' };
-      }
-      const [target] = await tx`
-        SELECT id FROM einkauf
-        WHERE id = ${eid} AND bank_tx_id IS NULL
-          AND (${seesAll} OR private_for_user_id IS NULL OR private_for_user_id = ${uid})`;
-      if (!target) { reply.code(404); return { error: 'receipt not found or already linked' }; }
-      if (cur) await tx`UPDATE einkauf SET bank_tx_id = NULL WHERE id = ${cur.id}`;
-      await tx`UPDATE einkauf SET bank_tx_id = ${id} WHERE id = ${target.id}`;
+      const [target] = await tx`SELECT id FROM income WHERE id = ${iid} AND bank_tx_id IS NULL FOR UPDATE`;
+      if (!target) { reply.code(404); return { error: 'income not found or already linked' }; }
+      await tx`UPDATE income SET bank_tx_id = NULL WHERE bank_tx_id = ${id}`;
+      await tx`UPDATE income SET bank_tx_id = ${id} WHERE id = ${target.id}`;
       return { ok: true };
     });
   });
 
-  /** Unlink the receipt attached to this bank transaction — scoped so a non-owner
-   *  can't detach a receipt that is private to someone else. */
+  /** Unlink whatever receipt / income row is attached to this bank transaction.
+   *  Receipt side is scoped so a non-owner can't detach someone's private receipt. */
   app.post('/api/finances/bank/:id/unlink', async (req, reply) => {
     const id = parseInt(String((req.params as { id: string }).id), 10);
     if (!id) return reply.code(400).send({ error: 'bad id' });
     await sql`UPDATE einkauf SET bank_tx_id = NULL WHERE bank_tx_id = ${id} ${kontoScope(req.user, sql`einkauf`)}`;
+    await sql`UPDATE income SET bank_tx_id = NULL WHERE bank_tx_id = ${id}`;
     return { ok: true };
   });
 
