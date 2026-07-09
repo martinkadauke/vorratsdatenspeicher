@@ -377,10 +377,11 @@ function FixedEvidenceModal({ id, label, month, t, onClose }: {
         {isLoading ? <Spinner /> : !data ? <p className="text-xs text-zinc-400">–</p> : (
           <>
             <p className="text-xs text-zinc-400">{t('finances.evidenceIntro')}</p>
-            {/* Bank booking — the source of truth */}
-            {data.bank ? (
-              <button type="button" disabled={data.bank.private} onClick={() => data.bank && !data.bank.private && go(`/finanzen?tab=bank&bq=${encodeURIComponent(data.bank.counterparty ?? '')}`)}
-                className={cn(rowCls, !data.bank.private && 'hover:bg-zinc-50 dark:hover:bg-zinc-800/50')}>
+            {/* Bank booking — the source of truth. Only a link when there's a
+                counterparty to search Auszüge by (else it would land unfiltered). */}
+            {data.bank ? (() => { const bankLink = !data.bank.private && !!data.bank.counterparty; return (
+              <button type="button" disabled={!bankLink} onClick={() => bankLink && go(`/finanzen?tab=bank&bq=${encodeURIComponent(data.bank!.counterparty!)}`)}
+                className={cn(rowCls, bankLink && 'hover:bg-zinc-50 dark:hover:bg-zinc-800/50')}>
                 <Landmark size={18} className="shrink-0 text-sky-500" />
                 <div className="min-w-0 flex-1">
                   <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">{t('finances.evidenceBank')}</div>
@@ -390,9 +391,9 @@ function FixedEvidenceModal({ id, label, month, t, onClose }: {
                   <div className="text-sm font-semibold">{eur(data.bank.amount)}</div>
                   <div className="text-[10px] text-zinc-400">{ddmmyyyy(data.bank.datum)}</div>
                 </div>
-                {!data.bank.private && <ChevronRight size={15} className="shrink-0 text-zinc-300 dark:text-zinc-600" />}
-              </button>
-            ) : <div className={dashCls}><Landmark size={14} /> {t('finances.evidenceNoBank')}</div>}
+                {bankLink && <ChevronRight size={15} className="shrink-0 text-zinc-300 dark:text-zinc-600" />}
+              </button>); })()
+            : <div className={dashCls}><Landmark size={14} /> {t('finances.evidenceNoBank')}</div>}
             {/* Receipt / e-mail invoice */}
             {data.receipt ? (
               <button type="button" disabled={data.receipt.private || data.receipt.id == null}
