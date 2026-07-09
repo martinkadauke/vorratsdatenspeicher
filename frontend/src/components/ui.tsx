@@ -1,4 +1,4 @@
-import { type ReactNode, type ButtonHTMLAttributes, type InputHTMLAttributes, type SelectHTMLAttributes, useEffect, forwardRef } from 'react';
+import { type ReactNode, type ButtonHTMLAttributes, type InputHTMLAttributes, type SelectHTMLAttributes, type HTMLAttributes, useEffect, forwardRef } from 'react';
 import { X } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -29,7 +29,7 @@ export function Button({
 }
 
 // ── Card ───────────────────────────────────────────────────────────────────
-export function Card({ className, children, onClick }: { className?: string; children: ReactNode; onClick?: () => void }) {
+export function Card({ className, children, onClick, ...rest }: { className?: string; children: ReactNode; onClick?: () => void } & Omit<HTMLAttributes<HTMLDivElement>, 'className' | 'onClick' | 'children'>) {
   return (
     <div
       onClick={onClick}
@@ -38,6 +38,7 @@ export function Card({ className, children, onClick }: { className?: string; chi
         onClick && 'cursor-pointer transition-colors hover:border-zinc-300 dark:hover:border-zinc-700',
         className,
       )}
+      {...rest}
     >
       {children}
     </div>

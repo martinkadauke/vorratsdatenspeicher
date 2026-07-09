@@ -531,4 +531,33 @@ export function financeRoutes(app: FastifyInstance): void {
     await sql`DELETE FROM budget WHERE id = ${id}`;
     return { ok: true };
   });
+
+  /** Drill-down: the individual article positions that make up a budget's "Ist"
+   *  (actual) for a month. Uses the SAME filter as the month view's actual sum —
+   *  category-prefix match, the budget's own konto scope, receipts already used as
+   *  fixed-cost evidence excluded, private receipts scoped — so `total` equals the
+   *  displayed Ist exactly. */
+  app.get('/api/finances/budget/:id/positions', async (req, reply) => {
+    const id = parseInt(String((req.params as { id: string }).id), 10);
+    if (!id) return reply.code(400).send({ error: 'invalid id' });
+    const b = monthBounds(((req.query as { month?: string }).month ?? '').trim());
+    if (!b) return reply.code(400).send({ error: 'month must be YYYY-MM' });
+    const rows = await sql`
+      SELECT a.id, COALESCE(NULLIF(a.canonical_name, ''), a.name) AS name,
+             a.preis::float8 AS preis, a.menge::float8 AS menge, a.einheit, a.category_path,
+             e.id AS einkauf_id, e.datum::text AS datum, e.roh_ladenname AS laden
+      FROM budget bu
+      JOIN budget_category bc ON bc.budget_id = bu.id
+      JOIN artikel a ON a.preis IS NOT NULL AND a.category_path IS NOT NULL
+        AND (a.category_path = bc.category_path OR a.category_path LIKE bc.category_path || '/%')
+      JOIN einkauf e ON e.id = a.einkauf_id
+      WHERE bu.id = ${id} AND bu.active AND e.datum BETWEEN ${b.first} AND ${b.last}
+        AND (bu.konto_id IS NULL OR e.konto_id = bu.konto_id)
+        AND NOT EXISTS (SELECT 1 FROM fixed_cost_check fc WHERE fc.einkauf_id = e.id)
+        ${kontoScope(req.user, sql`e`)}
+      ORDER BY e.datum DESC, a.id
+    `;
+    const total = Math.round(rows.reduce((s, r) => s + Number(r.preis), 0) * 100) / 100;
+    return { positions: rows, total };
+  });
 }

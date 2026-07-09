@@ -41,6 +41,7 @@ interface MonthData { month: string; income: MonthIncome[]; incomes: MonthFix[];
 
 const today = () => new Date().toISOString().slice(0, 10);
 const curMonth = () => new Date().toISOString().slice(0, 7);
+const ddmmyyyy = (d: string) => `${d.slice(8, 10)}.${d.slice(5, 7)}.${d.slice(0, 4)}`;
 const shiftMonth = (m: string, d: number) => {
   const [y, mo] = m.split('-').map(Number);
   return new Date(Date.UTC(y, mo - 1 + d, 1)).toISOString().slice(0, 7);
@@ -125,6 +126,7 @@ function MonthTab() {
   const [month, setMonth] = useUrlState('m', curMonth());
   const [picker, setPicker] = useState<MonthFix | null>(null);
   const [budgetModal, setBudgetModal] = useState<Partial<MonthBudget> | null>(null);
+  const [posBudget, setPosBudget] = useState<MonthBudget | null>(null);
 
   // Account-holder scope: one bubble per person + one for the household account;
   // default = all (Gesamthaushalt). Selecting a single person reveals sub-bubbles
@@ -294,7 +296,7 @@ function MonthTab() {
           <Section title={t('finances.varTitle')} count={budgets.length}
             right={<Button variant="secondary" className="px-2.5 py-1.5 text-xs" onClick={() => setBudgetModal({})}><Plus size={14} /> {t('finances.addBudget')}</Button>}>
             {!budgets.length && <Card className="p-3 text-xs text-zinc-400">{t('finances.noBudgets')}</Card>}
-            {budgets.map(b => <BudgetRow key={b.id} b={b} t={t} onEdit={() => setBudgetModal(b)} />)}
+            {budgets.map(b => <BudgetRow key={b.id} b={b} t={t} onEdit={() => setBudgetModal(b)} onOpen={() => setPosBudget(b)} />)}
           </Section>
         </>
       )}
@@ -304,6 +306,7 @@ function MonthTab() {
           onPick={(ev) => check.mutate({ fixed_cost_id: picker.id, month, action: 'confirm', ...ev })} />
       )}
       {budgetModal && <BudgetModal initial={budgetModal} onClose={() => setBudgetModal(null)} onSaved={invalidate} />}
+      {posBudget && <BudgetPositions budget={posBudget} month={month} onClose={() => setPosBudget(null)} />}
     </div>
   );
 }
@@ -354,11 +357,18 @@ function FixCheckRow({ f, t, onConfirmSuggestion, onConfirmNoReceipt, onSkip, on
   );
 }
 
-function BudgetRow({ b, t, onEdit }: { b: MonthBudget; t: (k: string, o?: Record<string, unknown>) => string; onEdit: () => void }) {
+function BudgetRow({ b, t, onEdit, onOpen }: { b: MonthBudget; t: (k: string, o?: Record<string, unknown>) => string; onEdit: () => void; onOpen: () => void }) {
   const pct = b.monthly_target > 0 ? (b.actual / b.monthly_target) * 100 : null;
   const barColor = pct == null ? 'bg-zinc-300' : pct > 100 ? 'bg-red-500' : pct >= 80 ? 'bg-amber-500' : 'bg-emerald-500';
   return (
-    <Card className="flex flex-col gap-1.5 p-3">
+    <Card
+      onClick={onOpen}
+      role="button"
+      tabIndex={0}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } }}
+      title={t('finances.showPositions')}
+      className="flex cursor-pointer flex-col gap-1.5 p-3 transition-colors hover:border-emerald-300 hover:bg-emerald-50/40 dark:hover:border-emerald-800 dark:hover:bg-emerald-950/20"
+    >
       <div className="flex items-center gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
@@ -370,7 +380,7 @@ function BudgetRow({ b, t, onEdit }: { b: MonthBudget; t: (k: string, o?: Record
           </div>
         </div>
         <span className={cn('shrink-0 text-sm font-semibold', pct != null && pct > 100 && 'text-red-600 dark:text-red-400')}>{eur(b.actual)}</span>
-        <button onClick={onEdit} className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800" title={t('common.edit')}>
+        <button onClick={e => { e.stopPropagation(); onEdit(); }} className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800" title={t('common.edit')}>
           <Pencil size={15} />
         </button>
       </div>
@@ -380,6 +390,51 @@ function BudgetRow({ b, t, onEdit }: { b: MonthBudget; t: (k: string, o?: Record
         </div>
       )}
     </Card>
+  );
+}
+
+interface BudgetPos {
+  id: number; name: string; preis: number; menge: number | null; einheit: string | null;
+  category_path: string | null; einkauf_id: number; datum: string; laden: string | null;
+}
+/** Drill-down modal: every article position that makes up this budget's actual
+ *  (Ist) for the month. The list total equals the Ist shown on the budget tile —
+ *  the backend reuses the same query. */
+function BudgetPositions({ budget, month, onClose }: { budget: MonthBudget; month: string; onClose: () => void }) {
+  const { t } = useTranslation();
+  const { data, isLoading } = useQuery({
+    queryKey: ['budget-positions', budget.id, month],
+    queryFn: () => api<{ positions: BudgetPos[]; total: number }>(`/api/finances/budget/${budget.id}/positions?month=${month}`),
+  });
+  const rows = data?.positions ?? [];
+  return (
+    <Modal open onClose={onClose} title={budget.label}>
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-zinc-500 dark:text-zinc-400">{t('finances.positionsCount', { count: rows.length })}</span>
+          <span className="font-semibold">{eur(data?.total ?? 0)}</span>
+        </div>
+        {isLoading ? <Spinner /> : rows.length === 0 ? (
+          <p className="py-4 text-center text-xs text-zinc-400">{t('finances.positionsEmpty')}</p>
+        ) : (
+          <ul className="-mx-1 flex max-h-[60vh] flex-col divide-y divide-zinc-100 overflow-y-auto dark:divide-zinc-800">
+            {rows.map(p => (
+              <li key={p.id} className="flex items-center gap-3 px-1 py-2">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-medium">{p.name}</div>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-zinc-500 dark:text-zinc-400">
+                    <span>{ddmmyyyy(p.datum)}</span>
+                    {p.laden && <span className="truncate">{p.laden}</span>}
+                    {p.category_path && <span className="truncate text-zinc-400">{p.category_path.split('/').pop()}</span>}
+                  </div>
+                </div>
+                <span className="shrink-0 text-sm font-semibold">{eur(p.preis)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </Modal>
   );
 }
 
@@ -625,7 +680,6 @@ interface IncomeEntry {
   konto_id: number | null; konto_name: string | null; is_shared: boolean | null;
   owner: string | null; owner_name: string | null;
 }
-const ddmmyyyy = (d: string) => `${d.slice(8, 10)}.${d.slice(5, 7)}.${d.slice(0, 4)}`;
 
 function IncomeList() {
   const { t } = useTranslation();
