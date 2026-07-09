@@ -136,7 +136,7 @@ function MonthTab() {
   const [picker, setPicker] = useState<MonthFix | null>(null);
   const [budgetModal, setBudgetModal] = useState<Partial<MonthBudget> | null>(null);
   const [posBudget, setPosBudget] = useState<MonthBudget | null>(null);
-  const [evidence, setEvidence] = useState<{ id: number; label: string } | null>(null);
+  const [evidence, setEvidence] = useState<{ id: number; label: string; kind: 'expense' | 'income' } | null>(null);
 
   // Account-holder scope: one bubble per person + one for the household account;
   // default = all (Gesamthaushalt). Selecting a single person reveals sub-bubbles
@@ -188,6 +188,13 @@ function MonthTab() {
     mutationFn: (b: { fixed_cost_id: number; month: string; action: 'confirm' | 'skip' | 'clear'; einkauf_id?: number | null; bank_tx_id?: number | null; income_id?: number | null }) =>
       api('/api/finances/check', { method: 'POST', body: b }),
     onSuccess: () => { invalidate(); setPicker(null); },
+    onError: (e: Error) => toast(e.message, 'error'),
+  });
+  // "Kein Beleg vorhanden" from the evidence modal: this fixed cost has no invoice →
+  // stop expecting one (also flips it to auto-confirmed in months without evidence).
+  const expectReceiptOff = useMutation({
+    mutationFn: (id: number) => api(`/api/fixed-costs/${id}`, { method: 'PATCH', body: { expect_receipt: false } }),
+    onSuccess: () => { invalidate(); void qc.invalidateQueries({ queryKey: ['fixed-costs'] }); toast(t('finances.evNoReceiptDone'), 'success'); },
     onError: (e: Error) => toast(e.message, 'error'),
   });
 
@@ -309,7 +316,7 @@ function MonthTab() {
               onSkip={() => check.mutate({ fixed_cost_id: f.id, month, action: 'skip' })}
               onClear={() => check.mutate({ fixed_cost_id: f.id, month, action: 'clear' })}
               onPick={() => setPicker(f)}
-              onShowEvidence={() => setEvidence({ id: f.id, label: f.label })}
+              onShowEvidence={() => setEvidence({ id: f.id, label: f.label, kind: f.kind })}
             />)}
           </Section>
 
@@ -322,7 +329,7 @@ function MonthTab() {
               onSkip={() => check.mutate({ fixed_cost_id: f.id, month, action: 'skip' })}
               onClear={() => check.mutate({ fixed_cost_id: f.id, month, action: 'clear' })}
               onPick={() => setPicker(f)}
-              onShowEvidence={() => setEvidence({ id: f.id, label: f.label })}
+              onShowEvidence={() => setEvidence({ id: f.id, label: f.label, kind: f.kind })}
             />)}
           </Section>
 
@@ -345,7 +352,15 @@ function MonthTab() {
       )}
       {budgetModal && <BudgetModal initial={budgetModal} onClose={() => setBudgetModal(null)} onSaved={invalidate} />}
       {posBudget && <BudgetPositions budget={posBudget} month={month} onClose={() => setPosBudget(null)} />}
-      {evidence && <FixedEvidenceModal id={evidence.id} label={evidence.label} month={month} t={t} onClose={() => setEvidence(null)} />}
+      {evidence && <FixedEvidenceModal id={evidence.id} label={evidence.label} kind={evidence.kind} month={month} t={t}
+        onClose={() => setEvidence(null)}
+        onNoReceipt={() => { expectReceiptOff.mutate(evidence.id); setEvidence(null); }}
+        onFindReceipt={() => {
+          const list = evidence.kind === 'income' ? (data?.incomes ?? []) : (data?.fixed ?? []);
+          const f = list.find(x => x.id === evidence.id);
+          setEvidence(null);
+          if (f) setPicker(f);
+        }} />}
     </div>
   );
 }
@@ -360,8 +375,9 @@ interface FixEvidence {
 /** Click a confirmed Fixkosten row → see the full evidence chain: the bank booking
  *  AND the receipt/e-mail (or income), whichever — or both — is attached. Each is a
  *  link (bank → Auszüge search, receipt → its detail page). */
-function FixedEvidenceModal({ id, label, month, t, onClose }: {
-  id: number; label: string; month: string; t: (k: string, o?: Record<string, unknown>) => string; onClose: () => void;
+function FixedEvidenceModal({ id, label, kind, month, t, onClose, onNoReceipt, onFindReceipt }: {
+  id: number; label: string; kind: 'expense' | 'income'; month: string; t: (k: string, o?: Record<string, unknown>) => string;
+  onClose: () => void; onNoReceipt: () => void; onFindReceipt: () => void;
 }) {
   const navigate = useNavigate();
   const { data, isLoading } = useQuery({
@@ -410,6 +426,14 @@ function FixedEvidenceModal({ id, label, month, t, onClose }: {
                 </div>
                 {!data.receipt.private && data.receipt.id != null && <ChevronRight size={15} className="shrink-0 text-zinc-300 dark:text-zinc-600" />}
               </button>
+            ) : kind === 'expense' ? (
+              <div className="rounded-xl border border-dashed border-zinc-200 p-3 dark:border-zinc-800">
+                <div className="mb-2 flex items-center gap-2 text-xs text-zinc-400"><Receipt size={14} /> {t('finances.evidenceNoReceipt')}</div>
+                <div className="flex flex-wrap gap-1.5">
+                  <button type="button" onClick={onFindReceipt} className="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-700">{t('finances.evFindReceipt')}</button>
+                  <button type="button" onClick={onNoReceipt} className="rounded-lg border border-zinc-300 px-2.5 py-1 text-xs font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">{t('finances.evNoReceiptNeeded')}</button>
+                </div>
+              </div>
             ) : <div className={dashCls}><Receipt size={14} /> {t('finances.evidenceNoReceipt')}</div>}
             {/* Income row (pay slip), if this is an income plan */}
             {data.income && (
