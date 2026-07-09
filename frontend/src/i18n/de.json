@@ -81,6 +81,7 @@
     "showPositions": "Positionen anzeigen",
     "positionsCount": "Positionen: {{count}}",
     "positionsEmpty": "Keine Positionen in diesem Monat.",
+    "openReceipt": "Zum Beleg springen",
     "pickerTitle": "Rechnung zuordnen",
     "pickerSearch": "Händler suchen …",
     "pickerEmpty": "Keine Rechnungen in diesem Monat. Fixkosten werden nur mit Rechnungen belegt (E-Mail/Upload) – Kassenbons zählen nicht.",

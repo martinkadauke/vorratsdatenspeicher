@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -402,11 +403,13 @@ interface BudgetPos {
  *  the backend reuses the same query. */
 function BudgetPositions({ budget, month, onClose }: { budget: MonthBudget; month: string; onClose: () => void }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { data, isLoading } = useQuery({
     queryKey: ['budget-positions', budget.id, month],
     queryFn: () => api<{ positions: BudgetPos[]; total: number }>(`/api/finances/budget/${budget.id}/positions?month=${month}`),
   });
   const rows = data?.positions ?? [];
+  const openReceipt = (p: BudgetPos) => { onClose(); navigate(`/receipts/${p.einkauf_id}?highlight=${p.id}`); };
   return (
     <Modal open onClose={onClose} title={budget.label}>
       <div className="flex flex-col gap-3">
@@ -419,7 +422,13 @@ function BudgetPositions({ budget, month, onClose }: { budget: MonthBudget; mont
         ) : (
           <ul className="-mx-1 flex max-h-[60vh] flex-col divide-y divide-zinc-100 overflow-y-auto dark:divide-zinc-800">
             {rows.map(p => (
-              <li key={p.id} className="flex items-center gap-3 px-1 py-2">
+              <li key={p.id}
+                onClick={() => openReceipt(p)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openReceipt(p); } }}
+                title={t('finances.openReceipt')}
+                className="flex cursor-pointer items-center gap-2 rounded-lg px-1 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium">{p.name}</div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-zinc-500 dark:text-zinc-400">
@@ -429,6 +438,7 @@ function BudgetPositions({ budget, month, onClose }: { budget: MonthBudget; mont
                   </div>
                 </div>
                 <span className="shrink-0 text-sm font-semibold">{eur(p.preis)}</span>
+                <ChevronRight size={15} className="shrink-0 text-zinc-300 dark:text-zinc-600" />
               </li>
             ))}
           </ul>

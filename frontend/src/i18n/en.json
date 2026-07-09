@@ -81,6 +81,7 @@
     "showPositions": "Show positions",
     "positionsCount": "Positions: {{count}}",
     "positionsEmpty": "No positions this month.",
+    "openReceipt": "Jump to receipt",
     "pickerTitle": "Assign invoice",
     "pickerSearch": "Search merchant …",
     "pickerEmpty": "No invoices this month. Fixed costs are only backed by invoices (e-mail/upload) – till receipts don't count.",
