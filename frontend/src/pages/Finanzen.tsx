@@ -1,11 +1,11 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Wallet, Plus, Pencil, Trash2, Home, User as UserIcon, Info,
   ChevronLeft, ChevronRight, ChevronDown, CheckCircle2, Circle, CircleDot, Search, X, Upload, Layers, Lock,
-  Link2, Link2Off, RefreshCw, Landmark,
+  Link2, Link2Off, RefreshCw, Landmark, SlidersHorizontal, Flag,
 } from 'lucide-react';
 import { api } from '../api/client';
 import { Card, Spinner, Button, Input, Label, Select, Switch, Modal, EmptyState, Badge } from '../components/ui';
@@ -974,6 +974,7 @@ interface BankTx {
   id: number; konto_id: number | null; konto_name: string | null;
   booking_date: string; purchase_date: string | null; amount: number;
   counterparty: string | null; description: string | null; private: boolean;
+  review_flag: boolean;
   status: 'open' | 'fixed' | 'receipt' | 'income';
   receipt: { id: number | null; laden: string | null; betrag: number | null; private: boolean } | null;
   income: { id: number; description: string | null; betrag: number } | null;
@@ -1053,9 +1054,10 @@ function BankUpload({ scopeKonten }: { scopeKonten: KontoLite[] }) {
   );
 }
 
-function BankRow({ tx, t, onOpen, onLink, onUnlink }: {
+function BankRow({ tx, t, onOpen, onLink, onUnlink, onFlag }: {
   tx: BankTx; t: (k: string, o?: Record<string, unknown>) => string;
   onOpen: (receiptId: number) => void; onLink: (tx: BankTx) => void; onUnlink: (id: number) => void;
+  onFlag: (id: number, flag: boolean) => void;
 }) {
   const credit = tx.amount > 0;
   const canOpen = tx.status === 'receipt' && tx.receipt?.id != null && !tx.receipt.private;
@@ -1066,8 +1068,23 @@ function BankRow({ tx, t, onOpen, onLink, onUnlink }: {
       : tx.status === 'fixed' ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300'
         : 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300';
   const onClick = canOpen ? () => onOpen(tx.receipt!.id!) : canLink ? () => onLink(tx) : undefined;
+  // Long-press (touch or mouse-hold, ~500 ms) toggles the personal red review mark.
+  // A fired long-press suppresses the click that follows it.
+  const longPressed = useRef(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startPress = () => {
+    longPressed.current = false;
+    timer.current = setTimeout(() => { longPressed.current = true; onFlag(tx.id, !tx.review_flag); }, 500);
+  };
+  const cancelPress = () => { if (timer.current) { clearTimeout(timer.current); timer.current = null; } };
+  const handleClick = () => { if (longPressed.current) { longPressed.current = false; return; } onClick?.(); };
   return (
-    <Card onClick={onClick} className="flex items-center gap-3 p-3">
+    <Card
+      onClick={handleClick}
+      onPointerDown={startPress} onPointerUp={cancelPress} onPointerLeave={cancelPress} onPointerCancel={cancelPress}
+      className={cn('flex select-none items-center gap-3 p-3', tx.review_flag && 'ring-2 ring-red-400 dark:ring-red-500/70')}
+    >
+      {tx.review_flag && <Flag size={14} className="shrink-0 fill-red-500 text-red-500" />}
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium">
           {tx.private
@@ -1139,19 +1156,27 @@ function BankTab() {
   const [konto, setKonto] = useUrlState('bk', '');
   const [month, setMonth] = useUrlState('bm', '');
   const [status, setStatus] = useUrlState('bs', 'all');
+  const [search, setSearch] = useUrlState('bq', '');
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [linkTx, setLinkTx] = useState<BankTx | null>(null);
   const qs = new URLSearchParams();
   if (konto) qs.set('konto', konto);
   if (month) qs.set('month', month);
   if (status !== 'all') qs.set('status', status);
+  if (search.trim()) qs.set('q', search.trim());
   const { data, isLoading } = useQuery({
-    queryKey: ['bank-tx', konto, month, status],
+    queryKey: ['bank-tx', konto, month, status, search],
     queryFn: () => api<{ items: BankTx[]; counts: { all: number; open: number; fixed: number; receipt: number; income: number } }>(`/api/finances/bank?${qs.toString()}`),
   });
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ['bank-tx'] });
     void qc.invalidateQueries({ queryKey: ['bank-candidates'] });
   };
+  const flag = useMutation({
+    mutationFn: ({ id, on }: { id: number; on: boolean }) => api(`/api/finances/bank/${id}/flag`, { method: 'POST', body: { flag: on } }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['bank-tx'] }),
+    onError: (e: Error) => toast(e.message, 'error'),
+  });
   const link = useMutation({
     // Debit → receipt (einkauf_id); credit → income row (income_id).
     mutationFn: (id: number) => api(`/api/finances/bank/${linkTx!.id}/link`, { method: 'POST', body: linkTx!.amount > 0 ? { income_id: id } : { einkauf_id: id } }),
@@ -1172,37 +1197,63 @@ function BankTab() {
   const chips: { key: 'all' | 'open' | 'fixed' | 'receipt' | 'income'; n?: number }[] = [
     { key: 'all', n: c?.all }, { key: 'open', n: c?.open }, { key: 'receipt', n: c?.receipt }, { key: 'income', n: c?.income }, { key: 'fixed', n: c?.fixed },
   ];
+  const hasActiveFilters = !!konto || !!month || status !== 'all';
   return (
     <div className="flex flex-col gap-4">
-      <BankUpload scopeKonten={scopeKonten} />
       <div className="flex flex-col gap-2">
-        <div className="flex flex-wrap gap-2">
-          <Select value={konto} onChange={e => setKonto(e.target.value)} className="min-w-0 flex-1">
-            <option value="">{t('finances.bank.allKonten')}</option>
-            {scopeKonten.map(k => <option key={k.id} value={k.id}>{scopeLabelOf(t, k)}</option>)}
-          </Select>
-          <Input type="month" value={month} onChange={e => setMonth(e.target.value)} className="w-[9.5rem]" />
-          <button onClick={() => rematch.mutate()} disabled={rematch.isPending} title={t('finances.bank.rematch')}
-            className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-zinc-300 px-2.5 py-2 text-xs font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
-            <RefreshCw size={14} className={cn(rematch.isPending && 'animate-spin')} /> {t('finances.bank.rematch')}
+        <div className="flex items-center gap-2">
+          <div className="relative min-w-0 flex-1">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+            <Input className="pl-9 pr-9" placeholder={t('finances.bank.search')} value={search} onChange={e => setSearch(e.target.value)} />
+            {search && (
+              <button onClick={() => setSearch('')} title={t('common.clear')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800">
+                <X size={15} />
+              </button>
+            )}
+          </div>
+          <button type="button" onClick={() => setFiltersOpen(o => !o)} title={t('receipts.filters')} aria-pressed={filtersOpen}
+            className={cn('relative flex shrink-0 items-center rounded-xl border px-2.5 py-2 transition',
+              filtersOpen ? 'border-emerald-500 bg-emerald-50 text-emerald-600 dark:border-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400'
+                : 'border-zinc-200 text-zinc-400 hover:text-zinc-600 dark:border-zinc-800')}>
+            <SlidersHorizontal size={16} />
+            {hasActiveFilters && !filtersOpen && <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-zinc-950" />}
           </button>
         </div>
-        <div className="flex flex-wrap gap-1.5">
-          {chips.map(ch => (
-            <button key={ch.key} onClick={() => setStatus(ch.key)}
-              className={cn('rounded-full border px-2.5 py-1 text-xs font-medium',
-                status === ch.key ? 'border-transparent bg-emerald-600 text-white' : 'border-zinc-300 text-zinc-600 dark:border-zinc-700 dark:text-zinc-300')}>
-              {t(`finances.bank.filter_${ch.key}`)}{ch.n != null ? ` · ${ch.n}` : ''}
-            </button>
-          ))}
-        </div>
+        {filtersOpen && (
+          <>
+            <div className="flex flex-wrap gap-2">
+              <Select value={konto} onChange={e => setKonto(e.target.value)} className="min-w-0 flex-1">
+                <option value="">{t('finances.bank.allKonten')}</option>
+                {scopeKonten.map(k => <option key={k.id} value={k.id}>{scopeLabelOf(t, k)}</option>)}
+              </Select>
+              <Input type="month" value={month} onChange={e => setMonth(e.target.value)} className="w-[9.5rem]" />
+              <button onClick={() => rematch.mutate()} disabled={rematch.isPending} title={t('finances.bank.rematch')}
+                className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-zinc-300 px-2.5 py-2 text-xs font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
+                <RefreshCw size={14} className={cn(rematch.isPending && 'animate-spin')} /> {t('finances.bank.rematch')}
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {chips.map(ch => (
+                <button key={ch.key} onClick={() => setStatus(ch.key)}
+                  className={cn('rounded-full border px-2.5 py-1 text-xs font-medium',
+                    status === ch.key ? 'border-transparent bg-emerald-600 text-white' : 'border-zinc-300 text-zinc-600 dark:border-zinc-700 dark:text-zinc-300')}>
+                  {t(`finances.bank.filter_${ch.key}`)}{ch.n != null ? ` · ${ch.n}` : ''}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
       </div>
       {isLoading ? <Spinner /> : !items.length ? (
-        <Card className="p-4 text-center text-xs text-zinc-400">{t('finances.bank.empty')}</Card>
+        <Card className="p-4 text-center text-xs text-zinc-400">{search ? t('finances.bank.noSearchResults') : t('finances.bank.empty')}</Card>
       ) : (
-        <div className="flex flex-col gap-2">
-          {items.map(tx => <BankRow key={tx.id} tx={tx} t={t} onOpen={id => navigate(`/receipts/${id}`)} onLink={setLinkTx} onUnlink={unlink.mutate} />)}
-        </div>
+        <>
+          <p className="-mb-1 text-[11px] text-zinc-400">{t('finances.bank.flagHint')}</p>
+          <div className="flex flex-col gap-2">
+            {items.map(tx => <BankRow key={tx.id} tx={tx} t={t} onOpen={id => navigate(`/receipts/${id}`)} onLink={setLinkTx} onUnlink={unlink.mutate} onFlag={(id, on) => flag.mutate({ id, on })} />)}
+          </div>
+        </>
       )}
       {linkTx && <BankLinkPicker tx={linkTx} t={t} onClose={() => setLinkTx(null)} onPick={link.mutate} />}
     </div>
@@ -1289,6 +1340,7 @@ function ManageTab() {
   return (
     <div className="flex flex-col gap-4">
       <PayslipUpload scopeKonten={scopeKonten} />
+      <BankUpload scopeKonten={scopeKonten} />
       <IncomeList />
 
       <div className="flex justify-end">

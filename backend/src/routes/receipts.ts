@@ -22,6 +22,9 @@ function receiptSearch(e: Frag) {
     text: [
       col(sql`${e}.roh_ladenname`),
       (p: string) => itemsWhere(sql`(${lk(sql`ax.name`, p)} OR ${lk(sql`ax.canonical_name`, p)} OR ${lk(sql`ax.ai_guess`, p)})`),
+      // Also match the linked bank booking's text, so a receipt filed under one
+      // name (e.g. "Scriptum") is found by its bank counterparty ("nexi germany").
+      (p: string) => sql`EXISTS (SELECT 1 FROM bank_tx bt WHERE bt.id = ${e}.bank_tx_id AND (${lk(sql`bt.counterparty`, p)} OR ${lk(sql`bt.description`, p)}))`,
     ],
     fields: {
       laden: col(sql`${e}.roh_ladenname`),

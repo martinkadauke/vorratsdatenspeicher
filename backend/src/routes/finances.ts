@@ -775,14 +775,15 @@ export function financeRoutes(app: FastifyInstance): void {
    *  A linked receipt that is private to someone else is masked (no id/store) for
    *  non-owners; the match status itself still shows. */
   app.get('/api/finances/bank', async (req, reply) => {
-    const q = (req.query ?? {}) as { konto?: string; month?: string; status?: string };
+    const q = (req.query ?? {}) as { konto?: string; month?: string; status?: string; q?: string };
     const kontoId = q.konto ? parseInt(q.konto, 10) : null;
     const b = q.month?.trim() ? monthBounds(q.month.trim()) : null;
     if (q.month?.trim() && !b) return reply.code(400).send({ error: 'month must be YYYY-MM' });
+    const search = (q.q ?? '').trim().toLowerCase();
     const rows = await sql`
       SELECT bt.id, bt.konto_id, k.name AS konto_name,
              bt.booking_date::text AS booking_date, bt.purchase_date::text AS purchase_date,
-             bt.amount::float8 AS amount, bt.counterparty, bt.description,
+             bt.amount::float8 AS amount, bt.counterparty, bt.description, bt.ref, bt.review_flag,
              re.id AS receipt_id, re.roh_ladenname AS receipt_laden, re.gesamt_betrag::float8 AS receipt_betrag,
              re.private_for_user_id AS receipt_priv,
              inc.id AS income_id, inc.description AS income_desc, inc.amount::float8 AS income_betrag,
@@ -819,6 +820,7 @@ export function financeRoutes(app: FastifyInstance): void {
         counterparty: masked ? null : r.counterparty,
         description: masked ? null : r.description,
         private: masked,
+        review_flag: r.review_flag === true,
         status,
         receipt: r.receipt_id
           ? (masked ? { id: null, laden: null, betrag: r.receipt_betrag, private: true }
@@ -826,13 +828,25 @@ export function financeRoutes(app: FastifyInstance): void {
           : null,
         income: r.income_id ? { id: r.income_id, description: r.income_desc, betrag: r.income_betrag } : null,
         fixed: r.fixed_id ? { id: r.fixed_id, label: r.fixed_label } : null,
+        // ref kept only for the (post-masking) search haystack below, not exposed.
+        _ref: (r.ref as string | null) ?? '',
       };
     });
-    const filtered = q.status && ['fixed', 'receipt', 'income', 'open'].includes(q.status)
-      ? items.filter(i => i.status === q.status) : items;
-    // Summary counts (over the current konto/month scope, before status filter).
-    const counts = { all: items.length, open: 0, fixed: 0, receipt: 0, income: 0 };
-    for (const i of items) counts[i.status as 'open' | 'fixed' | 'receipt' | 'income']++;
+    // Search runs AFTER masking, so a private receipt's masked merchant text can
+    // never be probed via search — only the visible fields + amount + bank ref match.
+    const searched = search
+      ? items.filter(i => {
+        const s2 = search.replace(',', '.');
+        const hay = `${i.counterparty ?? ''} ${i.description ?? ''} ${i._ref} ${i.amount}`.toLowerCase();
+        return hay.includes(search) || hay.includes(s2);
+      })
+      : items;
+    const filtered = (q.status && ['fixed', 'receipt', 'income', 'open'].includes(q.status)
+      ? searched.filter(i => i.status === q.status) : searched)
+      .map(({ _ref, ...rest }) => rest); // drop the internal search field from the payload
+    // Summary counts (over the current konto/month/search scope, before status filter).
+    const counts = { all: searched.length, open: 0, fixed: 0, receipt: 0, income: 0 };
+    for (const i of searched) counts[i.status as 'open' | 'fixed' | 'receipt' | 'income']++;
     return { items: filtered, counts };
   });
 
@@ -843,6 +857,17 @@ export function financeRoutes(app: FastifyInstance): void {
     if (!id) return reply.code(400).send({ error: 'bad id' });
     await sql`DELETE FROM bank_tx WHERE id = ${id}`;
     return { ok: true };
+  });
+
+  /** Toggle the personal "needs a closer look" marker on a bank statement line
+   *  (set via long-press in the Auszüge list). Pure review aid — no matching effect. */
+  app.post('/api/finances/bank/:id/flag', async (req, reply) => {
+    const id = parseInt(String((req.params as { id: string }).id), 10);
+    if (!id) return reply.code(400).send({ error: 'bad id' });
+    const flag = (req.body as { flag?: unknown } | undefined)?.flag === true;
+    const [row] = await sql`UPDATE bank_tx SET review_flag = ${flag} WHERE id = ${id} RETURNING id, review_flag`;
+    if (!row) return reply.code(404).send({ error: 'not found' });
+    return { ok: true, review_flag: row.review_flag };
   });
 
   /** Re-run auto-matching (e.g. after scanning receipts that were missing before). */
