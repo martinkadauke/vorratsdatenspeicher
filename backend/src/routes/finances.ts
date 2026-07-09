@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import type { TransactionSql } from 'postgres';
 import sql from '../db.js';
 import { kontoScope } from '../auth/konto.js';
 import { extractPayslip } from '../llm/ocr.js';
@@ -21,16 +22,45 @@ export function financeRoutes(app: FastifyInstance): void {
     return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
   };
 
+  /** Thrown inside sql.begin() to roll the transaction back and surface an HTTP
+   *  status to the client (partner-linking validation). */
+  class HttpError extends Error {
+    constructor(public code: number, message: string) { super(message); }
+  }
+  type Tx = TransactionSql<Record<string, never>>;
+
+  /** Break a fixed-cost's Umbuchung pairing symmetrically: if `id` has a partner,
+   *  null out both sides. No-op if unpaired. */
+  async function clearPartner(tx: Tx, id: number): Promise<void> {
+    const [row] = await tx`SELECT counterpart_id FROM fixed_cost WHERE id = ${id} FOR UPDATE`;
+    const partner = row?.counterpart_id as number | null | undefined;
+    if (partner != null) {
+      await tx`UPDATE fixed_cost SET counterpart_id = NULL WHERE id IN (${id}, ${partner})`;
+    }
+  }
+
+  /** Pair two fixed-cost legs of an internal transfer symmetrically, first
+   *  detaching any prior partners so the link stays strictly 1:1. */
+  async function linkCounterpart(tx: Tx, aId: number, bId: number): Promise<void> {
+    await clearPartner(tx, aId);
+    await clearPartner(tx, bId);
+    await tx`UPDATE fixed_cost SET counterpart_id = ${bId} WHERE id = ${aId}`;
+    await tx`UPDATE fixed_cost SET counterpart_id = ${aId} WHERE id = ${bId}`;
+  }
+
   /** All fixed costs with their konto scope (household vs which person). */
   app.get('/api/fixed-costs', async () => {
     return sql`
       SELECT f.id, f.label, f.category_path, f.monthly_eur::float8 AS monthly_eur, f.kind, f.frequency, f.is_transfer,
              f.konto_id, f.start_date::text AS start_date, f.end_date::text AS end_date, f.active,
-             f.expect_receipt, f.match_merchant,
+             f.expect_receipt, f.match_merchant, f.counterpart_id,
+             cp.label AS counterpart_label, ck.name AS counterpart_konto,
              k.name AS konto_name, k.is_shared, k.user_id AS konto_user_id, u.username AS owner
       FROM fixed_cost f
       LEFT JOIN konto k ON k.id = f.konto_id
       LEFT JOIN users u ON u.id = k.user_id
+      LEFT JOIN fixed_cost cp ON cp.id = f.counterpart_id
+      LEFT JOIN konto ck ON ck.id = cp.konto_id
       ORDER BY f.active DESC, k.is_shared DESC, u.username NULLS FIRST, f.label
     `;
   });
@@ -48,12 +78,29 @@ export function financeRoutes(app: FastifyInstance): void {
     if (!kontoId) return reply.code(400).send({ error: 'konto_id required' });
     const kind = b.kind === 'income' ? 'income' : 'expense';
     const freq = ['monthly', 'quarterly', 'yearly'].includes(String(b.frequency)) ? String(b.frequency) : 'monthly';
-    const [row] = await sql`
-      INSERT INTO fixed_cost (label, category_path, monthly_eur, kind, frequency, is_transfer, konto_id, start_date, end_date, active, expect_receipt, match_merchant, created_by)
-      VALUES (${label}, ${category}, ${monthly}, ${kind}, ${freq}, ${b.is_transfer === true}, ${kontoId}, ${start}, ${end}, ${b.active !== false},
-              ${b.expect_receipt !== false}, ${(b.match_merchant ?? '').toString().trim() || null}, ${req.user?.id ?? null})
-      RETURNING id`;
-    return { ok: true, id: row.id };
+    const isTransfer = b.is_transfer === true;
+    const cpId = b.counterpart_id != null ? parseInt(String(b.counterpart_id), 10) : null;
+    try {
+      const id = await sql.begin(async tx => {
+        const [row] = await tx`
+          INSERT INTO fixed_cost (label, category_path, monthly_eur, kind, frequency, is_transfer, konto_id, start_date, end_date, active, expect_receipt, match_merchant, created_by)
+          VALUES (${label}, ${category}, ${monthly}, ${kind}, ${freq}, ${isTransfer}, ${kontoId}, ${start}, ${end}, ${b.active !== false},
+                  ${b.expect_receipt !== false}, ${(b.match_merchant ?? '').toString().trim() || null}, ${req.user?.id ?? null})
+          RETURNING id`;
+        if (cpId) {
+          if (!isTransfer) throw new HttpError(400, 'Nur Umbuchungen können eine Gegenbuchung haben');
+          const [partner] = await tx`SELECT id, is_transfer FROM fixed_cost WHERE id = ${cpId} FOR UPDATE`;
+          if (!partner) throw new HttpError(400, 'Gegenbuchung nicht gefunden');
+          if (!partner.is_transfer) throw new HttpError(400, 'Die Gegenbuchung muss ebenfalls als Umbuchung markiert sein');
+          await linkCounterpart(tx, row.id as number, cpId);
+        }
+        return row.id as number;
+      });
+      return { ok: true, id };
+    } catch (e) {
+      if (e instanceof HttpError) return reply.code(e.code).send({ error: e.message });
+      throw e;
+    }
   });
 
   app.patch('/api/fixed-costs/:id', async (req, reply) => {
@@ -85,10 +132,36 @@ export function financeRoutes(app: FastifyInstance): void {
     if ('kind' in b) updates.kind = b.kind === 'income' ? 'income' : 'expense';
     if ('frequency' in b) updates.frequency = ['monthly', 'quarterly', 'yearly'].includes(String(b.frequency)) ? String(b.frequency) : 'monthly';
     if ('is_transfer' in b) updates.is_transfer = b.is_transfer === true;
-    if (!Object.keys(updates).length) return reply.code(400).send({ error: 'no patchable fields' });
-    const [row] = await sql`UPDATE fixed_cost SET ${sql(updates)} WHERE id = ${id} RETURNING id`;
-    if (!row) return reply.code(404).send({ error: 'not found' });
-    return { ok: true };
+    const hasCp = 'counterpart_id' in b;
+    const cpId = hasCp && b.counterpart_id != null ? parseInt(String(b.counterpart_id), 10) : null;
+    if (hasCp && b.counterpart_id != null && (!cpId || cpId === id)) return reply.code(400).send({ error: 'invalid counterpart_id' });
+    if (!Object.keys(updates).length && !hasCp) return reply.code(400).send({ error: 'no patchable fields' });
+    try {
+      await sql.begin(async tx => {
+        if (Object.keys(updates).length) {
+          const [row] = await tx`UPDATE fixed_cost SET ${tx(updates)} WHERE id = ${id} RETURNING id`;
+          if (!row) throw new HttpError(404, 'not found');
+        }
+        // A row that is no longer an Umbuchung must not keep a Gegenbuchung link.
+        if (updates.is_transfer === false) await clearPartner(tx, id);
+        if (hasCp) {
+          const [a] = await tx`SELECT id, is_transfer FROM fixed_cost WHERE id = ${id} FOR UPDATE`;
+          if (!a) throw new HttpError(404, 'not found');
+          if (cpId == null) {
+            await clearPartner(tx, id);
+          } else {
+            const [partner] = await tx`SELECT id, is_transfer FROM fixed_cost WHERE id = ${cpId} FOR UPDATE`;
+            if (!partner) throw new HttpError(400, 'Gegenbuchung nicht gefunden');
+            if (!a.is_transfer || !partner.is_transfer) throw new HttpError(400, 'Beide Buchungen müssen als Umbuchung markiert sein');
+            await linkCounterpart(tx, id, cpId);
+          }
+        }
+      });
+      return { ok: true };
+    } catch (e) {
+      if (e instanceof HttpError) return reply.code(e.code).send({ error: e.message });
+      throw e;
+    }
   });
 
   app.delete('/api/fixed-costs/:id', async (req, reply) => {

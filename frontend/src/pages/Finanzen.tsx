@@ -26,6 +26,7 @@ interface FixedCost {
   id: number; label: string; category_path: string | null; monthly_eur: number; kind: 'expense' | 'income'; frequency: Freq; is_transfer: boolean;
   konto_id: number | null; start_date: string; end_date: string | null; active: boolean;
   expect_receipt: boolean; match_merchant: string | null;
+  counterpart_id: number | null; counterpart_label: string | null; counterpart_konto: string | null;
   konto_name: string | null; is_shared: boolean | null; konto_user_id: number | null; owner: string | null;
 }
 interface KontoLite { id: number; name: string; is_shared: boolean; is_cash: boolean; user_id: number | null; owner: string | null; owner_name: string | null }
@@ -715,10 +716,90 @@ function BudgetModal({ initial, onClose, onSaved }: {
 
 // ── management tab (fixed-cost master data) ─────────────────────────────────
 
-type Draft = { id?: number; label: string; monthly_eur: string; kind: 'expense' | 'income'; frequency: Freq; is_transfer: boolean; konto_id: string; category_path: string | null; start_date: string; end_date: string; active: boolean; expect_receipt: boolean; match_merchant: string };
+/** Umbuchung pairing control: link this transfer leg to its opposite leg — pick
+ *  an existing fixed cost or create the counterpart on another account. Only
+ *  shown for a saved transfer; a brand-new row must be saved before it can pair
+ *  (the backend needs its id to write the symmetric link). */
+function CounterpartField({ draft, setDraft, costs, scopeKonten }: {
+  draft: Draft; setDraft: (d: Draft) => void; costs: FixedCost[]; scopeKonten: KontoLite[];
+}) {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const [creating, setCreating] = useState(false);
+  const [cpLabel, setCpLabel] = useState('');
+  const [cpKonto, setCpKonto] = useState('');
+
+  const partner = draft.counterpart_id != null ? costs.find(c => c.id === draft.counterpart_id) : null;
+  // The natural counterpart is an opposite-kind transfer on another account.
+  const candidates = costs.filter(c => c.is_transfer && c.id !== draft.id && c.kind !== draft.kind);
+
+  const create = useMutation({
+    mutationFn: () => api<{ id: number }>('/api/fixed-costs', { method: 'POST', body: {
+      label: cpLabel.trim(),
+      monthly_eur: draft.monthly_eur,
+      kind: draft.kind === 'income' ? 'expense' : 'income',
+      frequency: draft.frequency,
+      is_transfer: true,
+      konto_id: Number(cpKonto),
+      category_path: draft.category_path,
+      start_date: draft.start_date,
+      end_date: draft.end_date || null,
+      active: draft.active,
+      expect_receipt: false,
+      counterpart_id: draft.id,
+    } }),
+    onSuccess: (r) => {
+      void qc.invalidateQueries({ queryKey: ['fixed-costs'] });
+      setDraft({ ...draft, counterpart_id: r.id });
+      setCreating(false); setCpLabel(''); setCpKonto('');
+    },
+    onError: (e: Error) => toast(e.message, 'error'),
+  });
+
+  if (!draft.id) return <p className="pl-11 text-xs text-zinc-400">{t('finances.cpSaveFirst')}</p>;
+
+  return (
+    <div className="ml-11 rounded-xl border border-violet-200 bg-violet-50/50 p-3 dark:border-violet-900/50 dark:bg-violet-950/20">
+      <Label>{t('finances.counterpart')}</Label>
+      {partner ? (
+        <div className="flex items-center justify-between gap-2 text-sm">
+          <span className="min-w-0 truncate">↔ <span className="font-medium">{partner.label}</span> <span className="text-zinc-500">· {partner.konto_name}</span></span>
+          <button type="button" onClick={() => setDraft({ ...draft, counterpart_id: null })}
+            className="shrink-0 text-xs text-red-500 hover:underline">{t('finances.unlink')}</button>
+        </div>
+      ) : creating ? (
+        <div className="flex flex-col gap-2">
+          <Input value={cpLabel} onChange={e => setCpLabel(e.target.value)} placeholder={t('finances.label')} />
+          <Select value={cpKonto} onChange={e => setCpKonto(e.target.value)}>
+            <option value="" disabled>–</option>
+            {scopeKonten.filter(k => String(k.id) !== draft.konto_id).map(k => <option key={k.id} value={k.id}>{scopeLabelOf(t, k)}</option>)}
+          </Select>
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={() => { setCreating(false); setCpLabel(''); setCpKonto(''); }}
+              className="text-xs text-zinc-500 hover:underline">{t('common.cancel')}</button>
+            <button type="button" disabled={!cpLabel.trim() || !cpKonto || create.isPending} onClick={() => create.mutate()}
+              className="rounded-lg bg-violet-600 px-3 py-1 text-xs font-medium text-white disabled:opacity-50">{t('finances.cpCreate')}</button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <Select value="" onChange={e => e.target.value && setDraft({ ...draft, counterpart_id: Number(e.target.value) })}>
+            <option value="">{t('finances.cpPick')}</option>
+            {candidates.map(c => <option key={c.id} value={c.id}>{c.label} · {c.konto_name}</option>)}
+          </Select>
+          <button type="button" onClick={() => { setCreating(true); setCpLabel(draft.label); }}
+            className="self-start text-xs text-violet-600 hover:underline dark:text-violet-400">+ {t('finances.cpCreate')}</button>
+        </div>
+      )}
+      <p className="mt-2 text-xs text-zinc-400">{t('finances.counterpartHint')}</p>
+    </div>
+  );
+}
+
+type Draft = { id?: number; label: string; monthly_eur: string; kind: 'expense' | 'income'; frequency: Freq; is_transfer: boolean; konto_id: string; category_path: string | null; start_date: string; end_date: string; active: boolean; expect_receipt: boolean; match_merchant: string; counterpart_id: number | null };
 const emptyDraft = (kontoId?: number, kind: 'expense' | 'income' = 'expense'): Draft => ({
   label: '', monthly_eur: '', kind, frequency: 'monthly', is_transfer: false, konto_id: kontoId ? String(kontoId) : '', category_path: null,
-  start_date: today(), end_date: '', active: true, expect_receipt: true, match_merchant: '',
+  start_date: today(), end_date: '', active: true, expect_receipt: true, match_merchant: '', counterpart_id: null,
 });
 
 /** Upload one or more pay slips (DATEV etc.) → each is OCR'd and filed as an
@@ -1159,6 +1240,9 @@ function ManageTab() {
         active: d.active,
         expect_receipt: d.expect_receipt,
         match_merchant: d.match_merchant.trim() || null,
+        // Only send the pairing on an existing transfer: on PATCH it preserves
+        // (or re-sets) the link; a brand-new row can't pair before it has an id.
+        ...(d.id ? { counterpart_id: d.is_transfer ? d.counterpart_id : null } : {}),
       };
       return d.id
         ? api(`/api/fixed-costs/${d.id}`, { method: 'PATCH', body })
@@ -1251,6 +1335,7 @@ function ManageTab() {
                     <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-zinc-500 dark:text-zinc-400">
                       {c.kind === 'income' && <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">{t('finances.incomeTitle')}</span>}
                       {c.is_transfer && <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">{t('finances.transferBadge')}</span>}
+                      {c.counterpart_label && <span className="truncate text-violet-600 dark:text-violet-400" title={c.counterpart_konto ?? undefined}>↔ {c.counterpart_label}</span>}
                       {c.frequency !== 'monthly' && <span className="rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">{t(`finances.freq.${c.frequency}`)} · {eur(c.monthly_eur)}</span>}
                       {c.category_path && <span className="truncate">{c.category_path.split('/').pop()}</span>}
                       {!c.expect_receipt && <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] dark:bg-zinc-800">{t('finances.noReceiptBadge')}</span>}
@@ -1260,7 +1345,7 @@ function ManageTab() {
                     </div>
                   </div>
                   <span className={cn('shrink-0 text-sm font-semibold', c.kind === 'income' && 'text-emerald-600 dark:text-emerald-500')}>{c.kind === 'income' ? '+' : ''}{eur(amortized(c.monthly_eur, c.frequency))}<span className="text-xs font-normal text-zinc-400">{t('finances.perMonth')}</span></span>
-                  <button onClick={() => setModal({ id: c.id, label: c.label, monthly_eur: String(c.monthly_eur).replace('.', ','), kind: c.kind, frequency: c.frequency, is_transfer: c.is_transfer, konto_id: String(c.konto_id ?? ''), category_path: c.category_path, start_date: c.start_date, end_date: c.end_date ?? '', active: c.active, expect_receipt: c.expect_receipt, match_merchant: c.match_merchant ?? '' })}
+                  <button onClick={() => setModal({ id: c.id, label: c.label, monthly_eur: String(c.monthly_eur).replace('.', ','), kind: c.kind, frequency: c.frequency, is_transfer: c.is_transfer, konto_id: String(c.konto_id ?? ''), category_path: c.category_path, start_date: c.start_date, end_date: c.end_date ?? '', active: c.active, expect_receipt: c.expect_receipt, match_merchant: c.match_merchant ?? '', counterpart_id: c.counterpart_id })}
                     className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800" title={t('common.edit')}>
                     <Pencil size={15} />
                   </button>
@@ -1341,9 +1426,10 @@ function ManageTab() {
               </div>
             )}
             <label className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
-              <Switch checked={modal.is_transfer} onChange={v => setModal({ ...modal, is_transfer: v })} /> {t('finances.transferLabel')}
+              <Switch checked={modal.is_transfer} onChange={v => setModal({ ...modal, is_transfer: v, counterpart_id: v ? modal.counterpart_id : null })} /> {t('finances.transferLabel')}
             </label>
             <p className="-mt-2 pl-11 text-xs text-zinc-400">{t('finances.transferHint')}</p>
+            {modal.is_transfer && <CounterpartField draft={modal} setDraft={setModal} costs={costs ?? []} scopeKonten={scopeKonten} />}
             <label className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
               <Switch checked={modal.active} onChange={v => setModal({ ...modal, active: v })} /> {t('finances.activeLabel')}
             </label>
