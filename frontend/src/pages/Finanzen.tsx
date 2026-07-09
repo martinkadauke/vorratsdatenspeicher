@@ -77,6 +77,17 @@ function Section({ title, count, right, defaultOpen = true, children }: {
   );
 }
 
+/** Pill toggle for the account-holder / account scope filter. */
+function ScopeBubble({ active, small, onClick, children }: { active: boolean; small?: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button onClick={onClick} className={cn(
+      'shrink-0 rounded-full border font-medium transition-colors',
+      small ? 'px-2.5 py-0.5 text-[11px]' : 'px-3 py-1 text-xs',
+      active ? 'border-transparent bg-violet-600 text-white' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700 dark:text-zinc-400',
+    )}>{children}</button>
+  );
+}
+
 // ── page shell: tabs ────────────────────────────────────────────────────────
 
 export function Finanzen() {
@@ -114,9 +125,49 @@ function MonthTab() {
   const [picker, setPicker] = useState<MonthFix | null>(null);
   const [budgetModal, setBudgetModal] = useState<Partial<MonthBudget> | null>(null);
 
+  // Account-holder scope: one bubble per person + one for the household account;
+  // default = all (Gesamthaushalt). Selecting a single person reveals sub-bubbles
+  // for that person's accounts (subtractive). The chosen konto_ids scope the view,
+  // which makes internal transfers (Beiträge) net out in the whole-household view.
+  const { data: konten } = useKonten();
+  const scope = useMemo(() => {
+    const nonCash = (konten ?? []).filter(k => !k.is_cash);
+    const memberMap = new Map<number, { key: string; label: string; konten: KontoLite[] }>();
+    const household: KontoLite[] = [];
+    for (const k of nonCash) {
+      if (k.is_shared) household.push(k);
+      else if (k.user_id != null) {
+        if (!memberMap.has(k.user_id)) memberMap.set(k.user_id, { key: `u${k.user_id}`, label: k.owner ?? k.name, konten: [] });
+        memberMap.get(k.user_id)!.konten.push(k);
+      }
+    }
+    const members = [...memberMap.values()].sort((a, b) => a.label.localeCompare(b.label));
+    const allKeys = [...members.map(m => m.key), ...(household.length ? ['household'] : [])];
+    return { members, household, allKeys };
+  }, [konten]);
+  const [selKeys, setSelKeys] = useState<Set<string> | null>(null);   // null = all
+  const [exclKonten, setExclKonten] = useState<Set<number>>(new Set());
+  const activeKeys = selKeys ?? new Set(scope.allKeys);
+  const soleMember = activeKeys.size === 1 ? scope.members.find(m => activeKeys.has(m.key)) : undefined;
+  const effKonten = useMemo(() => {
+    const ids: number[] = [];
+    for (const m of scope.members) if (activeKeys.has(m.key)) ids.push(...m.konten.map(k => k.id));
+    if (scope.household.length && activeKeys.has('household')) ids.push(...scope.household.map(k => k.id));
+    return ids.filter(id => !exclKonten.has(id));
+  }, [scope, activeKeys, exclKonten]);
+  const isAll = !selKeys && exclKonten.size === 0;
+  const toggleGroup = (key: string) => {
+    const next = new Set(activeKeys);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    setExclKonten(new Set());
+    setSelKeys(next.size === 0 || next.size === scope.allKeys.length ? null : next);
+  };
+  const toggleKonto = (id: number) => setExclKonten(s => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const kontenParam = isAll ? '' : `&konten=${effKonten.join(',')}`;
+
   const { data, isLoading } = useQuery({
-    queryKey: ['fin-month', month],
-    queryFn: () => api<MonthData>(`/api/finances/month?month=${month}`),
+    queryKey: ['fin-month', month, isAll ? 'all' : effKonten.join(',')],
+    queryFn: () => api<MonthData>(`/api/finances/month?month=${month}${kontenParam}`),
   });
   const invalidate = () => void qc.invalidateQueries({ queryKey: ['fin-month'] });
 
@@ -164,6 +215,27 @@ function MonthTab() {
           <ChevronRight size={18} />
         </button>
       </div>
+
+      {/* account-holder scope bubbles (person(s) + household; default all) */}
+      {scope.allKeys.length > 1 && (
+        <div className="flex flex-col items-center gap-1.5">
+          <div className="flex flex-wrap justify-center gap-1.5">
+            {scope.members.map(m => (
+              <ScopeBubble key={m.key} active={activeKeys.has(m.key)} onClick={() => toggleGroup(m.key)}>{m.label}</ScopeBubble>
+            ))}
+            {scope.household.length > 0 && (
+              <ScopeBubble active={activeKeys.has('household')} onClick={() => toggleGroup('household')}>{t('finances.household')}</ScopeBubble>
+            )}
+          </div>
+          {soleMember && soleMember.konten.length > 1 && (
+            <div className="flex flex-wrap justify-center gap-1.5">
+              {soleMember.konten.map(k => (
+                <ScopeBubble key={k.id} small active={!exclKonten.has(k.id)} onClick={() => toggleKonto(k.id)}>{k.name}</ScopeBubble>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {isLoading && <Spinner />}
       {data && (

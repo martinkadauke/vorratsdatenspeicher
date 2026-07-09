@@ -116,6 +116,15 @@ export function financeRoutes(app: FastifyInstance): void {
     const b = monthBounds(m);
     if (!b) return reply.code(400).send({ error: 'month must be YYYY-MM' });
 
+    // Optional account scope (holder/household views): a comma list of konto_ids.
+    // Absent → whole household (all accounts). This is what makes internal
+    // transfers net out: a "Beitrag" expense on a personal account and its income
+    // on the household account both show only when both accounts are in scope.
+    const kraw = ((req.query as { konten?: string }).konten ?? '').trim();
+    const kIds = kraw ? kraw.split(',').map(s => parseInt(s, 10)).filter(Number.isFinite) : null;
+    const fixKonto = kIds && kIds.length ? sql`AND f.konto_id = ANY(${kIds})` : sql``;
+    const budKonto = kIds && kIds.length ? sql`AND (bu.konto_id = ANY(${kIds}) OR bu.konto_id IS NULL)` : sql``;
+
     // 1) Recurring plans active this month + their check. `kind` splits them into
     //    expenses (Fixkosten) and income (Einnahmen-Soll); both share the same
     //    check + evidence-matching engine, just against different evidence pools.
@@ -137,6 +146,7 @@ export function financeRoutes(app: FastifyInstance): void {
       LEFT JOIN bank_tx bce ON bce.id = c.bank_tx_id
       LEFT JOIN income ice ON ice.id = c.income_id
       WHERE f.active AND f.start_date <= ${b.last} AND (f.end_date IS NULL OR f.end_date >= ${b.first})
+        ${fixKonto}
       ORDER BY k.is_shared DESC NULLS LAST, u.username NULLS FIRST, f.label
     `;
 
@@ -244,7 +254,7 @@ export function financeRoutes(app: FastifyInstance): void {
       LEFT JOIN konto k ON k.id = bu.konto_id
       LEFT JOIN users u ON u.id = k.user_id
       LEFT JOIN budget_category bc ON bc.budget_id = bu.id
-      WHERE bu.active
+      WHERE bu.active ${budKonto}
       GROUP BY bu.id, k.name, k.is_shared, u.username
       ORDER BY bu.label
     `;
