@@ -23,7 +23,7 @@ export function financeRoutes(app: FastifyInstance): void {
   /** All fixed costs with their konto scope (household vs which person). */
   app.get('/api/fixed-costs', async () => {
     return sql`
-      SELECT f.id, f.label, f.category_path, f.monthly_eur::float8 AS monthly_eur, f.kind, f.frequency,
+      SELECT f.id, f.label, f.category_path, f.monthly_eur::float8 AS monthly_eur, f.kind, f.frequency, f.is_transfer,
              f.konto_id, f.start_date, f.end_date, f.active,
              f.expect_receipt, f.match_merchant,
              k.name AS konto_name, k.is_shared, k.user_id AS konto_user_id, u.username AS owner
@@ -48,8 +48,8 @@ export function financeRoutes(app: FastifyInstance): void {
     const kind = b.kind === 'income' ? 'income' : 'expense';
     const freq = ['monthly', 'quarterly', 'yearly'].includes(String(b.frequency)) ? String(b.frequency) : 'monthly';
     const [row] = await sql`
-      INSERT INTO fixed_cost (label, category_path, monthly_eur, kind, frequency, konto_id, start_date, end_date, active, expect_receipt, match_merchant, created_by)
-      VALUES (${label}, ${category}, ${monthly}, ${kind}, ${freq}, ${kontoId}, ${start}, ${end}, ${b.active !== false},
+      INSERT INTO fixed_cost (label, category_path, monthly_eur, kind, frequency, is_transfer, konto_id, start_date, end_date, active, expect_receipt, match_merchant, created_by)
+      VALUES (${label}, ${category}, ${monthly}, ${kind}, ${freq}, ${b.is_transfer === true}, ${kontoId}, ${start}, ${end}, ${b.active !== false},
               ${b.expect_receipt !== false}, ${(b.match_merchant ?? '').toString().trim() || null}, ${req.user?.id ?? null})
       RETURNING id`;
     return { ok: true, id: row.id };
@@ -83,6 +83,7 @@ export function financeRoutes(app: FastifyInstance): void {
     if ('match_merchant' in b) updates.match_merchant = (b.match_merchant ?? '').toString().trim() || null;
     if ('kind' in b) updates.kind = b.kind === 'income' ? 'income' : 'expense';
     if ('frequency' in b) updates.frequency = ['monthly', 'quarterly', 'yearly'].includes(String(b.frequency)) ? String(b.frequency) : 'monthly';
+    if ('is_transfer' in b) updates.is_transfer = b.is_transfer === true;
     if (!Object.keys(updates).length) return reply.code(400).send({ error: 'no patchable fields' });
     const [row] = await sql`UPDATE fixed_cost SET ${sql(updates)} WHERE id = ${id} RETURNING id`;
     if (!row) return reply.code(404).send({ error: 'not found' });
@@ -141,7 +142,7 @@ export function financeRoutes(app: FastifyInstance): void {
     //    expenses (Fixkosten) and income (Einnahmen-Soll); both share the same
     //    check + evidence-matching engine, just against different evidence pools.
     const fixed = await sql`
-      SELECT f.id, f.label, f.monthly_eur::float8 AS monthly_eur, f.kind, f.frequency, f.expect_receipt, f.match_merchant,
+      SELECT f.id, f.label, f.monthly_eur::float8 AS monthly_eur, f.kind, f.frequency, f.is_transfer, f.expect_receipt, f.match_merchant,
              f.konto_id, k.name AS konto_name, k.is_shared, u.username AS owner,
              c.id AS check_id, c.status AS check_status, c.einkauf_id AS check_einkauf_id,
              c.bank_tx_id AS check_bank_tx_id, c.income_id AS check_income_id, c.amount::float8 AS check_amount,
@@ -310,7 +311,7 @@ export function financeRoutes(app: FastifyInstance): void {
 
     // Map a plan row (expense or income) to its month-view shape (check + suggestion).
     const mapPlan = (f: typeof fixed[number]) => ({
-      id: f.id, label: f.label, monthly_eur: f.monthly_eur, kind: f.kind, frequency: f.frequency, expect_receipt: f.expect_receipt,
+      id: f.id, label: f.label, monthly_eur: f.monthly_eur, kind: f.kind, frequency: f.frequency, is_transfer: f.is_transfer, expect_receipt: f.expect_receipt,
       match_merchant: f.match_merchant, konto_id: f.konto_id, konto_name: f.konto_name,
       is_shared: f.is_shared, owner: f.owner,
       check: f.check_id ? {

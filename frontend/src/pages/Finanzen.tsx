@@ -21,7 +21,7 @@ const PERIOD_MONTHS: Record<Freq, number> = { monthly: 1, quarterly: 3, yearly: 
 const amortized = (eur: number, freq?: Freq | null) => eur / (PERIOD_MONTHS[(freq ?? 'monthly') as Freq] ?? 1);
 
 interface FixedCost {
-  id: number; label: string; category_path: string | null; monthly_eur: number; kind: 'expense' | 'income'; frequency: Freq;
+  id: number; label: string; category_path: string | null; monthly_eur: number; kind: 'expense' | 'income'; frequency: Freq; is_transfer: boolean;
   konto_id: number | null; start_date: string; end_date: string | null; active: boolean;
   expect_receipt: boolean; match_merchant: string | null;
   konto_name: string | null; is_shared: boolean | null; konto_user_id: number | null; owner: string | null;
@@ -29,7 +29,7 @@ interface FixedCost {
 interface KontoLite { id: number; name: string; is_shared: boolean; is_cash: boolean; user_id: number | null; owner: string | null; owner_name: string | null }
 
 interface MonthFix {
-  id: number; label: string; monthly_eur: number; kind: 'expense' | 'income'; frequency: Freq; expect_receipt: boolean; match_merchant: string | null;
+  id: number; label: string; monthly_eur: number; kind: 'expense' | 'income'; frequency: Freq; is_transfer: boolean; expect_receipt: boolean; match_merchant: string | null;
   konto_id: number | null; konto_name: string | null; is_shared: boolean | null; owner: string | null;
   check: { status: 'confirmed' | 'skipped'; source: 'receipt' | 'bank' | 'income' | 'none'; einkauf_id: number | null; bank_tx_id: number | null; income_id: number | null; amount: number | null; laden: string | null; datum: string | null } | null;
   suggestion: { source: 'receipt' | 'bank' | 'income'; einkauf_id: number | null; bank_tx_id: number | null; income_id: number | null; laden: string | null; betrag: number; datum: string; amount_ok: boolean; merchant_ok: boolean } | null;
@@ -194,8 +194,12 @@ function MonthTab() {
   const fixed = data?.fixed ?? [];
   const budgets = data?.budgets ?? [];
   // Summary mirrors fixed costs: sum the PLANS (Soll), not just the matched actuals.
-  const incomeTotal = incomes.reduce((s, f) => s + amortized(f.monthly_eur, f.frequency), 0);
-  const fixTotal = fixed.reduce((s, f) => s + amortized(f.monthly_eur, f.frequency), 0);
+  // Internal transfers (Umbuchung) net to zero across the household, so they're
+  // excluded from the gross totals in the whole-household view; in a single-account
+  // scope only one leg is present, so they count (Martin −2000 / Haushalt +2000).
+  const counts = (f: MonthFix) => !isAll || !f.is_transfer;
+  const incomeTotal = incomes.reduce((s, f) => s + (counts(f) ? amortized(f.monthly_eur, f.frequency) : 0), 0);
+  const fixTotal = fixed.reduce((s, f) => s + (counts(f) ? amortized(f.monthly_eur, f.frequency) : 0), 0);
   const isOk = (f: MonthFix) => !!f.check || f.expect_receipt === false;
   const okCount = fixed.filter(isOk).length;
   const varActual = budgets.reduce((s, b) => s + b.actual, 0);
@@ -277,7 +281,7 @@ function MonthTab() {
           {/* income plans (Einnahmen) — each shows its matched actual pay-slip / bank credit as evidence */}
           <Section title={t('finances.incomeTitle')} count={incomes.length}>
             {!incomes.length && <Card className="p-3 text-xs text-zinc-400">{t('finances.noIncomePlans')}</Card>}
-            {incomes.map(f => <FixCheckRow key={f.id} f={f} month={month} t={t}
+            {incomes.map(f => <FixCheckRow key={f.id} f={f} month={month} t={t} excluded={isAll && f.is_transfer}
               onConfirmSuggestion={() => confirmSug(f)}
               onConfirmNoReceipt={() => check.mutate({ fixed_cost_id: f.id, month, action: 'confirm' })}
               onSkip={() => check.mutate({ fixed_cost_id: f.id, month, action: 'skip' })}
@@ -289,7 +293,7 @@ function MonthTab() {
           {/* fixed costs */}
           <Section title={t('finances.fixTitle')} count={fixed.length}>
             {!fixed.length && <Card className="p-3 text-xs text-zinc-400">{t('finances.noFixThisMonth')}</Card>}
-            {fixed.map(f => <FixCheckRow key={f.id} f={f} month={month} t={t}
+            {fixed.map(f => <FixCheckRow key={f.id} f={f} month={month} t={t} excluded={isAll && f.is_transfer}
               onConfirmSuggestion={() => confirmSug(f)}
               onConfirmNoReceipt={() => check.mutate({ fixed_cost_id: f.id, month, action: 'confirm' })}
               onSkip={() => check.mutate({ fixed_cost_id: f.id, month, action: 'skip' })}
@@ -317,8 +321,8 @@ function MonthTab() {
   );
 }
 
-function FixCheckRow({ f, t, onConfirmSuggestion, onConfirmNoReceipt, onSkip, onClear, onPick }: {
-  f: MonthFix; month: string; t: (k: string, o?: Record<string, unknown>) => string;
+function FixCheckRow({ f, t, excluded, onConfirmSuggestion, onConfirmNoReceipt, onSkip, onClear, onPick }: {
+  f: MonthFix; month: string; t: (k: string, o?: Record<string, unknown>) => string; excluded?: boolean;
   onConfirmSuggestion: () => void; onConfirmNoReceipt: () => void; onSkip: () => void; onClear: () => void; onPick: () => void;
 }) {
   const autoOk = !f.check && f.expect_receipt === false;
@@ -337,6 +341,7 @@ function FixCheckRow({ f, t, onConfirmSuggestion, onConfirmNoReceipt, onSkip, on
           <div className="flex items-baseline gap-2">
             <span className="truncate text-sm font-medium">{f.label}</span>
             <span className="shrink-0 text-xs text-zinc-400">{scopeLabelOf(t, f)}</span>
+            {f.is_transfer && <span className="shrink-0 rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">{t('finances.transferBadge')}</span>}
           </div>
           <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
             {autoOk && t('finances.noReceiptAuto')}
@@ -351,8 +356,9 @@ function FixCheckRow({ f, t, onConfirmSuggestion, onConfirmNoReceipt, onSkip, on
           </div>
         </div>
         <div className="shrink-0 text-right">
-          <div className="text-sm font-semibold">{eur(shownAmount)}</div>
+          <div className={cn('text-sm font-semibold', excluded && 'text-zinc-400 line-through')}>{eur(shownAmount)}</div>
           {periodic && <div className="text-[10px] text-zinc-400">{eur(f.monthly_eur)} {t(`finances.freqPer.${f.frequency}`)}</div>}
+          {excluded && <div className="text-[10px] text-violet-500">{t('finances.notCounted')}</div>}
         </div>
       </div>
       {(state !== 'ok' || f.check) && (
@@ -673,9 +679,9 @@ function BudgetModal({ initial, onClose, onSaved }: {
 
 // ── management tab (fixed-cost master data) ─────────────────────────────────
 
-type Draft = { id?: number; label: string; monthly_eur: string; kind: 'expense' | 'income'; frequency: Freq; konto_id: string; category_path: string | null; start_date: string; end_date: string; active: boolean; expect_receipt: boolean; match_merchant: string };
+type Draft = { id?: number; label: string; monthly_eur: string; kind: 'expense' | 'income'; frequency: Freq; is_transfer: boolean; konto_id: string; category_path: string | null; start_date: string; end_date: string; active: boolean; expect_receipt: boolean; match_merchant: string };
 const emptyDraft = (kontoId?: number, kind: 'expense' | 'income' = 'expense'): Draft => ({
-  label: '', monthly_eur: '', kind, frequency: 'monthly', konto_id: kontoId ? String(kontoId) : '', category_path: null,
+  label: '', monthly_eur: '', kind, frequency: 'monthly', is_transfer: false, konto_id: kontoId ? String(kontoId) : '', category_path: null,
   start_date: today(), end_date: '', active: true, expect_receipt: true, match_merchant: '',
 });
 
@@ -862,6 +868,7 @@ function ManageTab() {
         monthly_eur: d.monthly_eur,
         kind: d.kind,
         frequency: d.frequency,
+        is_transfer: d.is_transfer,
         konto_id: Number(d.konto_id),
         category_path: d.category_path,
         start_date: d.start_date,
@@ -880,7 +887,7 @@ function ManageTab() {
   const readd = useMutation({
     mutationFn: (c: FixedCost) => api('/api/fixed-costs', {
       method: 'POST',
-      body: { label: c.label, monthly_eur: c.monthly_eur, kind: c.kind, frequency: c.frequency, konto_id: c.konto_id, category_path: c.category_path, start_date: c.start_date, end_date: c.end_date, active: c.active, expect_receipt: c.expect_receipt, match_merchant: c.match_merchant },
+      body: { label: c.label, monthly_eur: c.monthly_eur, kind: c.kind, frequency: c.frequency, is_transfer: c.is_transfer, konto_id: c.konto_id, category_path: c.category_path, start_date: c.start_date, end_date: c.end_date, active: c.active, expect_receipt: c.expect_receipt, match_merchant: c.match_merchant },
     }),
     onSuccess: invalidate,
   });
@@ -907,7 +914,8 @@ function ManageTab() {
       (a.konto?.owner ?? '').localeCompare(b.konto?.owner ?? ''));
   }, [costs, konten, scopeKonten]);
 
-  const monthlyTotal = (costs ?? []).filter(c => c.active && c.kind !== 'income').reduce((s, c) => s + amortized(c.monthly_eur, c.frequency), 0);
+  // Household-wide total excludes internal transfers (Umbuchung) — they aren't real spend.
+  const monthlyTotal = (costs ?? []).filter(c => c.active && c.kind !== 'income' && !c.is_transfer).reduce((s, c) => s + amortized(c.monthly_eur, c.frequency), 0);
 
   if (isLoading || !konten) return <Spinner />;
 
@@ -959,6 +967,7 @@ function ManageTab() {
                     <div className="truncate text-sm font-medium">{c.label}</div>
                     <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-zinc-500 dark:text-zinc-400">
                       {c.kind === 'income' && <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">{t('finances.incomeTitle')}</span>}
+                      {c.is_transfer && <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">{t('finances.transferBadge')}</span>}
                       {c.frequency !== 'monthly' && <span className="rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">{t(`finances.freq.${c.frequency}`)} · {eur(c.monthly_eur)}</span>}
                       {c.category_path && <span className="truncate">{c.category_path.split('/').pop()}</span>}
                       {!c.expect_receipt && <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] dark:bg-zinc-800">{t('finances.noReceiptBadge')}</span>}
@@ -967,7 +976,7 @@ function ManageTab() {
                     </div>
                   </div>
                   <span className={cn('shrink-0 text-sm font-semibold', c.kind === 'income' && 'text-emerald-600 dark:text-emerald-500')}>{c.kind === 'income' ? '+' : ''}{eur(amortized(c.monthly_eur, c.frequency))}<span className="text-xs font-normal text-zinc-400">{t('finances.perMonth')}</span></span>
-                  <button onClick={() => setModal({ id: c.id, label: c.label, monthly_eur: String(c.monthly_eur).replace('.', ','), kind: c.kind, frequency: c.frequency, konto_id: String(c.konto_id ?? ''), category_path: c.category_path, start_date: c.start_date, end_date: c.end_date ?? '', active: c.active, expect_receipt: c.expect_receipt, match_merchant: c.match_merchant ?? '' })}
+                  <button onClick={() => setModal({ id: c.id, label: c.label, monthly_eur: String(c.monthly_eur).replace('.', ','), kind: c.kind, frequency: c.frequency, is_transfer: c.is_transfer, konto_id: String(c.konto_id ?? ''), category_path: c.category_path, start_date: c.start_date, end_date: c.end_date ?? '', active: c.active, expect_receipt: c.expect_receipt, match_merchant: c.match_merchant ?? '' })}
                     className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800" title={t('common.edit')}>
                     <Pencil size={15} />
                   </button>
@@ -1047,6 +1056,10 @@ function ManageTab() {
                 <p className="mt-1 text-xs text-zinc-400">{t('finances.matchMerchantHint')}</p>
               </div>
             )}
+            <label className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
+              <Switch checked={modal.is_transfer} onChange={v => setModal({ ...modal, is_transfer: v })} /> {t('finances.transferLabel')}
+            </label>
+            <p className="-mt-2 pl-11 text-xs text-zinc-400">{t('finances.transferHint')}</p>
             <label className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
               <Switch checked={modal.active} onChange={v => setModal({ ...modal, active: v })} /> {t('finances.activeLabel')}
             </label>
