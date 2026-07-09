@@ -426,6 +426,46 @@ export function financeRoutes(app: FastifyInstance): void {
     };
   });
 
+  /** Full evidence chain behind a fixed-cost check for one month: the bank booking
+   *  AND the receipt/e-mail (and income row), resolved in BOTH directions — the
+   *  check may reference just one of them, but if that one is married to the other
+   *  (einkauf.bank_tx_id / income.bank_tx_id) we surface both. Powers the clickable
+   *  Fixkosten row so the user sees which of {Bank, Beleg} — or both — is attached. */
+  app.get('/api/finances/fixed-cost/:id/evidence', async (req, reply) => {
+    const id = parseInt(String((req.params as { id: string }).id), 10);
+    if (!id) return reply.code(400).send({ error: 'bad id' });
+    const month = (req.query as { month?: string }).month?.trim();
+    const b = month ? monthBounds(month) : null;
+    if (!b) return reply.code(400).send({ error: 'month (YYYY-MM) required' });
+    const [f] = await sql`SELECT frequency FROM fixed_cost WHERE id = ${id}`;
+    if (!f) return reply.code(404).send({ error: 'not found' });
+    const checkMonth = anchorMonth(b.first, f.frequency as string | null);
+    const [c] = await sql`SELECT einkauf_id, bank_tx_id, income_id, amount::float8 AS amount, status FROM fixed_cost_check WHERE fixed_cost_id = ${id} AND month = ${checkMonth}`;
+    if (!c) return { status: null, amount: null, bank: null, receipt: null, income: null };
+    let bankId = c.bank_tx_id as number | null;
+    let einkaufId = c.einkauf_id as number | null;
+    let incomeId = c.income_id as number | null;
+    // reverse-resolve the missing legs through the marriage links
+    if (bankId && !einkaufId) { const [e] = await sql`SELECT id FROM einkauf WHERE bank_tx_id = ${bankId} LIMIT 1`; einkaufId = (e?.id as number) ?? null; }
+    if (bankId && !incomeId) { const [i] = await sql`SELECT id FROM income WHERE bank_tx_id = ${bankId} LIMIT 1`; incomeId = (i?.id as number) ?? null; }
+    if (einkaufId && !bankId) { const [e] = await sql`SELECT bank_tx_id FROM einkauf WHERE id = ${einkaufId}`; bankId = (e?.bank_tx_id as number) ?? null; }
+    if (incomeId && !bankId) { const [i] = await sql`SELECT bank_tx_id FROM income WHERE id = ${incomeId}`; bankId = (i?.bank_tx_id as number) ?? null; }
+    const [rec] = einkaufId ? await sql`SELECT id, datum::text AS datum, roh_ladenname, gesamt_betrag::float8 AS betrag, quelle, private_for_user_id FROM einkauf WHERE id = ${einkaufId}` : [null];
+    const [bt] = bankId ? await sql`SELECT id, booking_date::text AS datum, amount::float8 AS amount, counterparty FROM bank_tx WHERE id = ${bankId}` : [null];
+    const [inc] = incomeId ? await sql`SELECT id, datum::text AS datum, description, amount::float8 AS amount FROM income WHERE id = ${incomeId}` : [null];
+    // A private receipt masks its own text AND its bank booking's merchant text.
+    const uid = req.user?.id ?? -1;
+    const masked = !!rec && (rec.private_for_user_id as number | null) != null && (rec.private_for_user_id as number | null) !== uid && !req.user?.sees_all_konten;
+    return {
+      status: c.status, amount: c.amount,
+      bank: bt ? { id: bt.id, datum: bt.datum, amount: bt.amount, counterparty: masked ? null : bt.counterparty, private: masked } : null,
+      receipt: rec ? (masked
+        ? { id: null, laden: null, datum: rec.datum, betrag: rec.betrag, quelle: rec.quelle, private: true }
+        : { id: rec.id, laden: rec.roh_ladenname, datum: rec.datum, betrag: rec.betrag, quelle: rec.quelle, private: false }) : null,
+      income: inc ? { id: inc.id, datum: inc.datum, description: inc.description, amount: inc.amount } : null,
+    };
+  });
+
   /** Decide a fixed-cost check for one month.
    *  action 'confirm' (+ optional einkauf_id as evidence), 'skip' ("this month is
    *  fine without evidence") or 'clear' (reopen). Confirming with a receipt LEARNS
