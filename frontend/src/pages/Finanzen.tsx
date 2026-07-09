@@ -109,17 +109,17 @@ export function Finanzen() {
           <h1 className="text-lg font-bold">{t('finances.title')}</h1>
         </div>
         <div className="flex rounded-xl bg-zinc-100 p-1 dark:bg-zinc-800/60">
-          {(['monat', 'verwaltung'] as const).map(tb => (
+          {([['monat', 'finances.monthTab'], ['bank', 'finances.bankTab'], ['verwaltung', 'finances.manageTab']] as const).map(([tb, key]) => (
             <button key={tb} onClick={() => setTab(tb)}
               className={cn('rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
                 tab === tb ? 'bg-white text-zinc-900 shadow-sm dark:bg-zinc-900 dark:text-zinc-100' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300')}
             >
-              {t(tb === 'monat' ? 'finances.monthTab' : 'finances.manageTab')}
+              {t(key)}
             </button>
           ))}
         </div>
       </div>
-      {tab === 'verwaltung' ? <ManageTab /> : <MonthTab />}
+      {tab === 'verwaltung' ? <ManageTab /> : tab === 'bank' ? <BankTab /> : <MonthTab />}
     </div>
   );
 }
@@ -860,6 +860,169 @@ function IncomeList() {
         </ul>
       )}
     </Card>
+  );
+}
+
+// ── Kontobewegungen (bank CSV import + matched-status list) ──────────────────
+interface BankTx {
+  id: number; konto_id: number | null; konto_name: string | null;
+  booking_date: string; purchase_date: string | null; amount: number;
+  counterparty: string | null; description: string;
+  status: 'open' | 'fixed' | 'receipt';
+  receipt: { id: number | null; laden: string | null; betrag: number | null; private: boolean } | null;
+  fixed: { id: number; label: string } | null;
+}
+
+/** Upload one or more comdirect "Umsätze Girokonto" CSVs into a chosen account.
+ *  One CSV = one account (picked here). Re-import is idempotent (dedup by Ref.). */
+function BankUpload({ scopeKonten }: { scopeKonten: KontoLite[] }) {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const [kontoId, setKontoId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [results, setResults] = useState<{ name: string; ok: boolean; text: string }[]>([]);
+  const eff = kontoId || String(scopeKonten[0]?.id ?? '');
+  const readB64 = (file: File) => new Promise<string>((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(String(r.result));
+    r.onerror = () => rej(new Error('read failed'));
+    r.readAsDataURL(file);
+  });
+  async function onFiles(list: FileList | null) {
+    if (!list?.length) return;
+    if (!eff) { toast(t('finances.bank.pickAccount'), 'error'); return; }
+    setBusy(true);
+    const out: { name: string; ok: boolean; text: string }[] = [];
+    for (const file of Array.from(list)) {
+      try {
+        const b64 = await readB64(file);
+        const r = await api<{ ok: boolean; imported?: number; skipped?: number; reason?: string }>(
+          '/api/finances/bank/upload', { method: 'POST', body: { filename: file.name, data_b64: b64, konto_id: Number(eff) } });
+        out.push(r.ok
+          ? { name: file.name, ok: true, text: t('finances.bank.importedResult', { imported: r.imported, skipped: r.skipped }) }
+          : { name: file.name, ok: false, text: r.reason ?? t('finances.bank.unreadable') });
+      } catch (e) { out.push({ name: file.name, ok: false, text: (e as Error).message }); }
+      setResults([...out]);
+    }
+    setBusy(false);
+    void qc.invalidateQueries({ queryKey: ['bank-tx'] });
+    void qc.invalidateQueries({ queryKey: ['fin-month'] });
+    const n = out.filter(o => o.ok).length;
+    if (n) toast(t('finances.bank.importedToast', { n }), 'success');
+  }
+  return (
+    <Card className="flex flex-col gap-3 p-4">
+      <div className="flex items-center gap-2">
+        <Upload size={16} className="text-emerald-600 dark:text-emerald-500" />
+        <h2 className="text-base font-semibold">{t('finances.bank.heading')}</h2>
+      </div>
+      <p className="text-xs text-zinc-500">{t('finances.bank.intro')}</p>
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="min-w-[9rem] flex-1">
+          <Label>{t('finances.bank.account')}</Label>
+          <Select value={eff} onChange={e => setKontoId(e.target.value)}>
+            {scopeKonten.map(k => <option key={k.id} value={k.id}>{scopeLabelOf(t, k)}</option>)}
+          </Select>
+        </div>
+        <label className={cn('inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700', busy && 'pointer-events-none opacity-50')}>
+          <Upload size={15} />
+          {busy ? t('finances.bank.working') : t('finances.bank.choose')}
+          <input type="file" accept=".csv,text/csv,text/plain" multiple className="hidden" disabled={busy}
+            onChange={e => { void onFiles(e.target.files); e.target.value = ''; }} />
+        </label>
+      </div>
+      {results.length > 0 && (
+        <ul className="flex flex-col gap-1 border-t border-zinc-100 pt-2 dark:border-zinc-800">
+          {results.map((r, i) => (
+            <li key={i} className="flex items-start gap-2 text-xs">
+              {r.ok ? <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-emerald-600" /> : <X size={14} className="mt-0.5 shrink-0 text-red-500" />}
+              <span className="min-w-0 flex-1"><span className="text-zinc-400">{r.name}</span> — {r.text}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="text-[11px] text-zinc-400">{t('finances.bank.hint')}</p>
+    </Card>
+  );
+}
+
+function BankRow({ tx, t, onOpen }: { tx: BankTx; t: (k: string, o?: Record<string, unknown>) => string; onOpen: (receiptId: number) => void }) {
+  const credit = tx.amount > 0;
+  const canOpen = tx.status === 'receipt' && tx.receipt?.id != null && !tx.receipt.private;
+  const badge = tx.status === 'receipt'
+    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+    : tx.status === 'fixed' ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300'
+      : 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300';
+  const badgeLabel = t(`finances.bank.status_${tx.status}`);
+  return (
+    <Card onClick={canOpen ? () => onOpen(tx.receipt!.id!) : undefined} className="flex items-center gap-3 p-3">
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium">{tx.counterparty || '—'}</div>
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400">
+          <span>{ddmmyyyy(tx.booking_date)}</span>
+          <span className={cn('rounded-full px-1.5 py-0.5 text-[10px]', badge)}>{badgeLabel}</span>
+          {tx.status === 'receipt' && tx.receipt && (tx.receipt.private
+            ? <span className="inline-flex items-center gap-1 truncate italic"><Lock size={11} />{t('finances.privatePurchase')}</span>
+            : tx.receipt.laden && <span className="truncate">→ {tx.receipt.laden}</span>)}
+          {tx.status === 'fixed' && tx.fixed && <span className="truncate">→ {tx.fixed.label}</span>}
+        </div>
+      </div>
+      <span className={cn('shrink-0 text-sm font-semibold', credit && 'text-emerald-600 dark:text-emerald-500')}>{credit ? '+' : ''}{eur(tx.amount)}</span>
+      {canOpen && <ChevronRight size={15} className="shrink-0 text-zinc-300 dark:text-zinc-600" />}
+    </Card>
+  );
+}
+
+function BankTab() {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const { data: konten } = useKonten();
+  const scopeKonten = useMemo(() => (konten ?? []).filter(k => !k.is_cash), [konten]);
+  const [konto, setKonto] = useUrlState('bk', '');
+  const [month, setMonth] = useUrlState('bm', '');
+  const [status, setStatus] = useUrlState('bs', 'all');
+  const qs = new URLSearchParams();
+  if (konto) qs.set('konto', konto);
+  if (month) qs.set('month', month);
+  if (status !== 'all') qs.set('status', status);
+  const { data, isLoading } = useQuery({
+    queryKey: ['bank-tx', konto, month, status],
+    queryFn: () => api<{ items: BankTx[]; counts: { all: number; open: number; fixed: number; receipt: number } }>(`/api/finances/bank?${qs.toString()}`),
+  });
+  const items = data?.items ?? [];
+  const c = data?.counts;
+  const chips: { key: 'all' | 'open' | 'fixed' | 'receipt'; n?: number }[] = [
+    { key: 'all', n: c?.all }, { key: 'open', n: c?.open }, { key: 'fixed', n: c?.fixed }, { key: 'receipt', n: c?.receipt },
+  ];
+  return (
+    <div className="flex flex-col gap-4">
+      <BankUpload scopeKonten={scopeKonten} />
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap gap-2">
+          <Select value={konto} onChange={e => setKonto(e.target.value)} className="min-w-0 flex-1">
+            <option value="">{t('finances.bank.allKonten')}</option>
+            {scopeKonten.map(k => <option key={k.id} value={k.id}>{scopeLabelOf(t, k)}</option>)}
+          </Select>
+          <Input type="month" value={month} onChange={e => setMonth(e.target.value)} className="w-[9.5rem]" />
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {chips.map(ch => (
+            <button key={ch.key} onClick={() => setStatus(ch.key)}
+              className={cn('rounded-full border px-2.5 py-1 text-xs font-medium',
+                status === ch.key ? 'border-transparent bg-emerald-600 text-white' : 'border-zinc-300 text-zinc-600 dark:border-zinc-700 dark:text-zinc-300')}>
+              {t(`finances.bank.filter_${ch.key}`)}{ch.n != null ? ` · ${ch.n}` : ''}
+            </button>
+          ))}
+        </div>
+      </div>
+      {isLoading ? <Spinner /> : !items.length ? (
+        <Card className="p-4 text-center text-xs text-zinc-400">{t('finances.bank.empty')}</Card>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {items.map(tx => <BankRow key={tx.id} tx={tx} t={t} onOpen={id => navigate(`/receipts/${id}`)} />)}
+        </div>
+      )}
+    </div>
   );
 }
 

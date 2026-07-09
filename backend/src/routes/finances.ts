@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import sql from '../db.js';
 import { kontoScope } from '../auth/konto.js';
 import { extractPayslip } from '../llm/ocr.js';
+import { parseComdirectCsv } from '../finances/bankCsv.js';
 
 /** Fixed costs (recurring monthly expenses) CRUD — the manual-entry UI the
  *  analytics foundation (mig 040 `fixed_cost` → `v_transactions`) always expected.
@@ -496,6 +497,107 @@ export function financeRoutes(app: FastifyInstance): void {
     const [row] = await sql`SELECT id FROM income WHERE id = ${id}`;
     if (!row) return reply.code(404).send({ error: 'not found' });
     await sql`DELETE FROM income WHERE id = ${id}`;
+    return { ok: true };
+  });
+
+  // ── Bank statement import (comdirect CSV → bank_tx) ───────────────────────
+
+  /** Import one comdirect "Umsätze Girokonto" CSV into bank_tx for a chosen konto.
+   *  Idempotent: rows already present (same konto + Ref.) are skipped, so re-importing
+   *  an overlapping / full-year export never duplicates. */
+  app.post('/api/finances/bank/upload', { bodyLimit: 25 * 1024 * 1024 }, async (req, reply) => {
+    const bdy = (req.body ?? {}) as { konto_id?: number; filename?: string; data_b64?: string };
+    const kontoId = bdy.konto_id != null ? parseInt(String(bdy.konto_id), 10) : null;
+    if (!kontoId) return reply.code(400).send({ error: 'konto_id required' });
+    if (!bdy.data_b64) return reply.code(400).send({ error: 'data_b64 required' });
+    let buf: Buffer;
+    try { buf = Buffer.from(bdy.data_b64.replace(/^data:[^,]*,/, ''), 'base64'); }
+    catch { return reply.code(400).send({ error: 'bad base64' }); }
+    if (!buf.length) return reply.code(400).send({ error: 'empty file' });
+
+    const parsed = parseComdirectCsv(buf.toString('latin1')); // comdirect exports are Latin-1
+    if (!parsed.rows.length) {
+      return { ok: false, filename: bdy.filename ?? null, reason: 'no transactions found — is this a comdirect Umsätze CSV?' };
+    }
+    const batch = `${(bdy.filename ?? 'upload').slice(0, 80)}@${new Date().toISOString()}`;
+    // Dedup on (konto, ref): fetch refs already present for this konto, skip them.
+    const refs = parsed.rows.map(r => r.ref).filter((r): r is string => !!r);
+    const existing = new Set(
+      refs.length ? (await sql`SELECT ref FROM bank_tx WHERE konto_id = ${kontoId} AND ref = ANY(${refs})`).map(r => r.ref as string) : [],
+    );
+    let imported = 0, skipped = 0;
+    for (const r of parsed.rows) {
+      if (r.ref && existing.has(r.ref)) { skipped++; continue; }
+      const ins = await sql`
+        INSERT INTO bank_tx (konto_id, booking_date, value_date, purchase_date, amount, counterparty, description, ref, raw, import_batch)
+        VALUES (${kontoId}, ${r.booking_date}, ${r.value_date}, ${r.purchase_date}, ${r.amount}, ${r.counterparty}, ${r.description}, ${r.ref}, ${r.raw}, ${batch})
+        ON CONFLICT DO NOTHING RETURNING id`;
+      if (ins.length) imported++; else skipped++;
+    }
+    return { ok: true, filename: bdy.filename ?? null, account: parsed.account, period: parsed.period, imported, skipped, total: parsed.rows.length };
+  });
+
+  /** List bank transactions with their match status. `status` filters to
+   *  fixed | receipt | open. A row is:
+   *   • fixed   → used as evidence for a fixed cost (fixed_cost_check.bank_tx_id)
+   *   • receipt → linked to a scanned receipt (einkauf.bank_tx_id)
+   *   • open    → neither → likely an un-scanned purchase / unclassified movement.
+   *  A linked receipt that is private to someone else is masked (no id/store) for
+   *  non-owners; the match status itself still shows. */
+  app.get('/api/finances/bank', async (req, reply) => {
+    const q = (req.query ?? {}) as { konto?: string; month?: string; status?: string };
+    const kontoId = q.konto ? parseInt(q.konto, 10) : null;
+    const b = q.month?.trim() ? monthBounds(q.month.trim()) : null;
+    if (q.month?.trim() && !b) return reply.code(400).send({ error: 'month must be YYYY-MM' });
+    const rows = await sql`
+      SELECT bt.id, bt.konto_id, k.name AS konto_name,
+             bt.booking_date::text AS booking_date, bt.purchase_date::text AS purchase_date,
+             bt.amount::float8 AS amount, bt.counterparty, bt.description,
+             re.id AS receipt_id, re.roh_ladenname AS receipt_laden, re.gesamt_betrag::float8 AS receipt_betrag,
+             re.private_for_user_id AS receipt_priv,
+             fc.fixed_cost_id AS fixed_id, f.label AS fixed_label
+      FROM bank_tx bt
+      LEFT JOIN konto k ON k.id = bt.konto_id
+      LEFT JOIN einkauf re ON re.bank_tx_id = bt.id
+      LEFT JOIN fixed_cost_check fc ON fc.bank_tx_id = bt.id
+      LEFT JOIN fixed_cost f ON f.id = fc.fixed_cost_id
+      WHERE TRUE
+        ${kontoId ? sql`AND bt.konto_id = ${kontoId}` : sql``}
+        ${b ? sql`AND bt.booking_date BETWEEN ${b.first} AND ${b.last}` : sql``}
+      ORDER BY bt.booking_date DESC, bt.id DESC
+      LIMIT 3000`;
+    const uid = req.user?.id ?? -1;
+    const seesAll = !!req.user?.sees_all_konten;
+    const items = rows.map(r => {
+      const priv = r.receipt_priv as number | null;
+      const masked = priv != null && priv !== uid && !seesAll;
+      const status = r.receipt_id ? 'receipt' : r.fixed_id ? 'fixed' : 'open';
+      return {
+        id: r.id, konto_id: r.konto_id, konto_name: r.konto_name,
+        booking_date: r.booking_date, purchase_date: r.purchase_date,
+        amount: r.amount, counterparty: r.counterparty, description: r.description,
+        status,
+        receipt: r.receipt_id
+          ? (masked ? { id: null, laden: null, betrag: r.receipt_betrag, private: true }
+            : { id: r.receipt_id, laden: r.receipt_laden, betrag: r.receipt_betrag, private: false })
+          : null,
+        fixed: r.fixed_id ? { id: r.fixed_id, label: r.fixed_label } : null,
+      };
+    });
+    const filtered = q.status && ['fixed', 'receipt', 'open'].includes(q.status)
+      ? items.filter(i => i.status === q.status) : items;
+    // Summary counts (over the current konto/month scope, before status filter).
+    const counts = { all: items.length, open: 0, fixed: 0, receipt: 0 };
+    for (const i of items) counts[i.status as 'open' | 'fixed' | 'receipt']++;
+    return { items: filtered, counts };
+  });
+
+  /** Delete a single bank transaction (mis-import). FK links (fixed_cost_check,
+   *  einkauf) are ON DELETE SET NULL, so a linked receipt/check just loses the link. */
+  app.delete('/api/finances/bank/:id', async (req, reply) => {
+    const id = parseInt(String((req.params as { id: string }).id), 10);
+    if (!id) return reply.code(400).send({ error: 'bad id' });
+    await sql`DELETE FROM bank_tx WHERE id = ${id}`;
     return { ok: true };
   });
 
