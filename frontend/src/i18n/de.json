@@ -42,7 +42,7 @@
     "undo": "Rückgängig",
     "monthTab": "Monat",
     "manageTab": "Verwaltung",
-    "bankTab": "Kontobewegungen",
+    "bankTab": "Kontos",
     "bank": {
       "heading": "Kontoauszug importieren (CSV)",
       "intro": "comdirect-CSV-Export (Umsätze Girokonto) hochladen. Mehrere Dateien möglich; ein erneuter Import zieht nichts doppelt.",
@@ -62,7 +62,14 @@
       "filter_receipt": "Beleg",
       "status_open": "offen",
       "status_fixed": "Fixkosten",
-      "status_receipt": "Beleg"
+      "status_receipt": "Beleg",
+      "tapToLink": "→ Beleg zuordnen",
+      "linkTitle": "Beleg zuordnen",
+      "noCandidates": "Keine passenden Belege gefunden (Betrag/Datum).",
+      "unlink": "Verknüpfung lösen",
+      "rematch": "Neu abgleichen",
+      "rematchToast": "{{n}} neu verknüpft",
+      "linkedToast": "Beleg verknüpft"
     },
     "jumpToday": "Zum aktuellen Monat",
     "fixTitle": "Fixkosten",
@@ -251,6 +258,7 @@
     "sumLabel": "Σ Positionen:",
     "printedLabel": "· Bon:",
     "itemsTotal": "Summe der Artikel",
+    "bankMatch": "Kontobewegung",
     "reocr": "OCR erneut ausführen",
     "reocrConfirm": "Bon-Foto erneut analysieren? Alle aktuellen Artikel werden ersetzt.",
     "reocrRunning": "Bon wird analysiert…",

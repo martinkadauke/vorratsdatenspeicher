@@ -502,9 +502,69 @@ export function financeRoutes(app: FastifyInstance): void {
 
   // ── Bank statement import (comdirect CSV → bank_tx) ───────────────────────
 
+  const isoMinusDays = (iso: string, n: number): string => {
+    const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() - n);
+    return d.toISOString().slice(0, 10);
+  };
+  const isoPlusDays = (iso: string, n: number): string => {
+    const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+  };
+
+  /** Auto-link bank debits to scanned receipts. A match needs the exact amount, a
+   *  shared merchant token AND a date window: the booking lags a few days behind the
+   *  purchase, so the receipt must fall on/before the booking day (≤10 days back) or
+   *  within ±2 days of the embedded card-purchase date. Only UNAMBIGUOUS matches
+   *  (exactly one candidate) are auto-linked; ambiguous ones wait for the picker. */
+  const autoMatchBank = async (kontoId?: number | null): Promise<number> => {
+    const debits = await sql`
+      SELECT bt.id, bt.konto_id, bt.amount::float8 AS amount, bt.counterparty,
+             bt.booking_date::text AS booking, bt.purchase_date::text AS purchase
+      FROM bank_tx bt
+      WHERE bt.amount < 0
+        AND NOT EXISTS (SELECT 1 FROM einkauf e WHERE e.bank_tx_id = bt.id)
+        ${kontoId ? sql`AND bt.konto_id = ${kontoId}` : sql``}
+      ORDER BY bt.booking_date, bt.id`;
+    if (!debits.length) return 0;
+    const receipts = await sql`
+      SELECT e.id, e.konto_id, e.gesamt_betrag::float8 AS betrag, e.roh_ladenname, e.datum::text AS datum
+      FROM einkauf e WHERE e.bank_tx_id IS NULL AND e.gesamt_betrag IS NOT NULL`;
+    const used = new Set<number>();
+    let linked = 0;
+    for (const d of debits) {
+      const target = Math.abs(d.amount as number);
+      const bankToks = normMerchant((d.counterparty as string | null) ?? '').split(' ').filter(w => w.length >= 4);
+      if (!bankToks.length) continue;
+      const booking = String(d.booking);
+      const purchase = d.purchase ? String(d.purchase) : null;
+      const lo = purchase ? isoMinusDays(purchase, 2) : isoMinusDays(booking, 10);
+      const hi = purchase ? isoPlusDays(purchase, 2) : booking;
+      // The TRUE candidate set (amount + date window + merchant) — NOT shrunk by
+      // `used`, so the ambiguity check below is honest. Prefer same-konto receipts
+      // (a card payment's receipt belongs on that account); only fall back to other
+      // konten if this account has none, which avoids cross-account mislinks.
+      const all = receipts.filter(r => {
+        if (Math.abs((r.betrag as number) - target) >= 0.005) return false;
+        const rd = String(r.datum);
+        if (rd < lo || rd > hi) return false;
+        const recNorm = normMerchant((r.roh_ladenname as string | null) ?? '');
+        return bankToks.some(tk => recNorm.includes(tk));
+      });
+      const sameKonto = all.filter(r => r.konto_id === d.konto_id);
+      const cands = sameKonto.length ? sameKonto : all;
+      // Auto-link ONLY when there is exactly one true candidate and it's still free.
+      if (cands.length === 1 && !used.has(cands[0].id as number)) {
+        await sql`UPDATE einkauf SET bank_tx_id = ${d.id} WHERE id = ${cands[0].id}`;
+        used.add(cands[0].id as number);
+        linked++;
+      }
+    }
+    return linked;
+  };
+
   /** Import one comdirect "Umsätze Girokonto" CSV into bank_tx for a chosen konto.
    *  Idempotent: rows already present (same konto + Ref.) are skipped, so re-importing
-   *  an overlapping / full-year export never duplicates. */
+   *  an overlapping / full-year export never duplicates. Runs auto-matching after. */
   app.post('/api/finances/bank/upload', { bodyLimit: 25 * 1024 * 1024 }, async (req, reply) => {
     const bdy = (req.body ?? {}) as { konto_id?: number; filename?: string; data_b64?: string };
     const kontoId = bdy.konto_id != null ? parseInt(String(bdy.konto_id), 10) : null;
@@ -534,7 +594,8 @@ export function financeRoutes(app: FastifyInstance): void {
         ON CONFLICT DO NOTHING RETURNING id`;
       if (ins.length) imported++; else skipped++;
     }
-    return { ok: true, filename: bdy.filename ?? null, account: parsed.account, period: parsed.period, imported, skipped, total: parsed.rows.length };
+    const matched = imported ? await autoMatchBank(kontoId) : 0;
+    return { ok: true, filename: bdy.filename ?? null, account: parsed.account, period: parsed.period, imported, skipped, matched, total: parsed.rows.length };
   });
 
   /** List bank transactions with their match status. `status` filters to
@@ -555,12 +616,16 @@ export function financeRoutes(app: FastifyInstance): void {
              bt.amount::float8 AS amount, bt.counterparty, bt.description,
              re.id AS receipt_id, re.roh_ladenname AS receipt_laden, re.gesamt_betrag::float8 AS receipt_betrag,
              re.private_for_user_id AS receipt_priv,
-             fc.fixed_cost_id AS fixed_id, f.label AS fixed_label
+             fx.fixed_id, fx.fixed_label
       FROM bank_tx bt
       LEFT JOIN konto k ON k.id = bt.konto_id
-      LEFT JOIN einkauf re ON re.bank_tx_id = bt.id
-      LEFT JOIN fixed_cost_check fc ON fc.bank_tx_id = bt.id
-      LEFT JOIN fixed_cost f ON f.id = fc.fixed_cost_id
+      -- LATERAL … LIMIT 1: a bank_tx may back more than one fixed-cost check (or be
+      -- linked to a receipt); take one so the row never fans out / double-counts.
+      LEFT JOIN LATERAL (SELECT e.id, e.roh_ladenname, e.gesamt_betrag, e.private_for_user_id
+                         FROM einkauf e WHERE e.bank_tx_id = bt.id LIMIT 1) re ON TRUE
+      LEFT JOIN LATERAL (SELECT fc.fixed_cost_id AS fixed_id, f.label AS fixed_label
+                         FROM fixed_cost_check fc JOIN fixed_cost f ON f.id = fc.fixed_cost_id
+                         WHERE fc.bank_tx_id = bt.id LIMIT 1) fx ON TRUE
       WHERE TRUE
         ${kontoId ? sql`AND bt.konto_id = ${kontoId}` : sql``}
         ${b ? sql`AND bt.booking_date BETWEEN ${b.first} AND ${b.last}` : sql``}
@@ -598,6 +663,75 @@ export function financeRoutes(app: FastifyInstance): void {
     const id = parseInt(String((req.params as { id: string }).id), 10);
     if (!id) return reply.code(400).send({ error: 'bad id' });
     await sql`DELETE FROM bank_tx WHERE id = ${id}`;
+    return { ok: true };
+  });
+
+  /** Re-run auto-matching (e.g. after scanning receipts that were missing before). */
+  app.post('/api/finances/bank/rematch', async (req) => {
+    const kraw = (req.body as { konto_id?: number } | undefined)?.konto_id;
+    const kontoId = kraw != null ? parseInt(String(kraw), 10) : null;
+    const linked = await autoMatchBank(kontoId);
+    return { ok: true, linked };
+  });
+
+  /** Candidate receipts to manually link to a bank transaction: unlinked receipts
+   *  near the amount (±2 %) and within a plausible date window (up to booking day,
+   *  ~14 days back). Private receipts the caller can't see are excluded. */
+  app.get('/api/finances/bank/:id/candidates', async (req, reply) => {
+    const id = parseInt(String((req.params as { id: string }).id), 10);
+    if (!id) return reply.code(400).send({ error: 'bad id' });
+    const [bt] = await sql`SELECT amount::float8 AS amount, booking_date::text AS booking, purchase_date::text AS purchase FROM bank_tx WHERE id = ${id}`;
+    if (!bt) return reply.code(404).send({ error: 'not found' });
+    const target = Math.abs(bt.amount as number);
+    const tol = Math.max(0.5, target * 0.02);
+    const hi = isoPlusDays(String(bt.booking), 1);
+    const lo = isoMinusDays(bt.purchase ? String(bt.purchase) : String(bt.booking), 14);
+    const rows = await sql`
+      SELECT e.id, e.roh_ladenname AS laden, e.gesamt_betrag::float8 AS betrag, e.datum::text AS datum, e.konto_id
+      FROM einkauf e
+      WHERE e.bank_tx_id IS NULL AND e.gesamt_betrag IS NOT NULL
+        AND ABS(e.gesamt_betrag - ${target}) <= ${tol}
+        AND e.datum BETWEEN ${lo} AND ${hi}
+        ${kontoScope(req.user, sql`e`)}
+      ORDER BY ABS(e.gesamt_betrag - ${target}), e.datum DESC
+      LIMIT 40`;
+    return { candidates: rows };
+  });
+
+  /** Manually link a bank transaction to a receipt (one-to-one). Atomic: verify the
+   *  target is visible + still unlinked BEFORE detaching the old one, so a bad/stale
+   *  target never destroys a valid existing link. A slot already held by another
+   *  user's PRIVATE receipt can't be hijacked. */
+  app.post('/api/finances/bank/:id/link', async (req, reply) => {
+    const id = parseInt(String((req.params as { id: string }).id), 10);
+    const eid = parseInt(String((req.body as { einkauf_id?: number } | undefined)?.einkauf_id ?? ''), 10);
+    if (!id || !eid) return reply.code(400).send({ error: 'bank id and einkauf_id required' });
+    const [bt] = await sql`SELECT id FROM bank_tx WHERE id = ${id}`;
+    if (!bt) return reply.code(404).send({ error: 'bank tx not found' });
+    const uid = req.user?.id ?? -1;
+    const seesAll = !!req.user?.sees_all_konten;
+    return await sql.begin(async tx => {
+      const [cur] = await tx`SELECT id, private_for_user_id AS priv FROM einkauf WHERE bank_tx_id = ${id}`;
+      if (cur && cur.priv != null && cur.priv !== uid && !seesAll) {
+        reply.code(403); return { error: 'bank transaction already linked to a private receipt' };
+      }
+      const [target] = await tx`
+        SELECT id FROM einkauf
+        WHERE id = ${eid} AND bank_tx_id IS NULL
+          AND (${seesAll} OR private_for_user_id IS NULL OR private_for_user_id = ${uid})`;
+      if (!target) { reply.code(404); return { error: 'receipt not found or already linked' }; }
+      if (cur) await tx`UPDATE einkauf SET bank_tx_id = NULL WHERE id = ${cur.id}`;
+      await tx`UPDATE einkauf SET bank_tx_id = ${id} WHERE id = ${target.id}`;
+      return { ok: true };
+    });
+  });
+
+  /** Unlink the receipt attached to this bank transaction — scoped so a non-owner
+   *  can't detach a receipt that is private to someone else. */
+  app.post('/api/finances/bank/:id/unlink', async (req, reply) => {
+    const id = parseInt(String((req.params as { id: string }).id), 10);
+    if (!id) return reply.code(400).send({ error: 'bad id' });
+    await sql`UPDATE einkauf SET bank_tx_id = NULL WHERE bank_tx_id = ${id} ${kontoScope(req.user, sql`einkauf`)}`;
     return { ok: true };
   });
 

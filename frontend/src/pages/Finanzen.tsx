@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Wallet, Plus, Pencil, Trash2, Home, User as UserIcon, Info,
   ChevronLeft, ChevronRight, ChevronDown, CheckCircle2, Circle, CircleDot, Search, X, Upload, Layers, Lock,
+  Link2, Link2Off, RefreshCw,
 } from 'lucide-react';
 import { api } from '../api/client';
 import { Card, Spinner, Button, Input, Label, Select, Switch, Modal, EmptyState, Badge } from '../components/ui';
@@ -946,41 +947,89 @@ function BankUpload({ scopeKonten }: { scopeKonten: KontoLite[] }) {
   );
 }
 
-function BankRow({ tx, t, onOpen }: { tx: BankTx; t: (k: string, o?: Record<string, unknown>) => string; onOpen: (receiptId: number) => void }) {
+function BankRow({ tx, t, onOpen, onLink, onUnlink }: {
+  tx: BankTx; t: (k: string, o?: Record<string, unknown>) => string;
+  onOpen: (receiptId: number) => void; onLink: (tx: BankTx) => void; onUnlink: (id: number) => void;
+}) {
   const credit = tx.amount > 0;
   const canOpen = tx.status === 'receipt' && tx.receipt?.id != null && !tx.receipt.private;
+  const canLink = tx.status === 'open' && tx.amount < 0;
   const badge = tx.status === 'receipt'
     ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
     : tx.status === 'fixed' ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300'
       : 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300';
-  const badgeLabel = t(`finances.bank.status_${tx.status}`);
+  const onClick = canOpen ? () => onOpen(tx.receipt!.id!) : canLink ? () => onLink(tx) : undefined;
   return (
-    <Card onClick={canOpen ? () => onOpen(tx.receipt!.id!) : undefined} className="flex items-center gap-3 p-3">
+    <Card onClick={onClick} className="flex items-center gap-3 p-3">
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium">{tx.counterparty || '—'}</div>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400">
           <span>{ddmmyyyy(tx.booking_date)}</span>
-          <span className={cn('rounded-full px-1.5 py-0.5 text-[10px]', badge)}>{badgeLabel}</span>
+          <span className={cn('rounded-full px-1.5 py-0.5 text-[10px]', badge)}>{t(`finances.bank.status_${tx.status}`)}</span>
           {tx.status === 'receipt' && tx.receipt && (tx.receipt.private
             ? <span className="inline-flex items-center gap-1 truncate italic"><Lock size={11} />{t('finances.privatePurchase')}</span>
             : tx.receipt.laden && <span className="truncate">→ {tx.receipt.laden}</span>)}
           {tx.status === 'fixed' && tx.fixed && <span className="truncate">→ {tx.fixed.label}</span>}
+          {canLink && <span className="text-zinc-400">{t('finances.bank.tapToLink')}</span>}
         </div>
       </div>
       <span className={cn('shrink-0 text-sm font-semibold', credit && 'text-emerald-600 dark:text-emerald-500')}>{credit ? '+' : ''}{eur(tx.amount)}</span>
+      {tx.status === 'receipt' && !tx.receipt?.private && (
+        <button onClick={e => { e.stopPropagation(); onUnlink(tx.id); }} title={t('finances.bank.unlink')}
+          className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-red-500 dark:hover:bg-zinc-800"><Link2Off size={15} /></button>
+      )}
+      {canLink && <Link2 size={15} className="shrink-0 text-zinc-300 dark:text-zinc-600" />}
       {canOpen && <ChevronRight size={15} className="shrink-0 text-zinc-300 dark:text-zinc-600" />}
     </Card>
   );
 }
 
+/** Pick a scanned receipt to link to a bank transaction (candidates = unlinked
+ *  receipts near the amount + date window). */
+function BankLinkPicker({ tx, t, onClose, onPick }: {
+  tx: BankTx; t: (k: string, o?: Record<string, unknown>) => string; onClose: () => void; onPick: (einkaufId: number) => void;
+}) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['bank-candidates', tx.id],
+    queryFn: () => api<{ candidates: { id: number; laden: string | null; betrag: number; datum: string }[] }>(`/api/finances/bank/${tx.id}/candidates`),
+  });
+  const cands = data?.candidates ?? [];
+  return (
+    <Modal open onClose={onClose} title={t('finances.bank.linkTitle')}>
+      <div className="flex flex-col gap-3">
+        <div className="text-xs text-zinc-500 dark:text-zinc-400">{tx.counterparty} · {eur(tx.amount)} · {ddmmyyyy(tx.booking_date)}</div>
+        {isLoading ? <Spinner /> : !cands.length ? (
+          <p className="py-4 text-center text-xs text-zinc-400">{t('finances.bank.noCandidates')}</p>
+        ) : (
+          <ul className="-mx-1 flex max-h-[55vh] flex-col divide-y divide-zinc-100 overflow-y-auto dark:divide-zinc-800">
+            {cands.map(c => (
+              <li key={c.id}>
+                <button onClick={() => onPick(c.id)} className="flex w-full items-center gap-2 rounded-lg px-1 py-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium">{c.laden || '–'}</div>
+                    <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{ddmmyyyy(c.datum)}</div>
+                  </div>
+                  <span className="shrink-0 text-sm font-semibold">{eur(c.betrag)}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 function BankTab() {
   const { t } = useTranslation();
+  const qc = useQueryClient();
   const navigate = useNavigate();
   const { data: konten } = useKonten();
   const scopeKonten = useMemo(() => (konten ?? []).filter(k => !k.is_cash), [konten]);
   const [konto, setKonto] = useUrlState('bk', '');
   const [month, setMonth] = useUrlState('bm', '');
   const [status, setStatus] = useUrlState('bs', 'all');
+  const [linkTx, setLinkTx] = useState<BankTx | null>(null);
   const qs = new URLSearchParams();
   if (konto) qs.set('konto', konto);
   if (month) qs.set('month', month);
@@ -988,6 +1037,24 @@ function BankTab() {
   const { data, isLoading } = useQuery({
     queryKey: ['bank-tx', konto, month, status],
     queryFn: () => api<{ items: BankTx[]; counts: { all: number; open: number; fixed: number; receipt: number } }>(`/api/finances/bank?${qs.toString()}`),
+  });
+  const invalidate = () => {
+    void qc.invalidateQueries({ queryKey: ['bank-tx'] });
+    void qc.invalidateQueries({ queryKey: ['bank-candidates'] });
+  };
+  const link = useMutation({
+    mutationFn: (einkauf_id: number) => api(`/api/finances/bank/${linkTx!.id}/link`, { method: 'POST', body: { einkauf_id } }),
+    onSuccess: () => { invalidate(); setLinkTx(null); toast(t('finances.bank.linkedToast'), 'success'); },
+    onError: (e: Error) => toast(e.message, 'error'),
+  });
+  const unlink = useMutation({
+    mutationFn: (id: number) => api(`/api/finances/bank/${id}/unlink`, { method: 'POST' }),
+    onSuccess: invalidate,
+  });
+  const rematch = useMutation({
+    mutationFn: () => api<{ linked: number }>('/api/finances/bank/rematch', { method: 'POST', body: { konto_id: konto ? Number(konto) : null } }),
+    onSuccess: (r) => { invalidate(); toast(t('finances.bank.rematchToast', { n: r.linked }), r.linked ? 'success' : 'info'); },
+    onError: (e: Error) => toast(e.message, 'error'),
   });
   const items = data?.items ?? [];
   const c = data?.counts;
@@ -1004,6 +1071,10 @@ function BankTab() {
             {scopeKonten.map(k => <option key={k.id} value={k.id}>{scopeLabelOf(t, k)}</option>)}
           </Select>
           <Input type="month" value={month} onChange={e => setMonth(e.target.value)} className="w-[9.5rem]" />
+          <button onClick={() => rematch.mutate()} disabled={rematch.isPending} title={t('finances.bank.rematch')}
+            className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-zinc-300 px-2.5 py-2 text-xs font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
+            <RefreshCw size={14} className={cn(rematch.isPending && 'animate-spin')} /> {t('finances.bank.rematch')}
+          </button>
         </div>
         <div className="flex flex-wrap gap-1.5">
           {chips.map(ch => (
@@ -1019,9 +1090,10 @@ function BankTab() {
         <Card className="p-4 text-center text-xs text-zinc-400">{t('finances.bank.empty')}</Card>
       ) : (
         <div className="flex flex-col gap-2">
-          {items.map(tx => <BankRow key={tx.id} tx={tx} t={t} onOpen={id => navigate(`/receipts/${id}`)} />)}
+          {items.map(tx => <BankRow key={tx.id} tx={tx} t={t} onOpen={id => navigate(`/receipts/${id}`)} onLink={setLinkTx} onUnlink={unlink.mutate} />)}
         </div>
       )}
+      {linkTx && <BankLinkPicker tx={linkTx} t={t} onClose={() => setLinkTx(null)} onPick={link.mutate} />}
     </div>
   );
 }

@@ -555,10 +555,12 @@ export function receiptRoutes(app: FastifyInstance): void {
     const receipts = await sql`
       SELECT e.id, e.datum, e.roh_ladenname, e.bild_pfad, e.gesamt_betrag, e.geprueft,
              e.konto_id, e.quelle, k.name AS konto_name, e.ocr_pending, e.date_uncertain,
-             e.private_for_user_id,
+             e.private_for_user_id, e.bank_tx_id,
+             bt.booking_date::text AS bank_booking, bt.amount::float8 AS bank_amount, bt.counterparty AS bank_counterparty,
              (e.private_for_user_id IS NOT NULL) AS private,
              EXISTS(SELECT 1 FROM email_message em WHERE em.einkauf_id = e.id) AS has_email
       FROM einkauf e LEFT JOIN konto k ON k.id = e.konto_id
+      LEFT JOIN bank_tx bt ON bt.id = e.bank_tx_id
       WHERE e.id = ${id}
     `;
     if (!receipts.length) return reply.code(404).send({ error: 'not found' });
@@ -601,8 +603,11 @@ export function receiptRoutes(app: FastifyInstance): void {
       byArtikel.set(r.artikel_id, list);
     }
 
+    const r0 = receipts[0];
     return {
-      ...receipts[0],
+      ...r0,
+      // The bank transaction this receipt is matched to (comdirect import), if any.
+      bank: r0.bank_tx_id ? { id: r0.bank_tx_id, booking_date: r0.bank_booking, amount: r0.bank_amount, counterparty: r0.bank_counterparty } : null,
       artikel: artikel.map(a => {
         const override = byArtikel.get(a.id as number);
         const canonical = a.canonical_name ? byCanonical.get(a.canonical_name as string) : undefined;

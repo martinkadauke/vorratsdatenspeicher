@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, ChevronLeft, ChevronRight, RotateCw, Check, Hand, Wallet, X, Search, Ban, Lock, Plus, Camera, ImagePlus, FileText, Mail, Maximize2 } from 'lucide-react';
+import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, ChevronLeft, ChevronRight, RotateCw, Check, Hand, Wallet, X, Search, Ban, Lock, Plus, Camera, ImagePlus, FileText, Mail, Maximize2, Landmark } from 'lucide-react';
 import { TransformWrapper, TransformComponent, useControls } from 'react-zoom-pan-pinch';
 import { api } from '../api/client';
 import type { Artikel, Receipt, ReceiptDetail } from '../api/types';
@@ -290,6 +290,13 @@ export function ReceiptDetailPage() {
             <span className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
               {t(`quelle.${data.quelle}`)}
             </span>
+          )}
+          {data.bank && (
+            <Link to={`/finanzen?tab=bank&bm=${data.bank.booking_date.slice(0, 7)}`}
+              title={t('receiptDetail.bankMatch')}
+              className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-700 hover:bg-sky-200 dark:bg-sky-950/50 dark:text-sky-300 dark:hover:bg-sky-900/50">
+              <Landmark size={11} /> {data.bank.counterparty ?? t('receiptDetail.bankMatch')} · {eur(data.bank.amount)}
+            </Link>
           )}
           {/* Private toggle — only you can see a private receipt (case-by-case hide). */}
           {data.private ? (

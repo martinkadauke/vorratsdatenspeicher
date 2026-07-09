@@ -61,6 +61,8 @@ export interface Artikel {
 
 export interface ReceiptDetail extends Receipt {
   artikel: Artikel[];
+  /** Matched comdirect bank transaction, if any. */
+  bank?: { id: number; booking_date: string; amount: number; counterparty: string | null } | null;
 }
 
 /** A single line item ("Position") — one artikel row joined with its receipt's

@@ -62,7 +62,14 @@
       "filter_receipt": "Receipt",
       "status_open": "open",
       "status_fixed": "fixed cost",
-      "status_receipt": "receipt"
+      "status_receipt": "receipt",
+      "tapToLink": "→ link a receipt",
+      "linkTitle": "Link a receipt",
+      "noCandidates": "No matching receipts found (amount/date).",
+      "unlink": "Unlink",
+      "rematch": "Re-match",
+      "rematchToast": "{{n}} newly linked",
+      "linkedToast": "Receipt linked"
     },
     "jumpToday": "Jump to current month",
     "fixTitle": "Fixed costs",
@@ -251,6 +258,7 @@
     "sumLabel": "Σ items:",
     "printedLabel": "· receipt:",
     "itemsTotal": "Items total",
+    "bankMatch": "Bank transaction",
     "reocr": "Re-run OCR",
     "reocrConfirm": "Re-analyze receipt photo? All current items will be replaced.",
     "reocrRunning": "Analyzing receipt…",
