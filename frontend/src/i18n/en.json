@@ -189,6 +189,8 @@
       "hint": "Upload your bank CSV (comdirect etc.) right below.",
       "listHeading": "Recorded income",
       "view": "View pay slip",
+      "attach": "Attach receipt/PDF",
+      "attached": "File attached",
       "viewPayslip": "Pay slip",
       "viewError": "Could not load the file.",
       "openTab": "Open in new tab",

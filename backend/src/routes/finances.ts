@@ -670,6 +670,29 @@ export function financeRoutes(app: FastifyInstance): void {
     };
   });
 
+  /** Attach a file to an EXISTING income row (no new row, no re-extraction) — used to
+   *  backfill pay-slip PDFs for entries imported before file storage existed, so a
+   *  HICO income entry has both its bank credit AND its pay-slip. Replaces any prior file. */
+  app.post('/api/finances/income/:id/file', { bodyLimit: 25 * 1024 * 1024 }, async (req, reply) => {
+    const id = parseInt(String((req.params as { id: string }).id), 10);
+    if (!id) return reply.code(400).send({ error: 'bad id' });
+    const bdy = (req.body ?? {}) as { filename?: string; data_b64?: string };
+    if (!bdy.data_b64) return reply.code(400).send({ error: 'data_b64 required' });
+    const [row] = await sql`SELECT id FROM income WHERE id = ${id}`;
+    if (!row) return reply.code(404).send({ error: 'not found' });
+    let buf: Buffer;
+    try { buf = Buffer.from(bdy.data_b64.replace(/^data:[^,]*,/, ''), 'base64'); }
+    catch { return reply.code(400).send({ error: 'bad base64' }); }
+    if (!buf.length) return reply.code(400).send({ error: 'empty file' });
+    const origName = (bdy.filename ?? '').toString();
+    const ext = (origName.match(/\.(pdf|png|jpe?g|webp|heic)$/i)?.[0] ?? '.pdf').toLowerCase();
+    const stored = `${id}_${randomBytes(6).toString('hex')}${ext}`;
+    await mkdir(PAYSLIP_DIR, { recursive: true });
+    await writeFile(path.join(PAYSLIP_DIR, stored), buf);
+    await sql`UPDATE income SET file_path = ${stored}, file_name = ${origName || `gehaltszettel${ext}`} WHERE id = ${id}`;
+    return { ok: true };
+  });
+
   /** Stream a stored pay-slip file (auth-guarded; income is shared household data).
    *  basename() guards path traversal; only files inside PAYSLIP_DIR are reachable. */
   app.get('/api/finances/income/:id/file', async (req, reply) => {

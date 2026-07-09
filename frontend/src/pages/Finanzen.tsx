@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Wallet, Plus, Pencil, Trash2, Home, User as UserIcon, Info,
   ChevronLeft, ChevronRight, ChevronDown, CheckCircle2, Circle, CircleDot, Search, X, Upload, Layers, Lock,
-  Link2, Link2Off, RefreshCw, Landmark, SlidersHorizontal, Flag, FilePlus2, Receipt, FileText,
+  Link2, Link2Off, RefreshCw, Landmark, SlidersHorizontal, Flag, FilePlus2, Receipt, FileText, Paperclip,
 } from 'lucide-react';
 import { api, getToken } from '../api/client';
 import { Card, Spinner, Button, Input, Label, Select, Switch, Modal, EmptyState, Badge } from '../components/ui';
@@ -1068,6 +1068,14 @@ function IncomeList() {
     },
     onError: (e: Error) => toast(e.message, 'error'),
   });
+  const attach = useMutation({
+    mutationFn: async ({ id, file }: { id: number; file: File }) => {
+      const b64 = await new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = () => rej(new Error('read failed')); r.readAsDataURL(file); });
+      return api(`/api/finances/income/${id}/file`, { method: 'POST', body: { filename: file.name, data_b64: b64 } });
+    },
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['fin-income'] }); toast(t('finances.income.attached'), 'success'); },
+    onError: (e: Error) => toast(e.message, 'error'),
+  });
   const srcLabel = (s: string) => t(`finances.income.src.${s}`, { defaultValue: s });
 
   const rows = data?.income ?? [];
@@ -1107,7 +1115,7 @@ function IncomeList() {
                 </div>
               </div>
               <span className="shrink-0 text-sm font-semibold text-emerald-600 dark:text-emerald-500">+{eur(r.amount)}</span>
-              {r.has_file && (
+              {r.has_file ? (
                 <button
                   onClick={() => setViewFile({ id: r.id, name: r.file_name ?? '' })}
                   className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-emerald-600 dark:hover:bg-zinc-800"
@@ -1115,6 +1123,12 @@ function IncomeList() {
                 >
                   <FileText size={15} />
                 </button>
+              ) : (
+                <label className="shrink-0 cursor-pointer rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-emerald-600 dark:hover:bg-zinc-800" title={t('finances.income.attach')}>
+                  <Paperclip size={15} />
+                  <input type="file" accept=".pdf,image/*" className="hidden"
+                    onChange={e => { const f = e.target.files?.[0]; if (f) attach.mutate({ id: r.id, file: f }); e.target.value = ''; }} />
+                </label>
               )}
               <button
                 onClick={() => remove.mutate(r.id)}

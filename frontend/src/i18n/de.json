@@ -189,6 +189,8 @@
       "hint": "Bank-CSV (comdirect etc.) lädst du direkt darunter hoch.",
       "listHeading": "Erfasste Einnahmen",
       "view": "Gehaltszettel ansehen",
+      "attach": "Beleg/PDF anhängen",
+      "attached": "Datei angehängt",
       "viewPayslip": "Gehaltszettel",
       "viewError": "Datei konnte nicht geladen werden.",
       "openTab": "In neuem Tab öffnen",
