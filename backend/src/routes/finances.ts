@@ -856,6 +856,7 @@ export function financeRoutes(app: FastifyInstance): void {
 STRIKTE REGELN:
 - Schlage NUR eine Zuordnung vor, wenn du HOCH sicher bist, dass es wirklich derselbe Vorgang ist. Händlernamen dürfen abweichen, wenn es klar dieselbe Firma / derselbe Dienst ist (Weltwissen nutzen: z. B. "RSG Group" = McFit, "nexi" = Zahlungsabwickler eines Ladens, "Congstar" = Handyvertrag).
 - Der Betrag muss praktisch identisch sein und das Datum plausibel.
+- WICHTIG: Ein gleicher Betrag ALLEIN genügt NICHT. Es muss auch der Händler / Zweck erkennbar zusammenpassen (per Name oder Weltwissen). Zwei unverbundene Firmen mit zufällig gleichem Betrag NICHT zuordnen — das Datum als einziges weiteres Kriterium reicht nicht.
 - Im Zweifel KEINE Zuordnung. Es ist viel besser, offen zu lassen, als zu raten. Erfinde NICHTS und wähle NUR aus den je Buchung angebotenen Kandidaten.
 - Höchstens EIN Vorschlag pro Buchung — nur der überzeugendste. Überzeugt nichts: weglassen.
 Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed","target_id":N,"confidence":0.0-1.0,"reason":"kurz"}]}. Nimm nur Vorschläge mit confidence >= 0.75 auf.`;
