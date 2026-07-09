@@ -17,6 +17,9 @@ UPDATE fixed_cost SET kind = 'income', monthly_eur = -monthly_eur WHERE monthly_
 -- Keep the analytics ledger correct: only EXPENSE plans are virtual monthly
 -- expenses. Income plans are planning-only (the checklist); actual income stays
 -- in the `income` table, so income is never double-counted here.
+-- Column list must match the EXISTING view exactly (incl. private_for_user_id,
+-- added by a later migration) — CREATE OR REPLACE can only ADD trailing columns,
+-- never drop. Only change vs. current: the fixed_cost part filters kind='expense'.
 CREATE OR REPLACE VIEW v_transactions AS
   SELECT
     'artikel'::text             AS source_table,
@@ -29,7 +32,8 @@ CREATE OR REPLACE VIEW v_transactions AS
     e.quelle                    AS source,
     NULLIF(e.roh_ladenname, '') AS counterparty,
     a.canonical_name            AS canonical_name,
-    a.name                      AS description
+    a.name                      AS description,
+    e.private_for_user_id       AS private_for_user_id
   FROM artikel a
   JOIN einkauf e ON e.id = a.einkauf_id
   WHERE a.preis IS NOT NULL
@@ -44,7 +48,8 @@ CREATE OR REPLACE VIEW v_transactions AS
     'income'::text,
     NULLIF(i.description, ''),
     NULL::text,
-    i.description
+    i.description,
+    NULL::integer
   FROM income i
 
   UNION ALL
@@ -57,7 +62,8 @@ CREATE OR REPLACE VIEW v_transactions AS
     'fixed'::text,
     f.label,
     NULL::text,
-    f.label
+    f.label,
+    NULL::integer
   FROM fixed_cost f
   CROSS JOIN LATERAL generate_series(
     date_trunc('month', f.start_date),
