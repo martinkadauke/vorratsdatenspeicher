@@ -36,6 +36,7 @@
     "activeLabel": "Active",
     "inactive": "inactive",
     "until": "until",
+    "from": "from",
     "empty": "No fixed costs yet.",
     "emptyScope": "No fixed costs.",
     "removedToast": "Deleted \"{{label}}\"",

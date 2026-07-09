@@ -1255,7 +1255,8 @@ function ManageTab() {
                       {c.category_path && <span className="truncate">{c.category_path.split('/').pop()}</span>}
                       {!c.expect_receipt && <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] dark:bg-zinc-800">{t('finances.noReceiptBadge')}</span>}
                       {!c.active && <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] dark:bg-zinc-800">{t('finances.inactive')}</span>}
-                      {c.end_date && <span>{t('finances.until')} {c.end_date}</span>}
+                      {c.start_date && c.start_date > today() && <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">{t('finances.from')} {ddmmyyyy(c.start_date)}</span>}
+                      {c.end_date && <span>{t('finances.until')} {ddmmyyyy(c.end_date)}</span>}
                     </div>
                   </div>
                   <span className={cn('shrink-0 text-sm font-semibold', c.kind === 'income' && 'text-emerald-600 dark:text-emerald-500')}>{c.kind === 'income' ? '+' : ''}{eur(amortized(c.monthly_eur, c.frequency))}<span className="text-xs font-normal text-zinc-400">{t('finances.perMonth')}</span></span>

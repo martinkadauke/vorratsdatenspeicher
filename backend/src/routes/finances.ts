@@ -25,7 +25,7 @@ export function financeRoutes(app: FastifyInstance): void {
   app.get('/api/fixed-costs', async () => {
     return sql`
       SELECT f.id, f.label, f.category_path, f.monthly_eur::float8 AS monthly_eur, f.kind, f.frequency, f.is_transfer,
-             f.konto_id, f.start_date, f.end_date, f.active,
+             f.konto_id, f.start_date::text AS start_date, f.end_date::text AS end_date, f.active,
              f.expect_receipt, f.match_merchant,
              k.name AS konto_name, k.is_shared, k.user_id AS konto_user_id, u.username AS owner
       FROM fixed_cost f

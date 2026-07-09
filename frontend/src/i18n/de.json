@@ -36,6 +36,7 @@
     "activeLabel": "Aktiv",
     "inactive": "inaktiv",
     "until": "bis",
+    "from": "ab",
     "empty": "Noch keine Fixkosten angelegt.",
     "emptyScope": "Keine Fixkosten.",
     "removedToast": "„{{label}}“ gelöscht",
