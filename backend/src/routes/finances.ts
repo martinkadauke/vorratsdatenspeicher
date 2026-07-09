@@ -834,11 +834,17 @@ export function financeRoutes(app: FastifyInstance): void {
     });
     // Search runs AFTER masking, so a private receipt's masked merchant text can
     // never be probed via search — only the visible fields + amount + bank ref match.
+    // Amount matching is done separately with a normalised query so a value typed
+    // exactly as shown ("1.234,50", "12,00") matches the stored float ("1234.5").
+    const amtQuery = search.replace(/\./g, '').replace(',', '.'); // strip de thousands dots, decimal comma→dot
+    const amtSearchable = amtQuery.length > 0 && /\d/.test(amtQuery);
     const searched = search
       ? items.filter(i => {
-        const s2 = search.replace(',', '.');
-        const hay = `${i.counterparty ?? ''} ${i.description ?? ''} ${i._ref} ${i.amount}`.toLowerCase();
-        return hay.includes(search) || hay.includes(s2);
+        const textHay = `${i.counterparty ?? ''} ${i.description ?? ''} ${i._ref}`.toLowerCase();
+        if (textHay.includes(search)) return true;
+        // amount haystack carries a fixed 2-decimal form so ".X0" amounts match too
+        const amtHay = `${i.amount} ${Math.abs(i.amount).toFixed(2)}`;
+        return amtSearchable && amtHay.includes(amtQuery);
       })
       : items;
     const filtered = (q.status && ['fixed', 'receipt', 'income', 'open'].includes(q.status)
@@ -859,8 +865,80 @@ export function financeRoutes(app: FastifyInstance): void {
     return { ok: true };
   });
 
-  /** Toggle the personal "needs a closer look" marker on a bank statement line
-   *  (set via long-press in the Auszüge list). Pure review aid — no matching effect. */
+  /** Guard: a bank_tx that already backs a receipt / income row / fixed-cost check
+   *  must not get a second generated home. Returns true if it is still open. */
+  async function bankTxIsOpen(id: number): Promise<boolean> {
+    const [st] = await sql`SELECT
+      EXISTS(SELECT 1 FROM einkauf WHERE bank_tx_id = ${id}) AS r,
+      EXISTS(SELECT 1 FROM income WHERE bank_tx_id = ${id}) AS i,
+      EXISTS(SELECT 1 FROM fixed_cost_check WHERE bank_tx_id = ${id}) AS f`;
+    return !(st.r || st.i || st.f);
+  }
+
+  /** Generate a stand-in RECEIPT for an un-scanned purchase (a debit we forgot to
+   *  photograph). One dummy "Unbekannter Einkauf" line in Sonstiges carries the
+   *  exact amount; the receipt is linked back to the bank line. */
+  app.post('/api/finances/bank/:id/generate-receipt', async (req, reply) => {
+    const id = parseInt(String((req.params as { id: string }).id), 10);
+    if (!id) return reply.code(400).send({ error: 'bad id' });
+    const [bt] = await sql`SELECT konto_id, booking_date::text AS booking, amount::float8 AS amount, counterparty FROM bank_tx WHERE id = ${id}`;
+    if (!bt) return reply.code(404).send({ error: 'not found' });
+    if ((bt.amount as number) >= 0) return reply.code(400).send({ error: 'Nur für Ausgaben (Belastungen). Für Gutschriften „Fixkosten/Einnahme" generieren.' });
+    if (!(await bankTxIsOpen(id))) return reply.code(400).send({ error: 'Diese Buchung ist bereits zugeordnet' });
+    const laden = ((req.body as { laden?: string } | undefined)?.laden ?? '').toString().trim()
+      || (bt.counterparty as string | null) || 'Unbekannt';
+    const amount = Math.abs(bt.amount as number);
+    const einkaufId = await sql.begin(async tx => {
+      const [e] = await tx`
+        INSERT INTO einkauf (datum, roh_ladenname, gesamt_betrag, konto_id, quelle, geprueft, ocr_pending, date_uncertain, bank_tx_id)
+        VALUES (${bt.booking}, ${laden}, ${amount}, ${bt.konto_id}, 'generated', TRUE, FALSE, FALSE, ${id})
+        RETURNING id`;
+      await tx`
+        INSERT INTO artikel (einkauf_id, name, canonical_name, menge, preis, category_path)
+        VALUES (${e.id}, 'Unbekannter Einkauf', 'Unbekannter Einkauf', 1, ${amount}, 'Sonstiges/Unkategorisiert')`;
+      return e.id as number;
+    });
+    return { ok: true, einkauf_id: einkaufId };
+  });
+
+  /** Generate a FIXED-COST entry from a bank line — the escape hatch for one-off
+   *  transfers/top-ups (e.g. a 2500 € booster on top of the monthly 2000). It never
+   *  gets folded onto an existing monthly ration (which would break 1:1 matching);
+   *  instead it becomes its own row, optionally scoped to just the booking month via
+   *  start/end date, and the bank line is linked as its confirmed evidence. */
+  app.post('/api/finances/bank/:id/generate-fixed', async (req, reply) => {
+    const id = parseInt(String((req.params as { id: string }).id), 10);
+    if (!id) return reply.code(400).send({ error: 'bad id' });
+    const [bt] = await sql`SELECT konto_id, booking_date::text AS booking, amount::float8 AS amount, counterparty FROM bank_tx WHERE id = ${id}`;
+    if (!bt) return reply.code(404).send({ error: 'not found' });
+    if (bt.konto_id == null) return reply.code(400).send({ error: 'Buchung ohne Konto' });
+    if (!(await bankTxIsOpen(id))) return reply.code(400).send({ error: 'Diese Buchung ist bereits zugeordnet' });
+    const body = (req.body ?? {}) as { label?: string; kind?: string; is_transfer?: boolean; one_month?: boolean };
+    const label = (body.label ?? '').toString().trim() || (bt.counterparty as string | null) || 'Fixkosten';
+    const kind = body.kind === 'income' ? 'income' : body.kind === 'expense' ? 'expense' : ((bt.amount as number) >= 0 ? 'income' : 'expense');
+    const amount = Math.abs(bt.amount as number);
+    const month = String(bt.booking).slice(0, 7);
+    const mb = monthBounds(month);
+    if (!mb) return reply.code(400).send({ error: 'bad booking date' });
+    const start = `${month}-01`;
+    const end = body.one_month === false ? null : mb.last; // default: scoped to the booking month
+    const fixedId = await sql.begin(async tx => {
+      const [f] = await tx`
+        INSERT INTO fixed_cost (label, category_path, monthly_eur, kind, frequency, is_transfer, konto_id, start_date, end_date, active, expect_receipt, match_merchant, created_by)
+        VALUES (${label}, NULL, ${amount}, ${kind}, 'monthly', ${body.is_transfer === true}, ${bt.konto_id}, ${start}, ${end}, TRUE, FALSE, NULL, ${req.user?.id ?? null})
+        RETURNING id`;
+      await tx`
+        INSERT INTO fixed_cost_check (fixed_cost_id, month, status, bank_tx_id, amount, decided_by)
+        VALUES (${f.id}, ${start}, 'confirmed', ${id}, ${amount}, ${req.user?.id ?? null})
+        ON CONFLICT (fixed_cost_id, month) DO UPDATE SET bank_tx_id = EXCLUDED.bank_tx_id, amount = EXCLUDED.amount, status = 'confirmed'`;
+      return f.id as number;
+    });
+    return { ok: true, fixed_cost_id: fixedId };
+  });
+
+  /** Toggle the shared household "needs a closer look" marker on a bank statement
+   *  line (set via long-press in the Auszüge list). Pure review aid — no matching
+   *  effect; visible to and toggleable by every household member. */
   app.post('/api/finances/bank/:id/flag', async (req, reply) => {
     const id = parseInt(String((req.params as { id: string }).id), 10);
     if (!id) return reply.code(400).send({ error: 'bad id' });

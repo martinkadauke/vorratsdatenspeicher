@@ -1,11 +1,11 @@
-import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Wallet, Plus, Pencil, Trash2, Home, User as UserIcon, Info,
   ChevronLeft, ChevronRight, ChevronDown, CheckCircle2, Circle, CircleDot, Search, X, Upload, Layers, Lock,
-  Link2, Link2Off, RefreshCw, Landmark, SlidersHorizontal, Flag,
+  Link2, Link2Off, RefreshCw, Landmark, SlidersHorizontal, Flag, FilePlus2,
 } from 'lucide-react';
 import { api } from '../api/client';
 import { Card, Spinner, Button, Input, Label, Select, Switch, Modal, EmptyState, Badge } from '../components/ui';
@@ -1054,10 +1054,10 @@ function BankUpload({ scopeKonten }: { scopeKonten: KontoLite[] }) {
   );
 }
 
-function BankRow({ tx, t, onOpen, onLink, onUnlink, onFlag }: {
+function BankRow({ tx, t, onOpen, onLink, onUnlink, onFlag, onGenerate }: {
   tx: BankTx; t: (k: string, o?: Record<string, unknown>) => string;
   onOpen: (receiptId: number) => void; onLink: (tx: BankTx) => void; onUnlink: (id: number) => void;
-  onFlag: (id: number, flag: boolean) => void;
+  onFlag: (id: number, flag: boolean) => void; onGenerate: (tx: BankTx) => void;
 }) {
   const credit = tx.amount > 0;
   const canOpen = tx.status === 'receipt' && tx.receipt?.id != null && !tx.receipt.private;
@@ -1068,7 +1068,7 @@ function BankRow({ tx, t, onOpen, onLink, onUnlink, onFlag }: {
       : tx.status === 'fixed' ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300'
         : 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300';
   const onClick = canOpen ? () => onOpen(tx.receipt!.id!) : canLink ? () => onLink(tx) : undefined;
-  // Long-press (touch or mouse-hold, ~500 ms) toggles the personal red review mark.
+  // Long-press (touch or mouse-hold, ~500 ms) toggles the shared red review mark.
   // A fired long-press suppresses the click that follows it.
   const longPressed = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1078,6 +1078,9 @@ function BankRow({ tx, t, onOpen, onLink, onUnlink, onFlag }: {
   };
   const cancelPress = () => { if (timer.current) { clearTimeout(timer.current); timer.current = null; } };
   const handleClick = () => { if (longPressed.current) { longPressed.current = false; return; } onClick?.(); };
+  useEffect(() => cancelPress, []); // clear a pending long-press timer if the row unmounts mid-hold
+  // Inner action buttons swallow the pointer so a hold on them never arms the long-press.
+  const stopArm = (e: { stopPropagation: () => void }) => e.stopPropagation();
   return (
     <Card
       onClick={handleClick}
@@ -1102,8 +1105,12 @@ function BankRow({ tx, t, onOpen, onLink, onUnlink, onFlag }: {
       </div>
       <span className={cn('shrink-0 text-sm font-semibold', credit && 'text-emerald-600 dark:text-emerald-500')}>{credit ? '+' : ''}{eur(tx.amount)}</span>
       {isLinked && !tx.receipt?.private && (
-        <button onClick={e => { e.stopPropagation(); onUnlink(tx.id); }} title={t('finances.bank.unlink')}
+        <button onClick={e => { e.stopPropagation(); onUnlink(tx.id); }} onPointerDown={stopArm} title={t('finances.bank.unlink')}
           className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-red-500 dark:hover:bg-zinc-800"><Link2Off size={15} /></button>
+      )}
+      {canLink && (
+        <button onClick={e => { e.stopPropagation(); onGenerate(tx); }} onPointerDown={stopArm} title={t('finances.bank.gen.button')}
+          className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-950/30"><FilePlus2 size={15} /></button>
       )}
       {canLink && <Link2 size={15} className="shrink-0 text-zinc-300 dark:text-zinc-600" />}
       {canOpen && <ChevronRight size={15} className="shrink-0 text-zinc-300 dark:text-zinc-600" />}
@@ -1147,6 +1154,89 @@ function BankLinkPicker({ tx, t, onClose, onPick }: {
   );
 }
 
+/** Give an open bank line a home when no scan exists: generate a stand-in receipt
+ *  (forgotten purchase) or a fixed-cost entry (one-off transfer/top-up). */
+function BankGenerateModal({ tx, t, onClose, onDone }: {
+  tx: BankTx; t: (k: string, o?: Record<string, unknown>) => string; onClose: () => void; onDone: () => void;
+}) {
+  const credit = tx.amount > 0;
+  const [mode, setMode] = useState<'einkauf' | 'fixed'>(credit ? 'fixed' : 'einkauf');
+  const [laden, setLaden] = useState(tx.counterparty ?? '');
+  const [label, setLabel] = useState(tx.counterparty ?? '');
+  const [kind, setKind] = useState<'expense' | 'income'>(credit ? 'income' : 'expense');
+  const [isTransfer, setIsTransfer] = useState(false);
+  const [oneMonth, setOneMonth] = useState(true);
+
+  const genReceipt = useMutation({
+    mutationFn: () => api(`/api/finances/bank/${tx.id}/generate-receipt`, { method: 'POST', body: { laden: laden.trim() } }),
+    onSuccess: () => { toast(t('finances.bank.gen.createdReceipt'), 'success'); onDone(); },
+    onError: (e: Error) => toast(e.message, 'error'),
+  });
+  const genFixed = useMutation({
+    mutationFn: () => api(`/api/finances/bank/${tx.id}/generate-fixed`, { method: 'POST', body: { label: label.trim(), kind, is_transfer: isTransfer, one_month: oneMonth } }),
+    onSuccess: () => { toast(t('finances.bank.gen.createdFixed'), 'success'); onDone(); },
+    onError: (e: Error) => toast(e.message, 'error'),
+  });
+  const busy = genReceipt.isPending || genFixed.isPending;
+
+  return (
+    <Modal open onClose={onClose} title={t('finances.bank.gen.title')}>
+      <div className="flex flex-col gap-3">
+        <div className="text-xs text-zinc-500 dark:text-zinc-400">{tx.counterparty || '—'} · {eur(tx.amount)} · {ddmmyyyy(tx.booking_date)}</div>
+        <div className="flex gap-1.5">
+          {(credit ? (['fixed'] as const) : (['einkauf', 'fixed'] as const)).map(m => (
+            <button key={m} type="button" onClick={() => setMode(m)}
+              className={cn('flex-1 rounded-xl border px-3 py-2 text-sm font-medium',
+                mode === m ? 'border-transparent bg-emerald-600 text-white' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700')}>
+              {t(`finances.bank.gen.${m}`)}
+            </button>
+          ))}
+        </div>
+        {mode === 'einkauf' ? (
+          <>
+            <div>
+              <Label>{t('finances.bank.gen.laden')}</Label>
+              <Input value={laden} onChange={e => setLaden(e.target.value)} placeholder={tx.counterparty ?? ''} />
+            </div>
+            <p className="text-xs text-zinc-400">{t('finances.bank.gen.receiptHint', { v: eur(Math.abs(tx.amount)) })}</p>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="secondary" onClick={onClose}>{t('common.cancel')}</Button>
+              <Button onClick={() => genReceipt.mutate()} disabled={busy}>{t('finances.bank.gen.createReceipt')}</Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div>
+              <Label>{t('finances.label')}</Label>
+              <Input value={label} onChange={e => setLabel(e.target.value)} placeholder={tx.counterparty ?? ''} />
+            </div>
+            <div className="flex gap-1.5">
+              {(['expense', 'income'] as const).map(k => (
+                <button key={k} type="button" onClick={() => setKind(k)}
+                  className={cn('flex-1 rounded-xl border px-3 py-2 text-sm font-medium',
+                    kind === k ? 'border-transparent bg-emerald-600 text-white' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700')}>
+                  {k === 'income' ? t('finances.incomeTitle') : t('finances.fixTitle')}
+                </button>
+              ))}
+            </div>
+            <label className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
+              <Switch checked={oneMonth} onChange={setOneMonth} /> {t('finances.bank.gen.oneMonth')}
+            </label>
+            <label className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
+              <Switch checked={isTransfer} onChange={setIsTransfer} /> {t('finances.transferLabel')}
+            </label>
+            <p className="text-xs text-zinc-400">{t('finances.bank.gen.fixedHint', { v: eur(Math.abs(tx.amount)) })}</p>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="secondary" onClick={onClose}>{t('common.cancel')}</Button>
+              <Button onClick={() => genFixed.mutate()} disabled={busy || !label.trim()}>{t('finances.bank.gen.createFixed')}</Button>
+            </div>
+          </>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 function BankTab() {
   const { t } = useTranslation();
   const qc = useQueryClient();
@@ -1159,6 +1249,7 @@ function BankTab() {
   const [search, setSearch] = useUrlState('bq', '');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [linkTx, setLinkTx] = useState<BankTx | null>(null);
+  const [genTx, setGenTx] = useState<BankTx | null>(null);
   const qs = new URLSearchParams();
   if (konto) qs.set('konto', konto);
   if (month) qs.set('month', month);
@@ -1251,11 +1342,19 @@ function BankTab() {
         <>
           <p className="-mb-1 text-[11px] text-zinc-400">{t('finances.bank.flagHint')}</p>
           <div className="flex flex-col gap-2">
-            {items.map(tx => <BankRow key={tx.id} tx={tx} t={t} onOpen={id => navigate(`/receipts/${id}`)} onLink={setLinkTx} onUnlink={unlink.mutate} onFlag={(id, on) => flag.mutate({ id, on })} />)}
+            {items.map(tx => <BankRow key={tx.id} tx={tx} t={t} onOpen={id => navigate(`/receipts/${id}`)} onLink={setLinkTx} onUnlink={unlink.mutate} onFlag={(id, on) => flag.mutate({ id, on })} onGenerate={setGenTx} />)}
           </div>
         </>
       )}
       {linkTx && <BankLinkPicker tx={linkTx} t={t} onClose={() => setLinkTx(null)} onPick={link.mutate} />}
+      {genTx && <BankGenerateModal tx={genTx} t={t} onClose={() => setGenTx(null)}
+        onDone={() => {
+          setGenTx(null);
+          invalidate();
+          void qc.invalidateQueries({ queryKey: ['fixed-costs'] });
+          void qc.invalidateQueries({ queryKey: ['fin-month'] });
+          void qc.invalidateQueries({ queryKey: ['receipts'] });
+        }} />}
     </div>
   );
 }
