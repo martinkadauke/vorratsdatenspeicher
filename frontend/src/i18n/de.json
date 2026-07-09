@@ -90,7 +90,17 @@
       "unreadable": "Keine Gehaltsdaten erkannt",
       "pickAccount": "Bitte zuerst ein Konto wählen",
       "importedToast": "{{n}} Gehaltszettel als Einkommen übernommen",
-      "hint": "Bank-CSV-Import (comdirect etc.) kommt als Nächstes – als eigene Evidenzquelle."
+      "hint": "Bank-CSV-Import (comdirect etc.) kommt als Nächstes – als eigene Evidenzquelle.",
+      "listHeading": "Erfasste Einnahmen",
+      "listEmpty": "Noch keine Einnahmen erfasst – lade oben Gehaltszettel hoch.",
+      "entryFallback": "Einnahme",
+      "src": {
+        "salary": "Gehalt",
+        "freelance": "Freiberuflich",
+        "transfer": "Überweisung",
+        "bank": "Bank",
+        "other": "Sonstiges"
+      }
     },
     "addBudgetTitle": "Budget anlegen",
     "editBudget": "Budget bearbeiten",

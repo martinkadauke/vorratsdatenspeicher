@@ -393,17 +393,21 @@ export function financeRoutes(app: FastifyInstance): void {
 
   // ── Income (pay-slip upload → income row) ─────────────────────────────────
 
-  /** List income entries of a month (konto-scoped), newest first. */
+  /** List income entries, newest first. With ?month=YYYY-MM → that month only;
+   *  without → all entries (the Verwaltung "Einnahmen" ledger). owner_name = the
+   *  household member linked to the account (falls back to username on the client). */
   app.get('/api/finances/income', async (req, reply) => {
-    const b = monthBounds(((req.query as { month?: string }).month ?? '').trim());
-    if (!b) return reply.code(400).send({ error: 'month must be YYYY-MM' });
+    const raw = ((req.query as { month?: string }).month ?? '').trim();
+    const b = raw ? monthBounds(raw) : null;
+    if (raw && !b) return reply.code(400).send({ error: 'month must be YYYY-MM' });
     const rows = await sql`
       SELECT i.id, i.datum::text AS datum, i.amount::float8 AS amount, i.source, i.description,
-             i.konto_id, k.name AS konto_name, k.is_shared, u.username AS owner
+             i.konto_id, k.name AS konto_name, k.is_shared, u.username AS owner,
+             (SELECT fm.name FROM family_member fm WHERE fm.user_id = k.user_id ORDER BY fm.sort_order, fm.id LIMIT 1) AS owner_name
       FROM income i
       LEFT JOIN konto k ON k.id = i.konto_id
       LEFT JOIN users u ON u.id = k.user_id
-      WHERE i.datum BETWEEN ${b.first} AND ${b.last}
+      ${b ? sql`WHERE i.datum BETWEEN ${b.first} AND ${b.last}` : sql``}
       ORDER BY i.datum DESC, i.id DESC`;
     return { income: rows };
   });

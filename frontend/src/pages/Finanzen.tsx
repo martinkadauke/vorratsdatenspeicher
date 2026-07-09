@@ -51,11 +51,12 @@ function useKonten() {
 }
 // Shared "Haushaltskonto" → "Haushalt"; other shared accounts keep their name;
 // personal accounts show the owner, else the account name.
-function scopeLabelOf(t: (k: string) => string, k: { is_shared?: boolean | null; name?: string | null; owner?: string | null; konto_name?: string | null } | undefined | null): string {
+function scopeLabelOf(t: (k: string) => string, k: { is_shared?: boolean | null; name?: string | null; owner?: string | null; owner_name?: string | null; konto_name?: string | null } | undefined | null): string {
   if (!k) return '?';
   const name = (k as { name?: string | null }).name ?? (k as { konto_name?: string | null }).konto_name ?? '';
   if (k.is_shared) return /haushalt/i.test(name ?? '') ? t('finances.household') : (name ?? '?');
-  return k.owner ?? name ?? '?';
+  // Prefer the linked household member's name over the raw username.
+  return k.owner_name ?? k.owner ?? name ?? '?';
 }
 
 /** Collapsible section with a chevron header (month-view groups). */
@@ -618,6 +619,77 @@ function PayslipUpload({ scopeKonten }: { scopeKonten: KontoLite[] }) {
   );
 }
 
+// ── Erfasste Einnahmen (actual income rows: pay slips / CSV credits) ──────────
+interface IncomeEntry {
+  id: number; datum: string; amount: number; source: string; description: string | null;
+  konto_id: number | null; konto_name: string | null; is_shared: boolean | null;
+  owner: string | null; owner_name: string | null;
+}
+const ddmmyyyy = (d: string) => `${d.slice(8, 10)}.${d.slice(5, 7)}.${d.slice(0, 4)}`;
+
+function IncomeList() {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery({
+    queryKey: ['fin-income'],
+    queryFn: () => api<{ income: IncomeEntry[] }>('/api/finances/income'),
+  });
+  const remove = useMutation({
+    mutationFn: (id: number) => api(`/api/finances/income/${id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['fin-income'] });
+      void qc.invalidateQueries({ queryKey: ['fin-month'] });
+    },
+    onError: (e: Error) => toast(e.message, 'error'),
+  });
+  const srcLabel = (s: string) => t(`finances.income.src.${s}`, { defaultValue: s });
+
+  const rows = data?.income ?? [];
+  const total = rows.reduce((s, r) => s + r.amount, 0);
+
+  return (
+    <Card className="flex flex-col gap-3 p-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Wallet size={16} className="text-emerald-600 dark:text-emerald-500" />
+          <h2 className="text-base font-semibold">{t('finances.income.listHeading')}</h2>
+        </div>
+        {rows.length > 0 && (
+          <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-500">+{eur(total)}</span>
+        )}
+      </div>
+      {isLoading ? (
+        <Spinner />
+      ) : rows.length === 0 ? (
+        <p className="text-xs text-zinc-400">{t('finances.income.listEmpty')}</p>
+      ) : (
+        <ul className="flex flex-col divide-y divide-zinc-100 dark:divide-zinc-800">
+          {rows.map(r => (
+            <li key={r.id} className="flex items-center gap-3 py-2">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium">{r.description || t('finances.income.entryFallback')}</div>
+                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-zinc-500 dark:text-zinc-400">
+                  <span>{ddmmyyyy(r.datum)}</span>
+                  <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">{srcLabel(r.source)}</span>
+                  {r.konto_id && <span className="truncate">{scopeLabelOf(t, r)}</span>}
+                </div>
+              </div>
+              <span className="shrink-0 text-sm font-semibold text-emerald-600 dark:text-emerald-500">+{eur(r.amount)}</span>
+              <button
+                onClick={() => remove.mutate(r.id)}
+                className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30"
+                title={t('common.delete')}
+              >
+                <Trash2 size={15} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
 function ManageTab() {
   const { t } = useTranslation();
   const qc = useQueryClient();
@@ -692,6 +764,7 @@ function ManageTab() {
   return (
     <div className="flex flex-col gap-4">
       <PayslipUpload scopeKonten={scopeKonten} />
+      <IncomeList />
 
       <div className="flex justify-end">
         <Button onClick={() => setModal(emptyDraft(scopeKonten[0]?.id))}>

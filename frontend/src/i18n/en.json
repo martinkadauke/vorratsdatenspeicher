@@ -90,7 +90,17 @@
       "unreadable": "No salary data detected",
       "pickAccount": "Pick an account first",
       "importedToast": "{{n}} pay slip(s) recorded as income",
-      "hint": "Bank-statement CSV import (comdirect etc.) is coming next – as its own evidence source."
+      "hint": "Bank-statement CSV import (comdirect etc.) is coming next – as its own evidence source.",
+      "listHeading": "Recorded income",
+      "listEmpty": "No income recorded yet – upload pay slips above.",
+      "entryFallback": "Income",
+      "src": {
+        "salary": "Salary",
+        "freelance": "Freelance",
+        "transfer": "Transfer",
+        "bank": "Bank",
+        "other": "Other"
+      }
     },
     "addBudgetTitle": "Add budget",
     "editBudget": "Edit budget",
