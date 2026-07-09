@@ -380,7 +380,7 @@ function FixedEvidenceModal({ id, label, month, t, onClose }: {
             {/* Bank booking — the source of truth. Only a link when there's a
                 counterparty to search Auszüge by (else it would land unfiltered). */}
             {data.bank ? (() => { const bankLink = !data.bank.private && !!data.bank.counterparty; return (
-              <button type="button" disabled={!bankLink} onClick={() => bankLink && go(`/finanzen?tab=bank&bq=${encodeURIComponent(data.bank!.counterparty!)}`)}
+              <button type="button" disabled={!bankLink} onClick={() => bankLink && go(`/finanzen?tab=bank&bq=${encodeURIComponent(data.bank!.counterparty!)}&bhl=${data.bank!.id}`)}
                 className={cn(rowCls, bankLink && 'hover:bg-zinc-50 dark:hover:bg-zinc-800/50')}>
                 <Landmark size={18} className="shrink-0 text-sky-500" />
                 <div className="min-w-0 flex-1">
@@ -1153,6 +1153,7 @@ function BankUpload({ scopeKonten }: { scopeKonten: KontoLite[] }) {
     }
     setBusy(false);
     void qc.invalidateQueries({ queryKey: ['bank-tx'] });
+    void qc.invalidateQueries({ queryKey: ['bank-batches'] });
     void qc.invalidateQueries({ queryKey: ['fin-month'] });
     const n = out.filter(o => o.ok).length;
     if (n) toast(t('finances.bank.importedToast', { n }), 'success');
@@ -1193,11 +1194,12 @@ function BankUpload({ scopeKonten }: { scopeKonten: KontoLite[] }) {
   );
 }
 
-function BankRow({ tx, t, onOpen, onLink, onUnlink, onFlag, onGenerate }: {
-  tx: BankTx; t: (k: string, o?: Record<string, unknown>) => string;
+function BankRow({ tx, t, highlight, onOpen, onLink, onUnlink, onFlag, onGenerate }: {
+  tx: BankTx; t: (k: string, o?: Record<string, unknown>) => string; highlight?: boolean;
   onOpen: (receiptId: number) => void; onLink: (tx: BankTx) => void; onUnlink: (id: number) => void;
   onFlag: (id: number, flag: boolean) => void; onGenerate: (tx: BankTx) => void;
 }) {
+  useEffect(() => { if (highlight) document.getElementById(`bank-row-${tx.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, [highlight, tx.id]);
   const credit = tx.amount > 0;
   const canOpen = tx.status === 'receipt' && tx.receipt?.id != null && !tx.receipt.private;
   const canLink = tx.status === 'open'; // debit → receipt, credit → income row
@@ -1222,9 +1224,12 @@ function BankRow({ tx, t, onOpen, onLink, onUnlink, onFlag, onGenerate }: {
   const stopArm = (e: { stopPropagation: () => void }) => e.stopPropagation();
   return (
     <Card
+      id={`bank-row-${tx.id}`}
       onClick={handleClick}
       onPointerDown={startPress} onPointerUp={cancelPress} onPointerLeave={cancelPress} onPointerCancel={cancelPress}
-      className={cn('flex select-none items-center gap-3 p-3', tx.review_flag && 'ring-2 ring-red-400 dark:ring-red-500/70')}
+      className={cn('flex select-none items-center gap-3 p-3',
+        tx.review_flag && 'ring-2 ring-red-400 dark:ring-red-500/70',
+        highlight && 'bg-amber-100 ring-2 ring-amber-400 dark:bg-amber-900/30 dark:ring-amber-500/70')}
     >
       {tx.review_flag && <Flag size={14} className="shrink-0 fill-red-500 text-red-500" />}
       <div className="min-w-0 flex-1">
@@ -1235,6 +1240,7 @@ function BankRow({ tx, t, onOpen, onLink, onUnlink, onFlag, onGenerate }: {
         </div>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400">
           <span>{ddmmyyyy(tx.booking_date)}</span>
+          {tx.konto_name && <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">{tx.konto_name}</span>}
           <span className={cn('rounded-full px-1.5 py-0.5 text-[10px]', badge)}>{t(`finances.bank.status_${tx.status}`)}</span>
           {tx.status === 'receipt' && tx.receipt && !tx.receipt.private && tx.receipt.laden && <span className="truncate">→ {tx.receipt.laden}</span>}
           {tx.status === 'income' && tx.income && <span className="truncate">→ {tx.income.description || t('finances.income.entryFallback')}</span>}
@@ -1379,6 +1385,34 @@ function BankGenerateModal({ tx, t, onClose, onDone }: {
   );
 }
 
+interface ImportBatch {
+  batch: string; filename: string; konto_id: number | null; konto_name: string | null;
+  n: number; imported_at: string | null; first_date: string; last_date: string;
+}
+
+/** Compact list of imported CSV batches (filename · account · count · import date). */
+function ImportBatches({ t }: { t: (k: string, o?: Record<string, unknown>) => string }) {
+  const { data } = useQuery({ queryKey: ['bank-batches'], queryFn: () => api<{ batches: ImportBatch[] }>('/api/finances/bank/batches') });
+  const batches = data?.batches ?? [];
+  if (!batches.length) return null;
+  return (
+    <div className="rounded-xl border border-zinc-200 p-2.5 dark:border-zinc-800">
+      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-400">{t('finances.bank.imports')}</div>
+      <ul className="flex flex-col gap-1">
+        {batches.map(b => (
+          <li key={b.batch} className="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300">
+            <FileText size={12} className="shrink-0 text-zinc-400" />
+            <span className="min-w-0 flex-1 truncate" title={b.filename}>{b.filename}</span>
+            {b.konto_name && <span className="shrink-0 rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] dark:bg-zinc-800">{b.konto_name}</span>}
+            <span className="shrink-0 tabular-nums text-zinc-400">{b.n}</span>
+            <span className="shrink-0 tabular-nums text-zinc-400" title={t('finances.bank.importedOn')}>{b.imported_at ? ddmmyyyy(b.imported_at.slice(0, 10)) : '–'}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function BankTab() {
   const { t } = useTranslation();
   const qc = useQueryClient();
@@ -1389,6 +1423,7 @@ function BankTab() {
   const [month, setMonth] = useUrlState('bm', '');
   const [status, setStatus] = useUrlState('bs', 'all');
   const [search, setSearch] = useUrlState('bq', '');
+  const [highlightId] = useUrlState('bhl', ''); // deep-link: highlight one booking
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [linkTx, setLinkTx] = useState<BankTx | null>(null);
   const [genTx, setGenTx] = useState<BankTx | null>(null);
@@ -1475,6 +1510,7 @@ function BankTab() {
                 </button>
               ))}
             </div>
+            <ImportBatches t={t} />
           </>
         )}
       </div>
@@ -1484,7 +1520,7 @@ function BankTab() {
         <>
           <p className="-mb-1 text-[11px] text-zinc-400">{t('finances.bank.flagHint')}</p>
           <div className="flex flex-col gap-2">
-            {items.map(tx => <BankRow key={tx.id} tx={tx} t={t} onOpen={id => navigate(`/receipts/${id}`)} onLink={setLinkTx} onUnlink={unlink.mutate} onFlag={(id, on) => flag.mutate({ id, on })} onGenerate={setGenTx} />)}
+            {items.map(tx => <BankRow key={tx.id} tx={tx} t={t} highlight={highlightId !== '' && String(tx.id) === highlightId} onOpen={id => navigate(`/receipts/${id}`)} onLink={setLinkTx} onUnlink={unlink.mutate} onFlag={(id, on) => flag.mutate({ id, on })} onGenerate={setGenTx} />)}
           </div>
         </>
       )}

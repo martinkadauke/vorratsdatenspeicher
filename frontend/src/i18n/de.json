@@ -50,6 +50,8 @@
       "search": "Auszüge durchsuchen …",
       "noSearchResults": "Keine passenden Buchungen.",
       "flagHint": "Lange gedrückt halten, um eine Buchung rot zu markieren („muss ich prüfen“).",
+      "imports": "Importe",
+      "importedOn": "Importiert am",
       "account": "Konto (dieser CSV)",
       "choose": "CSV wählen",
       "working": "Importiert …",

@@ -50,6 +50,8 @@
       "search": "Search statements …",
       "noSearchResults": "No matching entries.",
       "flagHint": "Long-press an entry to mark it red (\"need to check this\").",
+      "imports": "Imports",
+      "importedOn": "Imported on",
       "account": "Account (this CSV)",
       "choose": "Choose CSV",
       "working": "Importing …",

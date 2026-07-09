@@ -936,6 +936,27 @@ export function financeRoutes(app: FastifyInstance): void {
     return { items: filtered, counts };
   });
 
+  /** Imported CSV batches: one row per (import_batch, konto) with count + import date.
+   *  Lets the user see what was imported, when, and onto which account. */
+  app.get('/api/finances/bank/batches', async () => {
+    const rows = await sql`
+      SELECT bt.import_batch, bt.konto_id, k.name AS konto_name,
+             COUNT(*)::int AS n, MIN(bt.imported_at)::text AS imported_at,
+             MIN(bt.booking_date)::text AS first_date, MAX(bt.booking_date)::text AS last_date
+      FROM bank_tx bt LEFT JOIN konto k ON k.id = bt.konto_id
+      WHERE bt.import_batch IS NOT NULL
+      GROUP BY bt.import_batch, bt.konto_id, k.name
+      ORDER BY MIN(bt.imported_at) DESC`;
+    return {
+      batches: rows.map(r => ({
+        batch: r.import_batch,
+        filename: String(r.import_batch).split('@')[0],
+        konto_id: r.konto_id, konto_name: r.konto_name,
+        n: r.n, imported_at: r.imported_at, first_date: r.first_date, last_date: r.last_date,
+      })),
+    };
+  });
+
   /** Delete a single bank transaction (mis-import). FK links (fixed_cost_check,
    *  einkauf) are ON DELETE SET NULL, so a linked receipt/check just loses the link. */
   app.delete('/api/finances/bank/:id', async (req, reply) => {
