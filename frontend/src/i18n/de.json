@@ -93,8 +93,12 @@
       "noCandidates": "Keine passenden Belege gefunden (Betrag/Datum).",
       "unlink": "Verknüpfung lösen",
       "rematch": "Neu abgleichen",
-      "rematchToast": "{{n}} neu verknüpft",
-      "linkedToast": "Beleg verknüpft"
+      "rematchToast": "{{n}} verknüpft · {{s}} KI-Vorschläge (⭐)",
+      "linkedToast": "Beleg verknüpft",
+      "aiSuggests": "KI:",
+      "approveSuggestion": "Vorschlag übernehmen",
+      "dismissSuggestion": "Vorschlag verwerfen",
+      "approvedToast": "Vorschlag übernommen"
     },
     "jumpToday": "Zum aktuellen Monat",
     "fixTitle": "Fixkosten",
@@ -792,6 +796,8 @@
     "supermarketInfoLast": "Zuletzt: {{updated}} von {{checked}} Filialen aktualisiert",
     "taskModelReview": "Modell-Review",
     "taskModelReviewDesc": "Bewertet alle 2 Wochen, ob es bessere Modelle gibt. Kann selbst ein lokales Modell sein.",
+    "taskBankmatch": "Bank-Zuordnung (KI)",
+    "taskBankmatchDesc": "Kreativer Zweitversuch beim „Neu abgleichen“: ordnet offene Bankbuchungen Belegen/Einnahmen/Fixkosten zu, die der deterministische Abgleich nicht findet. Nur Vorschläge (⭐), die du bestätigst. Braucht ein starkes Reasoning-Modell.",
     "reviewTitle": "Modell-Review",
     "reviewHint": "Alle 2 Wochen schlägt das Reviewer-Modell pro KI-Aufgabe je ein API/Cloud- UND ein Open-Weight-Modell vor (preis/leistungs-bewusst). Du bekommst per Email die Wahl: alle API oder alle Open-Weight übernehmen – oder ablehnen. Nichts wird automatisch umgestellt.",
     "reviewRunBtn": "Review jetzt ausführen",

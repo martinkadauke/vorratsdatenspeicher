@@ -7,6 +7,7 @@ import path from 'node:path';
 import sql from '../db.js';
 import { kontoScope } from '../auth/konto.js';
 import { extractPayslip } from '../llm/ocr.js';
+import { providerForTask } from '../llm/provider.js';
 import { parseComdirectCsv } from '../finances/bankCsv.js';
 
 /** Pay-slip files live in a NON-static subdir of the receipts volume (the static
@@ -811,6 +812,75 @@ export function financeRoutes(app: FastifyInstance): void {
     return linked;
   };
 
+  /** Creative AI second pass: for bank lines the deterministic matcher left open,
+   *  ask the configured LLM to propose a match — but ONLY among candidates we
+   *  pre-filtered by amount+date (so it decides, never scans blindly), and we accept
+   *  a proposal ONLY if its (kind,id) was actually in the set we offered (anti-
+   *  hallucination) AND confidence ≥ 0.75. Proposals are stored as SUGGESTIONS
+   *  (⭐, human-approved) — never auto-linked. Bounded to keep prompt + cost small. */
+  const aiMatchBank = async (kontoId?: number | null): Promise<number> => {
+    const open = await sql`
+      SELECT bt.id, bt.konto_id, bt.amount::float8 AS amount, bt.counterparty, bt.description,
+             bt.booking_date::text AS booking, bt.purchase_date::text AS purchase
+      FROM bank_tx bt
+      WHERE NOT EXISTS (SELECT 1 FROM einkauf e WHERE e.bank_tx_id = bt.id)
+        AND NOT EXISTS (SELECT 1 FROM income i WHERE i.bank_tx_id = bt.id)
+        AND NOT EXISTS (SELECT 1 FROM fixed_cost_check fc WHERE fc.bank_tx_id = bt.id)
+        AND NOT EXISTS (SELECT 1 FROM bank_match_suggestion s WHERE s.bank_tx_id = bt.id)
+        ${kontoId ? sql`AND bt.konto_id = ${kontoId}` : sql``}
+      ORDER BY bt.booking_date DESC, bt.id
+      LIMIT 25`;
+    if (!open.length) return 0;
+    const receipts = await sql`SELECT id, gesamt_betrag::float8 AS betrag, roh_ladenname, datum::text AS datum FROM einkauf WHERE bank_tx_id IS NULL AND gesamt_betrag IS NOT NULL ORDER BY datum DESC LIMIT 400`;
+    const incomes = await sql`SELECT id, amount::float8 AS amount, description, datum::text AS datum FROM income WHERE bank_tx_id IS NULL ORDER BY datum DESC LIMIT 120`;
+    const fixed = await sql`SELECT id, label, monthly_eur::float8 AS monthly, kind, match_merchant FROM fixed_cost WHERE active LIMIT 250`;
+    const near = (v: number, amt: number) => Math.abs(v - amt) <= Math.max(0.5, amt * 0.03);
+    type Cand = { kind: 'receipt' | 'income' | 'fixed'; id: number; label: string | null; amount: number; merchant?: string | null; date?: string };
+    const items = open.map(bt => {
+      const amt = Math.abs(bt.amount as number);
+      const debit = (bt.amount as number) < 0;
+      const booking = String(bt.booking);
+      const lo = isoMinusDays(bt.purchase ? String(bt.purchase) : booking, 12);
+      const hi = isoPlusDays(booking, 3);
+      const recC: Cand[] = debit ? receipts.filter(r => near(r.betrag as number, amt) && String(r.datum) >= lo && String(r.datum) <= hi).slice(0, 6)
+        .map(r => ({ kind: 'receipt', id: r.id as number, label: r.roh_ladenname as string | null, amount: r.betrag as number, date: String(r.datum) })) : [];
+      const incC: Cand[] = !debit ? incomes.filter(i => near(i.amount as number, amt) && String(i.datum) >= isoMinusDays(booking, 45) && String(i.datum) <= hi).slice(0, 6)
+        .map(i => ({ kind: 'income', id: i.id as number, label: i.description as string | null, amount: i.amount as number, date: String(i.datum) })) : [];
+      const fixC: Cand[] = fixed.filter(f => (debit ? f.kind === 'expense' : f.kind === 'income') && near(f.monthly as number, amt)).slice(0, 6)
+        .map(f => ({ kind: 'fixed', id: f.id as number, label: f.label as string | null, amount: f.monthly as number, merchant: f.match_merchant as string | null }));
+      return { bank_tx_id: bt.id as number, counterparty: bt.counterparty as string | null, description: ((bt.description as string | null) ?? '').slice(0, 120), amount: bt.amount as number, date: booking, candidates: [...recC, ...incC, ...fixC] };
+    }).filter(it => it.candidates.length);
+    if (!items.length) return 0;
+
+    const system = `Du ordnest Bankbuchungen ihren passenden Nachweisen zu (Beleg, Einnahme oder Fixkosten-Position). Der deterministische Abgleich konnte diese Buchungen NICHT sicher zuordnen; du bist der kreative Zweitversuch.
+STRIKTE REGELN:
+- Schlage NUR eine Zuordnung vor, wenn du HOCH sicher bist, dass es wirklich derselbe Vorgang ist. Händlernamen dürfen abweichen, wenn es klar dieselbe Firma / derselbe Dienst ist (Weltwissen nutzen: z. B. "RSG Group" = McFit, "nexi" = Zahlungsabwickler eines Ladens, "Congstar" = Handyvertrag).
+- Der Betrag muss praktisch identisch sein und das Datum plausibel.
+- Im Zweifel KEINE Zuordnung. Es ist viel besser, offen zu lassen, als zu raten. Erfinde NICHTS und wähle NUR aus den je Buchung angebotenen Kandidaten.
+- Höchstens EIN Vorschlag pro Buchung — nur der überzeugendste. Überzeugt nichts: weglassen.
+Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed","target_id":N,"confidence":0.0-1.0,"reason":"kurz"}]}. Nimm nur Vorschläge mit confidence >= 0.75 auf.`;
+    let raw: string;
+    try { raw = await (await providerForTask('bankmatch')).chat({ system, user: `Offene Buchungen mit Kandidaten:\n${JSON.stringify(items)}`, json: true }); }
+    catch (e) { app.log.warn(`aiMatchBank chat failed: ${(e as Error).message}`); return 0; }
+    let matches: { bank_tx_id?: number; kind?: string; target_id?: number; confidence?: number; reason?: string }[] = [];
+    try { const j = JSON.parse(raw.replace(/^```json\s*|\s*```$/g, '')); matches = Array.isArray(j?.matches) ? j.matches : []; }
+    catch { app.log.warn('aiMatchBank: unparseable JSON'); return 0; }
+    let n = 0;
+    for (const m of matches) {
+      const btId = Number(m.bank_tx_id); const tid = Number(m.target_id); const conf = Number(m.confidence); const kind = m.kind;
+      if (!btId || !tid || !(conf >= 0.75) || (kind !== 'receipt' && kind !== 'income' && kind !== 'fixed')) continue;
+      const it = items.find(x => x.bank_tx_id === btId);
+      if (!it || !it.candidates.some(c => c.kind === kind && c.id === tid)) continue; // must be an offered candidate
+      try {
+        await sql`INSERT INTO bank_match_suggestion (bank_tx_id, target_kind, einkauf_id, income_id, fixed_cost_id, confidence, reason)
+          VALUES (${btId}, ${kind}, ${kind === 'receipt' ? tid : null}, ${kind === 'income' ? tid : null}, ${kind === 'fixed' ? tid : null}, ${conf}, ${String(m.reason ?? '').slice(0, 200)})
+          ON CONFLICT (bank_tx_id) DO NOTHING`;
+        n++;
+      } catch { /* skip */ }
+    }
+    return n;
+  };
+
   /** Import one comdirect "Umsätze Girokonto" CSV into bank_tx for a chosen konto.
    *  Idempotent: rows already present (same konto + Ref.) are skipped, so re-importing
    *  an overlapping / full-year export never duplicates. Runs auto-matching after. */
@@ -867,7 +937,9 @@ export function financeRoutes(app: FastifyInstance): void {
              re.id AS receipt_id, re.roh_ladenname AS receipt_laden, re.gesamt_betrag::float8 AS receipt_betrag,
              re.private_for_user_id AS receipt_priv,
              inc.id AS income_id, inc.description AS income_desc, inc.amount::float8 AS income_betrag,
-             fx.fixed_id, fx.fixed_label
+             fx.fixed_id, fx.fixed_label,
+             sg.target_kind AS sug_kind, sg.target_id AS sug_target_id, sg.target_label AS sug_label,
+             sg.confidence::float8 AS sug_confidence, sg.reason AS sug_reason, sg.target_priv AS sug_priv
       FROM bank_tx bt
       LEFT JOIN konto k ON k.id = bt.konto_id
       -- LATERAL … LIMIT 1: a bank_tx may back more than one fixed-cost check (or be
@@ -879,6 +951,16 @@ export function financeRoutes(app: FastifyInstance): void {
       LEFT JOIN LATERAL (SELECT fc.fixed_cost_id AS fixed_id, f.label AS fixed_label
                          FROM fixed_cost_check fc JOIN fixed_cost f ON f.id = fc.fixed_cost_id
                          WHERE fc.bank_tx_id = bt.id LIMIT 1) fx ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT s.target_kind, s.confidence, s.reason,
+               COALESCE(s.einkauf_id, s.income_id, s.fixed_cost_id) AS target_id,
+               COALESCE(se.roh_ladenname, si.description, sf.label) AS target_label,
+               se.private_for_user_id AS target_priv
+        FROM bank_match_suggestion s
+        LEFT JOIN einkauf se ON se.id = s.einkauf_id
+        LEFT JOIN income si ON si.id = s.income_id
+        LEFT JOIN fixed_cost sf ON sf.id = s.fixed_cost_id
+        WHERE s.bank_tx_id = bt.id LIMIT 1) sg ON TRUE
       WHERE TRUE
         ${kontoId ? sql`AND bt.konto_id = ${kontoId}` : sql``}
         ${b ? sql`AND bt.booking_date BETWEEN ${b.first} AND ${b.last}` : sql``}
@@ -908,6 +990,11 @@ export function financeRoutes(app: FastifyInstance): void {
           : null,
         income: r.income_id ? { id: r.income_id, description: r.income_desc, betrag: r.income_betrag } : null,
         fixed: r.fixed_id ? { id: r.fixed_id, label: r.fixed_label } : null,
+        // ⭐ pending AI suggestion (needs approval). A suggested private receipt has its label masked.
+        suggestion: r.sug_kind ? (() => {
+          const sm = (r.sug_priv as number | null) != null && (r.sug_priv as number | null) !== uid && !seesAll;
+          return { kind: r.sug_kind, target_id: r.sug_target_id, label: sm ? null : r.sug_label, confidence: r.sug_confidence, reason: sm ? null : r.sug_reason, private: sm };
+        })() : null,
         // ref kept only for the (post-masking) search haystack below, not exposed.
         _ref: (r.ref as string | null) ?? '',
       };
@@ -1061,12 +1148,69 @@ export function financeRoutes(app: FastifyInstance): void {
     return { ok: true, review_flag: row.review_flag };
   });
 
-  /** Re-run auto-matching (e.g. after scanning receipts that were missing before). */
+  /** Re-run matching: deterministic first (writes real links), then the creative
+   *  AI pass (writes ⭐ suggestions that need human approval). `ai:false` skips the
+   *  LLM step. */
   app.post('/api/finances/bank/rematch', async (req) => {
-    const kraw = (req.body as { konto_id?: number } | undefined)?.konto_id;
-    const kontoId = kraw != null ? parseInt(String(kraw), 10) : null;
+    const body = (req.body ?? {}) as { konto_id?: number; ai?: boolean };
+    const kontoId = body.konto_id != null ? parseInt(String(body.konto_id), 10) : null;
     const linked = (await autoMatchBank(kontoId)) + (await autoMatchBankCredits(kontoId));
-    return { ok: true, linked };
+    let suggested = 0;
+    if (body.ai !== false) {
+      try { suggested = await aiMatchBank(kontoId); }
+      catch (e) { app.log.warn(`aiMatchBank failed: ${(e as Error).message}`); }
+    }
+    return { ok: true, linked, suggested };
+  });
+
+  /** Approve a ⭐ AI match suggestion → turn it into the real link (receipt/income/
+   *  fixed-cost evidence) and delete the suggestion. Re-checks the line is still open. */
+  app.post('/api/finances/bank/:id/suggestion/approve', async (req, reply) => {
+    const id = parseInt(String((req.params as { id: string }).id), 10);
+    if (!id) return reply.code(400).send({ error: 'bad id' });
+    try {
+      await sql.begin(async tx => {
+        const [s] = await tx`SELECT target_kind, einkauf_id, income_id, fixed_cost_id FROM bank_match_suggestion WHERE bank_tx_id = ${id} FOR UPDATE`;
+        if (!s) throw new HttpError(404, 'kein Vorschlag');
+        const [open] = await tx`SELECT
+          EXISTS(SELECT 1 FROM einkauf WHERE bank_tx_id = ${id}) AS r,
+          EXISTS(SELECT 1 FROM income WHERE bank_tx_id = ${id}) AS i,
+          EXISTS(SELECT 1 FROM fixed_cost_check WHERE bank_tx_id = ${id}) AS f`;
+        if (open.r || open.i || open.f) throw new HttpError(400, 'Buchung ist bereits zugeordnet');
+        if (s.target_kind === 'receipt' && s.einkauf_id) {
+          const [e] = await tx`SELECT bank_tx_id FROM einkauf WHERE id = ${s.einkauf_id} FOR UPDATE`;
+          if (!e) throw new HttpError(400, 'Beleg nicht mehr vorhanden');
+          if (e.bank_tx_id != null) throw new HttpError(400, 'Beleg ist schon verknüpft');
+          await tx`UPDATE einkauf SET bank_tx_id = ${id} WHERE id = ${s.einkauf_id}`;
+        } else if (s.target_kind === 'income' && s.income_id) {
+          const [i] = await tx`SELECT bank_tx_id FROM income WHERE id = ${s.income_id} FOR UPDATE`;
+          if (!i) throw new HttpError(400, 'Einnahme nicht mehr vorhanden');
+          if (i.bank_tx_id != null) throw new HttpError(400, 'Einnahme ist schon verknüpft');
+          await tx`UPDATE income SET bank_tx_id = ${id} WHERE id = ${s.income_id}`;
+        } else if (s.target_kind === 'fixed' && s.fixed_cost_id) {
+          const [bt] = await tx`SELECT booking_date::text AS booking, amount::float8 AS amount FROM bank_tx WHERE id = ${id}`;
+          const [f] = await tx`SELECT frequency FROM fixed_cost WHERE id = ${s.fixed_cost_id}`;
+          if (!bt || !f) throw new HttpError(400, 'Fixkosten-Position nicht mehr vorhanden');
+          const checkMonth = anchorMonth(`${String(bt.booking).slice(0, 7)}-01`, f.frequency as string | null);
+          await tx`INSERT INTO fixed_cost_check (fixed_cost_id, month, status, bank_tx_id, amount, decided_by)
+            VALUES (${s.fixed_cost_id}, ${checkMonth}, 'confirmed', ${id}, ${Math.abs(bt.amount as number)}, ${req.user?.id ?? null})
+            ON CONFLICT (fixed_cost_id, month) DO UPDATE SET bank_tx_id = EXCLUDED.bank_tx_id, amount = EXCLUDED.amount, status = 'confirmed'`;
+        } else throw new HttpError(400, 'ungültiger Vorschlag');
+        await tx`DELETE FROM bank_match_suggestion WHERE bank_tx_id = ${id}`;
+      });
+      return { ok: true };
+    } catch (e) {
+      if (e instanceof HttpError) return reply.code(e.code).send({ error: e.message });
+      throw e;
+    }
+  });
+
+  /** Dismiss a ⭐ AI match suggestion (it was wrong) — just delete it. */
+  app.post('/api/finances/bank/:id/suggestion/dismiss', async (req, reply) => {
+    const id = parseInt(String((req.params as { id: string }).id), 10);
+    if (!id) return reply.code(400).send({ error: 'bad id' });
+    await sql`DELETE FROM bank_match_suggestion WHERE bank_tx_id = ${id}`;
+    return { ok: true };
   });
 
   /** Candidates to manually link to a bank transaction. A DEBIT (< 0) offers scanned

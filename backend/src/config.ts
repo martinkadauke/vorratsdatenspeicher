@@ -25,6 +25,8 @@ export interface AppConfig {
   'ai.model_review.model': string;
   'ai.nlanalytics.provider': string;
   'ai.nlanalytics.model': string;
+  'ai.bankmatch.provider': string;
+  'ai.bankmatch.model': string;
   'churner.enabled': boolean;
   'churner.cron': string;
   // Run a churn pass right after any receipt is OCR'd (debounced), so imports get
@@ -112,6 +114,10 @@ const DEFAULTS: AppConfig = {
   // Analytics agent: strong reasoning matters for correct intent → defaults to Claude.
   'ai.nlanalytics.provider': 'anthropic',
   'ai.nlanalytics.model': 'claude-sonnet-5',
+  // Bank-matching agent: creative fallback after deterministic matching; reasoning
+  // + restraint matter (must NOT force matches) → defaults to Claude.
+  'ai.bankmatch.provider': 'anthropic',
+  'ai.bankmatch.model': 'claude-sonnet-5',
   'churner.enabled': true,
   'churner.cron': '0 3 * * *',
   'churner.run_after_ocr': true,

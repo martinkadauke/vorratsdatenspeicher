@@ -93,8 +93,12 @@
       "noCandidates": "No matching receipts found (amount/date).",
       "unlink": "Unlink",
       "rematch": "Re-match",
-      "rematchToast": "{{n}} newly linked",
-      "linkedToast": "Receipt linked"
+      "rematchToast": "{{n}} linked · {{s}} AI suggestions (⭐)",
+      "linkedToast": "Receipt linked",
+      "aiSuggests": "AI:",
+      "approveSuggestion": "Approve suggestion",
+      "dismissSuggestion": "Dismiss suggestion",
+      "approvedToast": "Suggestion approved"
     },
     "jumpToday": "Jump to current month",
     "fixTitle": "Fixed costs",
@@ -792,6 +796,8 @@
     "supermarketInfoLast": "Last: updated {{updated}} of {{checked}} branches",
     "taskModelReview": "Model review",
     "taskModelReviewDesc": "Every 2 weeks judges whether better models exist. Can itself be a local model.",
+    "taskBankmatch": "Bank matching (AI)",
+    "taskBankmatchDesc": "Creative second pass on \"Re-match\": links open bank bookings to receipts/income/fixed costs the deterministic matcher misses. Suggestions only (⭐), approved by you. Needs a strong reasoning model.",
     "reviewTitle": "Model review",
     "reviewHint": "Every 2 weeks the reviewer model proposes, per AI task, both an API/cloud and an open-weight model (price/performance aware). The email lets you apply all-API or all-open-weight — or reject. Nothing is switched automatically.",
     "reviewRunBtn": "Run review now",

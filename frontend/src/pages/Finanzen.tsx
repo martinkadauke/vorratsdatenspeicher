@@ -1118,6 +1118,7 @@ interface BankTx {
   receipt: { id: number | null; laden: string | null; betrag: number | null; private: boolean } | null;
   income: { id: number; description: string | null; betrag: number } | null;
   fixed: { id: number; label: string } | null;
+  suggestion: { kind: 'receipt' | 'income' | 'fixed'; target_id: number; label: string | null; confidence: number; reason: string | null; private: boolean } | null;
 }
 
 /** Upload one or more comdirect "Umsätze Girokonto" CSVs into a chosen account.
@@ -1194,10 +1195,11 @@ function BankUpload({ scopeKonten }: { scopeKonten: KontoLite[] }) {
   );
 }
 
-function BankRow({ tx, t, highlight, onOpen, onLink, onUnlink, onFlag, onGenerate }: {
+function BankRow({ tx, t, highlight, onOpen, onLink, onUnlink, onFlag, onGenerate, onApprove, onDismiss }: {
   tx: BankTx; t: (k: string, o?: Record<string, unknown>) => string; highlight?: boolean;
   onOpen: (receiptId: number) => void; onLink: (tx: BankTx) => void; onUnlink: (id: number) => void;
   onFlag: (id: number, flag: boolean) => void; onGenerate: (tx: BankTx) => void;
+  onApprove: (id: number) => void; onDismiss: (id: number) => void;
 }) {
   useEffect(() => { if (highlight) document.getElementById(`bank-row-${tx.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, [highlight, tx.id]);
   const credit = tx.amount > 0;
@@ -1245,20 +1247,36 @@ function BankRow({ tx, t, highlight, onOpen, onLink, onUnlink, onFlag, onGenerat
           {tx.status === 'receipt' && tx.receipt && !tx.receipt.private && tx.receipt.laden && <span className="truncate">→ {tx.receipt.laden}</span>}
           {tx.status === 'income' && tx.income && <span className="truncate">→ {tx.income.description || t('finances.income.entryFallback')}</span>}
           {tx.status === 'fixed' && tx.fixed && <span className="truncate">→ {tx.fixed.label}</span>}
-          {canLink && <span className="text-zinc-400">{credit ? t('finances.bank.tapToLinkIncome') : t('finances.bank.tapToLink')}</span>}
+          {canLink && !tx.suggestion && <span className="text-zinc-400">{credit ? t('finances.bank.tapToLinkIncome') : t('finances.bank.tapToLink')}</span>}
+          {tx.suggestion && (
+            <span className="inline-flex min-w-0 items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" title={tx.suggestion.reason ?? undefined}>
+              ⭐ {t('finances.bank.aiSuggests')} <span className="max-w-[10rem] truncate">{tx.suggestion.private ? t('finances.privatePurchase') : (tx.suggestion.label || '—')}</span> · {Math.round(tx.suggestion.confidence * 100)}%
+            </span>
+          )}
         </div>
       </div>
       <span className={cn('shrink-0 text-sm font-semibold', credit && 'text-emerald-600 dark:text-emerald-500')}>{credit ? '+' : ''}{eur(tx.amount)}</span>
-      {isLinked && !tx.receipt?.private && (
-        <button onClick={e => { e.stopPropagation(); onUnlink(tx.id); }} onPointerDown={stopArm} title={t('finances.bank.unlink')}
-          className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-red-500 dark:hover:bg-zinc-800"><Link2Off size={15} /></button>
+      {tx.suggestion ? (
+        <>
+          <button onClick={e => { e.stopPropagation(); onApprove(tx.id); }} onPointerDown={stopArm} title={t('finances.bank.approveSuggestion')}
+            className="shrink-0 rounded-lg p-1.5 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"><CheckCircle2 size={16} /></button>
+          <button onClick={e => { e.stopPropagation(); onDismiss(tx.id); }} onPointerDown={stopArm} title={t('finances.bank.dismissSuggestion')}
+            className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30"><X size={16} /></button>
+        </>
+      ) : (
+        <>
+          {isLinked && !tx.receipt?.private && (
+            <button onClick={e => { e.stopPropagation(); onUnlink(tx.id); }} onPointerDown={stopArm} title={t('finances.bank.unlink')}
+              className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-red-500 dark:hover:bg-zinc-800"><Link2Off size={15} /></button>
+          )}
+          {canLink && (
+            <button onClick={e => { e.stopPropagation(); onGenerate(tx); }} onPointerDown={stopArm} title={t('finances.bank.gen.button')}
+              className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-950/30"><FilePlus2 size={15} /></button>
+          )}
+          {canLink && <Link2 size={15} className="shrink-0 text-zinc-300 dark:text-zinc-600" />}
+          {canOpen && <ChevronRight size={15} className="shrink-0 text-zinc-300 dark:text-zinc-600" />}
+        </>
       )}
-      {canLink && (
-        <button onClick={e => { e.stopPropagation(); onGenerate(tx); }} onPointerDown={stopArm} title={t('finances.bank.gen.button')}
-          className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-950/30"><FilePlus2 size={15} /></button>
-      )}
-      {canLink && <Link2 size={15} className="shrink-0 text-zinc-300 dark:text-zinc-600" />}
-      {canOpen && <ChevronRight size={15} className="shrink-0 text-zinc-300 dark:text-zinc-600" />}
     </Card>
   );
 }
@@ -1456,8 +1474,18 @@ function BankTab() {
     onSuccess: invalidate,
   });
   const rematch = useMutation({
-    mutationFn: () => api<{ linked: number }>('/api/finances/bank/rematch', { method: 'POST', body: { konto_id: konto ? Number(konto) : null } }),
-    onSuccess: (r) => { invalidate(); toast(t('finances.bank.rematchToast', { n: r.linked }), r.linked ? 'success' : 'info'); },
+    mutationFn: () => api<{ linked: number; suggested: number }>('/api/finances/bank/rematch', { method: 'POST', body: { konto_id: konto ? Number(konto) : null } }),
+    onSuccess: (r) => { invalidate(); toast(t('finances.bank.rematchToast', { n: r.linked, s: r.suggested }), (r.linked || r.suggested) ? 'success' : 'info'); },
+    onError: (e: Error) => toast(e.message, 'error'),
+  });
+  const approve = useMutation({
+    mutationFn: (id: number) => api(`/api/finances/bank/${id}/suggestion/approve`, { method: 'POST' }),
+    onSuccess: () => { invalidate(); void qc.invalidateQueries({ queryKey: ['fin-month'] }); toast(t('finances.bank.approvedToast'), 'success'); },
+    onError: (e: Error) => toast(e.message, 'error'),
+  });
+  const dismiss = useMutation({
+    mutationFn: (id: number) => api(`/api/finances/bank/${id}/suggestion/dismiss`, { method: 'POST' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['bank-tx'] }),
     onError: (e: Error) => toast(e.message, 'error'),
   });
   const items = data?.items ?? [];
@@ -1520,7 +1548,7 @@ function BankTab() {
         <>
           <p className="-mb-1 text-[11px] text-zinc-400">{t('finances.bank.flagHint')}</p>
           <div className="flex flex-col gap-2">
-            {items.map(tx => <BankRow key={tx.id} tx={tx} t={t} highlight={highlightId !== '' && String(tx.id) === highlightId} onOpen={id => navigate(`/receipts/${id}`)} onLink={setLinkTx} onUnlink={unlink.mutate} onFlag={(id, on) => flag.mutate({ id, on })} onGenerate={setGenTx} />)}
+            {items.map(tx => <BankRow key={tx.id} tx={tx} t={t} highlight={highlightId !== '' && String(tx.id) === highlightId} onOpen={id => navigate(`/receipts/${id}`)} onLink={setLinkTx} onUnlink={unlink.mutate} onFlag={(id, on) => flag.mutate({ id, on })} onGenerate={setGenTx} onApprove={approve.mutate} onDismiss={dismiss.mutate} />)}
           </div>
         </>
       )}
