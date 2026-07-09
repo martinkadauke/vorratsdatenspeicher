@@ -13,6 +13,7 @@ export function kontoRoutes(app: FastifyInstance): void {
     // private receipts via kontoScope).
     return sql`
       SELECT k.id, k.name, k.is_shared, k.is_cash, k.payment_type, k.user_id, u.username AS owner,
+             (SELECT fm.name FROM family_member fm WHERE fm.user_id = k.user_id ORDER BY fm.sort_order, fm.id LIMIT 1) AS owner_name,
              (SELECT COUNT(*)::int FROM einkauf e
               WHERE e.konto_id = k.id ${kontoScope(req.user, sql`e`)}) AS receipts
       FROM konto k LEFT JOIN users u ON u.id = k.user_id

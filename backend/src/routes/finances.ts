@@ -408,6 +408,21 @@ export function financeRoutes(app: FastifyInstance): void {
     return { income: rows };
   });
 
+  /** Income-evidence candidates of a month for the manual picker on an income plan:
+   *  actual income rows (pay slips) + bank credits (Gutschriften, amount > 0). */
+  app.get('/api/finances/income-evidence', async (req, reply) => {
+    const b = monthBounds(((req.query as { month?: string }).month ?? '').trim());
+    if (!b) return reply.code(400).send({ error: 'month must be YYYY-MM' });
+    const inc = await sql`SELECT id, datum::text AS datum, amount::float8 AS amount, description FROM income WHERE datum BETWEEN ${b.first} AND ${b.last} ORDER BY datum DESC, id DESC`;
+    const bank = await sql`SELECT id, booking_date::text AS datum, amount::float8 AS amount, counterparty, description FROM bank_tx WHERE booking_date BETWEEN ${b.first} AND ${b.last} AND amount > 0 ORDER BY booking_date DESC`;
+    return {
+      items: [
+        ...inc.map(i => ({ source: 'income' as const, id: i.id, datum: String(i.datum), amount: i.amount, label: (i.description as string | null) || 'Einnahme' })),
+        ...bank.map(bt => ({ source: 'bank' as const, id: bt.id, datum: String(bt.datum), amount: bt.amount, label: [bt.counterparty, bt.description].filter(Boolean).join(' ') || 'Gutschrift' })),
+      ],
+    };
+  });
+
   /** Upload a pay slip (DATEV etc.) as base64 → extract salary via Vision → create
    *  an income row (source='salary', amount = Auszahlungsbetrag/net). The client
    *  sends one file per request (so several PDFs upload sequentially). */

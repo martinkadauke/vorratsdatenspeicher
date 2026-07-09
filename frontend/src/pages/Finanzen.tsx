@@ -20,7 +20,7 @@ interface FixedCost {
   expect_receipt: boolean; match_merchant: string | null;
   konto_name: string | null; is_shared: boolean | null; konto_user_id: number | null; owner: string | null;
 }
-interface KontoLite { id: number; name: string; is_shared: boolean; is_cash: boolean; user_id: number | null; owner: string | null }
+interface KontoLite { id: number; name: string; is_shared: boolean; is_cash: boolean; user_id: number | null; owner: string | null; owner_name: string | null }
 
 interface MonthFix {
   id: number; label: string; monthly_eur: number; kind: 'expense' | 'income'; expect_receipt: boolean; match_merchant: string | null;
@@ -137,7 +137,7 @@ function MonthTab() {
     for (const k of nonCash) {
       if (k.is_shared) household.push(k);
       else if (k.user_id != null) {
-        if (!memberMap.has(k.user_id)) memberMap.set(k.user_id, { key: `u${k.user_id}`, label: k.owner ?? k.name, konten: [] });
+        if (!memberMap.has(k.user_id)) memberMap.set(k.user_id, { key: `u${k.user_id}`, label: k.owner_name ?? k.owner ?? k.name, konten: [] });
         memberMap.get(k.user_id)!.konten.push(k);
       }
     }
@@ -300,7 +300,7 @@ function MonthTab() {
 
       {picker && (
         <ReceiptPicker month={month} fix={picker} onClose={() => setPicker(null)}
-          onPick={(einkaufId) => check.mutate({ fixed_cost_id: picker.id, month, action: 'confirm', einkauf_id: einkaufId })} />
+          onPick={(ev) => check.mutate({ fixed_cost_id: picker.id, month, action: 'confirm', ...ev })} />
       )}
       {budgetModal && <BudgetModal initial={budgetModal} onClose={() => setBudgetModal(null)} onSaved={invalidate} />}
     </div>
@@ -343,7 +343,7 @@ function FixCheckRow({ f, t, onConfirmSuggestion, onConfirmNoReceipt, onSkip, on
       {(state !== 'ok' || f.check) && (
         <div className="flex flex-wrap gap-1.5 pl-7">
           {state === 'suggest' && <Button className="px-2.5 py-1 text-xs" onClick={onConfirmSuggestion}>{t('finances.confirm')}</Button>}
-          {state !== 'ok' && f.kind !== 'income' && <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={onPick}>{t('finances.chooseReceipt')}</Button>}
+          {state !== 'ok' && <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={onPick}>{f.kind === 'income' ? t('finances.chooseIncome') : t('finances.chooseReceipt')}</Button>}
           {state !== 'ok' && f.expect_receipt !== false && <Button variant="ghost" className="px-2.5 py-1 text-xs" onClick={onSkip}>{t('finances.skipThisMonth')}</Button>}
           {state !== 'ok' && f.expect_receipt !== false && <Button variant="ghost" className="px-2.5 py-1 text-xs" onClick={onConfirmNoReceipt}>{t('finances.okNoReceipt')}</Button>}
           {f.check && <Button variant="ghost" className="px-2.5 py-1 text-xs" onClick={onClear}>{t('finances.reopen')}</Button>}
@@ -383,38 +383,56 @@ function BudgetRow({ b, t, onEdit }: { b: MonthBudget; t: (k: string, o?: Record
 }
 
 /** Pick a receipt of the month as evidence for a fixed cost. */
+type PickEv = { einkauf_id?: number; income_id?: number; bank_tx_id?: number };
+/** Manual evidence picker. For an expense plan it lists the month's invoices
+ *  (e-mail/upload). For an income plan it lists income evidence — pay-slip rows
+ *  and bank credits — from /income-evidence. onPick returns the id of the chosen
+ *  evidence kind. */
 function ReceiptPicker({ month, fix, onClose, onPick }: {
-  month: string; fix: MonthFix; onClose: () => void; onPick: (einkaufId: number) => void;
+  month: string; fix: MonthFix; onClose: () => void; onPick: (ev: PickEv) => void;
 }) {
   const { t } = useTranslation();
   const [q, setQ] = useState('');
   const [y, mo] = month.split('-').map(Number);
   const last = new Date(Date.UTC(y, mo, 0)).toISOString().slice(0, 10);
-  // Fixed costs are only ever backed by invoices (e-mail import or a dropped PDF),
-  // never Kassenbons/cash — so the picker is scoped to those sources to match the
-  // backend guard.
-  const { data, isLoading } = useQuery({
-    queryKey: ['fin-picker', month],
+  const isIncome = fix.kind === 'income';
+
+  const receiptsQ = useQuery({
+    queryKey: ['fin-picker', 'receipt', month],
     queryFn: () => api<{ id: number; datum: string; roh_ladenname: string | null; gesamt_betrag: number | null }[]>(
       `/api/receipts?limit=200&from=${month}-01&to=${last}&quelle=email,upload`),
+    enabled: !isIncome,
   });
-  const rows = (data ?? []).filter(r => !q.trim() || (r.roh_ladenname ?? '').toLowerCase().includes(q.trim().toLowerCase()));
+  const incomeQ = useQuery({
+    queryKey: ['fin-picker', 'income', month],
+    queryFn: () => api<{ items: { source: 'income' | 'bank'; id: number; datum: string; amount: number; label: string }[] }>(
+      `/api/finances/income-evidence?month=${month}`),
+    enabled: isIncome,
+  });
+  const isLoading = isIncome ? incomeQ.isLoading : receiptsQ.isLoading;
+
+  type Row = { key: string; datum: string | null; label: string; amount: number | null; ev: PickEv };
+  const all: Row[] = isIncome
+    ? (incomeQ.data?.items ?? []).map(i => ({ key: `${i.source}:${i.id}`, datum: i.datum, label: i.label, amount: i.amount, ev: i.source === 'income' ? { income_id: i.id } : { bank_tx_id: i.id } }))
+    : (receiptsQ.data ?? []).map(r => ({ key: `r:${r.id}`, datum: r.datum, label: r.roh_ladenname ?? '–', amount: r.gesamt_betrag, ev: { einkauf_id: r.id } }));
+  const rows = all.filter(r => !q.trim() || r.label.toLowerCase().includes(q.trim().toLowerCase()));
+
   return (
-    <Modal open onClose={onClose} title={`${t('finances.pickerTitle')} · ${fix.label}`}>
+    <Modal open onClose={onClose} title={`${t(isIncome ? 'finances.incomePickerTitle' : 'finances.pickerTitle')} · ${fix.label}`}>
       <div className="flex flex-col gap-2">
         <div className="relative">
           <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
           <Input className="pl-8" autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder={t('finances.pickerSearch')} />
         </div>
         {isLoading && <Spinner />}
-        {!isLoading && !rows.length && <EmptyState>{t('finances.pickerEmpty')}</EmptyState>}
+        {!isLoading && !rows.length && <EmptyState>{t(isIncome ? 'finances.incomePickerEmpty' : 'finances.pickerEmpty')}</EmptyState>}
         <div className="flex max-h-80 flex-col gap-1 overflow-y-auto">
           {rows.map(r => (
-            <button key={r.id} onClick={() => onPick(r.id)}
+            <button key={r.key} onClick={() => onPick(r.ev)}
               className="flex items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2 text-left hover:border-emerald-400 hover:bg-emerald-50/50 dark:border-zinc-800 dark:hover:bg-emerald-950/20">
               <span className="w-14 shrink-0 text-xs text-zinc-400">{r.datum?.slice(8, 10)}.{r.datum?.slice(5, 7)}.</span>
-              <span className="min-w-0 flex-1 truncate text-sm">{r.roh_ladenname ?? '–'}</span>
-              <span className="shrink-0 text-sm font-medium">{r.gesamt_betrag != null ? eur(r.gesamt_betrag) : '–'}</span>
+              <span className="min-w-0 flex-1 truncate text-sm">{r.label}</span>
+              <span className="shrink-0 text-sm font-medium">{r.amount != null ? eur(r.amount) : '–'}</span>
             </button>
           ))}
         </div>
