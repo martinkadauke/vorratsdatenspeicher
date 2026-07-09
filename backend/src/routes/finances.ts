@@ -23,7 +23,7 @@ export function financeRoutes(app: FastifyInstance): void {
   /** All fixed costs with their konto scope (household vs which person). */
   app.get('/api/fixed-costs', async () => {
     return sql`
-      SELECT f.id, f.label, f.category_path, f.monthly_eur::float8 AS monthly_eur,
+      SELECT f.id, f.label, f.category_path, f.monthly_eur::float8 AS monthly_eur, f.kind,
              f.konto_id, f.start_date, f.end_date, f.active,
              f.expect_receipt, f.match_merchant,
              k.name AS konto_name, k.is_shared, k.user_id AS konto_user_id, u.username AS owner
@@ -45,9 +45,10 @@ export function financeRoutes(app: FastifyInstance): void {
     if (!label) return reply.code(400).send({ error: 'label required' });
     if (monthly == null) return reply.code(400).send({ error: 'monthly_eur required' }); // negatives allowed (= recurring credit/income)
     if (!kontoId) return reply.code(400).send({ error: 'konto_id required' });
+    const kind = b.kind === 'income' ? 'income' : 'expense';
     const [row] = await sql`
-      INSERT INTO fixed_cost (label, category_path, monthly_eur, konto_id, start_date, end_date, active, expect_receipt, match_merchant, created_by)
-      VALUES (${label}, ${category}, ${monthly}, ${kontoId}, ${start}, ${end}, ${b.active !== false},
+      INSERT INTO fixed_cost (label, category_path, monthly_eur, kind, konto_id, start_date, end_date, active, expect_receipt, match_merchant, created_by)
+      VALUES (${label}, ${category}, ${monthly}, ${kind}, ${kontoId}, ${start}, ${end}, ${b.active !== false},
               ${b.expect_receipt !== false}, ${(b.match_merchant ?? '').toString().trim() || null}, ${req.user?.id ?? null})
       RETURNING id`;
     return { ok: true, id: row.id };
@@ -79,6 +80,7 @@ export function financeRoutes(app: FastifyInstance): void {
     if ('active' in b) updates.active = !!b.active;
     if ('expect_receipt' in b) updates.expect_receipt = b.expect_receipt !== false;
     if ('match_merchant' in b) updates.match_merchant = (b.match_merchant ?? '').toString().trim() || null;
+    if ('kind' in b) updates.kind = b.kind === 'income' ? 'income' : 'expense';
     if (!Object.keys(updates).length) return reply.code(400).send({ error: 'no patchable fields' });
     const [row] = await sql`UPDATE fixed_cost SET ${sql(updates)} WHERE id = ${id} RETURNING id`;
     if (!row) return reply.code(404).send({ error: 'not found' });
@@ -114,22 +116,26 @@ export function financeRoutes(app: FastifyInstance): void {
     const b = monthBounds(m);
     if (!b) return reply.code(400).send({ error: 'month must be YYYY-MM' });
 
-    // 1) Fixed costs active in this month + their check (if decided).
+    // 1) Recurring plans active this month + their check. `kind` splits them into
+    //    expenses (Fixkosten) and income (Einnahmen-Soll); both share the same
+    //    check + evidence-matching engine, just against different evidence pools.
     const fixed = await sql`
-      SELECT f.id, f.label, f.monthly_eur::float8 AS monthly_eur, f.expect_receipt, f.match_merchant,
+      SELECT f.id, f.label, f.monthly_eur::float8 AS monthly_eur, f.kind, f.expect_receipt, f.match_merchant,
              f.konto_id, k.name AS konto_name, k.is_shared, u.username AS owner,
              c.id AS check_id, c.status AS check_status, c.einkauf_id AS check_einkauf_id,
-             c.bank_tx_id AS check_bank_tx_id, c.amount::float8 AS check_amount,
+             c.bank_tx_id AS check_bank_tx_id, c.income_id AS check_income_id, c.amount::float8 AS check_amount,
              CASE WHEN c.einkauf_id IS NOT NULL THEN 'receipt'
-                  WHEN c.bank_tx_id IS NOT NULL THEN 'bank' ELSE 'none' END AS check_source,
-             COALESCE(ce.roh_ladenname, bce.counterparty) AS check_laden,
-             COALESCE(ce.datum::text, bce.booking_date::text) AS check_datum
+                  WHEN c.bank_tx_id IS NOT NULL THEN 'bank'
+                  WHEN c.income_id IS NOT NULL THEN 'income' ELSE 'none' END AS check_source,
+             COALESCE(ce.roh_ladenname, bce.counterparty, ice.description) AS check_laden,
+             COALESCE(ce.datum::text, bce.booking_date::text, ice.datum::text) AS check_datum
       FROM fixed_cost f
       LEFT JOIN konto k ON k.id = f.konto_id
       LEFT JOIN users u ON u.id = k.user_id
       LEFT JOIN fixed_cost_check c ON c.fixed_cost_id = f.id AND c.month = ${b.first}
       LEFT JOIN einkauf ce ON ce.id = c.einkauf_id
       LEFT JOIN bank_tx bce ON bce.id = c.bank_tx_id
+      LEFT JOIN income ice ON ice.id = c.income_id
       WHERE f.active AND f.start_date <= ${b.last} AND (f.end_date IS NULL OR f.end_date >= ${b.first})
       ORDER BY k.is_shared DESC NULLS LAST, u.username NULLS FIRST, f.label
     `;
@@ -148,46 +154,62 @@ export function financeRoutes(app: FastifyInstance): void {
         AND e.quelle IN ('email', 'upload')
         ${kontoScope(req.user, sql`e`)}
     `;
-    // Bank transactions of the month are a SECOND evidence source. Only Belastungen
-    // (amount < 0) can back a fixed cost; the merchant text = Empfänger + Buchungstext.
+    // Bank transactions of the month (both signs) + actual income rows (pay slips)
+    // — the evidence for income plans. Expense plans match invoices + bank debits;
+    // income plans match income rows + bank credits.
     const banktx = await sql`
       SELECT bt.id, bt.booking_date::text AS datum, bt.counterparty, bt.description, bt.amount::float8 AS amount
       FROM bank_tx bt
-      WHERE bt.booking_date BETWEEN ${b.first} AND ${b.last} AND bt.amount < 0
+      WHERE bt.booking_date BETWEEN ${b.first} AND ${b.last}
     `;
+    const income = await sql`
+      SELECT i.id, i.datum::text AS datum, i.amount::float8 AS amount, i.source, i.description,
+             i.konto_id, k.name AS konto_name, k.is_shared, u.username AS owner
+      FROM income i
+      LEFT JOIN konto k ON k.id = i.konto_id
+      LEFT JOIN users u ON u.id = k.user_id
+      WHERE i.datum BETWEEN ${b.first} AND ${b.last}
+      ORDER BY i.amount DESC, i.id DESC`;
+    const bankText = (cp: unknown, desc: unknown): string | null => [cp, desc].filter(Boolean).join(' ') || null;
 
-    // Unified evidence pool (receipts + bank tx). A candidate is keyed "<source>:<id>"
-    // so the same physical evidence is never offered to two positions and a confirmed
-    // one is never re-suggested.
-    type Ev = { source: 'receipt' | 'bank'; id: number; laden: string | null; betrag: number; datum: string };
-    const evidence: Ev[] = [
+    // Two evidence pools; a candidate is keyed "<source>:<id>" so one piece of
+    // evidence never serves two positions and a confirmed one is never re-suggested.
+    type Ev = { source: 'receipt' | 'bank' | 'income'; id: number; laden: string | null; betrag: number; datum: string };
+    const evExpense: Ev[] = [
       ...receipts.map(r => ({ source: 'receipt' as const, id: r.id as number, laden: r.roh_ladenname as string | null, betrag: r.gesamt_betrag as number, datum: String(r.datum) })),
-      ...banktx.map(bt => ({ source: 'bank' as const, id: bt.id as number, laden: [bt.counterparty, bt.description].filter(Boolean).join(' ') || null, betrag: Math.abs(bt.amount as number), datum: String(bt.datum) })),
+      ...banktx.filter(bt => (bt.amount as number) < 0).map(bt => ({ source: 'bank' as const, id: bt.id as number, laden: bankText(bt.counterparty, bt.description), betrag: Math.abs(bt.amount as number), datum: String(bt.datum) })),
+    ];
+    const evIncome: Ev[] = [
+      ...income.map(i => ({ source: 'income' as const, id: i.id as number, laden: i.description as string | null, betrag: i.amount as number, datum: String(i.datum) })),
+      ...banktx.filter(bt => (bt.amount as number) > 0).map(bt => ({ source: 'bank' as const, id: bt.id as number, laden: bankText(bt.counterparty, bt.description), betrag: bt.amount as number, datum: String(bt.datum) })),
     ];
     const usedKeys = new Set<string>();
     for (const f of fixed) {
       if (f.check_einkauf_id) usedKeys.add(`receipt:${f.check_einkauf_id}`);
       if (f.check_bank_tx_id) usedKeys.add(`bank:${f.check_bank_tx_id}`);
+      if (f.check_income_id) usedKeys.add(`income:${f.check_income_id}`);
     }
     // Evidence already confirmed for ANY month/position never gets re-suggested.
     const confirmedElsewhere = new Set<string>();
-    for (const r of await sql`SELECT einkauf_id, bank_tx_id FROM fixed_cost_check WHERE einkauf_id IS NOT NULL OR bank_tx_id IS NOT NULL`) {
+    for (const r of await sql`SELECT einkauf_id, bank_tx_id, income_id FROM fixed_cost_check WHERE einkauf_id IS NOT NULL OR bank_tx_id IS NOT NULL OR income_id IS NOT NULL`) {
       if (r.einkauf_id) confirmedElsewhere.add(`receipt:${r.einkauf_id}`);
       if (r.bank_tx_id) confirmedElsewhere.add(`bank:${r.bank_tx_id}`);
+      if (r.income_id) confirmedElsewhere.add(`income:${r.income_id}`);
     }
 
     // Deterministic suggestion: merchant match (learned match_merchant, else label
     // tokens) and/or amount within ±max(1 €, 2 %). Greedy: best score first, one
     // piece of evidence serves at most one position.
-    type Cand = { fixedId: number; source: 'receipt' | 'bank'; einkaufId: number | null; bankTxId: number | null; score: number; laden: string | null; betrag: number; datum: string; amountOk: boolean; merchantOk: boolean };
+    type Cand = { fixedId: number; source: 'receipt' | 'bank' | 'income'; einkaufId: number | null; bankTxId: number | null; incomeId: number | null; score: number; laden: string | null; betrag: number; datum: string; amountOk: boolean; merchantOk: boolean };
     const cands: Cand[] = [];
     for (const f of fixed) {
       if (f.check_id || f.expect_receipt === false) continue;
+      const pool = f.kind === 'income' ? evIncome : evExpense;
       const target = f.monthly_eur as number;
       const tol = Math.max(1, Math.abs(target) * 0.02);
       const needle = normMerchant((f.match_merchant as string | null) ?? '');
       const labelToks = normMerchant(f.label as string).split(' ').filter(w => w.length >= 4);
-      for (const ev of evidence) {
+      for (const ev of pool) {
         const key = `${ev.source}:${ev.id}`;
         if (usedKeys.has(key) || confirmedElsewhere.has(key)) continue;
         const laden = normMerchant(ev.laden ?? '');
@@ -196,7 +218,7 @@ export function financeRoutes(app: FastifyInstance): void {
         if (!amountOk && !merchantOk) continue;
         cands.push({
           fixedId: f.id as number, source: ev.source,
-          einkaufId: ev.source === 'receipt' ? ev.id : null, bankTxId: ev.source === 'bank' ? ev.id : null,
+          einkaufId: ev.source === 'receipt' ? ev.id : null, bankTxId: ev.source === 'bank' ? ev.id : null, incomeId: ev.source === 'income' ? ev.id : null,
           score: (merchantOk ? 2 : 0) + (amountOk ? 1 : 0) + (needle && laden.includes(needle) ? 1 : 0),
           laden: ev.laden, betrag: ev.betrag, datum: ev.datum, amountOk, merchantOk,
         });
@@ -206,7 +228,7 @@ export function financeRoutes(app: FastifyInstance): void {
     const sugByFixed = new Map<number, Cand>();
     const takenKeys = new Set<string>();
     for (const c of cands) {
-      const key = `${c.source}:${c.einkaufId ?? c.bankTxId}`;
+      const key = `${c.source}:${c.einkaufId ?? c.bankTxId ?? c.incomeId}`;
       if (sugByFixed.has(c.fixedId) || takenKeys.has(key)) continue;
       sugByFixed.set(c.fixedId, c);
       takenKeys.add(key);
@@ -259,35 +281,31 @@ export function financeRoutes(app: FastifyInstance): void {
       return Math.round(s[Math.floor((s.length - 1) / 2)] * 100) / 100;
     };
 
-    // 4) Income of the month (pay slips today; bank credits / e-mail later).
-    const income = await sql`
-      SELECT i.id, i.datum::text AS datum, i.amount::float8 AS amount, i.source, i.description,
-             i.konto_id, k.name AS konto_name, k.is_shared, u.username AS owner
-      FROM income i
-      LEFT JOIN konto k ON k.id = i.konto_id
-      LEFT JOIN users u ON u.id = k.user_id
-      WHERE i.datum BETWEEN ${b.first} AND ${b.last}
-      ORDER BY i.amount DESC, i.id DESC`;
+    // Map a plan row (expense or income) to its month-view shape (check + suggestion).
+    const mapPlan = (f: typeof fixed[number]) => ({
+      id: f.id, label: f.label, monthly_eur: f.monthly_eur, kind: f.kind, expect_receipt: f.expect_receipt,
+      match_merchant: f.match_merchant, konto_id: f.konto_id, konto_name: f.konto_name,
+      is_shared: f.is_shared, owner: f.owner,
+      check: f.check_id ? {
+        status: f.check_status, source: f.check_source, einkauf_id: f.check_einkauf_id, bank_tx_id: f.check_bank_tx_id, income_id: f.check_income_id,
+        amount: f.check_amount, laden: f.check_laden, datum: f.check_datum ? String(f.check_datum) : null,
+      } : null,
+      suggestion: sugByFixed.has(f.id as number) ? (() => {
+        const s = sugByFixed.get(f.id as number)!;
+        return { source: s.source, einkauf_id: s.einkaufId, bank_tx_id: s.bankTxId, income_id: s.incomeId, laden: s.laden, betrag: s.betrag, datum: s.datum, amount_ok: s.amountOk, merchant_ok: s.merchantOk };
+      })() : null,
+    });
 
     return {
       month: m,
+      // actual income entries of the month (pay slips) — shown as the summary total
       income: income.map(i => ({
         id: i.id, datum: String(i.datum), amount: i.amount, source: i.source, description: i.description,
         konto_id: i.konto_id, konto_name: i.konto_name, is_shared: i.is_shared, owner: i.owner,
       })),
-      fixed: fixed.map(f => ({
-        id: f.id, label: f.label, monthly_eur: f.monthly_eur, expect_receipt: f.expect_receipt,
-        match_merchant: f.match_merchant, konto_id: f.konto_id, konto_name: f.konto_name,
-        is_shared: f.is_shared, owner: f.owner,
-        check: f.check_id ? {
-          status: f.check_status, source: f.check_source, einkauf_id: f.check_einkauf_id, bank_tx_id: f.check_bank_tx_id,
-          amount: f.check_amount, laden: f.check_laden, datum: f.check_datum ? String(f.check_datum) : null,
-        } : null,
-        suggestion: sugByFixed.has(f.id as number) ? (() => {
-          const s = sugByFixed.get(f.id as number)!;
-          return { source: s.source, einkauf_id: s.einkaufId, bank_tx_id: s.bankTxId, laden: s.laden, betrag: s.betrag, datum: s.datum, amount_ok: s.amountOk, merchant_ok: s.merchantOk };
-        })() : null,
-      })),
+      // recurring income PLANS (Einnahmen-Soll), matched vs actual income/bank credits
+      incomes: fixed.filter(f => f.kind === 'income').map(mapPlan),
+      fixed: fixed.filter(f => f.kind !== 'income').map(mapPlan),
       budgets: budgets.map(bu => ({
         id: bu.id, label: bu.label, monthly_target: bu.monthly_target, konto_id: bu.konto_id,
         konto_name: bu.konto_name, is_shared: bu.is_shared, owner: bu.owner,
@@ -303,7 +321,7 @@ export function financeRoutes(app: FastifyInstance): void {
    *  fine without evidence") or 'clear' (reopen). Confirming with a receipt LEARNS
    *  match_merchant from the receipt's store name when none is set yet. */
   app.post('/api/finances/check', async (req, reply) => {
-    const bdy = (req.body ?? {}) as { fixed_cost_id?: number; month?: string; action?: string; einkauf_id?: number | null; bank_tx_id?: number | null };
+    const bdy = (req.body ?? {}) as { fixed_cost_id?: number; month?: string; action?: string; einkauf_id?: number | null; bank_tx_id?: number | null; income_id?: number | null };
     const fixedId = parseInt(String(bdy.fixed_cost_id ?? ''), 10);
     const bounds = monthBounds((bdy.month ?? '').trim());
     if (!fixedId || !bounds) return reply.code(400).send({ error: 'fixed_cost_id and month (YYYY-MM) required' });
@@ -318,8 +336,17 @@ export function financeRoutes(app: FastifyInstance): void {
 
     let einkaufId: number | null = null;
     let bankTxId: number | null = null;
+    let incomeId: number | null = null;
     let amount: number | null = null;
-    if (bdy.action === 'confirm' && bdy.einkauf_id) {
+    if (bdy.action === 'confirm' && bdy.income_id) {
+      // An actual income row (pay slip) as evidence for an income plan.
+      const [inc] = await sql`SELECT id, amount::float8 AS amount, description FROM income WHERE id = ${bdy.income_id}`;
+      if (!inc) return reply.code(404).send({ error: 'income not found' });
+      incomeId = inc.id as number;
+      amount = inc.amount as number | null;
+      const merchant = ((inc.description as string | null) ?? '').trim();
+      if (!f.match_merchant && merchant) await sql`UPDATE fixed_cost SET match_merchant = ${merchant} WHERE id = ${fixedId}`;
+    } else if (bdy.action === 'confirm' && bdy.einkauf_id) {
       const [e] = await sql`
         SELECT e.id, e.gesamt_betrag::float8 AS betrag, e.roh_ladenname, e.quelle FROM einkauf e
         WHERE e.id = ${bdy.einkauf_id} ${kontoScope(req.user, sql`e`)}`;
@@ -346,11 +373,11 @@ export function financeRoutes(app: FastifyInstance): void {
       }
     }
     await sql`
-      INSERT INTO fixed_cost_check (fixed_cost_id, month, status, einkauf_id, bank_tx_id, amount, decided_by)
-      VALUES (${fixedId}, ${bounds.first}, ${bdy.action === 'skip' ? 'skipped' : 'confirmed'}, ${einkaufId}, ${bankTxId}, ${amount}, ${req.user?.id ?? null})
+      INSERT INTO fixed_cost_check (fixed_cost_id, month, status, einkauf_id, bank_tx_id, income_id, amount, decided_by)
+      VALUES (${fixedId}, ${bounds.first}, ${bdy.action === 'skip' ? 'skipped' : 'confirmed'}, ${einkaufId}, ${bankTxId}, ${incomeId}, ${amount}, ${req.user?.id ?? null})
       ON CONFLICT (fixed_cost_id, month) DO UPDATE SET
         status = EXCLUDED.status, einkauf_id = EXCLUDED.einkauf_id, bank_tx_id = EXCLUDED.bank_tx_id,
-        amount = EXCLUDED.amount, decided_by = EXCLUDED.decided_by, decided_at = NOW()`;
+        income_id = EXCLUDED.income_id, amount = EXCLUDED.amount, decided_by = EXCLUDED.decided_by, decided_at = NOW()`;
     return { ok: true };
   });
 
