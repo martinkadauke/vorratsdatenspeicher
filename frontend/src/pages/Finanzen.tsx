@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Wallet, Plus, Pencil, Trash2, Home, User as UserIcon, Info,
-  ChevronLeft, ChevronRight, ChevronDown, CheckCircle2, Circle, CircleDot, Search, X, Upload,
+  ChevronLeft, ChevronRight, ChevronDown, CheckCircle2, Circle, CircleDot, Search, X, Upload, Layers,
 } from 'lucide-react';
 import { api } from '../api/client';
 import { Card, Spinner, Button, Input, Label, Select, Switch, Modal, EmptyState, Badge } from '../components/ui';
@@ -408,18 +408,93 @@ interface BudgetPos {
   id: number; name: string; preis: number; menge: number | null; einheit: string | null;
   category_path: string | null; einkauf_id: number; datum: string; laden: string | null;
 }
+type PosSort = 'date_desc' | 'date_asc' | 'price_desc' | 'price_asc';
+
+// Group a position under the first sub-category below the budget's matched base
+// category (budget "Lebensmittel" → groups "Obst & Gemüse", "Milch & Eier", …).
+function catGroupOf(catPath: string, bases: string[]): { key: string; label: string } {
+  const base = bases.filter(b => catPath === b || catPath.startsWith(b + '/')).sort((a, b) => b.length - a.length)[0];
+  if (base == null) return { key: catPath || '—', label: (catPath.split('/').pop() || '—') };
+  if (catPath === base) return { key: base, label: (base.split('/').pop() || base) };
+  const firstSeg = catPath.slice(base.length + 1).split('/')[0];
+  return { key: `${base}/${firstSeg}`, label: firstSeg };
+}
+const sortPositions = (rs: BudgetPos[], sort: PosSort) => [...rs].sort((a, b) =>
+  sort === 'date_asc' ? (a.datum < b.datum ? -1 : a.datum > b.datum ? 1 : a.id - b.id)
+    : sort === 'date_desc' ? (a.datum > b.datum ? -1 : a.datum < b.datum ? 1 : b.id - a.id)
+      : sort === 'price_asc' ? a.preis - b.preis : b.preis - a.preis);
+
+/** One clickable position → jumps to its receipt with the item highlighted. */
+function PosRow({ p, t, onOpen }: { p: BudgetPos; t: (k: string, o?: Record<string, unknown>) => string; onOpen: (p: BudgetPos) => void }) {
+  return (
+    <li onClick={() => onOpen(p)} role="button" tabIndex={0}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(p); } }}
+      title={t('finances.openReceipt')}
+      className="flex cursor-pointer items-center gap-2 rounded-lg px-1 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium">{p.name}</div>
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-zinc-500 dark:text-zinc-400">
+          <span>{ddmmyyyy(p.datum)}</span>
+          {p.laden && <span className="truncate">{p.laden}</span>}
+          {p.category_path && <span className="truncate text-zinc-400">{p.category_path.split('/').pop()}</span>}
+        </div>
+      </div>
+      <span className="shrink-0 text-sm font-semibold">{eur(p.preis)}</span>
+      <ChevronRight size={15} className="shrink-0 text-zinc-300 dark:text-zinc-600" />
+    </li>
+  );
+}
+
+/** A collapsible sub-category group; the header shows its total for the month. */
+function CatGroup({ g, t, onOpen }: { g: { key: string; label: string; total: number; items: BudgetPos[] }; t: (k: string, o?: Record<string, unknown>) => string; onOpen: (p: BudgetPos) => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <li className="overflow-hidden rounded-lg border border-zinc-100 dark:border-zinc-800">
+      <button onClick={() => setOpen(o => !o)} className="flex w-full items-center gap-2 px-2 py-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
+        <ChevronDown size={14} className={cn('shrink-0 text-zinc-400 transition-transform', !open && '-rotate-90')} />
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">{g.label}</span>
+        <span className="shrink-0 text-xs text-zinc-400">{g.items.length}</span>
+        <span className="shrink-0 text-sm font-semibold">{eur(g.total)}</span>
+      </button>
+      {open && (
+        <ul className="border-t border-zinc-100 px-1 dark:border-zinc-800">
+          {g.items.map(p => <PosRow key={p.id} p={p} t={t} onOpen={onOpen} />)}
+        </ul>
+      )}
+    </li>
+  );
+}
+
 /** Drill-down modal: every article position that makes up this budget's actual
  *  (Ist) for the month. The list total equals the Ist shown on the budget tile —
- *  the backend reuses the same query. */
+ *  the backend reuses the same query. Positions can be sorted (date / price) and
+ *  grouped into the budget's sub-categories with per-group totals. */
 function BudgetPositions({ budget, month, onClose }: { budget: MonthBudget; month: string; onClose: () => void }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const [sort, setSort] = useState<PosSort>('date_desc');
+  const [grouped, setGrouped] = useState(false);
   const { data, isLoading } = useQuery({
     queryKey: ['budget-positions', budget.id, month],
     queryFn: () => api<{ positions: BudgetPos[]; total: number }>(`/api/finances/budget/${budget.id}/positions?month=${month}`),
   });
   const rows = data?.positions ?? [];
   const openReceipt = (p: BudgetPos) => { onClose(); navigate(`/receipts/${p.einkauf_id}?highlight=${p.id}`); };
+  const sorted = useMemo(() => sortPositions(rows, sort), [rows, sort]);
+  const groups = useMemo(() => {
+    const bases = budget.categories ?? [];
+    const map = new Map<string, { label: string; items: BudgetPos[]; total: number }>();
+    for (const p of rows) {
+      const g = catGroupOf(p.category_path ?? '', bases);
+      const e = map.get(g.key) ?? { label: g.label, items: [] as BudgetPos[], total: 0 };
+      e.items.push(p); e.total += p.preis;
+      map.set(g.key, e);
+    }
+    return [...map.entries()]
+      .map(([key, v]) => ({ key, label: v.label, total: Math.round(v.total * 100) / 100, items: sortPositions(v.items, sort) }))
+      .sort((a, b) => b.total - a.total);
+  }, [rows, sort, budget.categories]);
+
   return (
     <Modal open onClose={onClose} title={budget.label}>
       <div className="flex flex-col gap-3">
@@ -427,30 +502,30 @@ function BudgetPositions({ budget, month, onClose }: { budget: MonthBudget; mont
           <span className="text-zinc-500 dark:text-zinc-400">{t('finances.positionsCount', { count: rows.length })}</span>
           <span className="font-semibold">{eur(data?.total ?? 0)}</span>
         </div>
+        {rows.length > 0 && (
+          <div className="flex items-center gap-2">
+            <Select value={sort} onChange={e => setSort(e.target.value as PosSort)} className="min-w-0 flex-1 text-xs">
+              <option value="date_desc">{t('finances.sortDateDesc')}</option>
+              <option value="date_asc">{t('finances.sortDateAsc')}</option>
+              <option value="price_desc">{t('finances.sortPriceDesc')}</option>
+              <option value="price_asc">{t('finances.sortPriceAsc')}</option>
+            </Select>
+            <button onClick={() => setGrouped(g => !g)}
+              className={cn('inline-flex shrink-0 items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium',
+                grouped ? 'border-transparent bg-emerald-600 text-white' : 'border-zinc-300 text-zinc-600 dark:border-zinc-700 dark:text-zinc-300')}>
+              <Layers size={14} /> {t('finances.groupByCat')}
+            </button>
+          </div>
+        )}
         {isLoading ? <Spinner /> : rows.length === 0 ? (
           <p className="py-4 text-center text-xs text-zinc-400">{t('finances.positionsEmpty')}</p>
+        ) : grouped ? (
+          <ul className="-mx-1 flex max-h-[60vh] flex-col gap-1 overflow-y-auto px-1">
+            {groups.map(g => <CatGroup key={g.key} g={g} t={t} onOpen={openReceipt} />)}
+          </ul>
         ) : (
           <ul className="-mx-1 flex max-h-[60vh] flex-col divide-y divide-zinc-100 overflow-y-auto dark:divide-zinc-800">
-            {rows.map(p => (
-              <li key={p.id}
-                onClick={() => openReceipt(p)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openReceipt(p); } }}
-                title={t('finances.openReceipt')}
-                className="flex cursor-pointer items-center gap-2 rounded-lg px-1 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium">{p.name}</div>
-                  <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-zinc-500 dark:text-zinc-400">
-                    <span>{ddmmyyyy(p.datum)}</span>
-                    {p.laden && <span className="truncate">{p.laden}</span>}
-                    {p.category_path && <span className="truncate text-zinc-400">{p.category_path.split('/').pop()}</span>}
-                  </div>
-                </div>
-                <span className="shrink-0 text-sm font-semibold">{eur(p.preis)}</span>
-                <ChevronRight size={15} className="shrink-0 text-zinc-300 dark:text-zinc-600" />
-              </li>
-            ))}
+            {sorted.map(p => <PosRow key={p.id} p={p} t={t} onOpen={openReceipt} />)}
           </ul>
         )}
       </div>
