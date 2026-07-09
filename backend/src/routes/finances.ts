@@ -1,9 +1,22 @@
 import type { FastifyInstance } from 'fastify';
 import type { TransactionSql } from 'postgres';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import path from 'node:path';
 import sql from '../db.js';
 import { kontoScope } from '../auth/konto.js';
 import { extractPayslip } from '../llm/ocr.js';
 import { parseComdirectCsv } from '../finances/bankCsv.js';
+
+/** Pay-slip files live in a NON-static subdir of the receipts volume (the static
+ *  /receipts/:file route rejects any name containing '/'), so they're reachable
+ *  only through the auth-guarded income file endpoint. */
+const PAYSLIP_DIR = path.join(process.env.RECEIPTS_LOCAL_PATH ?? '/receipts', '_payslips');
+const MIME_BY_EXT: Record<string, string> = {
+  '.pdf': 'application/pdf', '.png': 'image/png', '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.heic': 'image/heic',
+};
 
 /** Fixed costs (recurring monthly expenses) CRUD — the manual-entry UI the
  *  analytics foundation (mig 040 `fixed_cost` → `v_transactions`) always expected.
@@ -547,6 +560,7 @@ export function financeRoutes(app: FastifyInstance): void {
       SELECT i.id, i.datum::text AS datum, i.amount::float8 AS amount, i.source, i.description,
              i.konto_id, k.name AS konto_name, k.is_shared, u.username AS owner,
              (SELECT fm.name FROM family_member fm WHERE fm.user_id = k.user_id ORDER BY fm.sort_order, fm.id LIMIT 1) AS owner_name,
+             (i.file_path IS NOT NULL) AS has_file, i.file_name,
              i.bank_tx_id, bt.booking_date::text AS bank_booking, bt.amount::float8 AS bank_amount, bt.counterparty AS bank_counterparty
       FROM income i
       LEFT JOIN konto k ON k.id = i.konto_id
@@ -638,10 +652,36 @@ export function financeRoutes(app: FastifyInstance): void {
       INSERT INTO income (datum, amount, category_path, konto_id, source, description, created_by)
       VALUES (${datum}::date, ${ex.netto}, 'Gehalt', ${kontoId}, 'salary', ${descr}, ${req.user?.id ?? null})
       RETURNING id`;
+    // Persist the uploaded file so it can be viewed later. Best-effort: if the disk
+    // write fails the income row still stands (just without a viewable document).
+    const origName = (bdy.filename ?? '').toString();
+    const ext = (origName.match(/\.(pdf|png|jpe?g|webp|heic)$/i)?.[0] ?? '.pdf').toLowerCase();
+    const stored = `${row.id}_${randomBytes(6).toString('hex')}${ext}`;
+    try {
+      await mkdir(PAYSLIP_DIR, { recursive: true });
+      await writeFile(path.join(PAYSLIP_DIR, stored), buf);
+      await sql`UPDATE income SET file_path = ${stored}, file_name = ${origName || `gehaltszettel${ext}`} WHERE id = ${row.id}`;
+    } catch (e) { req.log.warn(`payslip file store failed: ${(e as Error).message}`); }
     return {
       ok: true, income_id: row.id, filename: bdy.filename ?? null,
       datum, netto: ex.netto, brutto: ex.brutto, monat: ex.monat, arbeitgeber: ex.arbeitgeber,
     };
+  });
+
+  /** Stream a stored pay-slip file (auth-guarded; income is shared household data).
+   *  basename() guards path traversal; only files inside PAYSLIP_DIR are reachable. */
+  app.get('/api/finances/income/:id/file', async (req, reply) => {
+    const id = parseInt(String((req.params as { id: string }).id), 10);
+    if (!id) return reply.code(400).send({ error: 'bad id' });
+    const [row] = await sql`SELECT file_path, file_name FROM income WHERE id = ${id}`;
+    if (!row?.file_path) return reply.code(404).send({ error: 'no file' });
+    const full = path.join(PAYSLIP_DIR, path.basename(row.file_path as string));
+    if (!existsSync(full)) return reply.code(404).send({ error: 'file missing' });
+    const buf = await readFile(full);
+    const dispName = ((row.file_name as string | null) ?? 'gehaltszettel').replace(/[^\w.\-]/g, '_');
+    void reply.header('Content-Disposition', `inline; filename="${dispName}"`);
+    void reply.type(MIME_BY_EXT[path.extname(full).toLowerCase()] ?? 'application/octet-stream');
+    return reply.send(buf);
   });
 
   /** Delete an income entry (e.g. a mis-read pay slip). Konto-scoped. */

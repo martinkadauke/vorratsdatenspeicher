@@ -5,9 +5,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Wallet, Plus, Pencil, Trash2, Home, User as UserIcon, Info,
   ChevronLeft, ChevronRight, ChevronDown, CheckCircle2, Circle, CircleDot, Search, X, Upload, Layers, Lock,
-  Link2, Link2Off, RefreshCw, Landmark, SlidersHorizontal, Flag, FilePlus2, Receipt,
+  Link2, Link2Off, RefreshCw, Landmark, SlidersHorizontal, Flag, FilePlus2, Receipt, FileText,
 } from 'lucide-react';
-import { api } from '../api/client';
+import { api, getToken } from '../api/client';
 import { Card, Spinner, Button, Input, Label, Select, Switch, Modal, EmptyState, Badge } from '../components/ui';
 import { CategoryPicker } from '../components/CategoryPicker';
 import { toast } from '../components/Toast';
@@ -987,12 +987,51 @@ interface IncomeEntry {
   id: number; datum: string; amount: number; source: string; description: string | null;
   konto_id: number | null; konto_name: string | null; is_shared: boolean | null;
   owner: string | null; owner_name: string | null;
+  has_file?: boolean; file_name?: string | null;
   bank: { id: number; booking_date: string; amount: number; counterparty: string | null } | null;
+}
+
+/** View a stored pay-slip file. Fetched with the auth header (the file endpoint is
+ *  auth-guarded, so a plain <img>/<iframe> src wouldn't carry the token) into a blob
+ *  object URL, shown inline; PDFs in an iframe, images as <img>. */
+function PayslipViewer({ id, name, t, onClose }: {
+  id: number; name: string; t: (k: string, o?: Record<string, unknown>) => string; onClose: () => void;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [isPdf, setIsPdf] = useState(true);
+  const [err, setErr] = useState(false);
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = getToken();
+        const res = await fetch(`/api/finances/income/${id}/file`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+        if (!res.ok) throw new Error(String(res.status));
+        const blob = await res.blob();
+        objectUrl = URL.createObjectURL(blob);
+        if (!cancelled) { setUrl(objectUrl); setIsPdf(blob.type === 'application/pdf'); }
+      } catch { if (!cancelled) setErr(true); }
+    })();
+    return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [id]);
+  return (
+    <Modal open onClose={onClose} title={name || t('finances.income.viewPayslip')} wide>
+      <div className="flex flex-col gap-2">
+        {err ? <p className="py-10 text-center text-sm text-zinc-400">{t('finances.income.viewError')}</p>
+          : !url ? <div className="flex justify-center py-16"><Spinner /></div>
+            : isPdf ? <iframe src={url} title={name} className="h-[72vh] w-full rounded-lg border border-zinc-200 dark:border-zinc-800" />
+              : <img src={url} alt={name} className="mx-auto max-h-[72vh] rounded-lg" />}
+        {url && <a href={url} target="_blank" rel="noreferrer" className="self-end text-xs text-emerald-600 hover:underline dark:text-emerald-400">{t('finances.income.openTab')}</a>}
+      </div>
+    </Modal>
+  );
 }
 
 function IncomeList() {
   const { t } = useTranslation();
   const qc = useQueryClient();
+  const [viewFile, setViewFile] = useState<{ id: number; name: string } | null>(null);
   const { data, isLoading } = useQuery({
     queryKey: ['fin-income'],
     queryFn: () => api<{ income: IncomeEntry[] }>('/api/finances/income'),
@@ -1044,6 +1083,15 @@ function IncomeList() {
                 </div>
               </div>
               <span className="shrink-0 text-sm font-semibold text-emerald-600 dark:text-emerald-500">+{eur(r.amount)}</span>
+              {r.has_file && (
+                <button
+                  onClick={() => setViewFile({ id: r.id, name: r.file_name ?? '' })}
+                  className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-emerald-600 dark:hover:bg-zinc-800"
+                  title={t('finances.income.view')}
+                >
+                  <FileText size={15} />
+                </button>
+              )}
               <button
                 onClick={() => remove.mutate(r.id)}
                 className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30"
@@ -1055,6 +1103,7 @@ function IncomeList() {
           ))}
         </ul>
       )}
+      {viewFile && <PayslipViewer id={viewFile.id} name={viewFile.name} t={t} onClose={() => setViewFile(null)} />}
     </Card>
   );
 }

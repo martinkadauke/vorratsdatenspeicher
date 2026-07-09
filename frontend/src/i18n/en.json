@@ -179,6 +179,10 @@
       "importedToast": "{{n}} pay slip(s) recorded as income",
       "hint": "Upload your bank CSV (comdirect etc.) right below.",
       "listHeading": "Recorded income",
+      "view": "View pay slip",
+      "viewPayslip": "Pay slip",
+      "viewError": "Could not load the file.",
+      "openTab": "Open in new tab",
       "listEmpty": "No income recorded yet – upload pay slips above.",
       "entryFallback": "Income",
       "src": {
