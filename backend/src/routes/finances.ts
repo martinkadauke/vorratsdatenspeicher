@@ -8,6 +8,7 @@ import sql from '../db.js';
 import { kontoScope } from '../auth/konto.js';
 import { extractPayslip } from '../llm/ocr.js';
 import { providerForTask } from '../llm/provider.js';
+import { parseLlmJson } from '../llm/ollama.js';
 import { parseComdirectCsv } from '../finances/bankCsv.js';
 
 /** Pay-slip files live in a NON-static subdir of the receipts volume (the static
@@ -831,7 +832,10 @@ export function financeRoutes(app: FastifyInstance): void {
       ORDER BY bt.booking_date DESC, bt.id
       LIMIT 25`;
     if (!open.length) return 0;
-    const receipts = await sql`SELECT id, gesamt_betrag::float8 AS betrag, roh_ladenname, datum::text AS datum FROM einkauf WHERE bank_tx_id IS NULL AND gesamt_betrag IS NOT NULL ORDER BY datum DESC LIMIT 400`;
+    // PRIVATE receipts are never offered to the AI: their merchant text must not
+    // leave to a third-party LLM, and a masked suggestion must not be approvable by
+    // a non-owner. Private receipts can only be linked manually (konto-scoped picker).
+    const receipts = await sql`SELECT id, gesamt_betrag::float8 AS betrag, roh_ladenname, datum::text AS datum FROM einkauf WHERE bank_tx_id IS NULL AND gesamt_betrag IS NOT NULL AND private_for_user_id IS NULL ORDER BY datum DESC LIMIT 400`;
     const incomes = await sql`SELECT id, amount::float8 AS amount, description, datum::text AS datum FROM income WHERE bank_tx_id IS NULL ORDER BY datum DESC LIMIT 120`;
     const fixed = await sql`SELECT id, label, monthly_eur::float8 AS monthly, kind, match_merchant FROM fixed_cost WHERE active LIMIT 250`;
     const near = (v: number, amt: number) => Math.abs(v - amt) <= Math.max(0.5, amt * 0.03);
@@ -864,19 +868,20 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
     try { raw = await (await providerForTask('bankmatch')).chat({ system, user: `Offene Buchungen mit Kandidaten:\n${JSON.stringify(items)}`, json: true }); }
     catch (e) { app.log.warn(`aiMatchBank chat failed: ${(e as Error).message}`); return 0; }
     let matches: { bank_tx_id?: number; kind?: string; target_id?: number; confidence?: number; reason?: string }[] = [];
-    try { const j = JSON.parse(raw.replace(/^```json\s*|\s*```$/g, '')); matches = Array.isArray(j?.matches) ? j.matches : []; }
+    try { const j = parseLlmJson<{ matches?: typeof matches }>(raw); matches = Array.isArray(j?.matches) ? j.matches : []; }
     catch { app.log.warn('aiMatchBank: unparseable JSON'); return 0; }
     let n = 0;
+    const seen = new Set<number>(); // one accepted proposal per bank_tx (first wins)
     for (const m of matches) {
       const btId = Number(m.bank_tx_id); const tid = Number(m.target_id); const conf = Number(m.confidence); const kind = m.kind;
-      if (!btId || !tid || !(conf >= 0.75) || (kind !== 'receipt' && kind !== 'income' && kind !== 'fixed')) continue;
+      if (!btId || !tid || seen.has(btId) || !(conf >= 0.75) || (kind !== 'receipt' && kind !== 'income' && kind !== 'fixed')) continue;
       const it = items.find(x => x.bank_tx_id === btId);
       if (!it || !it.candidates.some(c => c.kind === kind && c.id === tid)) continue; // must be an offered candidate
       try {
-        await sql`INSERT INTO bank_match_suggestion (bank_tx_id, target_kind, einkauf_id, income_id, fixed_cost_id, confidence, reason)
+        const ins = await sql`INSERT INTO bank_match_suggestion (bank_tx_id, target_kind, einkauf_id, income_id, fixed_cost_id, confidence, reason)
           VALUES (${btId}, ${kind}, ${kind === 'receipt' ? tid : null}, ${kind === 'income' ? tid : null}, ${kind === 'fixed' ? tid : null}, ${conf}, ${String(m.reason ?? '').slice(0, 200)})
-          ON CONFLICT (bank_tx_id) DO NOTHING`;
-        n++;
+          ON CONFLICT (bank_tx_id) DO NOTHING RETURNING id`;
+        if (ins.length) { n++; seen.add(btId); }
       } catch { /* skip */ }
     }
     return n;
@@ -1179,8 +1184,13 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
           EXISTS(SELECT 1 FROM fixed_cost_check WHERE bank_tx_id = ${id}) AS f`;
         if (open.r || open.i || open.f) throw new HttpError(400, 'Buchung ist bereits zugeordnet');
         if (s.target_kind === 'receipt' && s.einkauf_id) {
-          const [e] = await tx`SELECT bank_tx_id FROM einkauf WHERE id = ${s.einkauf_id} FOR UPDATE`;
+          const [e] = await tx`SELECT bank_tx_id, private_for_user_id FROM einkauf WHERE id = ${s.einkauf_id} FOR UPDATE`;
           if (!e) throw new HttpError(400, 'Beleg nicht mehr vorhanden');
+          // Owner guard (like the manual /link + guardReceipt): never let a non-owner
+          // link someone else's PRIVATE receipt (belt-and-suspenders — the matcher
+          // already excludes private receipts from candidates).
+          const pf = e.private_for_user_id as number | null;
+          if (pf != null && pf !== (req.user?.id ?? null) && !req.user?.sees_all_konten) throw new HttpError(403, 'forbidden');
           if (e.bank_tx_id != null) throw new HttpError(400, 'Beleg ist schon verknüpft');
           await tx`UPDATE einkauf SET bank_tx_id = ${id} WHERE id = ${s.einkauf_id}`;
         } else if (s.target_kind === 'income' && s.income_id) {
@@ -1193,6 +1203,9 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
           const [f] = await tx`SELECT frequency FROM fixed_cost WHERE id = ${s.fixed_cost_id}`;
           if (!bt || !f) throw new HttpError(400, 'Fixkosten-Position nicht mehr vorhanden');
           const checkMonth = anchorMonth(`${String(bt.booking).slice(0, 7)}-01`, f.frequency as string | null);
+          // Don't silently overwrite a month already confirmed by other evidence.
+          const [existing] = await tx`SELECT status FROM fixed_cost_check WHERE fixed_cost_id = ${s.fixed_cost_id} AND month = ${checkMonth}`;
+          if (existing && existing.status === 'confirmed') throw new HttpError(400, 'Dieser Monat ist für diese Fixkosten-Position bereits bestätigt');
           await tx`INSERT INTO fixed_cost_check (fixed_cost_id, month, status, bank_tx_id, amount, decided_by)
             VALUES (${s.fixed_cost_id}, ${checkMonth}, 'confirmed', ${id}, ${Math.abs(bt.amount as number)}, ${req.user?.id ?? null})
             ON CONFLICT (fixed_cost_id, month) DO UPDATE SET bank_tx_id = EXCLUDED.bank_tx_id, amount = EXCLUDED.amount, status = 'confirmed'`;
