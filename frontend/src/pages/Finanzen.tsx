@@ -730,8 +730,8 @@ function CounterpartField({ draft, setDraft, costs, scopeKonten }: {
   const [cpKonto, setCpKonto] = useState('');
 
   const partner = draft.counterpart_id != null ? costs.find(c => c.id === draft.counterpart_id) : null;
-  // The natural counterpart is an opposite-kind transfer on another account.
-  const candidates = costs.filter(c => c.is_transfer && c.id !== draft.id && c.kind !== draft.kind);
+  // The natural counterpart is an opposite-kind transfer on *another* account.
+  const candidates = costs.filter(c => c.is_transfer && c.id !== draft.id && c.kind !== draft.kind && String(c.konto_id) !== draft.konto_id);
 
   const create = useMutation({
     mutationFn: () => api<{ id: number }>('/api/fixed-costs', { method: 'POST', body: {

@@ -89,9 +89,10 @@ export function financeRoutes(app: FastifyInstance): void {
           RETURNING id`;
         if (cpId) {
           if (!isTransfer) throw new HttpError(400, 'Nur Umbuchungen können eine Gegenbuchung haben');
-          const [partner] = await tx`SELECT id, is_transfer FROM fixed_cost WHERE id = ${cpId} FOR UPDATE`;
+          const [partner] = await tx`SELECT id, is_transfer, konto_id FROM fixed_cost WHERE id = ${cpId} FOR UPDATE`;
           if (!partner) throw new HttpError(400, 'Gegenbuchung nicht gefunden');
           if (!partner.is_transfer) throw new HttpError(400, 'Die Gegenbuchung muss ebenfalls als Umbuchung markiert sein');
+          if (kontoId === partner.konto_id) throw new HttpError(400, 'Umbuchung und Gegenbuchung müssen auf verschiedenen Konten liegen');
           await linkCounterpart(tx, row.id as number, cpId);
         }
         return row.id as number;
@@ -145,14 +146,17 @@ export function financeRoutes(app: FastifyInstance): void {
         // A row that is no longer an Umbuchung must not keep a Gegenbuchung link.
         if (updates.is_transfer === false) await clearPartner(tx, id);
         if (hasCp) {
-          const [a] = await tx`SELECT id, is_transfer FROM fixed_cost WHERE id = ${id} FOR UPDATE`;
+          const [a] = await tx`SELECT id, is_transfer, konto_id, counterpart_id FROM fixed_cost WHERE id = ${id} FOR UPDATE`;
           if (!a) throw new HttpError(404, 'not found');
           if (cpId == null) {
             await clearPartner(tx, id);
-          } else {
-            const [partner] = await tx`SELECT id, is_transfer FROM fixed_cost WHERE id = ${cpId} FOR UPDATE`;
+          } else if (a.counterpart_id !== cpId) {
+            // Already linked to this partner → nothing to do (ordinary edits re-send
+            // counterpart_id; don't rewrite the partner row for no reason).
+            const [partner] = await tx`SELECT id, is_transfer, konto_id FROM fixed_cost WHERE id = ${cpId} FOR UPDATE`;
             if (!partner) throw new HttpError(400, 'Gegenbuchung nicht gefunden');
             if (!a.is_transfer || !partner.is_transfer) throw new HttpError(400, 'Beide Buchungen müssen als Umbuchung markiert sein');
+            if (a.konto_id === partner.konto_id) throw new HttpError(400, 'Umbuchung und Gegenbuchung müssen auf verschiedenen Konten liegen');
             await linkCounterpart(tx, id, cpId);
           }
         }
