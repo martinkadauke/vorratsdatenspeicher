@@ -1,9 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Wallet, Plus, Pencil, Trash2, Home, User as UserIcon, Info,
-  ChevronLeft, ChevronRight, CheckCircle2, Circle, CircleDot, Search, X, Upload,
+  ChevronLeft, ChevronRight, ChevronDown, CheckCircle2, Circle, CircleDot, Search, X, Upload,
 } from 'lucide-react';
 import { api } from '../api/client';
 import { Card, Spinner, Button, Input, Label, Select, Switch, Modal, EmptyState, Badge } from '../components/ui';
@@ -58,6 +58,25 @@ function scopeLabelOf(t: (k: string) => string, k: { is_shared?: boolean | null;
   return k.owner ?? name ?? '?';
 }
 
+/** Collapsible section with a chevron header (month-view groups). */
+function Section({ title, count, right, defaultOpen = true, children }: {
+  title: string; count?: number; right?: ReactNode; defaultOpen?: boolean; children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between px-1">
+        <button onClick={() => setOpen(o => !o)} className="flex items-center gap-1.5 text-sm font-semibold">
+          <ChevronDown size={15} className={cn('shrink-0 text-zinc-400 transition-transform', !open && '-rotate-90')} />
+          {title}{count != null && <span className="font-normal text-zinc-400">· {count}</span>}
+        </button>
+        {right}
+      </div>
+      {open && children}
+    </div>
+  );
+}
+
 // ── page shell: tabs ────────────────────────────────────────────────────────
 
 export function Finanzen() {
@@ -107,20 +126,15 @@ function MonthTab() {
     onSuccess: () => { invalidate(); setPicker(null); },
     onError: (e: Error) => toast(e.message, 'error'),
   });
-  const delIncome = useMutation({
-    mutationFn: (id: number) => api(`/api/finances/income/${id}`, { method: 'DELETE' }),
-    onSuccess: invalidate,
-    onError: (e: Error) => toast(e.message, 'error'),
-  });
 
   const monthLabel = new Date(`${month}-01T00:00:00Z`).toLocaleDateString(
     i18n.language === 'en' ? 'en-GB' : 'de-DE', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 
-  const income = data?.income ?? [];
   const incomes = data?.incomes ?? [];   // recurring income PLANS (Einnahmen-Soll)
   const fixed = data?.fixed ?? [];
   const budgets = data?.budgets ?? [];
-  const incomeTotal = income.reduce((s, i) => s + i.amount, 0);
+  // Summary mirrors fixed costs: sum the PLANS (Soll), not just the matched actuals.
+  const incomeTotal = incomes.reduce((s, f) => s + f.monthly_eur, 0);
   const fixTotal = fixed.reduce((s, f) => s + f.monthly_eur, 0);
   const isOk = (f: MonthFix) => !!f.check || f.expect_receipt === false;
   const okCount = fixed.filter(isOk).length;
@@ -179,9 +193,8 @@ function MonthTab() {
             </div>
           </Card>
 
-          {/* income plans (Einnahmen-Soll) — matched vs actual pay-slip / bank credits */}
-          <div className="flex flex-col gap-2">
-            <h2 className="px-1 text-sm font-semibold">{t('finances.incomeTitle')}</h2>
+          {/* income plans (Einnahmen) — each shows its matched actual pay-slip / bank credit as evidence */}
+          <Section title={t('finances.incomeTitle')} count={incomes.length}>
             {!incomes.length && <Card className="p-3 text-xs text-zinc-400">{t('finances.noIncomePlans')}</Card>}
             {incomes.map(f => <FixCheckRow key={f.id} f={f} month={month} t={t}
               onConfirmSuggestion={() => confirmSug(f)}
@@ -190,30 +203,10 @@ function MonthTab() {
               onClear={() => check.mutate({ fixed_cost_id: f.id, month, action: 'clear' })}
               onPick={() => setPicker(f)}
             />)}
-          </div>
+          </Section>
 
-          {/* actual income entries of the month (pay slips), with delete */}
-          {income.length > 0 && (
-            <div className="flex flex-col gap-2">
-              <h2 className="px-1 text-sm font-semibold">{t('finances.incomeActualTitle')}</h2>
-              {income.map(i => (
-                <Card key={i.id} className="flex items-center gap-2 p-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium">{i.description || t(`finances.incomeSource.${i.source}`, i.source)}</div>
-                    <div className="text-xs text-zinc-400">{scopeLabelOf(t, i)} · {t(`finances.incomeSource.${i.source}`, i.source)}</div>
-                  </div>
-                  <span className="shrink-0 text-sm font-semibold text-emerald-600 dark:text-emerald-500">+{eur(i.amount)}</span>
-                  <button onClick={() => delIncome.mutate(i.id)} className="shrink-0 text-zinc-300 hover:text-red-500 dark:text-zinc-600" aria-label={t('common.delete')}>
-                    <Trash2 size={15} />
-                  </button>
-                </Card>
-              ))}
-            </div>
-          )}
-
-          {/* fixed-cost checklist */}
-          <div className="flex flex-col gap-2">
-            <h2 className="px-1 text-sm font-semibold">{t('finances.checkTitle')}</h2>
+          {/* fixed costs */}
+          <Section title={t('finances.fixTitle')} count={fixed.length}>
             {!fixed.length && <Card className="p-3 text-xs text-zinc-400">{t('finances.noFixThisMonth')}</Card>}
             {fixed.map(f => <FixCheckRow key={f.id} f={f} month={month} t={t}
               onConfirmSuggestion={() => confirmSug(f)}
@@ -222,19 +215,14 @@ function MonthTab() {
               onClear={() => check.mutate({ fixed_cost_id: f.id, month, action: 'clear' })}
               onPick={() => setPicker(f)}
             />)}
-          </div>
+          </Section>
 
           {/* variable budgets */}
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between px-1">
-              <h2 className="text-sm font-semibold">{t('finances.varTitle')}</h2>
-              <Button variant="secondary" className="px-2.5 py-1.5 text-xs" onClick={() => setBudgetModal({})}>
-                <Plus size={14} /> {t('finances.addBudget')}
-              </Button>
-            </div>
+          <Section title={t('finances.varTitle')} count={budgets.length}
+            right={<Button variant="secondary" className="px-2.5 py-1.5 text-xs" onClick={() => setBudgetModal({})}><Plus size={14} /> {t('finances.addBudget')}</Button>}>
             {!budgets.length && <Card className="p-3 text-xs text-zinc-400">{t('finances.noBudgets')}</Card>}
             {budgets.map(b => <BudgetRow key={b.id} b={b} t={t} onEdit={() => setBudgetModal(b)} />)}
-          </div>
+          </Section>
         </>
       )}
 
