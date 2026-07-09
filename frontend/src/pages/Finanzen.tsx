@@ -1376,6 +1376,9 @@ function ManageTab() {
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ['fixed-costs'] });
     void qc.invalidateQueries({ queryKey: ['fin-month'] });
+    // A fixed cost can carry a bank-tx link (generate-fixed), so its create/edit/
+    // delete changes an Auszüge line's status — keep that list fresh too.
+    void qc.invalidateQueries({ queryKey: ['bank-tx'] });
   };
 
   const save = useMutation({
