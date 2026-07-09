@@ -259,8 +259,22 @@ export function financeRoutes(app: FastifyInstance): void {
       return Math.round(s[Math.floor((s.length - 1) / 2)] * 100) / 100;
     };
 
+    // 4) Income of the month (pay slips today; bank credits / e-mail later).
+    const income = await sql`
+      SELECT i.id, i.datum::text AS datum, i.amount::float8 AS amount, i.source, i.description,
+             i.konto_id, k.name AS konto_name, k.is_shared, u.username AS owner
+      FROM income i
+      LEFT JOIN konto k ON k.id = i.konto_id
+      LEFT JOIN users u ON u.id = k.user_id
+      WHERE i.datum BETWEEN ${b.first} AND ${b.last}
+      ORDER BY i.amount DESC, i.id DESC`;
+
     return {
       month: m,
+      income: income.map(i => ({
+        id: i.id, datum: String(i.datum), amount: i.amount, source: i.source, description: i.description,
+        konto_id: i.konto_id, konto_name: i.konto_name, is_shared: i.is_shared, owner: i.owner,
+      })),
       fixed: fixed.map(f => ({
         id: f.id, label: f.label, monthly_eur: f.monthly_eur, expect_receipt: f.expect_receipt,
         match_merchant: f.match_merchant, konto_id: f.konto_id, konto_name: f.konto_name,

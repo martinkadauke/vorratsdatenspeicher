@@ -33,7 +33,11 @@ interface MonthBudget {
   konto_name: string | null; is_shared: boolean | null; owner: string | null;
   categories: string[]; actual: number; forecast: number | null;
 }
-interface MonthData { month: string; fixed: MonthFix[]; budgets: MonthBudget[] }
+interface MonthIncome {
+  id: number; datum: string; amount: number; source: string; description: string | null;
+  konto_id: number | null; konto_name: string | null; is_shared: boolean | null; owner: string | null;
+}
+interface MonthData { month: string; income: MonthIncome[]; fixed: MonthFix[]; budgets: MonthBudget[] }
 
 const today = () => new Date().toISOString().slice(0, 10);
 const curMonth = () => new Date().toISOString().slice(0, 7);
@@ -103,17 +107,25 @@ function MonthTab() {
     onSuccess: () => { invalidate(); setPicker(null); },
     onError: (e: Error) => toast(e.message, 'error'),
   });
+  const delIncome = useMutation({
+    mutationFn: (id: number) => api(`/api/finances/income/${id}`, { method: 'DELETE' }),
+    onSuccess: invalidate,
+    onError: (e: Error) => toast(e.message, 'error'),
+  });
 
   const monthLabel = new Date(`${month}-01T00:00:00Z`).toLocaleDateString(
     i18n.language === 'en' ? 'en-GB' : 'de-DE', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 
+  const income = data?.income ?? [];
   const fixed = data?.fixed ?? [];
   const budgets = data?.budgets ?? [];
+  const incomeTotal = income.reduce((s, i) => s + i.amount, 0);
   const fixTotal = fixed.reduce((s, f) => s + f.monthly_eur, 0);
   const isOk = (f: MonthFix) => !!f.check || f.expect_receipt === false;
   const okCount = fixed.filter(isOk).length;
   const varActual = budgets.reduce((s, b) => s + b.actual, 0);
   const varTarget = budgets.reduce((s, b) => s + b.monthly_target, 0);
+  const net = Math.round((incomeTotal - fixTotal - varActual) * 100) / 100;
 
   return (
     <div className="flex flex-col gap-4">
@@ -133,20 +145,48 @@ function MonthTab() {
       {isLoading && <Spinner />}
       {data && (
         <>
-          <Card className="grid grid-cols-2 gap-3 p-4">
-            <div>
-              <div className="text-xs text-zinc-500 dark:text-zinc-400">{t('finances.fixTitle')}</div>
-              <div className="text-lg font-bold">{eur(fixTotal)}</div>
-              <div className={cn('text-xs', okCount === fixed.length && fixed.length > 0 ? 'text-emerald-600 dark:text-emerald-500' : 'text-amber-600 dark:text-amber-500')}>
-                {t('finances.checkedOf', { done: okCount, total: fixed.length })}
+          <Card className="flex flex-col gap-3 p-4">
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <div className="text-xs text-zinc-500 dark:text-zinc-400">{t('finances.incomeTitle')}</div>
+                <div className="text-lg font-bold text-emerald-600 dark:text-emerald-500">{eur(incomeTotal)}</div>
+              </div>
+              <div>
+                <div className="text-xs text-zinc-500 dark:text-zinc-400">{t('finances.fixTitle')}</div>
+                <div className="text-lg font-bold">{eur(fixTotal)}</div>
+                <div className={cn('text-xs', okCount === fixed.length && fixed.length > 0 ? 'text-emerald-600 dark:text-emerald-500' : 'text-amber-600 dark:text-amber-500')}>
+                  {t('finances.checkedOf', { done: okCount, total: fixed.length })}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-zinc-500 dark:text-zinc-400">{t('finances.varTitle')}</div>
+                <div className="text-lg font-bold">{eur(varActual)}</div>
+                {varTarget > 0 && <div className="text-xs text-zinc-500 dark:text-zinc-400">{t('finances.ofTarget', { target: eur(varTarget) })}</div>}
               </div>
             </div>
-            <div>
-              <div className="text-xs text-zinc-500 dark:text-zinc-400">{t('finances.varTitle')}</div>
-              <div className="text-lg font-bold">{eur(varActual)}</div>
-              {varTarget > 0 && <div className="text-xs text-zinc-500 dark:text-zinc-400">{t('finances.ofTarget', { target: eur(varTarget) })}</div>}
+            <div className="flex items-center justify-between border-t border-zinc-100 pt-2 dark:border-zinc-800">
+              <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">{t('finances.netTitle')}</span>
+              <span className={cn('text-base font-bold', net >= 0 ? 'text-emerald-600 dark:text-emerald-500' : 'text-red-500')}>{net >= 0 ? '+' : ''}{eur(net)}</span>
             </div>
           </Card>
+
+          {/* income (pay slips today; bank credits / e-mail later) */}
+          <div className="flex flex-col gap-2">
+            <h2 className="px-1 text-sm font-semibold">{t('finances.incomeTitle')}</h2>
+            {!income.length && <Card className="p-3 text-xs text-zinc-400">{t('finances.noIncome')}</Card>}
+            {income.map(i => (
+              <Card key={i.id} className="flex items-center gap-2 p-3">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-medium">{i.description || t(`finances.incomeSource.${i.source}`, i.source)}</div>
+                  <div className="text-xs text-zinc-400">{scopeLabelOf(t, i)} · {t(`finances.incomeSource.${i.source}`, i.source)}</div>
+                </div>
+                <span className="shrink-0 text-sm font-semibold text-emerald-600 dark:text-emerald-500">+{eur(i.amount)}</span>
+                <button onClick={() => delIncome.mutate(i.id)} className="shrink-0 text-zinc-300 hover:text-red-500 dark:text-zinc-600" aria-label={t('common.delete')}>
+                  <Trash2 size={15} />
+                </button>
+              </Card>
+            ))}
+          </div>
 
           {/* fixed-cost checklist */}
           <div className="flex flex-col gap-2">
