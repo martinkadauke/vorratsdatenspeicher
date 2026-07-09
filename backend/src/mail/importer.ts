@@ -274,14 +274,15 @@ async function processMessage(mb: MailboxRow, kontoId: number | null, raw: Buffe
 
   // Email-date anchor: the mail's Date header is a far more reliable "when" than a
   // date the OCR may have lifted from the body (a delivery estimate, a copyright
-  // year, a previous order). If the OCR date landed >21 days from the header, trust
-  // the header — unless this is a forward, where the header is the forward time, not
-  // the original invoice's.
+  // year, a previous order). Fall back to the header when the OCR found NO reliable
+  // date (date_uncertain) or landed >21 days off it — so an e-mail invoice is never
+  // left flagged "please type the date" when the header date is right there. Skipped
+  // for forwards, where the header is the forward time, not the invoice's.
   const isForward = /^\s*(wg|fwd?|fw):/i.test(parsed.subject ?? '');
   if (einkaufId && datum && !isForward) {
     await sql`
       UPDATE einkauf SET datum = ${datum}::date, date_uncertain = FALSE
-      WHERE id = ${einkaufId} AND (datum IS NULL OR ABS(datum - ${datum}::date) > 21)`.catch(() => {});
+      WHERE id = ${einkaufId} AND (datum IS NULL OR date_uncertain = TRUE OR ABS(datum - ${datum}::date) > 21)`.catch(() => {});
   }
 
   // Keep the source mail so the detail page can show it (best-effort, non-fatal).
