@@ -23,7 +23,7 @@ export function financeRoutes(app: FastifyInstance): void {
   /** All fixed costs with their konto scope (household vs which person). */
   app.get('/api/fixed-costs', async () => {
     return sql`
-      SELECT f.id, f.label, f.category_path, f.monthly_eur::float8 AS monthly_eur, f.kind,
+      SELECT f.id, f.label, f.category_path, f.monthly_eur::float8 AS monthly_eur, f.kind, f.frequency,
              f.konto_id, f.start_date, f.end_date, f.active,
              f.expect_receipt, f.match_merchant,
              k.name AS konto_name, k.is_shared, k.user_id AS konto_user_id, u.username AS owner
@@ -46,9 +46,10 @@ export function financeRoutes(app: FastifyInstance): void {
     if (monthly == null) return reply.code(400).send({ error: 'monthly_eur required' }); // negatives allowed (= recurring credit/income)
     if (!kontoId) return reply.code(400).send({ error: 'konto_id required' });
     const kind = b.kind === 'income' ? 'income' : 'expense';
+    const freq = ['monthly', 'quarterly', 'yearly'].includes(String(b.frequency)) ? String(b.frequency) : 'monthly';
     const [row] = await sql`
-      INSERT INTO fixed_cost (label, category_path, monthly_eur, kind, konto_id, start_date, end_date, active, expect_receipt, match_merchant, created_by)
-      VALUES (${label}, ${category}, ${monthly}, ${kind}, ${kontoId}, ${start}, ${end}, ${b.active !== false},
+      INSERT INTO fixed_cost (label, category_path, monthly_eur, kind, frequency, konto_id, start_date, end_date, active, expect_receipt, match_merchant, created_by)
+      VALUES (${label}, ${category}, ${monthly}, ${kind}, ${freq}, ${kontoId}, ${start}, ${end}, ${b.active !== false},
               ${b.expect_receipt !== false}, ${(b.match_merchant ?? '').toString().trim() || null}, ${req.user?.id ?? null})
       RETURNING id`;
     return { ok: true, id: row.id };
@@ -81,6 +82,7 @@ export function financeRoutes(app: FastifyInstance): void {
     if ('expect_receipt' in b) updates.expect_receipt = b.expect_receipt !== false;
     if ('match_merchant' in b) updates.match_merchant = (b.match_merchant ?? '').toString().trim() || null;
     if ('kind' in b) updates.kind = b.kind === 'income' ? 'income' : 'expense';
+    if ('frequency' in b) updates.frequency = ['monthly', 'quarterly', 'yearly'].includes(String(b.frequency)) ? String(b.frequency) : 'monthly';
     if (!Object.keys(updates).length) return reply.code(400).send({ error: 'no patchable fields' });
     const [row] = await sql`UPDATE fixed_cost SET ${sql(updates)} WHERE id = ${id} RETURNING id`;
     if (!row) return reply.code(404).send({ error: 'not found' });
@@ -107,6 +109,16 @@ export function financeRoutes(app: FastifyInstance): void {
   const normMerchant = (s: string): string =>
     s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9äöüß ]/gi, ' ').replace(/\s+/g, ' ').trim();
 
+  // Check "anchor" month: monthly costs are checked per month; quarterly costs
+  // share one check across their quarter, yearly across their year — so a single
+  // quarterly/yearly invoice, confirmed once, covers every month of that period.
+  const anchorMonth = (firstOfMonth: string, freq: string | null | undefined): string => {
+    const [y, mo] = firstOfMonth.split('-').map(Number);
+    if (freq === 'quarterly') return `${y}-${String(Math.floor((mo - 1) / 3) * 3 + 1).padStart(2, '0')}-01`;
+    if (freq === 'yearly') return `${y}-01-01`;
+    return firstOfMonth;
+  };
+
   /** Everything the month view needs: fixed-cost checklist (state + suggestion)
    *  and budget rows (forecast / target / actual). Matching is deliberately a
    *  self-contained, deterministic step here — when bank-CSV transactions arrive
@@ -129,7 +141,7 @@ export function financeRoutes(app: FastifyInstance): void {
     //    expenses (Fixkosten) and income (Einnahmen-Soll); both share the same
     //    check + evidence-matching engine, just against different evidence pools.
     const fixed = await sql`
-      SELECT f.id, f.label, f.monthly_eur::float8 AS monthly_eur, f.kind, f.expect_receipt, f.match_merchant,
+      SELECT f.id, f.label, f.monthly_eur::float8 AS monthly_eur, f.kind, f.frequency, f.expect_receipt, f.match_merchant,
              f.konto_id, k.name AS konto_name, k.is_shared, u.username AS owner,
              c.id AS check_id, c.status AS check_status, c.einkauf_id AS check_einkauf_id,
              c.bank_tx_id AS check_bank_tx_id, c.income_id AS check_income_id, c.amount::float8 AS check_amount,
@@ -141,7 +153,12 @@ export function financeRoutes(app: FastifyInstance): void {
       FROM fixed_cost f
       LEFT JOIN konto k ON k.id = f.konto_id
       LEFT JOIN users u ON u.id = k.user_id
-      LEFT JOIN fixed_cost_check c ON c.fixed_cost_id = f.id AND c.month = ${b.first}
+      LEFT JOIN fixed_cost_check c ON c.fixed_cost_id = f.id AND c.month = (
+        CASE f.frequency
+          WHEN 'quarterly' THEN date_trunc('quarter', ${b.first}::date)::date
+          WHEN 'yearly' THEN date_trunc('year', ${b.first}::date)::date
+          ELSE ${b.first}::date
+        END)
       LEFT JOIN einkauf ce ON ce.id = c.einkauf_id
       LEFT JOIN bank_tx bce ON bce.id = c.bank_tx_id
       LEFT JOIN income ice ON ice.id = c.income_id
@@ -293,7 +310,7 @@ export function financeRoutes(app: FastifyInstance): void {
 
     // Map a plan row (expense or income) to its month-view shape (check + suggestion).
     const mapPlan = (f: typeof fixed[number]) => ({
-      id: f.id, label: f.label, monthly_eur: f.monthly_eur, kind: f.kind, expect_receipt: f.expect_receipt,
+      id: f.id, label: f.label, monthly_eur: f.monthly_eur, kind: f.kind, frequency: f.frequency, expect_receipt: f.expect_receipt,
       match_merchant: f.match_merchant, konto_id: f.konto_id, konto_name: f.konto_name,
       is_shared: f.is_shared, owner: f.owner,
       check: f.check_id ? {
@@ -335,11 +352,14 @@ export function financeRoutes(app: FastifyInstance): void {
     const fixedId = parseInt(String(bdy.fixed_cost_id ?? ''), 10);
     const bounds = monthBounds((bdy.month ?? '').trim());
     if (!fixedId || !bounds) return reply.code(400).send({ error: 'fixed_cost_id and month (YYYY-MM) required' });
-    const [f] = await sql`SELECT id, match_merchant FROM fixed_cost WHERE id = ${fixedId}`;
+    const [f] = await sql`SELECT id, match_merchant, frequency FROM fixed_cost WHERE id = ${fixedId}`;
     if (!f) return reply.code(404).send({ error: 'fixed cost not found' });
+    // Quarterly/yearly costs share one check per period (anchored to its first
+    // month), so a single invoice covers every month of the quarter/year.
+    const checkMonth = anchorMonth(bounds.first, f.frequency as string | null);
 
     if (bdy.action === 'clear') {
-      await sql`DELETE FROM fixed_cost_check WHERE fixed_cost_id = ${fixedId} AND month = ${bounds.first}`;
+      await sql`DELETE FROM fixed_cost_check WHERE fixed_cost_id = ${fixedId} AND month = ${checkMonth}`;
       return { ok: true };
     }
     if (bdy.action !== 'confirm' && bdy.action !== 'skip') return reply.code(400).send({ error: 'bad action' });
@@ -384,7 +404,7 @@ export function financeRoutes(app: FastifyInstance): void {
     }
     await sql`
       INSERT INTO fixed_cost_check (fixed_cost_id, month, status, einkauf_id, bank_tx_id, income_id, amount, decided_by)
-      VALUES (${fixedId}, ${bounds.first}, ${bdy.action === 'skip' ? 'skipped' : 'confirmed'}, ${einkaufId}, ${bankTxId}, ${incomeId}, ${amount}, ${req.user?.id ?? null})
+      VALUES (${fixedId}, ${checkMonth}, ${bdy.action === 'skip' ? 'skipped' : 'confirmed'}, ${einkaufId}, ${bankTxId}, ${incomeId}, ${amount}, ${req.user?.id ?? null})
       ON CONFLICT (fixed_cost_id, month) DO UPDATE SET
         status = EXCLUDED.status, einkauf_id = EXCLUDED.einkauf_id, bank_tx_id = EXCLUDED.bank_tx_id,
         income_id = EXCLUDED.income_id, amount = EXCLUDED.amount, decided_by = EXCLUDED.decided_by, decided_at = NOW()`;

@@ -15,8 +15,13 @@ import { useUrlState } from '../hooks/useUrlState';
 
 // ── shared types ────────────────────────────────────────────────────────────
 
+type Freq = 'monthly' | 'quarterly' | 'yearly';
+const PERIOD_MONTHS: Record<Freq, number> = { monthly: 1, quarterly: 3, yearly: 12 };
+// The per-month burden of a plan: monthly = full amount, quarterly = /3, yearly = /12.
+const amortized = (eur: number, freq?: Freq | null) => eur / (PERIOD_MONTHS[(freq ?? 'monthly') as Freq] ?? 1);
+
 interface FixedCost {
-  id: number; label: string; category_path: string | null; monthly_eur: number; kind: 'expense' | 'income';
+  id: number; label: string; category_path: string | null; monthly_eur: number; kind: 'expense' | 'income'; frequency: Freq;
   konto_id: number | null; start_date: string; end_date: string | null; active: boolean;
   expect_receipt: boolean; match_merchant: string | null;
   konto_name: string | null; is_shared: boolean | null; konto_user_id: number | null; owner: string | null;
@@ -24,7 +29,7 @@ interface FixedCost {
 interface KontoLite { id: number; name: string; is_shared: boolean; is_cash: boolean; user_id: number | null; owner: string | null; owner_name: string | null }
 
 interface MonthFix {
-  id: number; label: string; monthly_eur: number; kind: 'expense' | 'income'; expect_receipt: boolean; match_merchant: string | null;
+  id: number; label: string; monthly_eur: number; kind: 'expense' | 'income'; frequency: Freq; expect_receipt: boolean; match_merchant: string | null;
   konto_id: number | null; konto_name: string | null; is_shared: boolean | null; owner: string | null;
   check: { status: 'confirmed' | 'skipped'; source: 'receipt' | 'bank' | 'income' | 'none'; einkauf_id: number | null; bank_tx_id: number | null; income_id: number | null; amount: number | null; laden: string | null; datum: string | null } | null;
   suggestion: { source: 'receipt' | 'bank' | 'income'; einkauf_id: number | null; bank_tx_id: number | null; income_id: number | null; laden: string | null; betrag: number; datum: string; amount_ok: boolean; merchant_ok: boolean } | null;
@@ -189,8 +194,8 @@ function MonthTab() {
   const fixed = data?.fixed ?? [];
   const budgets = data?.budgets ?? [];
   // Summary mirrors fixed costs: sum the PLANS (Soll), not just the matched actuals.
-  const incomeTotal = incomes.reduce((s, f) => s + f.monthly_eur, 0);
-  const fixTotal = fixed.reduce((s, f) => s + f.monthly_eur, 0);
+  const incomeTotal = incomes.reduce((s, f) => s + amortized(f.monthly_eur, f.frequency), 0);
+  const fixTotal = fixed.reduce((s, f) => s + amortized(f.monthly_eur, f.frequency), 0);
   const isOk = (f: MonthFix) => !!f.check || f.expect_receipt === false;
   const okCount = fixed.filter(isOk).length;
   const varActual = budgets.reduce((s, b) => s + b.actual, 0);
@@ -318,6 +323,8 @@ function FixCheckRow({ f, t, onConfirmSuggestion, onConfirmNoReceipt, onSkip, on
 }) {
   const autoOk = !f.check && f.expect_receipt === false;
   const delta = f.check?.amount != null ? Math.round((f.check.amount - f.monthly_eur) * 100) / 100 : null;
+  const periodic = f.frequency && f.frequency !== 'monthly';
+  const shownAmount = periodic ? amortized(f.monthly_eur, f.frequency) : f.monthly_eur;
   const state: 'ok' | 'suggest' | 'open' = f.check || autoOk ? 'ok' : f.suggestion ? 'suggest' : 'open';
   const IconEl = state === 'ok' ? CheckCircle2 : state === 'suggest' ? CircleDot : Circle;
   return (
@@ -343,7 +350,10 @@ function FixCheckRow({ f, t, onConfirmSuggestion, onConfirmNoReceipt, onSkip, on
             {state === 'open' && (f.kind === 'income' ? t('finances.noIncomeFound') : t('finances.noReceiptFound'))}
           </div>
         </div>
-        <span className="shrink-0 text-sm font-semibold">{eur(f.monthly_eur)}</span>
+        <div className="shrink-0 text-right">
+          <div className="text-sm font-semibold">{eur(shownAmount)}</div>
+          {periodic && <div className="text-[10px] text-zinc-400">{eur(f.monthly_eur)} {t(`finances.freqPer.${f.frequency}`)}</div>}
+        </div>
       </div>
       {(state !== 'ok' || f.check) && (
         <div className="flex flex-wrap gap-1.5 pl-7">
@@ -588,9 +598,9 @@ function BudgetModal({ initial, onClose, onSaved }: {
 
 // ── management tab (fixed-cost master data) ─────────────────────────────────
 
-type Draft = { id?: number; label: string; monthly_eur: string; kind: 'expense' | 'income'; konto_id: string; category_path: string | null; start_date: string; end_date: string; active: boolean; expect_receipt: boolean; match_merchant: string };
+type Draft = { id?: number; label: string; monthly_eur: string; kind: 'expense' | 'income'; frequency: Freq; konto_id: string; category_path: string | null; start_date: string; end_date: string; active: boolean; expect_receipt: boolean; match_merchant: string };
 const emptyDraft = (kontoId?: number, kind: 'expense' | 'income' = 'expense'): Draft => ({
-  label: '', monthly_eur: '', kind, konto_id: kontoId ? String(kontoId) : '', category_path: null,
+  label: '', monthly_eur: '', kind, frequency: 'monthly', konto_id: kontoId ? String(kontoId) : '', category_path: null,
   start_date: today(), end_date: '', active: true, expect_receipt: true, match_merchant: '',
 });
 
@@ -776,6 +786,7 @@ function ManageTab() {
         label: d.label.trim(),
         monthly_eur: d.monthly_eur,
         kind: d.kind,
+        frequency: d.frequency,
         konto_id: Number(d.konto_id),
         category_path: d.category_path,
         start_date: d.start_date,
@@ -794,7 +805,7 @@ function ManageTab() {
   const readd = useMutation({
     mutationFn: (c: FixedCost) => api('/api/fixed-costs', {
       method: 'POST',
-      body: { label: c.label, monthly_eur: c.monthly_eur, kind: c.kind, konto_id: c.konto_id, category_path: c.category_path, start_date: c.start_date, end_date: c.end_date, active: c.active, expect_receipt: c.expect_receipt, match_merchant: c.match_merchant },
+      body: { label: c.label, monthly_eur: c.monthly_eur, kind: c.kind, frequency: c.frequency, konto_id: c.konto_id, category_path: c.category_path, start_date: c.start_date, end_date: c.end_date, active: c.active, expect_receipt: c.expect_receipt, match_merchant: c.match_merchant },
     }),
     onSuccess: invalidate,
   });
@@ -821,7 +832,7 @@ function ManageTab() {
       (a.konto?.owner ?? '').localeCompare(b.konto?.owner ?? ''));
   }, [costs, konten, scopeKonten]);
 
-  const monthlyTotal = (costs ?? []).filter(c => c.active && c.kind !== 'income').reduce((s, c) => s + c.monthly_eur, 0);
+  const monthlyTotal = (costs ?? []).filter(c => c.active && c.kind !== 'income').reduce((s, c) => s + amortized(c.monthly_eur, c.frequency), 0);
 
   if (isLoading || !konten) return <Spinner />;
 
@@ -847,7 +858,7 @@ function ManageTab() {
       </Card>
 
       {groups.filter(g => g.items.length > 0 || g.konto).map(g => {
-        const sum = g.items.filter(c => c.active && c.kind !== 'income').reduce((s, c) => s + c.monthly_eur, 0);
+        const sum = g.items.filter(c => c.active && c.kind !== 'income').reduce((s, c) => s + amortized(c.monthly_eur, c.frequency), 0);
         const isHome = !!g.konto?.is_shared;
         return (
           <div key={g.konto?.id ?? 'none'} className="flex flex-col gap-2">
@@ -873,14 +884,15 @@ function ManageTab() {
                     <div className="truncate text-sm font-medium">{c.label}</div>
                     <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-zinc-500 dark:text-zinc-400">
                       {c.kind === 'income' && <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">{t('finances.incomeTitle')}</span>}
+                      {c.frequency !== 'monthly' && <span className="rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">{t(`finances.freq.${c.frequency}`)} · {eur(c.monthly_eur)}</span>}
                       {c.category_path && <span className="truncate">{c.category_path.split('/').pop()}</span>}
                       {!c.expect_receipt && <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] dark:bg-zinc-800">{t('finances.noReceiptBadge')}</span>}
                       {!c.active && <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] dark:bg-zinc-800">{t('finances.inactive')}</span>}
                       {c.end_date && <span>{t('finances.until')} {c.end_date}</span>}
                     </div>
                   </div>
-                  <span className={cn('shrink-0 text-sm font-semibold', c.kind === 'income' && 'text-emerald-600 dark:text-emerald-500')}>{c.kind === 'income' ? '+' : ''}{eur(c.monthly_eur)}<span className="text-xs font-normal text-zinc-400">{t('finances.perMonth')}</span></span>
-                  <button onClick={() => setModal({ id: c.id, label: c.label, monthly_eur: String(c.monthly_eur).replace('.', ','), kind: c.kind, konto_id: String(c.konto_id ?? ''), category_path: c.category_path, start_date: c.start_date, end_date: c.end_date ?? '', active: c.active, expect_receipt: c.expect_receipt, match_merchant: c.match_merchant ?? '' })}
+                  <span className={cn('shrink-0 text-sm font-semibold', c.kind === 'income' && 'text-emerald-600 dark:text-emerald-500')}>{c.kind === 'income' ? '+' : ''}{eur(amortized(c.monthly_eur, c.frequency))}<span className="text-xs font-normal text-zinc-400">{t('finances.perMonth')}</span></span>
+                  <button onClick={() => setModal({ id: c.id, label: c.label, monthly_eur: String(c.monthly_eur).replace('.', ','), kind: c.kind, frequency: c.frequency, konto_id: String(c.konto_id ?? ''), category_path: c.category_path, start_date: c.start_date, end_date: c.end_date ?? '', active: c.active, expect_receipt: c.expect_receipt, match_merchant: c.match_merchant ?? '' })}
                     className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800" title={t('common.edit')}>
                     <Pencil size={15} />
                   </button>
@@ -913,16 +925,27 @@ function ManageTab() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label>{t('finances.monthly')}</Label>
+                <Label>{t('finances.amount')}</Label>
                 <Input inputMode="decimal" value={modal.monthly_eur} onChange={e => setModal({ ...modal, monthly_eur: e.target.value })} placeholder="0,00" />
+                {modal.frequency !== 'monthly' && modal.monthly_eur && (
+                  <p className="mt-1 text-[11px] text-zinc-400">{t('finances.amortizedHint', { v: eur(amortized(parseFloat(modal.monthly_eur.replace(',', '.')) || 0, modal.frequency)) })}</p>
+                )}
               </div>
               <div>
-                <Label>{t('finances.scope')}</Label>
-                <Select value={modal.konto_id} onChange={e => setModal({ ...modal, konto_id: e.target.value })}>
-                  <option value="" disabled>–</option>
-                  {scopeKonten.map(k => <option key={k.id} value={k.id}>{scopeLabelOf(t, k)}</option>)}
+                <Label>{t('finances.frequency')}</Label>
+                <Select value={modal.frequency} onChange={e => setModal({ ...modal, frequency: e.target.value as Freq })}>
+                  <option value="monthly">{t('finances.freq.monthly')}</option>
+                  <option value="quarterly">{t('finances.freq.quarterly')}</option>
+                  <option value="yearly">{t('finances.freq.yearly')}</option>
                 </Select>
               </div>
+            </div>
+            <div>
+              <Label>{t('finances.scope')}</Label>
+              <Select value={modal.konto_id} onChange={e => setModal({ ...modal, konto_id: e.target.value })}>
+                <option value="" disabled>–</option>
+                {scopeKonten.map(k => <option key={k.id} value={k.id}>{scopeLabelOf(t, k)}</option>)}
+              </Select>
             </div>
             <div>
               <Label>{t('finances.category')} <span className="text-zinc-400">({t('common.optional')})</span></Label>
