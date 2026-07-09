@@ -91,6 +91,7 @@
     "transferLabel": "Umbuchung (interner Übertrag)",
     "transferHint": "Internes Hin- und Herschieben zwischen eigenen Konten (z. B. dein Beitrag aufs Haushaltskonto). Zählt in Einzel-Konto-Ansichten, aber nicht in die Gesamthaushalt-Summen.",
     "notCounted": "nicht gezählt",
+    "privatePurchase": "Privater Einkauf",
     "amount": "Betrag (€)",
     "frequency": "Häufigkeit",
     "amortizedHint": "≈ {{v}}/Monat",

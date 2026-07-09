@@ -287,9 +287,11 @@ export function financeRoutes(app: FastifyInstance): void {
       WHERE bu.active AND e.datum BETWEEN ${prevFirst} AND ${b.last}
         AND (bu.konto_id IS NULL OR e.konto_id = bu.konto_id)
         AND NOT EXISTS (SELECT 1 FROM fixed_cost_check fc WHERE fc.einkauf_id = e.id)
-        ${kontoScope(req.user, sql`e`)}
       GROUP BY bu.id, date_trunc('month', e.datum)
     `;
+    // NB: no kontoScope here on purpose — a private receipt still counts toward the
+    // (shared) budget total; the drill-down masks its details for non-owners. The
+    // budget Ist is a household aggregate, so the amount is visible to everyone.
     // NB: an artikel matching two category prefixes of the SAME budget would double-
     // count — the UI prevents nesting by keeping picks distinct; acceptable for v1.
     const actualBy = new Map<number, number>();
@@ -554,10 +556,15 @@ export function financeRoutes(app: FastifyInstance): void {
   });
 
   /** Drill-down: the individual article positions that make up a budget's "Ist"
-   *  (actual) for a month. Uses the SAME filter as the month view's actual sum —
-   *  category-prefix match, the budget's own konto scope, receipts already used as
-   *  fixed-cost evidence excluded, private receipts scoped — so `total` equals the
-   *  displayed Ist exactly. */
+   *  (actual) for a month. Same filter as the month view's actual sum (category-
+   *  prefix match, the budget's own konto scope, fixed-cost-evidence receipts
+   *  excluded) — so `total` equals the displayed Ist exactly.
+   *
+   *  Privacy: a receipt marked private (private_for_user_id) still CONTRIBUTES its
+   *  amount to the household budget, but its DETAILS (item name, store, category,
+   *  date, link) are masked server-side for anyone who is neither the owner nor a
+   *  super-admin — they only see "Privater Einkauf" + the amount. The sensitive
+   *  fields never leave the server for those users. */
   app.get('/api/finances/budget/:id/positions', async (req, reply) => {
     const id = parseInt(String((req.params as { id: string }).id), 10);
     if (!id) return reply.code(400).send({ error: 'invalid id' });
@@ -566,7 +573,8 @@ export function financeRoutes(app: FastifyInstance): void {
     const rows = await sql`
       SELECT a.id, COALESCE(NULLIF(a.canonical_name, ''), a.name) AS name,
              a.preis::float8 AS preis, a.menge::float8 AS menge, a.einheit, a.category_path,
-             e.id AS einkauf_id, e.datum::text AS datum, e.roh_ladenname AS laden
+             e.id AS einkauf_id, e.datum::text AS datum, e.roh_ladenname AS laden,
+             e.private_for_user_id
       FROM budget bu
       JOIN budget_category bc ON bc.budget_id = bu.id
       JOIN artikel a ON a.preis IS NOT NULL AND a.category_path IS NOT NULL
@@ -575,10 +583,19 @@ export function financeRoutes(app: FastifyInstance): void {
       WHERE bu.id = ${id} AND bu.active AND e.datum BETWEEN ${b.first} AND ${b.last}
         AND (bu.konto_id IS NULL OR e.konto_id = bu.konto_id)
         AND NOT EXISTS (SELECT 1 FROM fixed_cost_check fc WHERE fc.einkauf_id = e.id)
-        ${kontoScope(req.user, sql`e`)}
       ORDER BY e.datum DESC, a.id
     `;
-    const total = Math.round(rows.reduce((s, r) => s + Number(r.preis), 0) * 100) / 100;
-    return { positions: rows, total };
+    const uid = req.user?.id ?? -1;
+    const seesAll = !!req.user?.sees_all_konten;
+    const positions = rows.map((r, i) => {
+      const priv = r.private_for_user_id as number | null;
+      const masked = priv != null && priv !== uid && !seesAll;
+      return masked
+        // Synthetic negative id as a stable React key; every sensitive field nulled.
+        ? { id: -(i + 1), name: null, preis: r.preis as number, menge: null, einheit: null, category_path: null, einkauf_id: null, datum: null, laden: null, private: true }
+        : { id: r.id, name: r.name, preis: r.preis, menge: r.menge, einheit: r.einheit, category_path: r.category_path, einkauf_id: r.einkauf_id, datum: r.datum, laden: r.laden, private: false };
+    });
+    const total = Math.round(positions.reduce((s, r) => s + Number(r.preis), 0) * 100) / 100;
+    return { positions, total };
   });
 }

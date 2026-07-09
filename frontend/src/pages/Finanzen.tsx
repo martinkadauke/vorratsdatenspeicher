@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Wallet, Plus, Pencil, Trash2, Home, User as UserIcon, Info,
-  ChevronLeft, ChevronRight, ChevronDown, CheckCircle2, Circle, CircleDot, Search, X, Upload, Layers,
+  ChevronLeft, ChevronRight, ChevronDown, CheckCircle2, Circle, CircleDot, Search, X, Upload, Layers, Lock,
 } from 'lucide-react';
 import { api } from '../api/client';
 import { Card, Spinner, Button, Input, Label, Select, Switch, Modal, EmptyState, Badge } from '../components/ui';
@@ -411,8 +411,9 @@ function BudgetRow({ b, t, onEdit, onOpen }: { b: MonthBudget; t: (k: string, o?
 }
 
 interface BudgetPos {
-  id: number; name: string; preis: number; menge: number | null; einheit: string | null;
-  category_path: string | null; einkauf_id: number; datum: string; laden: string | null;
+  id: number; name: string | null; preis: number; menge: number | null; einheit: string | null;
+  category_path: string | null; einkauf_id: number | null; datum: string | null; laden: string | null;
+  private?: boolean;
 }
 type PosSort = 'date_desc' | 'date_asc' | 'price_desc' | 'price_asc';
 
@@ -425,13 +426,28 @@ function catGroupOf(catPath: string, bases: string[]): { key: string; label: str
   const firstSeg = catPath.slice(base.length + 1).split('/')[0];
   return { key: `${base}/${firstSeg}`, label: firstSeg };
 }
-const sortPositions = (rs: BudgetPos[], sort: PosSort) => [...rs].sort((a, b) =>
-  sort === 'date_asc' ? (a.datum < b.datum ? -1 : a.datum > b.datum ? 1 : a.id - b.id)
-    : sort === 'date_desc' ? (a.datum > b.datum ? -1 : a.datum < b.datum ? 1 : b.id - a.id)
-      : sort === 'price_asc' ? a.preis - b.preis : b.preis - a.preis);
+const sortPositions = (rs: BudgetPos[], sort: PosSort) => [...rs].sort((a, b) => {
+  const ad = a.datum ?? '', bd = b.datum ?? '';
+  return sort === 'date_asc' ? (ad < bd ? -1 : ad > bd ? 1 : a.id - b.id)
+    : sort === 'date_desc' ? (ad > bd ? -1 : ad < bd ? 1 : b.id - a.id)
+      : sort === 'price_asc' ? a.preis - b.preis : b.preis - a.preis;
+});
 
-/** One clickable position → jumps to its receipt with the item highlighted. */
+/** One position row. A masked (private) position shows only "Privater Einkauf" +
+ *  its amount — no name, store, category, date, and not clickable. Otherwise the
+ *  row jumps to its receipt with the item highlighted. */
 function PosRow({ p, t, onOpen }: { p: BudgetPos; t: (k: string, o?: Record<string, unknown>) => string; onOpen: (p: BudgetPos) => void }) {
+  if (p.private) {
+    return (
+      <li className="flex items-center gap-2 px-1 py-2">
+        <div className="flex min-w-0 flex-1 items-center gap-1.5 text-sm italic text-zinc-500 dark:text-zinc-400">
+          <Lock size={13} className="shrink-0" />
+          <span className="truncate">{t('finances.privatePurchase')}</span>
+        </div>
+        <span className="shrink-0 text-sm font-semibold">{eur(p.preis)}</span>
+      </li>
+    );
+  }
   return (
     <li onClick={() => onOpen(p)} role="button" tabIndex={0}
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(p); } }}
@@ -440,7 +456,7 @@ function PosRow({ p, t, onOpen }: { p: BudgetPos; t: (k: string, o?: Record<stri
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium">{p.name}</div>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-zinc-500 dark:text-zinc-400">
-          <span>{ddmmyyyy(p.datum)}</span>
+          {p.datum && <span>{ddmmyyyy(p.datum)}</span>}
           {p.laden && <span className="truncate">{p.laden}</span>}
           {p.category_path && <span className="truncate text-zinc-400">{p.category_path.split('/').pop()}</span>}
         </div>
@@ -485,13 +501,15 @@ function BudgetPositions({ budget, month, onClose }: { budget: MonthBudget; mont
     queryFn: () => api<{ positions: BudgetPos[]; total: number }>(`/api/finances/budget/${budget.id}/positions?month=${month}`),
   });
   const rows = data?.positions ?? [];
-  const openReceipt = (p: BudgetPos) => { onClose(); navigate(`/receipts/${p.einkauf_id}?highlight=${p.id}`); };
+  // Masked (private) positions carry no einkauf_id → not navigable.
+  const openReceipt = (p: BudgetPos) => { if (p.private || !p.einkauf_id) return; onClose(); navigate(`/receipts/${p.einkauf_id}?highlight=${p.id}`); };
   const sorted = useMemo(() => sortPositions(rows, sort), [rows, sort]);
   const groups = useMemo(() => {
     const bases = budget.categories ?? [];
     const map = new Map<string, { label: string; items: BudgetPos[]; total: number }>();
     for (const p of rows) {
-      const g = catGroupOf(p.category_path ?? '', bases);
+      // Private positions have no category → collect them in one "Privater Einkauf" group.
+      const g = p.private ? { key: '__private__', label: t('finances.privatePurchase') } : catGroupOf(p.category_path ?? '', bases);
       const e = map.get(g.key) ?? { label: g.label, items: [] as BudgetPos[], total: 0 };
       e.items.push(p); e.total += p.preis;
       map.set(g.key, e);

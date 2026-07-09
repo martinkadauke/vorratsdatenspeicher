@@ -91,6 +91,7 @@
     "transferLabel": "Internal transfer",
     "transferHint": "Money moved between your own accounts (e.g. your contribution to the household account). Counts in single-account views, but not in the whole-household totals.",
     "notCounted": "not counted",
+    "privatePurchase": "Private purchase",
     "amount": "Amount (€)",
     "frequency": "Frequency",
     "amortizedHint": "≈ {{v}}/month",
