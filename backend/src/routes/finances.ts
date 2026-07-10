@@ -1389,6 +1389,49 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
     return { kind: 'income', candidates: rows };
   });
 
+  /** Free-text receipt/income search for the manual link picker. Unlike /candidates
+   *  (pre-filtered by amount + date window), this finds ANY still-unlinked receipt the
+   *  user believes is correct — by merchant, an item name, amount, or date. Amount &
+   *  date are returned so a deliberate mismatch (e.g. an Amazon part-shipment) is
+   *  visible before linking. Same konto/privacy scope as /candidates. */
+  app.get('/api/finances/bank/:id/search-receipts', async (req, reply) => {
+    const id = parseInt(String((req.params as { id: string }).id), 10);
+    if (!id) return reply.code(400).send({ error: 'bad id' });
+    const q = String((req.query as { q?: string }).q ?? '').trim();
+    const [bt] = await sql`SELECT amount::float8 AS amount FROM bank_tx WHERE id = ${id}`;
+    if (!bt) return reply.code(404).send({ error: 'not found' });
+    const credit = (bt.amount as number) > 0;
+    if (!q) return { kind: credit ? 'income' : 'receipt', results: [] };
+    const like = `%${q}%`;
+    // Accept an amount typed the German way ("112,03" / "1.234,50") as a numeric match.
+    const amtQ = q.replace(/\./g, '').replace(',', '.');
+    const amtNum = /^\d+(\.\d+)?$/.test(amtQ) ? parseFloat(amtQ) : null;
+    if (credit) {
+      const rows = await sql`
+        SELECT i.id, i.description AS label, i.amount::float8 AS betrag, i.datum::text AS datum
+        FROM income i
+        WHERE i.bank_tx_id IS NULL
+          AND (i.description ILIKE ${like} OR i.source ILIKE ${like}
+               ${amtNum != null ? sql`OR ABS(i.amount - ${amtNum}) <= 0.01` : sql``}
+               OR i.datum::text ILIKE ${like})
+        ORDER BY i.datum DESC
+        LIMIT 40`;
+      return { kind: 'income', results: rows };
+    }
+    const rows = await sql`
+      SELECT e.id, e.roh_ladenname AS label, e.gesamt_betrag::float8 AS betrag, e.datum::text AS datum
+      FROM einkauf e
+      WHERE e.bank_tx_id IS NULL AND e.gesamt_betrag IS NOT NULL
+        AND (e.roh_ladenname ILIKE ${like}
+             ${amtNum != null ? sql`OR ABS(e.gesamt_betrag - ${amtNum}) <= 0.01` : sql``}
+             OR e.datum::text ILIKE ${like}
+             OR EXISTS (SELECT 1 FROM artikel a WHERE a.einkauf_id = e.id AND a.name ILIKE ${like}))
+        ${kontoScope(req.user, sql`e`)}
+      ORDER BY e.datum DESC
+      LIMIT 40`;
+    return { kind: 'receipt', results: rows };
+  });
+
   /** Manually link a bank transaction to a receipt (debit) or income row (credit),
    *  one-to-one. Atomic: verify the target is visible + still unlinked BEFORE
    *  detaching the old one, so a bad/stale target never destroys a valid link; a slot

@@ -1363,6 +1363,28 @@ function BankLinkPicker({ tx, t, onClose, onPick, onApprove }: {
   });
   const cands = data?.candidates ?? [];
   const sug = tx.suggestion;
+  // Free-text search across ALL still-unlinked receipts (merchant / item / amount /
+  // date), so the user can allocate one they know is right even when it falls outside
+  // the automatic amount+date window (e.g. an Amazon part-shipment).
+  const [q, setQ] = useState('');
+  const searching = q.trim().length >= 1;
+  const searchQ = useQuery({
+    queryKey: ['bank-search', tx.id, q.trim()],
+    queryFn: () => api<{ kind: 'receipt' | 'income'; results: { id: number; label: string | null; betrag: number; datum: string }[] }>(`/api/finances/bank/${tx.id}/search-receipts?q=${encodeURIComponent(q.trim())}`),
+    enabled: searching,
+  });
+  const results = searchQ.data?.results ?? [];
+  const row = (c: { id: number; label: string | null; betrag: number; datum: string }) => (
+    <li key={c.id}>
+      <button onClick={() => onPick(c.id)} className="flex w-full items-center gap-2 rounded-lg px-1 py-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium">{c.label || '–'}</div>
+          <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{ddmmyyyy(c.datum)}</div>
+        </div>
+        <span className="shrink-0 text-sm font-semibold">{eur(c.betrag)}</span>
+      </button>
+    </li>
+  );
   return (
     <Modal open onClose={onClose} title={tx.amount > 0 ? t('finances.bank.linkIncomeTitle') : t('finances.bank.linkTitle')}>
       <div className="flex flex-col gap-3">
@@ -1393,24 +1415,32 @@ function BankLinkPicker({ tx, t, onClose, onPick, onApprove }: {
             </div>
           </div>
         )}
-        {isLoading ? <Spinner /> : !cands.length ? (
-          !sug && <p className="py-4 text-center text-xs text-zinc-400">{t('finances.bank.noCandidates')}</p>
+        {/* Manual search: allocate any unlinked receipt/income the user knows is right. */}
+        <div className="relative">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+          <Input className="pl-9 pr-9" placeholder={t(tx.amount > 0 ? 'finances.bank.searchIncomePlaceholder' : 'finances.bank.searchReceiptPlaceholder')} value={q} onChange={e => setQ(e.target.value)} />
+          {q && (
+            <button onClick={() => setQ('')} title={t('common.clear')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800">
+              <X size={15} />
+            </button>
+          )}
+        </div>
+        {searching ? (
+          searchQ.isLoading ? <Spinner /> : !results.length ? (
+            <p className="py-4 text-center text-xs text-zinc-400">{t('finances.bank.noSearchResults')}</p>
+          ) : (
+            <>
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">{t('finances.bank.searchResults')}</div>
+              <ul className="-mx-1 flex max-h-[55vh] flex-col divide-y divide-zinc-100 overflow-y-auto dark:divide-zinc-800">{results.map(row)}</ul>
+            </>
+          )
+        ) : isLoading ? <Spinner /> : !cands.length ? (
+          !sug && <p className="py-4 text-center text-xs text-zinc-400">{t('finances.bank.noCandidatesHint')}</p>
         ) : (
           <>
-            {sug && <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">{t('finances.bank.otherCandidates')}</div>}
-            <ul className="-mx-1 flex max-h-[55vh] flex-col divide-y divide-zinc-100 overflow-y-auto dark:divide-zinc-800">
-              {cands.map(c => (
-                <li key={c.id}>
-                  <button onClick={() => onPick(c.id)} className="flex w-full items-center gap-2 rounded-lg px-1 py-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium">{c.label || '–'}</div>
-                      <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{ddmmyyyy(c.datum)}</div>
-                    </div>
-                    <span className="shrink-0 text-sm font-semibold">{eur(c.betrag)}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">{t(sug ? 'finances.bank.otherCandidates' : 'finances.bank.suggestedMatches')}</div>
+            <ul className="-mx-1 flex max-h-[55vh] flex-col divide-y divide-zinc-100 overflow-y-auto dark:divide-zinc-800">{cands.map(row)}</ul>
           </>
         )}
       </div>
@@ -1624,7 +1654,10 @@ function BankTab() {
                 <option value="">{t('finances.bank.allKonten')}</option>
                 {scopeKonten.map(k => <option key={k.id} value={k.id}>{scopeLabelOf(t, k)}</option>)}
               </Select>
-              <Input type="month" value={month} onChange={e => setMonth(e.target.value)} className="w-[9.5rem]" />
+              <label className="flex items-center gap-1.5 whitespace-nowrap text-xs text-zinc-500 dark:text-zinc-400">
+                {t('finances.bank.monthFilter')}
+                <Input type="month" value={month} onChange={e => setMonth(e.target.value)} className="w-[9.5rem]" />
+              </label>
               <button onClick={() => rematch.mutate()} disabled={rematch.isPending} title={t('finances.bank.rematch')}
                 className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-zinc-300 px-2.5 py-2 text-xs font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
                 <RefreshCw size={14} className={cn(rematch.isPending && 'animate-spin')} /> {t('finances.bank.rematch')}
