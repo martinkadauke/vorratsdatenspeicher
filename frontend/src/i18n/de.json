@@ -340,6 +340,8 @@
     "printedLabel": "· Bon:",
     "itemsTotal": "Summe der Artikel",
     "bankMatch": "Kontobewegung",
+    "snappedBy": "Aufgenommen von",
+    "snappedByUnset": "— wer?",
     "reocr": "OCR erneut ausführen",
     "reocrConfirm": "Bon-Foto erneut analysieren? Alle aktuellen Artikel werden ersetzt.",
     "reocrRunning": "Bon wird analysiert…",

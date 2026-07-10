@@ -104,6 +104,17 @@ export function ReceiptDetailPage() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['receipt', id] }),
     onError: (e) => toast((e as Error).message, 'error'),
   });
+  // Household members for the "scanned by" picker (legacy PWA receipts never captured
+  // the uploader; new scans auto-attribute the logged-in member).
+  const { data: family } = useQuery({
+    queryKey: ['family'],
+    queryFn: () => api<{ id: number; name: string; emoji: string | null }[]>('/api/family'),
+  });
+  const setSnappedBy = useMutation({
+    mutationFn: (memberId: number | null) => api(`/api/receipts/${id}`, { method: 'PATCH', body: { snapped_by_member_id: memberId } }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['receipt', id] }); void qc.invalidateQueries({ queryKey: ['receipts'] }); },
+    onError: (e) => toast((e as Error).message, 'error'),
+  });
   // When the user taps a between-items divider we open the add-item modal targeted
   // at that position (so Cancel leaves nothing behind). null = append (the + button).
   const [insertAfterId, setInsertAfterId] = useState<number | null>(null);
@@ -290,6 +301,19 @@ export function ReceiptDetailPage() {
             <span className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
               {t(`quelle.${data.quelle}`)}
             </span>
+          )}
+          {/* Who scanned/uploaded this receipt (household member) — set the uploader on
+              legacy PWA receipts that never captured it; new scans auto-fill it. */}
+          {(family?.length ?? 0) > 0 && (
+            <label className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-950/50 dark:text-amber-300" title={t('receiptDetail.snappedBy')}>
+              <Camera size={11} />
+              <select value={data.snapped_by_member_id ?? ''} disabled={!canWrite || setSnappedBy.isPending}
+                onChange={e => setSnappedBy.mutate(e.target.value ? Number(e.target.value) : null)}
+                className="cursor-pointer bg-transparent text-[11px] font-medium outline-none disabled:cursor-default">
+                <option value="">{t('receiptDetail.snappedByUnset')}</option>
+                {family!.map(m => <option key={m.id} value={m.id}>{m.emoji ? `${m.emoji} ` : ''}{m.name}</option>)}
+              </select>
+            </label>
           )}
           {data.bank && (
             <Link to={`/finanzen?tab=bank&bm=${data.bank.booking_date.slice(0, 7)}&bhl=${data.bank.id}`}

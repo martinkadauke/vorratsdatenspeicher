@@ -340,6 +340,8 @@
     "printedLabel": "· receipt:",
     "itemsTotal": "Items total",
     "bankMatch": "Bank transaction",
+    "snappedBy": "Scanned by",
+    "snappedByUnset": "— who?",
     "reocr": "Re-run OCR",
     "reocrConfirm": "Re-analyze receipt photo? All current items will be replaced.",
     "reocrRunning": "Analyzing receipt…",

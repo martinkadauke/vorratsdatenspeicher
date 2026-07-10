@@ -294,9 +294,15 @@ export function receiptRoutes(app: FastifyInstance): void {
       }
     }
 
+    // Attribute the scan to the uploader's household member (Lena / Martin) — the level
+    // the receipts filter cares about (not the login user). Null for a user with no
+    // linked member. Legacy PWA receipts (pre-column) get it set manually via PATCH.
+    const [mem] = req.user?.id ? await sql`SELECT id FROM family_member WHERE user_id = ${req.user.id} ORDER BY sort_order, id LIMIT 1` : [];
+    const snappedBy = (mem?.id as number | undefined) ?? null;
+
     const [row] = await sql`
-      INSERT INTO einkauf (datum, roh_ladenname, gesamt_betrag, quelle, konto_id, bild_pfad, private_for_user_id)
-      VALUES (${datum}, ${laden}, ${gesamt}, ${quelle}, ${kontoId}, ${bildPfad}, ${privateFor})
+      INSERT INTO einkauf (datum, roh_ladenname, gesamt_betrag, quelle, konto_id, bild_pfad, private_for_user_id, snapped_by_member_id)
+      VALUES (${datum}, ${laden}, ${gesamt}, ${quelle}, ${kontoId}, ${bildPfad}, ${privateFor}, ${snappedBy})
       RETURNING id
     `;
 
@@ -377,6 +383,19 @@ export function receiptRoutes(app: FastifyInstance): void {
     if ('quelle' in body && typeof body.quelle === 'string') updates.quelle = body.quelle;
     // Mark/unmark this receipt private (visible only to the current user).
     if ('private' in body) updates.private_for_user_id = body.private ? (req.user?.id ?? null) : null;
+    // Who scanned/uploaded this receipt (household member). Mainly to set the uploader
+    // on legacy PWA receipts that never captured it; null clears the attribution.
+    if ('snapped_by_member_id' in body) {
+      const v = body.snapped_by_member_id;
+      if (v === null || v === '') updates.snapped_by_member_id = null;
+      else {
+        const n = parseInt(String(v), 10);
+        if (!Number.isFinite(n)) return reply.code(400).send({ error: 'invalid snapped_by_member_id' });
+        const [m] = await sql`SELECT id FROM family_member WHERE id = ${n}`;
+        if (!m) return reply.code(400).send({ error: 'unknown member' });
+        updates.snapped_by_member_id = n;
+      }
+    }
     if ('konto_id' in body) {
       const v = body.konto_id;
       if (v === null || v === '') updates.konto_id = null;
@@ -558,7 +577,7 @@ export function receiptRoutes(app: FastifyInstance): void {
     const receipts = await sql`
       SELECT e.id, e.datum, e.roh_ladenname, e.bild_pfad, e.gesamt_betrag, e.geprueft,
              e.konto_id, e.quelle, k.name AS konto_name, e.ocr_pending, e.date_uncertain,
-             e.private_for_user_id, e.bank_tx_id,
+             e.private_for_user_id, e.bank_tx_id, e.snapped_by_member_id,
              bt.booking_date::text AS bank_booking, bt.amount::float8 AS bank_amount, bt.counterparty AS bank_counterparty,
              (e.private_for_user_id IS NOT NULL) AS private,
              EXISTS(SELECT 1 FROM email_message em WHERE em.einkauf_id = e.id) AS has_email
