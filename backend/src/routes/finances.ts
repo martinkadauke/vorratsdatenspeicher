@@ -397,8 +397,12 @@ export function financeRoutes(app: FastifyInstance): void {
     type Cand = { fixedId: number; source: 'receipt' | 'bank' | 'income'; einkaufId: number | null; bankTxId: number | null; incomeId: number | null; score: number; laden: string | null; betrag: number; datum: string; amountOk: boolean; merchantOk: boolean };
     const cands: Cand[] = [];
     for (const f of fixed) {
-      if (f.check_id || f.expect_receipt === false) continue;
-      const pool = f.kind === 'income' ? evIncome : evExpense;
+      if (f.check_id) continue;
+      // A no-receipt plan (Kindergeld, rent, Kredit …) still needs its BANK payment
+      // suggested — it just never has an invoice/pay slip, so offer bank evidence only
+      // (don't propose a coincidental receipt for something that has none).
+      const noReceipt = f.expect_receipt === false;
+      const pool = (f.kind === 'income' ? evIncome : evExpense).filter(ev => !noReceipt || ev.source === 'bank');
       const target = f.monthly_eur as number;
       const tol = Math.max(1, Math.abs(target) * 0.02);
       const needle = normMerchant((f.match_merchant as string | null) ?? '');
