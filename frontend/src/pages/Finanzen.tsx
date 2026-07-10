@@ -1169,6 +1169,9 @@ function PayslipViewer({ id, name, t, onClose }: {
   const [url, setUrl] = useState<string | null>(null);
   const [isPdf, setIsPdf] = useState(true);
   const [err, setErr] = useState(false);
+  // Mobile browsers (esp. iOS Safari) render a PDF inside an <iframe> as a blank box.
+  // On touch/coarse-pointer devices offer open/download instead of the dead preview.
+  const [coarse] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches);
   useEffect(() => {
     let objectUrl: string | null = null;
     let cancelled = false;
@@ -1189,9 +1192,24 @@ function PayslipViewer({ id, name, t, onClose }: {
       <div className="flex flex-col gap-2">
         {err ? <p className="py-10 text-center text-sm text-zinc-400">{t('finances.income.viewError')}</p>
           : !url ? <div className="flex justify-center py-16"><Spinner /></div>
-            : isPdf ? <iframe src={url} title={name} className="h-[72vh] w-full rounded-lg border border-zinc-200 dark:border-zinc-800" />
-              : <img src={url} alt={name} className="mx-auto max-h-[72vh] rounded-lg" />}
-        {url && <a href={url} target="_blank" rel="noreferrer" className="self-end text-xs text-emerald-600 hover:underline dark:text-emerald-400">{t('finances.income.openTab')}</a>}
+            : !isPdf ? <img src={url} alt={name} className="mx-auto max-h-[72vh] rounded-lg" />
+              : coarse ? (
+                // Touch device: an embedded PDF stays blank, so present it as actions.
+                <div className="flex flex-col items-center gap-4 rounded-lg border border-dashed border-zinc-300 px-6 py-12 text-center dark:border-zinc-700">
+                  <FileText size={44} className="text-emerald-500" />
+                  <div className="text-sm font-medium">{name || t('finances.income.viewPayslip')}</div>
+                  <div className="flex flex-wrap justify-center gap-2">
+                    <a href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">
+                      <ExternalLink size={15} /> {t('finances.income.openPdf')}
+                    </a>
+                    <a href={url} download={name || 'gehaltszettel.pdf'} className="inline-flex items-center gap-1.5 rounded-xl border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
+                      <FileText size={15} /> {t('finances.income.downloadPdf')}
+                    </a>
+                  </div>
+                </div>
+              )
+                : <iframe src={url} title={name} className="h-[72vh] w-full rounded-lg border border-zinc-200 dark:border-zinc-800" />}
+        {url && !coarse && <a href={url} target="_blank" rel="noreferrer" className="self-end text-xs text-emerald-600 hover:underline dark:text-emerald-400">{t('finances.income.openTab')}</a>}
       </div>
     </Modal>
   );

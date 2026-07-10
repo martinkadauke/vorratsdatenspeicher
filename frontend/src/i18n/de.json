@@ -221,6 +221,8 @@
       "viewPayslip": "Gehaltszettel",
       "viewError": "Datei konnte nicht geladen werden.",
       "openTab": "In neuem Tab öffnen",
+      "openPdf": "PDF öffnen",
+      "downloadPdf": "Herunterladen",
       "listEmpty": "Noch keine Einnahmen erfasst – lade oben Gehaltszettel hoch.",
       "entryFallback": "Einnahme",
       "src": {

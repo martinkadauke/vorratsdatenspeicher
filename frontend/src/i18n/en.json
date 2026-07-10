@@ -221,6 +221,8 @@
       "viewPayslip": "Pay slip",
       "viewError": "Could not load the file.",
       "openTab": "Open in new tab",
+      "openPdf": "Open PDF",
+      "downloadPdf": "Download",
       "listEmpty": "No income recorded yet – upload pay slips above.",
       "entryFallback": "Income",
       "src": {
