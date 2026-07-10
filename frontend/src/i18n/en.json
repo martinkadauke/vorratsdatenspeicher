@@ -116,6 +116,7 @@
     "varTitle": "Variable costs",
     "incomeTitle": "Income",
     "oneOffTitle": "One-off entries",
+    "oneOffBadge": "one-off",
     "netTitle": "Net (in − out)",
     "noIncome": "No income this month. Upload pay slips under “Manage”.",
     "noIncomePlans": "No income definitions yet. Add them under “Manage” (e.g. salary, child benefit).",

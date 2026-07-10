@@ -33,6 +33,7 @@ interface KontoLite { id: number; name: string; is_shared: boolean; is_cash: boo
 
 interface MonthFix {
   id: number; label: string; monthly_eur: number; kind: 'expense' | 'income'; frequency: Freq; is_transfer: boolean; expect_receipt: boolean; match_merchant: string | null;
+  one_off: boolean;
   konto_id: number | null; konto_name: string | null; is_shared: boolean | null; owner: string | null;
   complete: boolean; bank_linked: boolean;
   check: { status: 'confirmed' | 'skipped'; source: 'receipt' | 'bank' | 'income' | 'none'; einkauf_id: number | null; bank_tx_id: number | null; income_id: number | null; amount: number | null; laden: string | null; datum: string | null } | null;
@@ -604,6 +605,7 @@ function FixCheckRow({ f, t, excluded, onConfirmSuggestion, onClear, onShowEvide
             <span className="truncate text-sm font-medium">{f.label}</span>
             <span className="shrink-0 text-xs text-zinc-400">{scopeLabelOf(t, f)}</span>
             {f.is_transfer && <span className="shrink-0 rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">{t('finances.transferBadge')}</span>}
+            {f.one_off && <span className="shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">{t('finances.oneOffBadge')}</span>}
           </div>
           <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
             {rstate === 'skipped' && t('finances.skippedMonth')}

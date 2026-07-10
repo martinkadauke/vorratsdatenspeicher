@@ -306,6 +306,7 @@ export function financeRoutes(app: FastifyInstance): void {
     //    check + evidence-matching engine, just against different evidence pools.
     const fixed = await sql`
       SELECT f.id, f.label, f.monthly_eur::float8 AS monthly_eur, f.kind, f.frequency, f.is_transfer, f.expect_receipt, f.match_merchant,
+             (f.end_date IS NOT NULL AND date_trunc('month', f.start_date) = date_trunc('month', f.end_date)) AS one_off,
              f.konto_id, k.name AS konto_name, k.is_shared, u.username AS owner,
              c.id AS check_id, c.status AS check_status, c.einkauf_id AS check_einkauf_id,
              c.bank_tx_id AS check_bank_tx_id, c.income_id AS check_income_id, c.amount::float8 AS check_amount,
@@ -512,6 +513,7 @@ export function financeRoutes(app: FastifyInstance): void {
     // Map a plan row (expense or income) to its month-view shape (check + suggestion).
     const mapPlan = (f: typeof fixed[number]) => ({
       id: f.id, label: f.label, monthly_eur: f.monthly_eur, kind: f.kind, frequency: f.frequency, is_transfer: f.is_transfer, expect_receipt: f.expect_receipt,
+      one_off: f.one_off === true,
       match_merchant: f.match_merchant, konto_id: f.konto_id, konto_name: f.konto_name,
       is_shared: f.is_shared, owner: f.owner,
       complete: isComplete(f),

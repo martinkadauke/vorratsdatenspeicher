@@ -116,6 +116,7 @@
     "varTitle": "Variable Kosten",
     "incomeTitle": "Einnahmen",
     "oneOffTitle": "Einmalige Buchungen",
+    "oneOffBadge": "einmalig",
     "netTitle": "Netto (Ein − Aus)",
     "noIncome": "Keine Einnahmen in diesem Monat. Gehaltszettel unter „Verwaltung“ hochladen.",
     "noIncomePlans": "Keine Einnahmen-Definitionen. Unter „Verwaltung“ anlegen (z. B. Gehalt, Kindergeld).",
