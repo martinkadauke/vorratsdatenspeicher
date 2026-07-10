@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Wallet, Plus, Pencil, Trash2, Home, User as UserIcon, Info,
   ChevronLeft, ChevronRight, ChevronDown, CheckCircle2, Circle, CircleDot, AlertCircle, Search, X, Upload, Layers, Lock,
-  Link2, Link2Off, RefreshCw, Landmark, SlidersHorizontal, Flag, FilePlus2, Receipt, FileText, Paperclip, Sparkles,
+  Link2, Link2Off, RefreshCw, Landmark, SlidersHorizontal, Flag, FilePlus2, Receipt, FileText, Paperclip, Sparkles, Calendar, ExternalLink,
 } from 'lucide-react';
 import { api, getToken } from '../api/client';
 import { Card, Spinner, Button, Input, Label, Select, Switch, Modal, EmptyState, Badge } from '../components/ui';
@@ -370,9 +370,11 @@ function MonthTab() {
       {picker && (
         <ReceiptPicker month={month} fix={picker} onClose={() => setPicker(null)}
           onPick={async (ev, amount) => {
+            if (!Object.keys(ev).length) return;                       // nothing selected → no-op
             if (!(await okDelta(picker, amount))) return;
+            // Close only on success (check.onSuccess → invalidate + setPicker(null));
+            // on failure the picker stays open and an error toast shows.
             check.mutate({ fixed_cost_id: picker.id, month, action: 'confirm', ...ev });
-            setPicker(null);
           }} />
       )}
       {budgetModal && <BudgetModal initial={budgetModal} onClose={() => setBudgetModal(null)} onSaved={invalidate} />}
@@ -525,23 +527,29 @@ function FixCheckRow({ f, t, excluded, onConfirmSuggestion, onConfirmNoReceipt, 
   onConfirmSuggestion: () => void; onConfirmNoReceipt: () => void; onSkip: () => void; onClear: () => void; onPick: () => void;
   onShowEvidence: () => void;
 }) {
-  const autoOk = !f.check && f.expect_receipt === false;
   const delta = f.check?.amount != null ? Math.round((f.check.amount - f.monthly_eur) * 100) / 100 : null;
   const periodic = f.frequency && f.frequency !== 'monthly';
   const shownAmount = periodic ? amortized(f.monthly_eur, f.frequency) : f.monthly_eur;
-  const state: 'ok' | 'suggest' | 'open' = f.check || autoOk ? 'ok' : f.suggestion ? 'suggest' : 'open';
-  // "Matched but not finished": a confirmed row whose receipt question is still open
-  // (bank booking linked, but no receipt attached and not marked "kein Beleg"). Shown
-  // amber so it stands out as a to-do that counts against the month's Zugeordnet-%.
-  const incomplete = state === 'ok' && f.check?.status !== 'skipped' && !autoOk && !f.complete;
-  const IconEl = incomplete ? AlertCircle : state === 'ok' ? CheckCircle2 : state === 'suggest' ? CircleDot : Circle;
+  const skipped = f.check?.status === 'skipped';
+  const hasCheck = !!f.check;
+  // Reconciliation state (backend decides `complete` = bank linked + receipt resolved):
+  //   done      → fully reconciled (green)     skipped → deliberately no evidence (grey)
+  //   incomplete→ check exists but a leg is still missing (amber, → Nachweis-Modal)
+  //   suggest   → an auto match is offered (amber)   open → nothing yet (grey)
+  // Everything except done/skipped stays actionable ("Verknüpfen") — including a
+  // no-receipt/transfer plan whose bank booking still needs to be linked.
+  const rstate: 'done' | 'skipped' | 'incomplete' | 'suggest' | 'open' =
+    skipped ? 'skipped' : f.complete ? 'done' : hasCheck ? 'incomplete' : f.suggestion ? 'suggest' : 'open';
+  const actionable = rstate !== 'done' && rstate !== 'skipped';
+  const IconEl = rstate === 'done' || rstate === 'skipped' ? CheckCircle2
+    : rstate === 'incomplete' ? AlertCircle : rstate === 'suggest' ? CircleDot : Circle;
   return (
     <Card className="flex flex-col gap-2 p-3">
       <div className="flex items-center gap-2.5">
         <IconEl size={18} className={cn('shrink-0',
-          incomplete && 'text-amber-500',
-          !incomplete && state === 'ok' && (f.check?.status === 'skipped' ? 'text-zinc-400' : 'text-emerald-500'),
-          state === 'suggest' && 'text-amber-500', state === 'open' && 'text-zinc-300 dark:text-zinc-600')} />
+          rstate === 'done' && 'text-emerald-500', rstate === 'skipped' && 'text-zinc-400',
+          (rstate === 'incomplete' || rstate === 'suggest') && 'text-amber-500',
+          rstate === 'open' && 'text-zinc-300 dark:text-zinc-600')} />
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
             <span className="truncate text-sm font-medium">{f.label}</span>
@@ -549,19 +557,19 @@ function FixCheckRow({ f, t, excluded, onConfirmSuggestion, onConfirmNoReceipt, 
             {f.is_transfer && <span className="shrink-0 rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">{t('finances.transferBadge')}</span>}
           </div>
           <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-            {autoOk && t('finances.noReceiptAuto')}
-            {f.check?.status === 'skipped' && t('finances.skippedMonth')}
-            {f.check?.status === 'confirmed' && (f.check.source === 'none'
-              ? t('finances.confirmedNoReceipt')
-              : <button type="button" onClick={onShowEvidence} className="inline-flex items-center gap-1 text-left hover:text-zinc-700 hover:underline dark:hover:text-zinc-200" title={t('finances.showEvidence')}>
-                  {f.check.source === 'bank' ? t('finances.bankShort') : f.check.source === 'income' ? t('finances.incomeShort') : t('finances.receiptShort')} {f.check.datum} „{f.check.laden}“ · {eur(f.check.amount)}{delta != null && Math.abs(delta) >= 0.01 && <span className={cn('ml-1', delta > 0 ? 'text-amber-600' : 'text-emerald-600')}>Δ {delta > 0 ? '+' : ''}{eur(delta)}</span>}
-                  <ChevronRight size={12} className="shrink-0 text-zinc-400" />
-                </button>)}
-            {state === 'suggest' && f.suggestion && (
+            {rstate === 'skipped' && t('finances.skippedMonth')}
+            {hasCheck && !skipped && f.check!.source !== 'none' && (
+              <button type="button" onClick={onShowEvidence} className="inline-flex items-center gap-1 text-left hover:text-zinc-700 hover:underline dark:hover:text-zinc-200" title={t('finances.showEvidence')}>
+                {f.check!.source === 'bank' ? t('finances.bankShort') : f.check!.source === 'income' ? t('finances.incomeShort') : t('finances.receiptShort')} {f.check!.datum} „{f.check!.laden}“ · {eur(f.check!.amount)}{delta != null && Math.abs(delta) >= 0.01 && <span className={cn('ml-1', delta > 0 ? 'text-amber-600' : 'text-emerald-600')}>Δ {delta > 0 ? '+' : ''}{eur(delta)}</span>}
+                <ChevronRight size={12} className="shrink-0 text-zinc-400" />
+              </button>)}
+            {rstate === 'suggest' && f.suggestion && (
               <>{t('finances.suggestion')} „{f.suggestion.laden}“ {eur(f.suggestion.betrag)} · {f.suggestion.datum.slice(8, 10)}.{f.suggestion.datum.slice(5, 7)}.{f.suggestion.source === 'bank' && <Badge className="ml-1.5">{t('finances.bankBadge')}</Badge>}</>
             )}
-            {state === 'open' && (f.kind === 'income' ? t('finances.noIncomeFound') : t('finances.noReceiptFound'))}
-            {incomplete && <button type="button" onClick={onShowEvidence} className="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-300">{t(f.kind === 'income' ? 'finances.proofOpen' : 'finances.receiptOpen')}</button>}
+            {rstate === 'open' && (f.expect_receipt === false || f.is_transfer ? t('finances.noReceiptBankOpen') : f.kind === 'income' ? t('finances.noIncomeFound') : t('finances.noReceiptFound'))}
+            {/* Amber to-do chip names the leg that's actually missing: the bank booking
+                (the usual case) or, once that's linked, the receipt/proof. */}
+            {rstate === 'incomplete' && <button type="button" onClick={onShowEvidence} className="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-300">{t(!f.bank_linked ? 'finances.bankOpen' : f.kind === 'income' ? 'finances.proofOpen' : 'finances.receiptOpen')}</button>}
           </div>
         </div>
         <div className="shrink-0 text-right">
@@ -570,13 +578,13 @@ function FixCheckRow({ f, t, excluded, onConfirmSuggestion, onConfirmNoReceipt, 
           {excluded && <div className="text-[10px] text-violet-500">{t('finances.notCounted')}</div>}
         </div>
       </div>
-      {(state !== 'ok' || f.check) && (
+      {actionable && (
         <div className="flex flex-wrap gap-1.5 pl-7">
-          {state === 'suggest' && <Button className="px-2.5 py-1 text-xs" onClick={onConfirmSuggestion}>{t('finances.confirm')}</Button>}
-          {(state !== 'ok' || incomplete) && <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={onPick}><Link2 size={13} className="mr-1 inline" />{t('finances.linkEvidence')}</Button>}
-          {state !== 'ok' && f.expect_receipt !== false && <Button variant="ghost" className="px-2.5 py-1 text-xs" onClick={onSkip}>{t('finances.skipThisMonth')}</Button>}
-          {state !== 'ok' && f.expect_receipt !== false && <Button variant="ghost" className="px-2.5 py-1 text-xs" onClick={onConfirmNoReceipt}>{t('finances.okNoReceipt')}</Button>}
-          {f.check && <Button variant="ghost" className="px-2.5 py-1 text-xs" onClick={onClear}>{t('finances.reopen')}</Button>}
+          {rstate === 'suggest' && <Button className="px-2.5 py-1 text-xs" onClick={onConfirmSuggestion}>{t('finances.confirm')}</Button>}
+          <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={onPick}><Link2 size={13} className="mr-1 inline" />{t('finances.linkEvidence')}</Button>
+          {!hasCheck && f.expect_receipt !== false && !f.is_transfer && <Button variant="ghost" className="px-2.5 py-1 text-xs" onClick={onConfirmNoReceipt}>{t('finances.okNoReceipt')}</Button>}
+          {!hasCheck && <Button variant="ghost" className="px-2.5 py-1 text-xs" onClick={onSkip}>{t('finances.skipThisMonth')}</Button>}
+          {hasCheck && <Button variant="ghost" className="px-2.5 py-1 text-xs" onClick={onClear}>{t('finances.reopen')}</Button>}
         </div>
       )}
     </Card>
@@ -1479,15 +1487,22 @@ function BankLinkPicker({ tx, t, onClose, onPick, onApprove }: {
     enabled: searching,
   });
   const results = searchQ.data?.results ?? [];
+  // Debit → receipt candidates: offer a "view" (new tab) so the user can inspect the
+  // receipt before linking (e.g. tell apart several Amazon orders found by item name).
+  const isDebit = tx.amount < 0;
   const row = (c: { id: number; label: string | null; betrag: number; datum: string }) => (
-    <li key={c.id}>
-      <button onClick={() => onPick(c.id)} className="flex w-full items-center gap-2 rounded-lg px-1 py-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
+    <li key={c.id} className="flex items-center gap-1">
+      <button onClick={() => onPick(c.id)} className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1 py-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium">{c.label || '–'}</div>
           <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{ddmmyyyy(c.datum)}</div>
         </div>
         <span className="shrink-0 text-sm font-semibold">{eur(c.betrag)}</span>
       </button>
+      {isDebit && (
+        <a href={`/receipts/${c.id}`} target="_blank" rel="noreferrer" title={t('finances.bank.viewReceipt')}
+          className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-emerald-600 dark:hover:bg-zinc-800"><ExternalLink size={15} /></a>
+      )}
     </li>
   );
   return (
@@ -1759,10 +1774,13 @@ function BankTab() {
                 <option value="">{t('finances.bank.allKonten')}</option>
                 {scopeKonten.map(k => <option key={k.id} value={k.id}>{scopeLabelOf(t, k)}</option>)}
               </Select>
-              <label className="flex items-center gap-1.5 whitespace-nowrap text-xs text-zinc-500 dark:text-zinc-400">
-                {t('finances.bank.monthFilter')}
-                <Input type="month" value={month} onChange={e => setMonth(e.target.value)} className="w-[9.5rem]" />
-              </label>
+              <div className="relative flex items-center">
+                <Calendar size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+                <Input type="month" value={month} onChange={e => setMonth(e.target.value)} aria-label={t('finances.bank.monthFilter')}
+                  className="w-[11rem] cursor-pointer pl-8 pr-7" title={t('finances.bank.monthFilter')} />
+                {month && <button type="button" onClick={() => setMonth('')} title={t('common.clear')}
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"><X size={13} /></button>}
+              </div>
               <button onClick={() => rematch.mutate()} disabled={rematch.isPending} title={t('finances.bank.rematch')}
                 className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-zinc-300 px-2.5 py-2 text-xs font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
                 <RefreshCw size={14} className={cn(rematch.isPending && 'animate-spin')} /> {t('finances.bank.rematch')}

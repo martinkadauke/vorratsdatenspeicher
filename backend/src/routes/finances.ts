@@ -475,24 +475,22 @@ export function financeRoutes(app: FastifyInstance): void {
       return Math.round(s[Math.floor((s.length - 1) / 2)] * 100) / 100;
     };
 
-    // "Complete" = this month's row is fully allocated for the reconciliation %.
-    //  - a bank booking is linked (the actual payment — directly, or via the
-    //    married receipt/income row), AND
-    //  - the receipt question is resolved (an invoice/receipt is attached, or a
-    //    pay slip for income, or the user marked "no receipt exists" → expect_receipt
-    //    = false), OR the month was deliberately skipped.
-    //  A row confirmed via a bank booking but still awaiting a receipt decision is
-    //  therefore NOT complete — it's the "click No receipt exists" to-do. A plan
-    //  globally marked no-receipt with no monthly check (autoOk) stays complete.
+    // "Complete" = this month's row is fully reconciled for the Zugeordnet-%.
+    //  Needs BOTH: a bank booking linked (the actual payment — directly or via the
+    //  married receipt/income row) AND the receipt question resolved (invoice/receipt
+    //  attached, income pay slip, "kein Beleg" = expect_receipt false, OR an internal
+    //  transfer which has no receipt by nature). A deliberately skipped month counts
+    //  as done. NB: a plan with no monthly check is NOT complete — even when globally
+    //  marked no-receipt — because the payment still has to be matched to a booking;
+    //  such a row therefore stays actionable ("Verknüpfen") instead of auto-passing.
     const isComplete = (f: typeof fixed[number]): boolean => {
-      const autoOk = !f.check_id && f.expect_receipt === false;
-      if (autoOk) return true;
       if (!f.check_id) return false;
       if (f.check_status === 'skipped') return true;
       const bankLinked = f.check_bank_tx_id != null || f.ce_bank != null || f.ice_bank != null;
       const receiptResolved = f.check_source === 'receipt'
         || (f.kind === 'income' && f.ice_file != null)
-        || f.expect_receipt === false;
+        || f.expect_receipt === false
+        || f.is_transfer === true;
       return bankLinked && receiptResolved;
     };
     // Map a plan row (expense or income) to its month-view shape (check + suggestion).
