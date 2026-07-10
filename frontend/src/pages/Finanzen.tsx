@@ -870,6 +870,24 @@ function CounterpartField({ draft, setDraft, costs, scopeKonten }: {
     onError: (e: Error) => toast(e.message, 'error'),
   });
 
+  // Matching bank bookings on another account (opposite sign, same amount) that can
+  // BE the counterpart — picking one auto-creates its Fixkosten leg + links + pairs.
+  const { data: bankCands } = useQuery({
+    queryKey: ['cp-bank', draft.id],
+    queryFn: () => api<{ candidates: { id: number; konto_id: number; konto_name: string | null; datum: string; amount: number; counterparty: string | null }[] }>(`/api/finances/fixed-cost/${draft.id}/bank-counterpart-candidates`),
+    enabled: !!draft.id,
+  });
+  const pairFromBank = useMutation({
+    mutationFn: (bankTxId: number) => api<{ counterpart_id: number }>(`/api/finances/fixed-cost/${draft.id}/counterpart-from-bank`, { method: 'POST', body: { bank_tx_id: bankTxId } }),
+    onSuccess: (r) => {
+      void qc.invalidateQueries({ queryKey: ['fixed-costs'] });
+      void qc.invalidateQueries({ queryKey: ['bank-tx'] });
+      void qc.invalidateQueries({ queryKey: ['fin-month'] });
+      setDraft({ ...draft, counterpart_id: r.counterpart_id });
+    },
+    onError: (e: Error) => toast(e.message, 'error'),
+  });
+
   if (!draft.id) return <p className="pl-11 text-xs text-zinc-400">{t('finances.cpSaveFirst')}</p>;
 
   return (
@@ -901,6 +919,20 @@ function CounterpartField({ draft, setDraft, costs, scopeKonten }: {
             <option value="">{t('finances.cpPick')}</option>
             {candidates.map(c => <option key={c.id} value={c.id}>{c.label} · {c.konto_name}</option>)}
           </Select>
+          {(bankCands?.candidates.length ?? 0) > 0 && (
+            <div className="flex flex-col gap-1">
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">{t('finances.cpBankCandidates')}</div>
+              {bankCands!.candidates.map(b => (
+                <button key={b.id} type="button" disabled={pairFromBank.isPending} onClick={() => pairFromBank.mutate(b.id)}
+                  className="flex items-center gap-2 rounded-lg border border-zinc-200 px-2 py-1.5 text-left text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800/50">
+                  <Landmark size={12} className="shrink-0 text-sky-500" />
+                  <span className="min-w-0 flex-1 truncate">{b.counterparty || '—'} <span className="text-zinc-400">· {b.konto_name}</span></span>
+                  <span className="shrink-0 tabular-nums">{eur(b.amount)}</span>
+                  <span className="shrink-0 text-zinc-400">{ddmmyyyy(b.datum)}</span>
+                </button>
+              ))}
+            </div>
+          )}
           <button type="button" onClick={() => { setCreating(true); setCpLabel(draft.label); }}
             className="self-start text-xs text-violet-600 hover:underline dark:text-violet-400">+ {t('finances.cpCreate')}</button>
         </div>

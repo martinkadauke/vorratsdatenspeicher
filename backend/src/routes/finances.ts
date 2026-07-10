@@ -190,6 +190,74 @@ export function financeRoutes(app: FastifyInstance): void {
     return { ok: true };
   });
 
+  /** Bank bookings that could be this transfer leg's Gegenbuchung: opposite sign,
+   *  matching amount, on a DIFFERENT account, still unlinked. */
+  app.get('/api/finances/fixed-cost/:id/bank-counterpart-candidates', async (req, reply) => {
+    const id = parseInt(String((req.params as { id: string }).id), 10);
+    if (!id) return reply.code(400).send({ error: 'bad id' });
+    const [f] = await sql`SELECT monthly_eur::float8 AS amount, kind, konto_id, is_transfer FROM fixed_cost WHERE id = ${id}`;
+    if (!f || f.is_transfer !== true) return { candidates: [] };
+    const amt = f.amount as number;
+    const tol = Math.max(0.5, amt * 0.02);
+    const rows = await sql`
+      SELECT bt.id, bt.konto_id, k.name AS konto_name, bt.booking_date::text AS datum, bt.amount::float8 AS amount, bt.counterparty
+      FROM bank_tx bt LEFT JOIN konto k ON k.id = bt.konto_id
+      WHERE ABS(ABS(bt.amount) - ${amt}) <= ${tol}
+        AND ${f.kind === 'income' ? sql`bt.amount < 0` : sql`bt.amount > 0`}
+        AND bt.konto_id IS DISTINCT FROM ${f.konto_id}
+        AND NOT EXISTS (SELECT 1 FROM einkauf e WHERE e.bank_tx_id = bt.id)
+        AND NOT EXISTS (SELECT 1 FROM income i WHERE i.bank_tx_id = bt.id)
+        AND NOT EXISTS (SELECT 1 FROM fixed_cost_check fc WHERE fc.bank_tx_id = bt.id)
+      ORDER BY bt.booking_date DESC LIMIT 20`;
+    return { candidates: rows };
+  });
+
+  /** Pair this transfer leg with a bank booking in ONE step: auto-create the opposite
+   *  Fixkosten leg from the booking (one-month, Umbuchung), link the booking to it as
+   *  confirmed evidence, and pair the two legs symmetrically. */
+  app.post('/api/finances/fixed-cost/:id/counterpart-from-bank', async (req, reply) => {
+    const id = parseInt(String((req.params as { id: string }).id), 10);
+    if (!id) return reply.code(400).send({ error: 'bad id' });
+    const bankTxId = parseInt(String((req.body as { bank_tx_id?: number } | undefined)?.bank_tx_id ?? ''), 10);
+    if (!bankTxId) return reply.code(400).send({ error: 'bank_tx_id required' });
+    try {
+      const counterpartId = await sql.begin(async tx => {
+        const [f] = await tx`SELECT label, kind, konto_id, is_transfer FROM fixed_cost WHERE id = ${id} FOR UPDATE`;
+        if (!f) throw new HttpError(404, 'not found');
+        if (f.is_transfer !== true) throw new HttpError(400, 'Nur Umbuchungen können eine Gegenbuchung haben');
+        const [bt] = await tx`SELECT konto_id, booking_date::text AS booking, amount::float8 AS amount FROM bank_tx WHERE id = ${bankTxId} FOR UPDATE`;
+        if (!bt) throw new HttpError(400, 'Bankbuchung nicht gefunden');
+        if (bt.konto_id == null) throw new HttpError(400, 'Buchung ohne Konto');
+        if (bt.konto_id === f.konto_id) throw new HttpError(400, 'Gegenbuchung muss auf einem anderen Konto liegen');
+        const [st] = await tx`SELECT
+          EXISTS(SELECT 1 FROM einkauf WHERE bank_tx_id = ${bankTxId}) AS r,
+          EXISTS(SELECT 1 FROM income WHERE bank_tx_id = ${bankTxId}) AS i,
+          EXISTS(SELECT 1 FROM fixed_cost_check WHERE bank_tx_id = ${bankTxId}) AS f`;
+        if (st.r || st.i || st.f) throw new HttpError(400, 'Bankbuchung ist bereits zugeordnet');
+        const oppKind = f.kind === 'income' ? 'expense' : 'income';
+        const amount = Math.abs(bt.amount as number);
+        const month = String(bt.booking).slice(0, 7);
+        const mb = monthBounds(month);
+        if (!mb) throw new HttpError(400, 'bad booking date');
+        const start = `${month}-01`;
+        const [nf] = await tx`
+          INSERT INTO fixed_cost (label, category_path, monthly_eur, kind, frequency, is_transfer, konto_id, start_date, end_date, active, expect_receipt, match_merchant, created_by)
+          VALUES (${(f.label as string | null) ?? 'Umbuchung'}, NULL, ${amount}, ${oppKind}, 'monthly', TRUE, ${bt.konto_id}, ${start}, ${mb.last}, TRUE, FALSE, NULL, ${req.user?.id ?? null})
+          RETURNING id`;
+        await tx`
+          INSERT INTO fixed_cost_check (fixed_cost_id, month, status, bank_tx_id, amount, decided_by)
+          VALUES (${nf.id}, ${start}, 'confirmed', ${bankTxId}, ${amount}, ${req.user?.id ?? null})
+          ON CONFLICT (fixed_cost_id, month) DO UPDATE SET bank_tx_id = EXCLUDED.bank_tx_id, amount = EXCLUDED.amount, status = 'confirmed'`;
+        await linkCounterpart(tx, id, nf.id as number);
+        return nf.id as number;
+      });
+      return { ok: true, counterpart_id: counterpartId };
+    } catch (e) {
+      if (e instanceof HttpError) return reply.code(e.code).send({ error: e.message });
+      throw e;
+    }
+  });
+
   // ── Monatsansicht ─────────────────────────────────────────────────────────
 
   const monthBounds = (m: string): { first: string; last: string } | null => {

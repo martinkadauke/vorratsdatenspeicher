@@ -165,6 +165,7 @@
     "counterpart": "Gegenbuchung",
     "counterpartHint": "Die andere Seite dieser Umbuchung: die Abbuchung auf dem einen Konto ↔ die Gutschrift auf dem anderen. Verknüpfe eine vorhandene Buchung oder lege die Gegenbuchung neu an.",
     "cpPick": "Vorhandene Buchung wählen …",
+    "cpBankCandidates": "Passende Bankbuchungen (als Gegenbuchung übernehmen)",
     "cpCreate": "Neue Gegenbuchung anlegen",
     "cpSaveFirst": "Speichere die Umbuchung zuerst — danach kannst du hier die Gegenbuchung verknüpfen.",
     "unlink": "Verknüpfung lösen",

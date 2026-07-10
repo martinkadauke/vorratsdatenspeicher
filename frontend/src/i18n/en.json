@@ -165,6 +165,7 @@
     "counterpart": "Counterpart",
     "counterpartHint": "The other side of this transfer: the debit on one account ↔ the credit on the other. Link an existing entry or create the counterpart anew.",
     "cpPick": "Choose an existing entry …",
+    "cpBankCandidates": "Matching bank bookings (use as counterpart)",
     "cpCreate": "Create counterpart",
     "cpSaveFirst": "Save the transfer first — then you can link its counterpart here.",
     "unlink": "Unlink",
