@@ -292,7 +292,7 @@ export function ReceiptDetailPage() {
             </span>
           )}
           {data.bank && (
-            <Link to={`/finanzen?tab=bank&bm=${data.bank.booking_date.slice(0, 7)}`}
+            <Link to={`/finanzen?tab=bank&bm=${data.bank.booking_date.slice(0, 7)}&bhl=${data.bank.id}`}
               title={t('receiptDetail.bankMatch')}
               className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-700 hover:bg-sky-200 dark:bg-sky-950/50 dark:text-sky-300 dark:hover:bg-sky-900/50">
               <Landmark size={11} /> {data.bank.counterparty ?? t('receiptDetail.bankMatch')} · {eur(data.bank.amount)}

@@ -310,6 +310,7 @@ export function financeRoutes(app: FastifyInstance): void {
              CASE WHEN c.einkauf_id IS NOT NULL THEN 'receipt'
                   WHEN c.bank_tx_id IS NOT NULL THEN 'bank'
                   WHEN c.income_id IS NOT NULL THEN 'income' ELSE 'none' END AS check_source,
+             ce.bank_tx_id AS ce_bank, ice.bank_tx_id AS ice_bank, ice.file_path AS ice_file,
              COALESCE(ce.roh_ladenname, bce.counterparty, ice.description) AS check_laden,
              COALESCE(ce.datum::text, bce.booking_date::text, ice.datum::text) AS check_datum
       FROM fixed_cost f
@@ -474,11 +475,33 @@ export function financeRoutes(app: FastifyInstance): void {
       return Math.round(s[Math.floor((s.length - 1) / 2)] * 100) / 100;
     };
 
+    // "Complete" = this month's row is fully allocated for the reconciliation %.
+    //  - a bank booking is linked (the actual payment — directly, or via the
+    //    married receipt/income row), AND
+    //  - the receipt question is resolved (an invoice/receipt is attached, or a
+    //    pay slip for income, or the user marked "no receipt exists" → expect_receipt
+    //    = false), OR the month was deliberately skipped.
+    //  A row confirmed via a bank booking but still awaiting a receipt decision is
+    //  therefore NOT complete — it's the "click No receipt exists" to-do. A plan
+    //  globally marked no-receipt with no monthly check (autoOk) stays complete.
+    const isComplete = (f: typeof fixed[number]): boolean => {
+      const autoOk = !f.check_id && f.expect_receipt === false;
+      if (autoOk) return true;
+      if (!f.check_id) return false;
+      if (f.check_status === 'skipped') return true;
+      const bankLinked = f.check_bank_tx_id != null || f.ce_bank != null || f.ice_bank != null;
+      const receiptResolved = f.check_source === 'receipt'
+        || (f.kind === 'income' && f.ice_file != null)
+        || f.expect_receipt === false;
+      return bankLinked && receiptResolved;
+    };
     // Map a plan row (expense or income) to its month-view shape (check + suggestion).
     const mapPlan = (f: typeof fixed[number]) => ({
       id: f.id, label: f.label, monthly_eur: f.monthly_eur, kind: f.kind, frequency: f.frequency, is_transfer: f.is_transfer, expect_receipt: f.expect_receipt,
       match_merchant: f.match_merchant, konto_id: f.konto_id, konto_name: f.konto_name,
       is_shared: f.is_shared, owner: f.owner,
+      complete: isComplete(f),
+      bank_linked: f.check_bank_tx_id != null || f.ce_bank != null || f.ice_bank != null,
       check: f.check_id ? {
         status: f.check_status, source: f.check_source, einkauf_id: f.check_einkauf_id, bank_tx_id: f.check_bank_tx_id, income_id: f.check_income_id,
         amount: f.check_amount, laden: f.check_laden, datum: f.check_datum ? String(f.check_datum) : null,
@@ -535,7 +558,7 @@ export function financeRoutes(app: FastifyInstance): void {
     if (incomeId && !bankId) { const [i] = await sql`SELECT bank_tx_id FROM income WHERE id = ${incomeId}`; bankId = (i?.bank_tx_id as number) ?? null; }
     const [rec] = einkaufId ? await sql`SELECT id, datum::text AS datum, roh_ladenname, gesamt_betrag::float8 AS betrag, quelle, private_for_user_id FROM einkauf WHERE id = ${einkaufId}` : [null];
     const [bt] = bankId ? await sql`SELECT id, booking_date::text AS datum, amount::float8 AS amount, counterparty FROM bank_tx WHERE id = ${bankId}` : [null];
-    const [inc] = incomeId ? await sql`SELECT id, datum::text AS datum, description, amount::float8 AS amount FROM income WHERE id = ${incomeId}` : [null];
+    const [inc] = incomeId ? await sql`SELECT id, datum::text AS datum, description, amount::float8 AS amount, file_path, file_name FROM income WHERE id = ${incomeId}` : [null];
     // A private receipt masks its own text AND its bank booking's merchant text.
     const uid = req.user?.id ?? -1;
     const masked = !!rec && (rec.private_for_user_id as number | null) != null && (rec.private_for_user_id as number | null) !== uid && !req.user?.sees_all_konten;
@@ -545,7 +568,7 @@ export function financeRoutes(app: FastifyInstance): void {
       receipt: rec ? (masked
         ? { id: null, laden: null, datum: rec.datum, betrag: rec.betrag, quelle: rec.quelle, private: true }
         : { id: rec.id, laden: rec.roh_ladenname, datum: rec.datum, betrag: rec.betrag, quelle: rec.quelle, private: false }) : null,
-      income: inc ? { id: inc.id, datum: inc.datum, description: inc.description, amount: inc.amount } : null,
+      income: inc ? { id: inc.id, datum: inc.datum, description: inc.description, amount: inc.amount, has_file: inc.file_path != null, file_name: inc.file_name ?? null } : null,
     };
   });
 
@@ -574,39 +597,40 @@ export function financeRoutes(app: FastifyInstance): void {
     let bankTxId: number | null = null;
     let incomeId: number | null = null;
     let amount: number | null = null;
-    if (bdy.action === 'confirm' && bdy.income_id) {
-      // An actual income row (pay slip) as evidence for an income plan.
-      const [inc] = await sql`SELECT id, amount::float8 AS amount, description FROM income WHERE id = ${bdy.income_id}`;
-      if (!inc) return reply.code(404).send({ error: 'income not found' });
-      incomeId = inc.id as number;
-      amount = inc.amount as number | null;
-      const merchant = ((inc.description as string | null) ?? '').trim();
-      if (!f.match_merchant && merchant) await sql`UPDATE fixed_cost SET match_merchant = ${merchant} WHERE id = ${fixedId}`;
-    } else if (bdy.action === 'confirm' && bdy.einkauf_id) {
-      const [e] = await sql`
-        SELECT e.id, e.gesamt_betrag::float8 AS betrag, e.roh_ladenname, e.quelle FROM einkauf e
-        WHERE e.id = ${bdy.einkauf_id} ${kontoScope(req.user, sql`e`)}`;
-      if (!e) return reply.code(404).send({ error: 'receipt not found' });
-      // Guard: a fixed cost can only be backed by an invoice (e-mail or dropped
-      // PDF), never a till/cash receipt — even if the client somehow passes one.
-      if (e.quelle !== 'email' && e.quelle !== 'upload') return reply.code(400).send({ error: 'fixed costs can only be matched to invoices, not till receipts' });
-      einkaufId = e.id as number;
-      amount = e.betrag as number | null;
+    // A confirm may carry a DOCUMENT (invoice / pay slip) AND the bank STATEMENT (the
+    // actual payment) at once, so a fixed cost is fully reconciled in one step — both
+    // land on the same fixed_cost_check row. The document amount is authoritative;
+    // the bank amount is only a fallback. Merchant is learned from the document first.
+    if (bdy.action === 'confirm') {
+      let learnMerchant: string | null = null;
+      if (bdy.income_id) {
+        const [inc] = await sql`SELECT id, amount::float8 AS amount, description FROM income WHERE id = ${bdy.income_id}`;
+        if (!inc) return reply.code(404).send({ error: 'income not found' });
+        incomeId = inc.id as number;
+        amount = inc.amount as number | null;
+        learnMerchant = ((inc.description as string | null) ?? '').trim() || learnMerchant;
+      }
+      if (bdy.einkauf_id) {
+        const [e] = await sql`
+          SELECT e.id, e.gesamt_betrag::float8 AS betrag, e.roh_ladenname, e.quelle FROM einkauf e
+          WHERE e.id = ${bdy.einkauf_id} ${kontoScope(req.user, sql`e`)}`;
+        if (!e) return reply.code(404).send({ error: 'receipt not found' });
+        // Guard: a fixed cost can only be backed by an invoice (e-mail or dropped
+        // PDF), never a till/cash receipt — even if the client somehow passes one.
+        if (e.quelle !== 'email' && e.quelle !== 'upload') return reply.code(400).send({ error: 'fixed costs can only be matched to invoices, not till receipts' });
+        einkaufId = e.id as number;
+        amount = e.betrag as number | null;
+        learnMerchant = ((e.roh_ladenname as string | null) ?? '').trim() || learnMerchant;
+      }
+      if (bdy.bank_tx_id) {
+        const [bt] = await sql`SELECT id, amount::float8 AS amount, counterparty, description FROM bank_tx WHERE id = ${bdy.bank_tx_id}`;
+        if (!bt) return reply.code(404).send({ error: 'bank transaction not found' });
+        bankTxId = bt.id as number;
+        if (amount == null) amount = Math.abs(bt.amount as number);
+        if (!learnMerchant) learnMerchant = ((bt.counterparty as string | null) ?? '').trim() || ((bt.description as string | null) ?? '').trim();
+      }
       // Learn the merchant for future auto-suggestions ("Internet" ↔ "Telekom").
-      if (!f.match_merchant && e.roh_ladenname) {
-        await sql`UPDATE fixed_cost SET match_merchant = ${(e.roh_ladenname as string).trim()} WHERE id = ${fixedId}`;
-      }
-    } else if (bdy.action === 'confirm' && bdy.bank_tx_id) {
-      // A bank transaction as evidence (comdirect CSV etc.). Amount is the paid
-      // amount (abs of the Belastung); learn the merchant from the counterparty.
-      const [bt] = await sql`SELECT id, amount::float8 AS amount, counterparty, description FROM bank_tx WHERE id = ${bdy.bank_tx_id}`;
-      if (!bt) return reply.code(404).send({ error: 'bank transaction not found' });
-      bankTxId = bt.id as number;
-      amount = Math.abs(bt.amount as number);
-      const merchant = ((bt.counterparty as string | null) ?? '').trim() || ((bt.description as string | null) ?? '').trim();
-      if (!f.match_merchant && merchant) {
-        await sql`UPDATE fixed_cost SET match_merchant = ${merchant} WHERE id = ${fixedId}`;
-      }
+      if (learnMerchant && !f.match_merchant) await sql`UPDATE fixed_cost SET match_merchant = ${learnMerchant} WHERE id = ${fixedId}`;
     }
     await sql`
       INSERT INTO fixed_cost_check (fixed_cost_id, month, status, einkauf_id, bank_tx_id, income_id, amount, decided_by)

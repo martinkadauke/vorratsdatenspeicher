@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Wallet, Plus, Pencil, Trash2, Home, User as UserIcon, Info,
-  ChevronLeft, ChevronRight, ChevronDown, CheckCircle2, Circle, CircleDot, Search, X, Upload, Layers, Lock,
+  ChevronLeft, ChevronRight, ChevronDown, CheckCircle2, Circle, CircleDot, AlertCircle, Search, X, Upload, Layers, Lock,
   Link2, Link2Off, RefreshCw, Landmark, SlidersHorizontal, Flag, FilePlus2, Receipt, FileText, Paperclip, Sparkles,
 } from 'lucide-react';
 import { api, getToken } from '../api/client';
@@ -34,6 +34,7 @@ interface KontoLite { id: number; name: string; is_shared: boolean; is_cash: boo
 interface MonthFix {
   id: number; label: string; monthly_eur: number; kind: 'expense' | 'income'; frequency: Freq; is_transfer: boolean; expect_receipt: boolean; match_merchant: string | null;
   konto_id: number | null; konto_name: string | null; is_shared: boolean | null; owner: string | null;
+  complete: boolean; bank_linked: boolean;
   check: { status: 'confirmed' | 'skipped'; source: 'receipt' | 'bank' | 'income' | 'none'; einkauf_id: number | null; bank_tx_id: number | null; income_id: number | null; amount: number | null; laden: string | null; datum: string | null } | null;
   suggestion: { source: 'receipt' | 'bank' | 'income'; einkauf_id: number | null; bank_tx_id: number | null; income_id: number | null; laden: string | null; betrag: number; datum: string; amount_ok: boolean; merchant_ok: boolean } | null;
 }
@@ -136,7 +137,7 @@ function MonthTab() {
   const [picker, setPicker] = useState<MonthFix | null>(null);
   const [budgetModal, setBudgetModal] = useState<Partial<MonthBudget> | null>(null);
   const [posBudget, setPosBudget] = useState<MonthBudget | null>(null);
-  const [evidence, setEvidence] = useState<{ id: number; label: string; kind: 'expense' | 'income' } | null>(null);
+  const [evidence, setEvidence] = useState<{ id: number; label: string; kind: 'expense' | 'income'; expectReceipt: boolean } | null>(null);
 
   // Account-holder scope: one bubble per person + one for the household account;
   // default = all (Gesamthaushalt). Selecting a single person reveals sub-bubbles
@@ -197,6 +198,12 @@ function MonthTab() {
     onSuccess: () => { invalidate(); void qc.invalidateQueries({ queryKey: ['fixed-costs'] }); toast(t('finances.evNoReceiptDone'), 'success'); },
     onError: (e: Error) => toast(e.message, 'error'),
   });
+  // Undo "kein Beleg vorhanden": start expecting a receipt again for this fixed cost.
+  const expectReceiptOn = useMutation({
+    mutationFn: (id: number) => api(`/api/fixed-costs/${id}`, { method: 'PATCH', body: { expect_receipt: true } }),
+    onSuccess: () => { invalidate(); void qc.invalidateQueries({ queryKey: ['fixed-costs'] }); void qc.invalidateQueries({ queryKey: ['fix-evidence'] }); toast(t('finances.evExpectReceiptOn'), 'success'); },
+    onError: (e: Error) => toast(e.message, 'error'),
+  });
 
   const monthLabel = new Date(`${month}-01T00:00:00Z`).toLocaleDateString(
     i18n.language === 'en' ? 'en-GB' : 'de-DE', { month: 'long', year: 'numeric', timeZone: 'UTC' });
@@ -215,8 +222,14 @@ function MonthTab() {
   const effEur = (f: MonthFix) => amortized(f.check?.status === 'confirmed' && f.check.amount != null ? f.check.amount : f.monthly_eur, f.frequency);
   const incomeTotal = incomes.reduce((s, f) => s + (counts(f) ? effEur(f) : 0), 0);
   const fixTotal = fixed.reduce((s, f) => s + (counts(f) ? effEur(f) : 0), 0);
-  const isOk = (f: MonthFix) => !!f.check || f.expect_receipt === false;
-  const okCount = fixed.filter(isOk).length;
+  // Reconciliation completeness: a plan is "complete" when its bank booking is linked
+  // AND the receipt question is resolved (attached / pay slip / "kein Beleg") — the
+  // backend decides. The month %-bar covers income plans + fixed costs together.
+  const fixDone = fixed.filter(f => f.complete).length;
+  const incDone = incomes.filter(f => f.complete).length;
+  const planTotal = incomes.length + fixed.length;
+  const planDone = fixDone + incDone;
+  const donePct = planTotal ? Math.round((planDone / planTotal) * 100) : 100;
   const varActual = budgets.reduce((s, b) => s + b.actual, 0);
   const varTarget = budgets.reduce((s, b) => s + b.monthly_target, 0);
   const net = Math.round((incomeTotal - fixTotal - varActual) * 100) / 100;
@@ -291,8 +304,8 @@ function MonthTab() {
               <div>
                 <div className="text-xs text-zinc-500 dark:text-zinc-400">{t('finances.fixTitle')}</div>
                 <div className="text-lg font-bold">{eur(fixTotal)}</div>
-                <div className={cn('text-xs', okCount === fixed.length && fixed.length > 0 ? 'text-emerald-600 dark:text-emerald-500' : 'text-amber-600 dark:text-amber-500')}>
-                  {t('finances.checkedOf', { done: okCount, total: fixed.length })}
+                <div className={cn('text-xs', fixDone === fixed.length && fixed.length > 0 ? 'text-emerald-600 dark:text-emerald-500' : 'text-amber-600 dark:text-amber-500')}>
+                  {t('finances.checkedOf', { done: fixDone, total: fixed.length })}
                 </div>
               </div>
               <div>
@@ -305,6 +318,18 @@ function MonthTab() {
               <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">{t('finances.netTitle')}</span>
               <span className={cn('text-base font-bold', net >= 0 ? 'text-emerald-600 dark:text-emerald-500' : 'text-red-500')}>{net >= 0 ? '+' : ''}{eur(net)}</span>
             </div>
+            {/* Reconciliation completeness for the month (income plans + fixed costs). */}
+            {planTotal > 0 && (
+              <div className="flex flex-col gap-1 border-t border-zinc-100 pt-2 dark:border-zinc-800">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-medium text-zinc-500 dark:text-zinc-400">{t('finances.allocatedTitle')}</span>
+                  <span className={cn('font-semibold', donePct === 100 ? 'text-emerald-600 dark:text-emerald-500' : 'text-amber-600 dark:text-amber-500')}>{donePct}% · {planDone}/{planTotal}</span>
+                </div>
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
+                  <div className={cn('h-full rounded-full transition-all', donePct === 100 ? 'bg-emerald-500' : 'bg-amber-500')} style={{ width: `${donePct}%` }} />
+                </div>
+              </div>
+            )}
           </Card>
 
           {/* income plans (Einnahmen) — each shows its matched actual pay-slip / bank credit as evidence */}
@@ -316,7 +341,7 @@ function MonthTab() {
               onSkip={() => check.mutate({ fixed_cost_id: f.id, month, action: 'skip' })}
               onClear={() => check.mutate({ fixed_cost_id: f.id, month, action: 'clear' })}
               onPick={() => setPicker(f)}
-              onShowEvidence={() => setEvidence({ id: f.id, label: f.label, kind: f.kind })}
+              onShowEvidence={() => setEvidence({ id: f.id, label: f.label, kind: f.kind, expectReceipt: f.expect_receipt })}
             />)}
           </Section>
 
@@ -329,7 +354,7 @@ function MonthTab() {
               onSkip={() => check.mutate({ fixed_cost_id: f.id, month, action: 'skip' })}
               onClear={() => check.mutate({ fixed_cost_id: f.id, month, action: 'clear' })}
               onPick={() => setPicker(f)}
-              onShowEvidence={() => setEvidence({ id: f.id, label: f.label, kind: f.kind })}
+              onShowEvidence={() => setEvidence({ id: f.id, label: f.label, kind: f.kind, expectReceipt: f.expect_receipt })}
             />)}
           </Section>
 
@@ -353,8 +378,10 @@ function MonthTab() {
       {budgetModal && <BudgetModal initial={budgetModal} onClose={() => setBudgetModal(null)} onSaved={invalidate} />}
       {posBudget && <BudgetPositions budget={posBudget} month={month} onClose={() => setPosBudget(null)} />}
       {evidence && <FixedEvidenceModal id={evidence.id} label={evidence.label} kind={evidence.kind} month={month} t={t}
+        expectReceipt={evidence.expectReceipt}
         onClose={() => setEvidence(null)}
-        onNoReceipt={() => { expectReceiptOff.mutate(evidence.id); setEvidence(null); }}
+        onNoReceipt={() => { expectReceiptOff.mutate(evidence.id); setEvidence(e => e && { ...e, expectReceipt: false }); }}
+        onExpectReceiptOn={() => { expectReceiptOn.mutate(evidence.id); setEvidence(e => e && { ...e, expectReceipt: true }); }}
         onFindReceipt={() => {
           const list = evidence.kind === 'income' ? (data?.incomes ?? []) : (data?.fixed ?? []);
           const f = list.find(x => x.id === evidence.id);
@@ -369,25 +396,38 @@ interface FixEvidence {
   status: string | null; amount: number | null;
   bank: { id: number; datum: string; amount: number; counterparty: string | null; private: boolean } | null;
   receipt: { id: number | null; laden: string | null; datum: string; betrag: number; quelle: string; private: boolean } | null;
-  income: { id: number; datum: string; description: string | null; amount: number } | null;
+  income: { id: number; datum: string; description: string | null; amount: number; has_file: boolean; file_name: string | null } | null;
 }
 
 /** Click a confirmed Fixkosten row → see the full evidence chain: the bank booking
  *  AND the receipt/e-mail (or income), whichever — or both — is attached. Each is a
  *  link (bank → Auszüge search, receipt → its detail page). */
-function FixedEvidenceModal({ id, label, kind, month, t, onClose, onNoReceipt, onFindReceipt }: {
+function FixedEvidenceModal({ id, label, kind, month, t, expectReceipt, onClose, onNoReceipt, onExpectReceiptOn, onFindReceipt }: {
   id: number; label: string; kind: 'expense' | 'income'; month: string; t: (k: string, o?: Record<string, unknown>) => string;
-  onClose: () => void; onNoReceipt: () => void; onFindReceipt: () => void;
+  expectReceipt: boolean; onClose: () => void; onNoReceipt: () => void; onExpectReceiptOn: () => void; onFindReceipt: () => void;
 }) {
   const navigate = useNavigate();
+  const qc = useQueryClient();
+  const [viewPayslip, setViewPayslip] = useState(false);
   const { data, isLoading } = useQuery({
     queryKey: ['fix-evidence', id, month],
     queryFn: () => api<FixEvidence>(`/api/finances/fixed-cost/${id}/evidence?month=${month}`),
+  });
+  // Attach a pay slip to the linked income row (income "receipt"), mirroring the
+  // Verwaltung income list — so income evidence has the same proof flow as fixed costs.
+  const attach = useMutation({
+    mutationFn: async ({ id: incId, file }: { id: number; file: File }) => {
+      const b64 = await new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = () => rej(new Error('read failed')); r.readAsDataURL(file); });
+      return api(`/api/finances/income/${incId}/file`, { method: 'POST', body: { filename: file.name, data_b64: b64 } });
+    },
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['fix-evidence'] }); void qc.invalidateQueries({ queryKey: ['fin-month'] }); void qc.invalidateQueries({ queryKey: ['fin-income'] }); toast(t('finances.income.attached'), 'success'); },
+    onError: (e: Error) => toast(e.message, 'error'),
   });
   const go = (to: string) => { onClose(); navigate(to); };
   const rowCls = 'flex items-center gap-3 rounded-xl border border-zinc-200 p-3 text-left dark:border-zinc-800';
   const dashCls = 'flex items-center gap-2 rounded-xl border border-dashed border-zinc-200 p-3 text-xs text-zinc-400 dark:border-zinc-800';
   return (
+    <>
     <Modal open onClose={onClose} title={label}>
       <div className="flex flex-col gap-2.5">
         {isLoading ? <Spinner /> : !data ? <p className="text-xs text-zinc-400">–</p> : (
@@ -410,8 +450,8 @@ function FixedEvidenceModal({ id, label, kind, month, t, onClose, onNoReceipt, o
                 {bankLink && <ChevronRight size={15} className="shrink-0 text-zinc-300 dark:text-zinc-600" />}
               </button>); })()
             : <div className={dashCls}><Landmark size={14} /> {t('finances.evidenceNoBank')}</div>}
-            {/* Receipt / e-mail invoice */}
-            {data.receipt ? (
+            {/* Receipt / e-mail invoice (expense) */}
+            {kind === 'expense' && data.receipt && (
               <button type="button" disabled={data.receipt.private || data.receipt.id == null}
                 onClick={() => data.receipt?.id != null && go(`/receipts/${data.receipt.id}`)}
                 className={cn(rowCls, !data.receipt.private && data.receipt.id != null && 'hover:bg-zinc-50 dark:hover:bg-zinc-800/50')}>
@@ -426,17 +466,9 @@ function FixedEvidenceModal({ id, label, kind, month, t, onClose, onNoReceipt, o
                 </div>
                 {!data.receipt.private && data.receipt.id != null && <ChevronRight size={15} className="shrink-0 text-zinc-300 dark:text-zinc-600" />}
               </button>
-            ) : kind === 'expense' ? (
-              <div className="rounded-xl border border-dashed border-zinc-200 p-3 dark:border-zinc-800">
-                <div className="mb-2 flex items-center gap-2 text-xs text-zinc-400"><Receipt size={14} /> {t('finances.evidenceNoReceipt')}</div>
-                <div className="flex flex-wrap gap-1.5">
-                  <button type="button" onClick={onFindReceipt} className="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-700">{t('finances.evFindReceipt')}</button>
-                  <button type="button" onClick={onNoReceipt} className="rounded-lg border border-zinc-300 px-2.5 py-1 text-xs font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">{t('finances.evNoReceiptNeeded')}</button>
-                </div>
-              </div>
-            ) : <div className={dashCls}><Receipt size={14} /> {t('finances.evidenceNoReceipt')}</div>}
-            {/* Income row (pay slip), if this is an income plan */}
-            {data.income && (
+            )}
+            {/* Income row (pay slip) — the proof for an income plan; view / attach here */}
+            {kind === 'income' && data.income && (
               <div className={rowCls}>
                 <Wallet size={18} className="shrink-0 text-teal-500" />
                 <div className="min-w-0 flex-1">
@@ -447,12 +479,44 @@ function FixedEvidenceModal({ id, label, kind, month, t, onClose, onNoReceipt, o
                   <div className="text-sm font-semibold">{eur(data.income.amount)}</div>
                   <div className="text-[10px] text-zinc-400">{ddmmyyyy(data.income.datum)}</div>
                 </div>
+                {data.income.has_file ? (
+                  <button type="button" onClick={() => setViewPayslip(true)} title={t('finances.income.view')}
+                    className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-emerald-600 dark:hover:bg-zinc-800"><FileText size={16} /></button>
+                ) : (
+                  <label className="shrink-0 cursor-pointer rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-emerald-600 dark:hover:bg-zinc-800" title={t('finances.income.attach')}>
+                    <Paperclip size={16} />
+                    <input type="file" accept=".pdf,image/*" className="hidden" onChange={e => { const fl = e.target.files?.[0]; const inc = data.income; if (fl && inc) attach.mutate({ id: inc.id, file: fl }); e.currentTarget.value = ''; }} />
+                  </label>
+                )}
               </div>
             )}
+            {/* Proof resolution: find, (income) attach above, or mark "kein Beleg" (undo-able) */}
+            {(() => {
+              const hasProof = kind === 'expense' ? !!data.receipt : !!(data.income && data.income.has_file);
+              if (hasProof) return null;
+              if (expectReceipt === false) return (
+                <div className="flex items-center justify-between gap-2 rounded-xl border border-dashed border-zinc-200 p-3 dark:border-zinc-800">
+                  <span className="inline-flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400"><CheckCircle2 size={14} className="shrink-0 text-zinc-400" /> {t('finances.evNoReceiptState')}</span>
+                  <button type="button" onClick={onExpectReceiptOn} className="shrink-0 rounded-lg border border-zinc-300 px-2.5 py-1 text-xs font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">{t('finances.evExpectReceiptOn')}</button>
+                </div>
+              );
+              const canFind = kind === 'expense' ? !data.receipt : !data.income;
+              return (
+                <div className="rounded-xl border border-dashed border-zinc-200 p-3 dark:border-zinc-800">
+                  <div className="mb-2 flex items-center gap-2 text-xs text-zinc-400"><Receipt size={14} /> {kind === 'income' ? t('finances.evidenceNoProof') : t('finances.evidenceNoReceipt')}</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {canFind && <button type="button" onClick={onFindReceipt} className="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-700">{kind === 'income' ? t('finances.evFindIncome') : t('finances.evFindReceipt')}</button>}
+                    <button type="button" onClick={onNoReceipt} className="rounded-lg border border-zinc-300 px-2.5 py-1 text-xs font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">{t('finances.evNoReceiptNeeded')}</button>
+                  </div>
+                </div>
+              );
+            })()}
           </>
         )}
       </div>
     </Modal>
+    {viewPayslip && data?.income && <PayslipViewer id={data.income.id} name={data.income.file_name ?? ''} t={t} onClose={() => setViewPayslip(false)} />}
+    </>
   );
 }
 
@@ -466,12 +530,17 @@ function FixCheckRow({ f, t, excluded, onConfirmSuggestion, onConfirmNoReceipt, 
   const periodic = f.frequency && f.frequency !== 'monthly';
   const shownAmount = periodic ? amortized(f.monthly_eur, f.frequency) : f.monthly_eur;
   const state: 'ok' | 'suggest' | 'open' = f.check || autoOk ? 'ok' : f.suggestion ? 'suggest' : 'open';
-  const IconEl = state === 'ok' ? CheckCircle2 : state === 'suggest' ? CircleDot : Circle;
+  // "Matched but not finished": a confirmed row whose receipt question is still open
+  // (bank booking linked, but no receipt attached and not marked "kein Beleg"). Shown
+  // amber so it stands out as a to-do that counts against the month's Zugeordnet-%.
+  const incomplete = state === 'ok' && f.check?.status !== 'skipped' && !autoOk && !f.complete;
+  const IconEl = incomplete ? AlertCircle : state === 'ok' ? CheckCircle2 : state === 'suggest' ? CircleDot : Circle;
   return (
     <Card className="flex flex-col gap-2 p-3">
       <div className="flex items-center gap-2.5">
         <IconEl size={18} className={cn('shrink-0',
-          state === 'ok' && (f.check?.status === 'skipped' ? 'text-zinc-400' : 'text-emerald-500'),
+          incomplete && 'text-amber-500',
+          !incomplete && state === 'ok' && (f.check?.status === 'skipped' ? 'text-zinc-400' : 'text-emerald-500'),
           state === 'suggest' && 'text-amber-500', state === 'open' && 'text-zinc-300 dark:text-zinc-600')} />
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
@@ -492,6 +561,7 @@ function FixCheckRow({ f, t, excluded, onConfirmSuggestion, onConfirmNoReceipt, 
               <>{t('finances.suggestion')} „{f.suggestion.laden}“ {eur(f.suggestion.betrag)} · {f.suggestion.datum.slice(8, 10)}.{f.suggestion.datum.slice(5, 7)}.{f.suggestion.source === 'bank' && <Badge className="ml-1.5">{t('finances.bankBadge')}</Badge>}</>
             )}
             {state === 'open' && (f.kind === 'income' ? t('finances.noIncomeFound') : t('finances.noReceiptFound'))}
+            {incomplete && <button type="button" onClick={onShowEvidence} className="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-300">{t(f.kind === 'income' ? 'finances.proofOpen' : 'finances.receiptOpen')}</button>}
           </div>
         </div>
         <div className="shrink-0 text-right">
@@ -503,7 +573,7 @@ function FixCheckRow({ f, t, excluded, onConfirmSuggestion, onConfirmNoReceipt, 
       {(state !== 'ok' || f.check) && (
         <div className="flex flex-wrap gap-1.5 pl-7">
           {state === 'suggest' && <Button className="px-2.5 py-1 text-xs" onClick={onConfirmSuggestion}>{t('finances.confirm')}</Button>}
-          {state !== 'ok' && <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={onPick}>{f.kind === 'income' ? t('finances.chooseIncome') : t('finances.chooseReceipt')}</Button>}
+          {(state !== 'ok' || incomplete) && <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={onPick}><Link2 size={13} className="mr-1 inline" />{t('finances.linkEvidence')}</Button>}
           {state !== 'ok' && f.expect_receipt !== false && <Button variant="ghost" className="px-2.5 py-1 text-xs" onClick={onSkip}>{t('finances.skipThisMonth')}</Button>}
           {state !== 'ok' && f.expect_receipt !== false && <Button variant="ghost" className="px-2.5 py-1 text-xs" onClick={onConfirmNoReceipt}>{t('finances.okNoReceipt')}</Button>}
           {f.check && <Button variant="ghost" className="px-2.5 py-1 text-xs" onClick={onClear}>{t('finances.reopen')}</Button>}
@@ -708,6 +778,19 @@ function ReceiptPicker({ month, fix, onClose, onPick }: {
   const { t } = useTranslation();
   const [q, setQ] = useState('');
   const isIncome = fix.kind === 'income';
+  // Two independent selections: a DOCUMENT (invoice / pay slip) and the bank STATEMENT
+  // (the actual payment). Pick one from each — or just one — then "Verknüpfen" links
+  // both onto the same check, so the row is fully reconciled (Beleg + Bankbuchung).
+  // Pre-seed from the existing check so adding one leg never wipes the other (confirm
+  // rebuilds the check from the passed ids).
+  const [docSel, setDocSel] = useState<{ id: number; amount: number | null } | null>(() => {
+    const c = fix.check;
+    if (c?.einkauf_id != null) return { id: c.einkauf_id, amount: c.amount };
+    if (c?.income_id != null) return { id: c.income_id, amount: c.amount };
+    return null;
+  });
+  const [bankSel, setBankSel] = useState<{ id: number; amount: number | null } | null>(
+    () => fix.check?.bank_tx_id != null ? { id: fix.check.bank_tx_id, amount: fix.check.amount } : null);
 
   // Both kinds return {items:[{source,id,datum,amount,label}]}: income → pay-slip rows
   // + bank credits; expense → invoices + bank debits (wide window for booking lag).
@@ -718,31 +801,53 @@ function ReceiptPicker({ month, fix, onClose, onPick }: {
   });
   const isLoading = evidenceQ.isLoading;
 
-  type Row = { key: string; datum: string | null; label: string; amount: number | null; ev: PickEv };
-  const all: Row[] = (evidenceQ.data?.items ?? []).map(i => ({
-    key: `${i.source}:${i.id}`, datum: i.datum, label: i.label, amount: i.amount,
-    ev: i.source === 'income' ? { income_id: i.id } : i.source === 'bank' ? { bank_tx_id: i.id } : { einkauf_id: i.id },
-  }));
-  const rows = all.filter(r => !q.trim() || r.label.toLowerCase().includes(q.trim().toLowerCase()));
+  const items = evidenceQ.data?.items ?? [];
+  const hit = (l: string) => !q.trim() || l.toLowerCase().includes(q.trim().toLowerCase());
+  const docs = items.filter(i => i.source !== 'bank' && hit(i.label));   // invoices / pay-slip rows
+  const banks = items.filter(i => i.source === 'bank' && hit(i.label));  // bank statement lines
+  const canLink = !!docSel || !!bankSel;
+  const doLink = () => {
+    const ev: PickEv = {};
+    if (docSel) { if (isIncome) ev.income_id = docSel.id; else ev.einkauf_id = docSel.id; }
+    if (bankSel) ev.bank_tx_id = bankSel.id;
+    onPick(ev, docSel?.amount ?? bankSel?.amount ?? null);
+  };
+  const evRow = (i: { source: string; id: number; datum: string; amount: number; label: string }, selected: boolean, onClick: () => void) => (
+    <button key={`${i.source}:${i.id}`} type="button" onClick={onClick}
+      className={cn('flex items-center gap-2 rounded-xl border px-3 py-2 text-left transition',
+        selected ? 'border-emerald-500 bg-emerald-50 dark:border-emerald-600 dark:bg-emerald-950/30'
+          : 'border-zinc-200 hover:border-emerald-400 hover:bg-emerald-50/50 dark:border-zinc-800 dark:hover:bg-emerald-950/20')}>
+      <span className="w-12 shrink-0 text-xs text-zinc-400">{i.datum?.slice(8, 10)}.{i.datum?.slice(5, 7)}.</span>
+      <span className="min-w-0 flex-1 truncate text-sm">{i.label}</span>
+      <span className="shrink-0 text-sm font-medium">{i.amount != null ? eur(i.amount) : '–'}</span>
+      {selected ? <CheckCircle2 size={16} className="shrink-0 text-emerald-500" /> : <Circle size={16} className="shrink-0 text-zinc-300 dark:text-zinc-600" />}
+    </button>
+  );
 
   return (
     <Modal open onClose={onClose} title={`${t(isIncome ? 'finances.incomePickerTitle' : 'finances.pickerTitle')} · ${fix.label}`}>
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-3">
         <div className="relative">
           <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
           <Input className="pl-8" autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder={t('finances.pickerSearch')} />
         </div>
-        {isLoading && <Spinner />}
-        {!isLoading && !rows.length && <EmptyState>{t(isIncome ? 'finances.incomePickerEmpty' : 'finances.pickerEmpty')}</EmptyState>}
-        <div className="flex max-h-80 flex-col gap-1 overflow-y-auto">
-          {rows.map(r => (
-            <button key={r.key} onClick={() => onPick(r.ev, r.amount)}
-              className="flex items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2 text-left hover:border-emerald-400 hover:bg-emerald-50/50 dark:border-zinc-800 dark:hover:bg-emerald-950/20">
-              <span className="w-14 shrink-0 text-xs text-zinc-400">{r.datum?.slice(8, 10)}.{r.datum?.slice(5, 7)}.</span>
-              <span className="min-w-0 flex-1 truncate text-sm">{r.label}</span>
-              <span className="shrink-0 text-sm font-medium">{r.amount != null ? eur(r.amount) : '–'}</span>
-            </button>
-          ))}
+        {isLoading ? <Spinner /> : (
+          <div className="flex max-h-[62vh] flex-col gap-3 overflow-y-auto">
+            <div className="flex flex-col gap-1">
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">{t(isIncome ? 'finances.pickIncomeDoc' : 'finances.pickInvoice')}</div>
+              {docs.length ? docs.map(i => evRow(i, docSel?.id === i.id, () => setDocSel(s => s?.id === i.id ? null : { id: i.id, amount: i.amount })))
+                : <p className="px-1 py-1 text-xs text-zinc-400">{t(isIncome ? 'finances.incomePickerEmpty' : 'finances.pickerEmpty')}</p>}
+            </div>
+            <div className="flex flex-col gap-1">
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">{t('finances.pickStatement')}</div>
+              {banks.length ? banks.map(i => evRow(i, bankSel?.id === i.id, () => setBankSel(s => s?.id === i.id ? null : { id: i.id, amount: i.amount })))
+                : <p className="px-1 py-1 text-xs text-zinc-400">{t('finances.pickNoStatements')}</p>}
+            </div>
+          </div>
+        )}
+        <div className="flex items-center justify-end gap-2 border-t border-zinc-100 pt-2.5 dark:border-zinc-800">
+          <Button variant="ghost" className="px-3 py-1.5 text-xs" onClick={onClose}>{t('common.cancel')}</Button>
+          <Button className="px-3 py-1.5 text-xs" disabled={!canLink} onClick={doLink}><Link2 size={14} className="mr-1 inline" />{t('finances.linkSelected')}</Button>
         </div>
       </div>
     </Modal>
@@ -1139,7 +1244,7 @@ function IncomeList() {
                   <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">{srcLabel(r.source)}</span>
                   {r.konto_id && <span className="truncate">{scopeLabelOf(t, r)}</span>}
                   {r.bank && (
-                    <Link to={`/finanzen?tab=bank&bm=${r.bank.booking_date.slice(0, 7)}`} onClick={e => e.stopPropagation()}
+                    <Link to={`/finanzen?tab=bank&bm=${r.bank.booking_date.slice(0, 7)}&bhl=${r.bank.id}`} onClick={e => e.stopPropagation()}
                       className="inline-flex items-center gap-1 rounded-full bg-teal-100 px-1.5 py-0.5 text-[10px] text-teal-700 hover:bg-teal-200 dark:bg-teal-900/40 dark:text-teal-300">
                       <Landmark size={10} /> {t('finances.bank.matched')}
                     </Link>
