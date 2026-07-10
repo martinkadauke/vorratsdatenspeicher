@@ -435,12 +435,17 @@ export function financeRoutes(app: FastifyInstance): void {
         if (usedKeys.has(key) || confirmedElsewhere.has(key)) continue;
         const laden = normMerchant(ev.laden ?? '');
         const amountOk = Math.abs(ev.betrag - target) <= tol;
-        const merchantOk = !!(needle && laden.includes(needle)) || labelToks.some(tk => laden.includes(tk));
+        // Merchant match: the learned merchant (or a label token) is in the evidence's
+        // counterparty — OR the reverse, when the learned merchant is MORE verbose than
+        // the counterparty (a pay slip's "Employer · Brutto 6250 €" vs the bank's plain
+        // "Employer"), so a variable salary still matches its Gutschrift by name.
+        const merchantHit = !!needle && (laden.includes(needle) || (laden.length >= 6 && needle.includes(laden)));
+        const merchantOk = merchantHit || labelToks.some(tk => laden.includes(tk));
         if (!amountOk && !merchantOk) continue;
         cands.push({
           fixedId: f.id as number, source: ev.source,
           einkaufId: ev.source === 'receipt' ? ev.id : null, bankTxId: ev.source === 'bank' ? ev.id : null, incomeId: ev.source === 'income' ? ev.id : null,
-          score: (merchantOk ? 2 : 0) + (amountOk ? 1 : 0) + (needle && laden.includes(needle) ? 1 : 0),
+          score: (merchantOk ? 2 : 0) + (amountOk ? 1 : 0) + (merchantHit ? 1 : 0),
           laden: ev.laden, betrag: ev.betrag, datum: ev.datum, amountOk, merchantOk,
         });
       }
