@@ -204,6 +204,17 @@ function MonthTab() {
     onSuccess: () => { invalidate(); void qc.invalidateQueries({ queryKey: ['fixed-costs'] }); void qc.invalidateQueries({ queryKey: ['fix-evidence'] }); toast(t('finances.evExpectReceiptOn'), 'success'); },
     onError: (e: Error) => toast(e.message, 'error'),
   });
+  // "Nicht mehr aktiv": the plan shows up this month but shouldn't — end it at the
+  // last day of the PREVIOUS month (so this month & later drop it, earlier months keep it).
+  const priorMonthEnd = () => {
+    const [y, mo] = month.split('-').map(Number);
+    return new Date(Date.UTC(y, mo - 1, 0)).toISOString().slice(0, 10);
+  };
+  const endPlan = useMutation({
+    mutationFn: (id: number) => api(`/api/fixed-costs/${id}`, { method: 'PATCH', body: { end_date: priorMonthEnd() } }),
+    onSuccess: () => { invalidate(); void qc.invalidateQueries({ queryKey: ['fixed-costs'] }); toast(t('finances.evEndDone'), 'success'); },
+    onError: (e: Error) => toast(e.message, 'error'),
+  });
 
   const monthLabel = new Date(`${month}-01T00:00:00Z`).toLocaleDateString(
     i18n.language === 'en' ? 'en-GB' : 'de-DE', { month: 'long', year: 'numeric', timeZone: 'UTC' });
@@ -340,7 +351,6 @@ function MonthTab() {
               onConfirmNoReceipt={() => check.mutate({ fixed_cost_id: f.id, month, action: 'confirm' })}
               onSkip={() => check.mutate({ fixed_cost_id: f.id, month, action: 'skip' })}
               onClear={() => check.mutate({ fixed_cost_id: f.id, month, action: 'clear' })}
-              onPick={() => setPicker(f)}
               onShowEvidence={() => setEvidence({ id: f.id, label: f.label, kind: f.kind, expectReceipt: f.expect_receipt })}
             />)}
           </Section>
@@ -353,7 +363,6 @@ function MonthTab() {
               onConfirmNoReceipt={() => check.mutate({ fixed_cost_id: f.id, month, action: 'confirm' })}
               onSkip={() => check.mutate({ fixed_cost_id: f.id, month, action: 'skip' })}
               onClear={() => check.mutate({ fixed_cost_id: f.id, month, action: 'clear' })}
-              onPick={() => setPicker(f)}
               onShowEvidence={() => setEvidence({ id: f.id, label: f.label, kind: f.kind, expectReceipt: f.expect_receipt })}
             />)}
           </Section>
@@ -389,6 +398,12 @@ function MonthTab() {
           const f = list.find(x => x.id === evidence.id);
           setEvidence(null);
           if (f) setPicker(f);
+        }}
+        onEndPlan={() => {
+          const msg = evidence.kind === 'income' ? t('finances.evEndIncomeConfirm', { label: evidence.label }) : t('finances.evEndFixedConfirm', { label: evidence.label });
+          if (!window.confirm(msg)) return;
+          endPlan.mutate(evidence.id);
+          setEvidence(null);
         }} />}
     </div>
   );
@@ -404,9 +419,9 @@ interface FixEvidence {
 /** Click a confirmed Fixkosten row → see the full evidence chain: the bank booking
  *  AND the receipt/e-mail (or income), whichever — or both — is attached. Each is a
  *  link (bank → Auszüge search, receipt → its detail page). */
-function FixedEvidenceModal({ id, label, kind, month, t, expectReceipt, onClose, onNoReceipt, onExpectReceiptOn, onFindReceipt }: {
+function FixedEvidenceModal({ id, label, kind, month, t, expectReceipt, onClose, onNoReceipt, onExpectReceiptOn, onFindReceipt, onEndPlan }: {
   id: number; label: string; kind: 'expense' | 'income'; month: string; t: (k: string, o?: Record<string, unknown>) => string;
-  expectReceipt: boolean; onClose: () => void; onNoReceipt: () => void; onExpectReceiptOn: () => void; onFindReceipt: () => void;
+  expectReceipt: boolean; onClose: () => void; onNoReceipt: () => void; onExpectReceiptOn: () => void; onFindReceipt: () => void; onEndPlan: () => void;
 }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -433,7 +448,6 @@ function FixedEvidenceModal({ id, label, kind, month, t, expectReceipt, onClose,
   });
   const go = (to: string) => { onClose(); navigate(to); };
   const rowCls = 'flex items-center gap-3 rounded-xl border border-zinc-200 p-3 text-left dark:border-zinc-800';
-  const dashCls = 'flex items-center gap-2 rounded-xl border border-dashed border-zinc-200 p-3 text-xs text-zinc-400 dark:border-zinc-800';
   return (
     <>
     <Modal open onClose={onClose} title={label}>
@@ -461,7 +475,17 @@ function FixedEvidenceModal({ id, label, kind, month, t, expectReceipt, onClose,
                 {!data.bank.private && <button type="button" onClick={() => unlink.mutate('bank')} disabled={unlink.isPending} title={t('finances.evUnlink')}
                   className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30"><Link2Off size={15} /></button>}
               </div>); })()
-            : <div className={dashCls}><Landmark size={14} /> {t('finances.evidenceNoBank')}</div>}
+            : (
+              // No bank booking this month → either find the statement, or the plan
+              // is no longer active (end it at the end of the previous month).
+              <div className="rounded-xl border border-dashed border-zinc-200 p-3 dark:border-zinc-800">
+                <div className="mb-2 flex items-center gap-2 text-xs text-zinc-400"><Landmark size={14} /> {t('finances.evidenceNoBank')}</div>
+                <div className="flex flex-wrap gap-1.5">
+                  <button type="button" onClick={onFindReceipt} className="rounded-lg bg-sky-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-sky-700">{t('finances.evFindBank')}</button>
+                  <button type="button" onClick={onEndPlan} className="rounded-lg border border-zinc-300 px-2.5 py-1 text-xs font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">{kind === 'income' ? t('finances.evEndIncome') : t('finances.evEndFixed')}</button>
+                </div>
+              </div>
+            )}
             {/* Receipt / e-mail invoice (expense) */}
             {kind === 'expense' && data.receipt && (
               <div className={rowCls}>
@@ -538,9 +562,9 @@ function FixedEvidenceModal({ id, label, kind, month, t, expectReceipt, onClose,
   );
 }
 
-function FixCheckRow({ f, t, excluded, onConfirmSuggestion, onConfirmNoReceipt, onSkip, onClear, onPick, onShowEvidence }: {
+function FixCheckRow({ f, t, excluded, onConfirmSuggestion, onConfirmNoReceipt, onSkip, onClear, onShowEvidence }: {
   f: MonthFix; month: string; t: (k: string, o?: Record<string, unknown>) => string; excluded?: boolean;
-  onConfirmSuggestion: () => void; onConfirmNoReceipt: () => void; onSkip: () => void; onClear: () => void; onPick: () => void;
+  onConfirmSuggestion: () => void; onConfirmNoReceipt: () => void; onSkip: () => void; onClear: () => void;
   onShowEvidence: () => void;
 }) {
   const delta = f.check?.amount != null ? Math.round((f.check.amount - f.monthly_eur) * 100) / 100 : null;
@@ -560,7 +584,11 @@ function FixCheckRow({ f, t, excluded, onConfirmSuggestion, onConfirmNoReceipt, 
   const IconEl = rstate === 'done' || rstate === 'skipped' ? CheckCircle2
     : rstate === 'incomplete' ? AlertCircle : rstate === 'suggest' ? CircleDot : Circle;
   return (
-    <Card className="flex flex-col gap-2 p-3">
+    // The whole row is the single entry point → opens the one evidence menu (no
+    // separate "link" button). Inner action buttons stopPropagation.
+    <Card onClick={onShowEvidence} role="button" tabIndex={0}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onShowEvidence(); } }}
+      className="flex cursor-pointer flex-col gap-2 p-3 transition hover:bg-zinc-50/70 dark:hover:bg-zinc-800/30">
       <div className="flex items-center gap-2.5">
         <IconEl size={18} className={cn('shrink-0',
           rstate === 'done' && 'text-emerald-500', rstate === 'skipped' && 'text-zinc-400',
@@ -595,9 +623,8 @@ function FixCheckRow({ f, t, excluded, onConfirmSuggestion, onConfirmNoReceipt, 
         </div>
       </div>
       {actionable && (
-        <div className="flex flex-wrap gap-1.5 pl-7">
+        <div className="flex flex-wrap gap-1.5 pl-7" onClick={e => e.stopPropagation()}>
           {rstate === 'suggest' && <Button className="px-2.5 py-1 text-xs" onClick={onConfirmSuggestion}>{t('finances.confirm')}</Button>}
-          <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={onPick}><Link2 size={13} className="mr-1 inline" />{t('finances.linkEvidence')}</Button>
           {!hasCheck && f.expect_receipt !== false && !f.is_transfer && <Button variant="ghost" className="px-2.5 py-1 text-xs" onClick={onConfirmNoReceipt}>{t('finances.okNoReceipt')}</Button>}
           {!hasCheck && <Button variant="ghost" className="px-2.5 py-1 text-xs" onClick={onSkip}>{t('finances.skipThisMonth')}</Button>}
           {hasCheck && <Button variant="ghost" className="px-2.5 py-1 text-xs" onClick={onClear}>{t('finances.reopen')}</Button>}
