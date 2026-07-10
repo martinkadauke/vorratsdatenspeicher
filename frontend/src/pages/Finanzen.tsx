@@ -1925,6 +1925,11 @@ function BankTab() {
   );
 }
 
+/** A one-off = a single-month bounded fixed_cost (start & end in the same month), e.g. a
+ *  generated one-time income ("…Spesen") or cost. Not a recurring plan → kept OUT of the
+ *  manage lists; it lives in its month in the Monat view (+ a collapsed section here). */
+const isOneOff = (c: FixedCost): boolean => c.end_date != null && c.start_date.slice(0, 7) === c.end_date.slice(0, 7);
+
 function ManageTab() {
   const { t } = useTranslation();
   const qc = useQueryClient();
@@ -1986,11 +1991,15 @@ function ManageTab() {
     onError: (e: Error) => toast(e.message, 'error'),
   });
 
-  // Group by konto: household (shared) first, then each person.
+  // Single-month one-offs live in their month (Monat view) + a collapsed section below,
+  // newest first — so the manage lists show only recurring fix costs + income plans.
+  const oneOffs = useMemo(() => (costs ?? []).filter(isOneOff).sort((a, b) => b.start_date.localeCompare(a.start_date)), [costs]);
+
+  // Group RECURRING costs by konto: household (shared) first, then each person.
   const groups = useMemo(() => {
     const byKonto = new Map<number, { konto: KontoLite | undefined; items: FixedCost[] }>();
     for (const k of scopeKonten) byKonto.set(k.id, { konto: k, items: [] });
-    for (const c of costs ?? []) {
+    for (const c of (costs ?? []).filter(c => !isOneOff(c))) {
       if (c.konto_id == null) continue;
       if (!byKonto.has(c.konto_id)) byKonto.set(c.konto_id, { konto: konten?.find(k => k.id === c.konto_id), items: [] });
       byKonto.get(c.konto_id)!.items.push(c);
@@ -2000,8 +2009,9 @@ function ManageTab() {
       (a.konto?.owner ?? '').localeCompare(b.konto?.owner ?? ''));
   }, [costs, konten, scopeKonten]);
 
-  // Household-wide total excludes internal transfers (Umbuchung) — they aren't real spend.
-  const monthlyTotal = (costs ?? []).filter(c => c.active && c.kind !== 'income' && !c.is_transfer).reduce((s, c) => s + amortized(c.monthly_eur, c.frequency), 0);
+  // Household-wide recurring total: excludes income, internal transfers (Umbuchung —
+  // not real spend) AND one-offs (not a recurring monthly commitment).
+  const monthlyTotal = (costs ?? []).filter(c => c.active && c.kind !== 'income' && !c.is_transfer && !isOneOff(c)).reduce((s, c) => s + amortized(c.monthly_eur, c.frequency), 0);
 
   if (isLoading || !konten) return <Spinner />;
 
@@ -2078,7 +2088,29 @@ function ManageTab() {
           </div>
         );
       })}
-      {!groups.some(g => g.items.length) && <EmptyState>{t('finances.empty')}</EmptyState>}
+      {!groups.some(g => g.items.length) && !oneOffs.length && <EmptyState>{t('finances.empty')}</EmptyState>}
+
+      {oneOffs.length > 0 && (
+        <Section title={t('finances.oneOffTitle')} count={oneOffs.length} defaultOpen={false}>
+          {oneOffs.map(c => (
+            <Card key={c.id} className={cn('flex items-center gap-3 p-3', !c.active && 'opacity-50')}>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium">{c.label}</div>
+                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-zinc-500 dark:text-zinc-400">
+                  <span className={cn('rounded-full px-1.5 py-0.5 text-[10px]', c.kind === 'income' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' : 'bg-zinc-100 dark:bg-zinc-800')}>{c.kind === 'income' ? t('finances.incomeTitle') : t('finances.fixTitle')}</span>
+                  <span>{c.start_date.slice(5, 7)}/{c.start_date.slice(0, 4)}</span>
+                  {c.konto_name && <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] dark:bg-zinc-800">{c.konto_name}</span>}
+                  {c.is_transfer && <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">{t('finances.transferBadge')}</span>}
+                </div>
+              </div>
+              <span className={cn('shrink-0 text-sm font-semibold', c.kind === 'income' && 'text-emerald-600 dark:text-emerald-500')}>{c.kind === 'income' ? '+' : ''}{eur(c.monthly_eur)}</span>
+              <button onClick={() => setModal({ id: c.id, label: c.label, monthly_eur: String(c.monthly_eur).replace('.', ','), kind: c.kind, frequency: c.frequency, is_transfer: c.is_transfer, konto_id: String(c.konto_id ?? ''), category_path: c.category_path, start_date: c.start_date, end_date: c.end_date ?? '', active: c.active, expect_receipt: c.expect_receipt, match_merchant: c.match_merchant ?? '', counterpart_id: c.counterpart_id })}
+                className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800" title={t('common.edit')}><Pencil size={15} /></button>
+              <button onClick={() => remove.mutate(c)} className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30" title={t('common.delete')}><Trash2 size={15} /></button>
+            </Card>
+          ))}
+        </Section>
+      )}
 
       {modal && (
         <Modal open onClose={() => setModal(null)} title={modal.id ? t('finances.editTitle') : t('finances.addTitle')}>
