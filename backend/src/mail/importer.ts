@@ -191,6 +191,11 @@ async function processMessage(mb: MailboxRow, kontoId: number | null, raw: Buffe
 
   const datum = parsed.date ? parsed.date.toISOString().slice(0, 10) : null;
   const privateFor = mb.make_private ? mb.user_id : null;
+  // Attribute the receipt to the mailbox owner's household member — the inbox belongs to
+  // exactly one member, so e-mail invoices are member-scoped WITHOUT any manual picking
+  // (the manual "Aufgenommen von" picker is only for ambiguous till/cash scans).
+  const [snapMember] = await sql`SELECT id FROM family_member WHERE user_id = ${mb.user_id} ORDER BY sort_order, id LIMIT 1`;
+  const snappedBy = (snapMember?.id as number | undefined) ?? null;
   const atts = (parsed.attachments ?? []).filter(a => a.content && ((a.size ?? a.content.length) > 0));
   // Pick the attachment most likely to BE the invoice. The actual invoice is often
   // in the e-mail body while the only PDF attached is legal boilerplate (AGB / terms
@@ -225,8 +230,8 @@ async function processMessage(mb: MailboxRow, kontoId: number | null, raw: Buffe
       await writeFile(path.join(RECEIPTS_LOCAL_PATH, filename), att.content as Buffer);
       const bildPfad = `/receipts/${filename}`;
       const [row] = await sql`
-        INSERT INTO einkauf (datum, roh_ladenname, quelle, konto_id, bild_pfad, private_for_user_id, ocr_pending)
-        VALUES (${datum ?? todayISO()}, ${subject}, 'email', ${kontoId}, ${bildPfad}, ${privateFor}, TRUE)
+        INSERT INTO einkauf (datum, roh_ladenname, quelle, konto_id, bild_pfad, private_for_user_id, snapped_by_member_id, ocr_pending)
+        VALUES (${datum ?? todayISO()}, ${subject}, 'email', ${kontoId}, ${bildPfad}, ${privateFor}, ${snappedBy}, TRUE)
         RETURNING id`;
       einkaufId = row.id as number;
       let attItems = 0;
@@ -257,8 +262,8 @@ async function processMessage(mb: MailboxRow, kontoId: number | null, raw: Buffe
         reason = 'no receipt data found in e-mail body';
       } else {
         const [row] = await sql`
-          INSERT INTO einkauf (datum, roh_ladenname, quelle, konto_id, private_for_user_id)
-          VALUES (${datum ?? todayISO()}, ${subject}, 'email', ${kontoId}, ${privateFor})
+          INSERT INTO einkauf (datum, roh_ladenname, quelle, konto_id, private_for_user_id, snapped_by_member_id)
+          VALUES (${datum ?? todayISO()}, ${subject}, 'email', ${kontoId}, ${privateFor}, ${snappedBy})
           RETURNING id`;
         einkaufId = row.id as number;
         madeItems = (await storeOcrResult(einkaufId, extracted)).items > 0;

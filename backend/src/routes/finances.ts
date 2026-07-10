@@ -391,13 +391,36 @@ export function financeRoutes(app: FastifyInstance): void {
       if (r.income_id) confirmedElsewhere.add(`income:${r.income_id}`);
     }
 
+    // "Complete" = this month's row is fully reconciled for the Zugeordnet-%.
+    //  Needs BOTH: a bank booking linked (the actual payment — directly or via the
+    //  married receipt/income row) AND the receipt question resolved (invoice/receipt
+    //  attached, income pay slip, "kein Beleg" = expect_receipt false, OR an internal
+    //  transfer which has no receipt by nature). A deliberately skipped month counts
+    //  as done. NB: a plan with no monthly check is NOT complete — even when globally
+    //  marked no-receipt — because the payment still has to be matched to a booking;
+    //  such a row therefore stays actionable ("Verknüpfen") instead of auto-passing.
+    const isComplete = (f: typeof fixed[number]): boolean => {
+      if (!f.check_id) return false;
+      if (f.check_status === 'skipped') return true;
+      const bankLinked = f.check_bank_tx_id != null || f.ce_bank != null || f.ice_bank != null;
+      const receiptResolved = f.check_source === 'receipt'
+        || (f.kind === 'income' && f.ice_file != null)
+        || f.expect_receipt === false
+        || f.is_transfer === true;
+      return bankLinked && receiptResolved;
+    };
+
     // Deterministic suggestion: merchant match (learned match_merchant, else label
     // tokens) and/or amount within ±max(1 €, 2 %). Greedy: best score first, one
     // piece of evidence serves at most one position.
     type Cand = { fixedId: number; source: 'receipt' | 'bank' | 'income'; einkaufId: number | null; bankTxId: number | null; incomeId: number | null; score: number; laden: string | null; betrag: number; datum: string; amountOk: boolean; merchantOk: boolean };
     const cands: Cand[] = [];
     for (const f of fixed) {
-      if (f.check_id) continue;
+      // Skip only FULLY reconciled (or deliberately skipped) rows. A PARTIAL check —
+      // e.g. an income plan with its pay slip but no bank credit yet — still gets its
+      // MISSING leg suggested (the check's own legs are already in usedKeys, so only
+      // the gap is offered). Fixes: no re-proposal after a plan is re-activated.
+      if (isComplete(f)) continue;
       // A no-receipt plan (Kindergeld, rent, Kredit …) still needs its BANK payment
       // suggested — it just never has an invoice/pay slip, so offer bank evidence only
       // (don't propose a coincidental receipt for something that has none).
@@ -481,24 +504,6 @@ export function financeRoutes(app: FastifyInstance): void {
       return Math.round(s[Math.floor((s.length - 1) / 2)] * 100) / 100;
     };
 
-    // "Complete" = this month's row is fully reconciled for the Zugeordnet-%.
-    //  Needs BOTH: a bank booking linked (the actual payment — directly or via the
-    //  married receipt/income row) AND the receipt question resolved (invoice/receipt
-    //  attached, income pay slip, "kein Beleg" = expect_receipt false, OR an internal
-    //  transfer which has no receipt by nature). A deliberately skipped month counts
-    //  as done. NB: a plan with no monthly check is NOT complete — even when globally
-    //  marked no-receipt — because the payment still has to be matched to a booking;
-    //  such a row therefore stays actionable ("Verknüpfen") instead of auto-passing.
-    const isComplete = (f: typeof fixed[number]): boolean => {
-      if (!f.check_id) return false;
-      if (f.check_status === 'skipped') return true;
-      const bankLinked = f.check_bank_tx_id != null || f.ce_bank != null || f.ice_bank != null;
-      const receiptResolved = f.check_source === 'receipt'
-        || (f.kind === 'income' && f.ice_file != null)
-        || f.expect_receipt === false
-        || f.is_transfer === true;
-      return bankLinked && receiptResolved;
-    };
     // Map a plan row (expense or income) to its month-view shape (check + suggestion).
     const mapPlan = (f: typeof fixed[number]) => ({
       id: f.id, label: f.label, monthly_eur: f.monthly_eur, kind: f.kind, frequency: f.frequency, is_transfer: f.is_transfer, expect_receipt: f.expect_receipt,

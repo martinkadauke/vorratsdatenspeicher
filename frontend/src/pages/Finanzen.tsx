@@ -348,8 +348,6 @@ function MonthTab() {
             {!incomes.length && <Card className="p-3 text-xs text-zinc-400">{t('finances.noIncomePlans')}</Card>}
             {incomes.map(f => <FixCheckRow key={f.id} f={f} month={month} t={t} excluded={isAll && f.is_transfer}
               onConfirmSuggestion={() => confirmSug(f)}
-              onConfirmNoReceipt={() => check.mutate({ fixed_cost_id: f.id, month, action: 'confirm' })}
-              onSkip={() => check.mutate({ fixed_cost_id: f.id, month, action: 'skip' })}
               onClear={() => check.mutate({ fixed_cost_id: f.id, month, action: 'clear' })}
               onShowEvidence={() => setEvidence({ id: f.id, label: f.label, kind: f.kind, expectReceipt: f.expect_receipt })}
             />)}
@@ -360,8 +358,6 @@ function MonthTab() {
             {!fixed.length && <Card className="p-3 text-xs text-zinc-400">{t('finances.noFixThisMonth')}</Card>}
             {fixed.map(f => <FixCheckRow key={f.id} f={f} month={month} t={t} excluded={isAll && f.is_transfer}
               onConfirmSuggestion={() => confirmSug(f)}
-              onConfirmNoReceipt={() => check.mutate({ fixed_cost_id: f.id, month, action: 'confirm' })}
-              onSkip={() => check.mutate({ fixed_cost_id: f.id, month, action: 'skip' })}
               onClear={() => check.mutate({ fixed_cost_id: f.id, month, action: 'clear' })}
               onShowEvidence={() => setEvidence({ id: f.id, label: f.label, kind: f.kind, expectReceipt: f.expect_receipt })}
             />)}
@@ -562,9 +558,9 @@ function FixedEvidenceModal({ id, label, kind, month, t, expectReceipt, onClose,
   );
 }
 
-function FixCheckRow({ f, t, excluded, onConfirmSuggestion, onConfirmNoReceipt, onSkip, onClear, onShowEvidence }: {
+function FixCheckRow({ f, t, excluded, onConfirmSuggestion, onClear, onShowEvidence }: {
   f: MonthFix; month: string; t: (k: string, o?: Record<string, unknown>) => string; excluded?: boolean;
-  onConfirmSuggestion: () => void; onConfirmNoReceipt: () => void; onSkip: () => void; onClear: () => void;
+  onConfirmSuggestion: () => void; onClear: () => void;
   onShowEvidence: () => void;
 }) {
   const delta = f.check?.amount != null ? Math.round((f.check.amount - f.monthly_eur) * 100) / 100 : null;
@@ -625,8 +621,6 @@ function FixCheckRow({ f, t, excluded, onConfirmSuggestion, onConfirmNoReceipt, 
       {actionable && (
         <div className="flex flex-wrap gap-1.5 pl-7" onClick={e => e.stopPropagation()}>
           {rstate === 'suggest' && <Button className="px-2.5 py-1 text-xs" onClick={onConfirmSuggestion}>{t('finances.confirm')}</Button>}
-          {!hasCheck && f.expect_receipt !== false && !f.is_transfer && <Button variant="ghost" className="px-2.5 py-1 text-xs" onClick={onConfirmNoReceipt}>{t('finances.okNoReceipt')}</Button>}
-          {!hasCheck && <Button variant="ghost" className="px-2.5 py-1 text-xs" onClick={onSkip}>{t('finances.skipThisMonth')}</Button>}
           {hasCheck && <Button variant="ghost" className="px-2.5 py-1 text-xs" onClick={onClear}>{t('finances.reopen')}</Button>}
         </div>
       )}
@@ -838,17 +832,22 @@ function ReceiptPicker({ month, fix, onClose, onPick }: {
     const c = fix.check;
     if (c?.einkauf_id != null) return { id: c.einkauf_id, amount: c.amount };
     if (c?.income_id != null) return { id: c.income_id, amount: c.amount };
-    // Not yet confirmed → pre-select the deterministic suggestion so the likely match
-    // is already green and one "Verknüpfen" click confirms it.
+    // The check has no document leg → pre-select the deterministic suggestion's doc so
+    // the likely match is already green and one "Verknüpfen" confirms it. A PARTIAL
+    // check (e.g. income plan with a pay slip but no bank) still gets a suggestion for
+    // its missing leg (see the /month isComplete guard), so its bank is pre-picked below.
     const s = fix.suggestion;
-    if (!c && s?.source === 'receipt' && s.einkauf_id != null) return { id: s.einkauf_id, amount: s.betrag };
-    if (!c && s?.source === 'income' && s.income_id != null) return { id: s.income_id, amount: s.betrag };
+    if (s?.source === 'receipt' && s.einkauf_id != null) return { id: s.einkauf_id, amount: s.betrag };
+    if (s?.source === 'income' && s.income_id != null) return { id: s.income_id, amount: s.betrag };
     return null;
   });
   const [bankSel, setBankSel] = useState<{ id: number; amount: number | null } | null>(() => {
-    if (fix.check?.bank_tx_id != null) return { id: fix.check.bank_tx_id, amount: fix.check.amount };
+    const c = fix.check;
+    if (c?.bank_tx_id != null) return { id: c.bank_tx_id, amount: c.amount };
+    // The check has no bank leg → pre-select the suggested bank statement (green), so an
+    // income plan holding only its pay slip gets its Gutschrift pre-picked for 1-click.
     const s = fix.suggestion;
-    if (!fix.check && s?.source === 'bank' && s.bank_tx_id != null) return { id: s.bank_tx_id, amount: s.betrag };
+    if (s?.source === 'bank' && s.bank_tx_id != null) return { id: s.bank_tx_id, amount: s.betrag };
     return null;
   });
 

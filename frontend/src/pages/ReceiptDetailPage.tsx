@@ -304,19 +304,32 @@ export function ReceiptDetailPage() {
               {t(`quelle.${data.quelle}`)}
             </span>
           )}
-          {/* Who scanned/uploaded this receipt (household member) — set the uploader on
-              legacy PWA receipts that never captured it; new scans auto-fill it. */}
-          {snappers.length > 0 && (
-            <label className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-950/50 dark:text-amber-300" title={t('receiptDetail.snappedBy')}>
-              <Camera size={11} />
-              <select value={data.snapped_by_member_id ?? ''} disabled={!canWrite || setSnappedBy.isPending}
-                onChange={e => setSnappedBy.mutate(e.target.value ? Number(e.target.value) : null)}
-                className="cursor-pointer bg-transparent text-[11px] font-medium outline-none disabled:cursor-default">
-                <option value="">{t('receiptDetail.snappedByUnset')}</option>
-                {snappers.map(m => <option key={m.id} value={m.id}>{m.emoji ? `${m.emoji} ` : ''}{m.name}</option>)}
-              </select>
-            </label>
-          )}
+          {/* Who took this receipt (household member). Only AMBIGUOUS scans (a till/cash
+              receipt bought in person) are manually settable — an e-mail invoice or a
+              dropped PDF is auto-attributed to the mailbox owner and shown read-only. */}
+          {snappers.length > 0 && (() => {
+            const autoAttributed = data.quelle === 'email' || data.quelle === 'upload';
+            const snapper = snappers.find(m => m.id === data.snapped_by_member_id);
+            const cls = 'inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-950/50 dark:text-amber-300';
+            // E-mail/upload with a resolved owner → read-only (attributed by mailbox). If it
+            // has NO resolvable snapper (a filesystem drop that missed the backfill, or an
+            // owner whose login was deleted) fall through to the editable picker so it can
+            // still be attributed — never a dead-end.
+            if (autoAttributed && snapper) {
+              return <span className={cls} title={t('receiptDetail.snappedBy')}><Camera size={11} /> {snapper.emoji ? `${snapper.emoji} ` : ''}{snapper.name}</span>;
+            }
+            return (
+              <label className={cls} title={t('receiptDetail.snappedBy')}>
+                <Camera size={11} />
+                <select value={data.snapped_by_member_id ?? ''} disabled={!canWrite || setSnappedBy.isPending}
+                  onChange={e => setSnappedBy.mutate(e.target.value ? Number(e.target.value) : null)}
+                  className="cursor-pointer bg-transparent text-[11px] font-medium outline-none disabled:cursor-default">
+                  <option value="">{t('receiptDetail.snappedByUnset')}</option>
+                  {snappers.map(m => <option key={m.id} value={m.id}>{m.emoji ? `${m.emoji} ` : ''}{m.name}</option>)}
+                </select>
+              </label>
+            );
+          })()}
           {data.bank && (
             <Link to={`/finanzen?tab=bank&bm=${data.bank.booking_date.slice(0, 7)}&bhl=${data.bank.id}`}
               title={t('receiptDetail.bankMatch')}
@@ -654,7 +667,10 @@ function EmailViewer({ id }: { id: number }) {
     : `<pre style="white-space:pre-wrap;word-break:break-word;font-family:system-ui,sans-serif;font-size:13px;line-height:1.5;color:#27272a;margin:0;padding:12px">${escapeHtml(data.text ?? '')}</pre>`;
   // CSP blocks REMOTE resources (no tracking pixels / IP leak to the sender); only
   // embedded data:/blob: images and inline styles render. The sandbox blocks scripts.
-  const srcDoc = `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: blob:; style-src 'unsafe-inline'; font-src data:"><base target="_blank"><body style="margin:0;background:#fff;font-family:system-ui,sans-serif">${inner}</body>`;
+  // Constrain width so wide HTML emails (fixed-width tables, big images, long unbroken
+  // URLs) reflow to the frame instead of overflowing horizontally; anything still too
+  // wide scrolls INSIDE the iframe (isolated) rather than breaking the page layout.
+  const srcDoc = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: blob:; style-src 'unsafe-inline'; font-src data:"><base target="_blank"><style>body{margin:0;background:#fff;font-family:system-ui,sans-serif;overflow-x:auto;overflow-wrap:break-word;word-break:break-word}img{max-width:100%;height:auto}table{max-width:100%}</style><body>${inner}</body>`;
   return (
     <>
       <div className="overflow-hidden rounded-2xl border border-zinc-200 dark:border-zinc-700">

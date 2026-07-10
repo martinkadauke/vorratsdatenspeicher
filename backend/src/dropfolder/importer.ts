@@ -131,13 +131,21 @@ async function importOne(sourceName: string, buf: Buffer, konto: number | null):
   const bildPfad = `/receipts/${filename}`;
 
   const label = sourceName.replace(/\.[a-z0-9]+$/i, '').slice(0, 200); // filename (sans ext) until OCR fills the store
+  // A filesystem drop has no user context → attribute the invoice to the primary mailbox
+  // owner's household member (the household's default invoice manager, same fallback as
+  // migration 082 for uploads), so it isn't left un-attributed. Re-assignable in the UI.
+  const [snapMember] = await sql`
+    SELECT fm.id FROM family_member fm
+    WHERE fm.user_id = (SELECT user_id FROM user_mailbox WHERE enabled ORDER BY user_id LIMIT 1)
+    ORDER BY fm.sort_order, fm.id LIMIT 1`;
+  const snappedBy = (snapMember?.id as number | undefined) ?? null;
   // quelle='email' — same bucket as e-mail invoices (they're the same kind of thing:
   // online invoices, not in-store receipts). Provenance stays in the imported_file
   // ledger; the e-mail-specific backfill/reocr queries also require an imported_email
   // row, which these never have, so they're not affected.
   const [row] = await sql`
-    INSERT INTO einkauf (datum, roh_ladenname, quelle, konto_id, bild_pfad, private_for_user_id, ocr_pending)
-    VALUES (${todayISO()}, ${label}, 'email', ${konto}, ${bildPfad}, ${null}, TRUE)
+    INSERT INTO einkauf (datum, roh_ladenname, quelle, konto_id, bild_pfad, private_for_user_id, snapped_by_member_id, ocr_pending)
+    VALUES (${todayISO()}, ${label}, 'email', ${konto}, ${bildPfad}, ${null}, ${snappedBy}, TRUE)
     RETURNING id`;
   const einkaufId = row.id as number;
 
