@@ -97,6 +97,7 @@
       "linkedToast": "Receipt linked",
       "aiSuggests": "AI:",
       "otherCandidates": "Other candidates",
+      "viewProposed": "View proposal",
       "approveSuggestion": "Approve suggestion",
       "dismissSuggestion": "Dismiss suggestion",
       "approvedToast": "Suggestion approved"

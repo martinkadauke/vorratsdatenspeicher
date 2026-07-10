@@ -1356,6 +1356,7 @@ function BankRow({ tx, t, highlight, onOpen, onLink, onUnlink, onFlag, onGenerat
 function BankLinkPicker({ tx, t, onClose, onPick, onApprove }: {
   tx: BankTx; t: (k: string, o?: Record<string, unknown>) => string; onClose: () => void; onPick: (id: number) => void; onApprove: (id: number) => void;
 }) {
+  const navigate = useNavigate();
   const { data, isLoading } = useQuery({
     queryKey: ['bank-candidates', tx.id],
     queryFn: () => api<{ kind: 'receipt' | 'income'; candidates: { id: number; label: string | null; betrag: number; datum: string }[] }>(`/api/finances/bank/${tx.id}/candidates`),
@@ -1366,18 +1367,31 @@ function BankLinkPicker({ tx, t, onClose, onPick, onApprove }: {
     <Modal open onClose={onClose} title={tx.amount > 0 ? t('finances.bank.linkIncomeTitle') : t('finances.bank.linkTitle')}>
       <div className="flex flex-col gap-3">
         <div className="text-xs text-zinc-500 dark:text-zinc-400">{tx.counterparty} · {eur(tx.amount)} · {ddmmyyyy(tx.booking_date)}</div>
-        {/* The AI proposal (⭐) sits on top, distinct from the deterministic matches,
-            and approving it turns it into the real link. */}
+        {/* The AI proposal (⭐), distinct from the deterministic matches. Full reason
+            shown (not truncated); jump to inspect the proposed receipt, then approve. */}
         {sug && (
-          <button onClick={() => { onApprove(tx.id); onClose(); }}
-            className="flex w-full items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-left hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/30 dark:hover:bg-amber-950/50">
-            <Sparkles size={16} className="shrink-0 text-amber-500" />
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-medium">{sug.private ? t('finances.privatePurchase') : (sug.label || '—')}</div>
-              <div className="mt-0.5 truncate text-xs text-amber-700 dark:text-amber-300">{t('finances.bank.aiSuggests')} {Math.round(sug.confidence * 100)}%{sug.reason ? ` · ${sug.reason}` : ''}</div>
+          <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/30">
+            <div className="flex items-start gap-2">
+              <Sparkles size={16} className="mt-0.5 shrink-0 text-amber-500" />
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-medium">{sug.private ? t('finances.privatePurchase') : (sug.label || '—')}</div>
+                <div className="mt-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">{t('finances.bank.aiSuggests')} {Math.round(sug.confidence * 100)}%</div>
+                {sug.reason && !sug.private && <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">{sug.reason}</div>}
+              </div>
             </div>
-            <CheckCircle2 size={16} className="shrink-0 text-emerald-600" />
-          </button>
+            <div className="mt-2 flex items-center justify-end gap-3">
+              {sug.kind === 'receipt' && sug.target_id != null && !sug.private && (
+                <button type="button" onClick={() => { onClose(); navigate(`/receipts/${sug.target_id}`); }}
+                  className="inline-flex items-center gap-0.5 text-xs font-medium text-amber-700 hover:underline dark:text-amber-300">
+                  {t('finances.bank.viewProposed')} <ChevronRight size={13} />
+                </button>
+              )}
+              <button type="button" onClick={() => { onApprove(tx.id); onClose(); }}
+                className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-700">
+                <CheckCircle2 size={14} /> {t('finances.bank.approveSuggestion')}
+              </button>
+            </div>
+          </div>
         )}
         {isLoading ? <Spinner /> : !cands.length ? (
           !sug && <p className="py-4 text-center text-xs text-zinc-400">{t('finances.bank.noCandidates')}</p>
