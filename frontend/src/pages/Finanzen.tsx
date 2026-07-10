@@ -811,10 +811,19 @@ function ReceiptPicker({ month, fix, onClose, onPick }: {
     const c = fix.check;
     if (c?.einkauf_id != null) return { id: c.einkauf_id, amount: c.amount };
     if (c?.income_id != null) return { id: c.income_id, amount: c.amount };
+    // Not yet confirmed → pre-select the deterministic suggestion so the likely match
+    // is already green and one "Verknüpfen" click confirms it.
+    const s = fix.suggestion;
+    if (!c && s?.source === 'receipt' && s.einkauf_id != null) return { id: s.einkauf_id, amount: s.betrag };
+    if (!c && s?.source === 'income' && s.income_id != null) return { id: s.income_id, amount: s.betrag };
     return null;
   });
-  const [bankSel, setBankSel] = useState<{ id: number; amount: number | null } | null>(
-    () => fix.check?.bank_tx_id != null ? { id: fix.check.bank_tx_id, amount: fix.check.amount } : null);
+  const [bankSel, setBankSel] = useState<{ id: number; amount: number | null } | null>(() => {
+    if (fix.check?.bank_tx_id != null) return { id: fix.check.bank_tx_id, amount: fix.check.amount };
+    const s = fix.suggestion;
+    if (!fix.check && s?.source === 'bank' && s.bank_tx_id != null) return { id: s.bank_tx_id, amount: s.betrag };
+    return null;
+  });
 
   // Both kinds return {items:[{source,id,datum,amount,label}]}: income → pay-slip rows
   // + bank credits; expense → invoices + bank debits (wide window for booking lag).
