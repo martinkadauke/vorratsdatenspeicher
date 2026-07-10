@@ -1655,6 +1655,7 @@ function BankLinkPicker({ tx, t, onClose, onPick, onApprove }: {
 function BankGenerateModal({ tx, t, onClose, onDone }: {
   tx: BankTx; t: (k: string, o?: Record<string, unknown>) => string; onClose: () => void; onDone: () => void;
 }) {
+  const navigate = useNavigate();
   const credit = tx.amount > 0;
   const debit = tx.amount < 0; // only true outflows can become a purchase receipt
   const [mode, setMode] = useState<'einkauf' | 'fixed'>(debit ? 'einkauf' : 'fixed');
@@ -1667,8 +1668,10 @@ function BankGenerateModal({ tx, t, onClose, onDone }: {
   const [oneMonth, setOneMonth] = useState(true);
 
   const genReceipt = useMutation({
-    mutationFn: () => api(`/api/finances/bank/${tx.id}/generate-receipt`, { method: 'POST', body: { laden: laden.trim() } }),
-    onSuccess: () => { toast(t('finances.bank.gen.createdReceipt'), 'success'); onDone(); },
+    mutationFn: () => api<{ ok: boolean; einkauf_id: number }>(`/api/finances/bank/${tx.id}/generate-receipt`, { method: 'POST', body: { laden: laden.trim() } }),
+    // Jump straight into the freshly generated receipt so the user can review/fix it
+    // (rename, correct the Konto, add real items) instead of hunting for it in Belege.
+    onSuccess: (r) => { toast(t('finances.bank.gen.createdReceipt'), 'success'); onDone(); if (r?.einkauf_id) navigate(`/receipts/${r.einkauf_id}`); },
     onError: (e: Error) => toast(e.message, 'error'),
   });
   const genFixed = useMutation({
