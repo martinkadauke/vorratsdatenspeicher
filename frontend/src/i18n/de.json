@@ -105,6 +105,8 @@
       "monthFilter": "Monat",
       "viewProposed": "Vorschlag ansehen",
       "viewReceipt": "Beleg ansehen (neuer Tab)",
+      "showText": "Buchungstext anzeigen",
+      "hideText": "Buchungstext ausblenden",
       "approveSuggestion": "Vorschlag übernehmen",
       "dismissSuggestion": "Vorschlag verwerfen",
       "approvedToast": "Vorschlag übernommen"

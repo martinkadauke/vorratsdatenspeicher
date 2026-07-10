@@ -1490,6 +1490,9 @@ function BankLinkPicker({ tx, t, onClose, onPick, onApprove }: {
   // Debit → receipt candidates: offer a "view" (new tab) so the user can inspect the
   // receipt before linking (e.g. tell apart several Amazon orders found by item name).
   const isDebit = tx.amount < 0;
+  // Full CSV booking text (Auftraggeber / Buchungstext / order number / Ref.) so the
+  // user can judge what an unclear booking is actually about before allocating it.
+  const [showText, setShowText] = useState(false);
   const row = (c: { id: number; label: string | null; betrag: number; datum: string }) => (
     <li key={c.id} className="flex items-center gap-1">
       <button onClick={() => onPick(c.id)} className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1 py-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
@@ -1509,6 +1512,16 @@ function BankLinkPicker({ tx, t, onClose, onPick, onApprove }: {
     <Modal open onClose={onClose} title={tx.amount > 0 ? t('finances.bank.linkIncomeTitle') : t('finances.bank.linkTitle')}>
       <div className="flex flex-col gap-3">
         <div className="text-xs text-zinc-500 dark:text-zinc-400">{tx.counterparty} · {eur(tx.amount)} · {ddmmyyyy(tx.booking_date)}</div>
+        {/* Full CSV booking text — reveal to judge what an unclear booking is about. */}
+        {!tx.private && tx.description && (
+          <div>
+            <button type="button" onClick={() => setShowText(v => !v)}
+              className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 hover:underline dark:text-emerald-400">
+              <FileText size={13} /> {showText ? t('finances.bank.hideText') : t('finances.bank.showText')}
+            </button>
+            {showText && <div className="mt-1 whitespace-pre-wrap break-words rounded-lg bg-zinc-100 p-2 text-[11px] leading-relaxed text-zinc-600 dark:bg-zinc-800/60 dark:text-zinc-300">{tx.description}</div>}
+          </div>
+        )}
         {/* The AI proposal (⭐), distinct from the deterministic matches. Full reason
             shown (not truncated); jump to inspect the proposed receipt, then approve. */}
         {sug && (

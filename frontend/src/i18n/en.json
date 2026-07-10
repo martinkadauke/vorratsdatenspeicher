@@ -105,6 +105,8 @@
       "monthFilter": "Month",
       "viewProposed": "View proposal",
       "viewReceipt": "View receipt (new tab)",
+      "showText": "Show booking text",
+      "hideText": "Hide booking text",
       "approveSuggestion": "Approve suggestion",
       "dismissSuggestion": "Dismiss suggestion",
       "approvedToast": "Suggestion approved"
