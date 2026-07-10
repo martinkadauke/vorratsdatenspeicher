@@ -205,6 +205,7 @@ export function financeRoutes(app: FastifyInstance): void {
       WHERE ABS(ABS(bt.amount) - ${amt}) <= ${tol}
         AND ${f.kind === 'income' ? sql`bt.amount < 0` : sql`bt.amount > 0`}
         AND bt.konto_id IS DISTINCT FROM ${f.konto_id}
+        AND bt.einkauf_id IS NULL
         AND NOT EXISTS (SELECT 1 FROM einkauf e WHERE e.bank_tx_id = bt.id)
         AND NOT EXISTS (SELECT 1 FROM income i WHERE i.bank_tx_id = bt.id)
         AND NOT EXISTS (SELECT 1 FROM fixed_cost_check fc WHERE fc.bank_tx_id = bt.id)
@@ -225,7 +226,7 @@ export function financeRoutes(app: FastifyInstance): void {
         const [f] = await tx`SELECT label, kind, konto_id, is_transfer FROM fixed_cost WHERE id = ${id} FOR UPDATE`;
         if (!f) throw new HttpError(404, 'not found');
         if (f.is_transfer !== true) throw new HttpError(400, 'Nur Umbuchungen können eine Gegenbuchung haben');
-        const [bt] = await tx`SELECT konto_id, booking_date::text AS booking, amount::float8 AS amount FROM bank_tx WHERE id = ${bankTxId} FOR UPDATE`;
+        const [bt] = await tx`SELECT konto_id, booking_date::text AS booking, amount::float8 AS amount, einkauf_id FROM bank_tx WHERE id = ${bankTxId} FOR UPDATE`;
         if (!bt) throw new HttpError(400, 'Bankbuchung nicht gefunden');
         if (bt.konto_id == null) throw new HttpError(400, 'Buchung ohne Konto');
         if (bt.konto_id === f.konto_id) throw new HttpError(400, 'Gegenbuchung muss auf einem anderen Konto liegen');
@@ -233,7 +234,8 @@ export function financeRoutes(app: FastifyInstance): void {
           EXISTS(SELECT 1 FROM einkauf WHERE bank_tx_id = ${bankTxId}) AS r,
           EXISTS(SELECT 1 FROM income WHERE bank_tx_id = ${bankTxId}) AS i,
           EXISTS(SELECT 1 FROM fixed_cost_check WHERE bank_tx_id = ${bankTxId}) AS f`;
-        if (st.r || st.i || st.f) throw new HttpError(400, 'Bankbuchung ist bereits zugeordnet');
+        // bt.einkauf_id → this booking is already a split-shipment sibling of a receipt.
+        if (st.r || st.i || st.f || bt.einkauf_id != null) throw new HttpError(400, 'Bankbuchung ist bereits zugeordnet');
         const oppKind = f.kind === 'income' ? 'expense' : 'income';
         const amount = Math.abs(bt.amount as number);
         const month = String(bt.booking).slice(0, 7);
@@ -830,7 +832,7 @@ export function financeRoutes(app: FastifyInstance): void {
     const debits = await sql`
       SELECT id, amount::float8 AS amount, description, raw, counterparty
       FROM bank_tx bt
-      WHERE bt.amount < 0 AND NOT EXISTS (SELECT 1 FROM einkauf e WHERE e.bank_tx_id = bt.id)
+      WHERE bt.amount < 0 AND bt.einkauf_id IS NULL AND NOT EXISTS (SELECT 1 FROM einkauf e WHERE e.bank_tx_id = bt.id)
         ${kontoId ? sql`AND bt.konto_id = ${kontoId}` : sql``}`;
     let linked = 0;
     for (const d of debits) {
@@ -853,6 +855,66 @@ export function financeRoutes(app: FastifyInstance): void {
     return linked;
   };
 
+  /** Split-shipment matcher: Amazon (and similar) charge ONE order/invoice as SEVERAL
+   *  bank debits (per parcel) that together SUM to the invoice total. Group the open
+   *  debits whose order numbers appear in an unlinked receipt's e-mail, and if they
+   *  sum to that receipt's total (±1.5 %), link the whole group to it — the first debit
+   *  as the primary (einkauf.bank_tx_id), every debit via bank_tx.einkauf_id. Runs
+   *  after the single-debit order matcher, so 1:1 orders are already taken. Returns the
+   *  number of DEBITS newly linked. */
+  const autoMatchBankByOrderSum = async (kontoId?: number | null): Promise<number> => {
+    const debits = await sql`
+      SELECT id, amount::float8 AS amount, description, raw, counterparty
+      FROM bank_tx bt
+      WHERE bt.amount < 0 AND bt.einkauf_id IS NULL
+        AND NOT EXISTS (SELECT 1 FROM einkauf e WHERE e.bank_tx_id = bt.id)
+        ${kontoId ? sql`AND bt.konto_id = ${kontoId}` : sql``}`;
+    const debitOrders = new Map<number, { amount: number; orders: Set<string> }>();
+    for (const d of debits) {
+      const text = `${(d.description as string | null) ?? ''}\n${(d.raw as string | null) ?? ''}\n${(d.counterparty as string | null) ?? ''}`;
+      const orders = new Set(text.match(ORDER_RE) ?? []);
+      if (orders.size) debitOrders.set(d.id as number, { amount: Math.abs(d.amount as number), orders });
+    }
+    if (!debitOrders.size) return 0;
+    // Unlinked receipts that carry an e-mail (invoice), biggest total first (greedy:
+    // a multi-order e-mail claims all its debits before a smaller overlapping one).
+    const emails = await sql`
+      SELECT e.id, e.gesamt_betrag::float8 AS total,
+             coalesce(em.subject,'') || ' ' || coalesce(em.body_text,'') || ' ' || coalesce(em.html,'') AS t
+      FROM einkauf e JOIN email_message em ON em.einkauf_id = e.id
+      WHERE e.bank_tx_id IS NULL AND e.gesamt_betrag IS NOT NULL
+      ORDER BY e.gesamt_betrag DESC, e.id`;
+    // How many unlinked receipts own each order number: only order numbers unique to a
+    // single receipt are safe to auto-group on. If the same order appears in two
+    // unlinked receipts (e.g. a duplicate e-mail import), it's ambiguous → left for the
+    // manual picker, mirroring the single-debit matcher's "exactly one candidate" rule.
+    const emailList = emails.map(em => ({ id: em.id as number, total: em.total as number, orders: new Set(String(em.t).match(ORDER_RE) ?? []) }));
+    const orderOwners = new Map<string, Set<number>>();
+    for (const em of emailList) for (const o of em.orders) { if (!orderOwners.has(o)) orderOwners.set(o, new Set()); orderOwners.get(o)!.add(em.id); }
+    const used = new Set<number>();
+    let linkedDebits = 0;
+    for (const em of emailList) {
+      if (!em.orders.size) continue;
+      const group: { id: number; amount: number }[] = [];
+      for (const [id, d] of debitOrders) {
+        if (used.has(id)) continue;
+        // Include the debit only if it shares an order that belongs to THIS receipt ALONE.
+        let ok = false;
+        for (const o of d.orders) { if (em.orders.has(o) && (orderOwners.get(o)?.size ?? 0) === 1) { ok = true; break; } }
+        if (ok) group.push({ id, amount: d.amount });
+      }
+      if (group.length < 2) continue;                 // a genuine split has ≥2 debits; singles are autoMatchBankByOrder's job
+      const total = em.total;
+      const sum = group.reduce((a, g) => a + g.amount, 0);
+      if (Math.abs(sum - total) > Math.max(1, total * 0.015)) continue; // not the full set → leave for manual
+      group.sort((a, b) => a.id - b.id);
+      await sql`UPDATE einkauf SET bank_tx_id = ${group[0].id} WHERE id = ${em.id} AND bank_tx_id IS NULL`;
+      for (const g of group) { await sql`UPDATE bank_tx SET einkauf_id = ${em.id} WHERE id = ${g.id}`; used.add(g.id); }
+      linkedDebits += group.length;
+    }
+    return linkedDebits;
+  };
+
   /** Auto-link bank debits to scanned receipts. A match needs the exact amount, a
    *  shared merchant token AND a date window: the booking lags a few days behind the
    *  purchase, so the receipt must fall on/before the booking day (≤10 days back) or
@@ -864,6 +926,7 @@ export function financeRoutes(app: FastifyInstance): void {
              bt.booking_date::text AS booking, bt.purchase_date::text AS purchase
       FROM bank_tx bt
       WHERE bt.amount < 0
+        AND bt.einkauf_id IS NULL
         AND NOT EXISTS (SELECT 1 FROM einkauf e WHERE e.bank_tx_id = bt.id)
         ${kontoId ? sql`AND bt.konto_id = ${kontoId}` : sql``}
       ORDER BY bt.booking_date, bt.id`;
@@ -970,7 +1033,8 @@ export function financeRoutes(app: FastifyInstance): void {
       SELECT bt.id, bt.konto_id, bt.amount::float8 AS amount, bt.counterparty, bt.description,
              bt.booking_date::text AS booking, bt.purchase_date::text AS purchase
       FROM bank_tx bt
-      WHERE NOT EXISTS (SELECT 1 FROM einkauf e WHERE e.bank_tx_id = bt.id)
+      WHERE bt.einkauf_id IS NULL
+        AND NOT EXISTS (SELECT 1 FROM einkauf e WHERE e.bank_tx_id = bt.id)
         AND NOT EXISTS (SELECT 1 FROM income i WHERE i.bank_tx_id = bt.id)
         AND NOT EXISTS (SELECT 1 FROM fixed_cost_check fc WHERE fc.bank_tx_id = bt.id)
         AND NOT EXISTS (SELECT 1 FROM bank_match_suggestion s WHERE s.bank_tx_id = bt.id)
@@ -1065,7 +1129,7 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
         ON CONFLICT DO NOTHING RETURNING id`;
       if (ins.length) imported++; else skipped++;
     }
-    const matched = imported ? (await autoMatchBankByOrder(kontoId)) + (await autoMatchBank(kontoId)) + (await autoMatchBankCredits(kontoId)) : 0;
+    const matched = imported ? (await autoMatchBankByOrder(kontoId)) + (await autoMatchBankByOrderSum(kontoId)) + (await autoMatchBank(kontoId)) + (await autoMatchBankCredits(kontoId)) : 0;
     return { ok: true, filename: bdy.filename ?? null, account: parsed.account, period: parsed.period, imported, skipped, matched, total: parsed.rows.length };
   });
 
@@ -1096,8 +1160,10 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
       LEFT JOIN konto k ON k.id = bt.konto_id
       -- LATERAL … LIMIT 1: a bank_tx may back more than one fixed-cost check (or be
       -- linked to a receipt / income row); take one so the row never fans out.
+      -- A receipt is attached either as this booking's PRIMARY (einkauf.bank_tx_id = bt.id)
+      -- or as a SIBLING of a split shipment (bt.einkauf_id = e.id) — check both directions.
       LEFT JOIN LATERAL (SELECT e.id, e.roh_ladenname, e.gesamt_betrag, e.private_for_user_id
-                         FROM einkauf e WHERE e.bank_tx_id = bt.id LIMIT 1) re ON TRUE
+                         FROM einkauf e WHERE e.bank_tx_id = bt.id OR e.id = bt.einkauf_id LIMIT 1) re ON TRUE
       LEFT JOIN LATERAL (SELECT i.id, i.description, i.amount
                          FROM income i WHERE i.bank_tx_id = bt.id LIMIT 1) inc ON TRUE
       LEFT JOIN LATERAL (SELECT fc.fixed_cost_id AS fixed_id, f.label AS fixed_label
@@ -1201,7 +1267,13 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
   app.delete('/api/finances/bank/:id', async (req, reply) => {
     const id = parseInt(String((req.params as { id: string }).id), 10);
     if (!id) return reply.code(400).send({ error: 'bad id' });
-    await sql`DELETE FROM bank_tx WHERE id = ${id}`;
+    await sql.begin(async tx => {
+      // If this booking is a split-shipment PRIMARY, detach its receipt's siblings too,
+      // so deleting it doesn't leave a receipt with siblings but no primary (the FK only
+      // nulls einkauf.bank_tx_id). Keyed off the primary → run BEFORE the delete.
+      await tx`UPDATE bank_tx SET einkauf_id = NULL WHERE einkauf_id IN (SELECT id FROM einkauf WHERE bank_tx_id = ${id})`;
+      await tx`DELETE FROM bank_tx WHERE id = ${id}`;
+    });
     return { ok: true };
   });
 
@@ -1306,7 +1378,7 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
   app.post('/api/finances/bank/rematch', async (req) => {
     const body = (req.body ?? {}) as { konto_id?: number; ai?: boolean };
     const kontoId = body.konto_id != null ? parseInt(String(body.konto_id), 10) : null;
-    const linked = (await autoMatchBankByOrder(kontoId)) + (await autoMatchBank(kontoId)) + (await autoMatchBankCredits(kontoId));
+    const linked = (await autoMatchBankByOrder(kontoId)) + (await autoMatchBankByOrderSum(kontoId)) + (await autoMatchBank(kontoId)) + (await autoMatchBankCredits(kontoId));
     let suggested = 0;
     if (body.ai !== false) {
       try { suggested = await aiMatchBank(kontoId); }
@@ -1420,7 +1492,7 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
     const id = parseInt(String((req.params as { id: string }).id), 10);
     if (!id) return reply.code(400).send({ error: 'bad id' });
     const q = String((req.query as { q?: string }).q ?? '').trim();
-    const [bt] = await sql`SELECT amount::float8 AS amount FROM bank_tx WHERE id = ${id}`;
+    const [bt] = await sql`SELECT amount::float8 AS amount, einkauf_id FROM bank_tx WHERE id = ${id}`;
     if (!bt) return reply.code(404).send({ error: 'not found' });
     const credit = (bt.amount as number) > 0;
     if (!q) return { kind: credit ? 'income' : 'receipt', results: [] };
@@ -1443,13 +1515,17 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
     const rows = await sql`
       SELECT e.id, e.roh_ladenname AS label, e.gesamt_betrag::float8 AS betrag, e.datum::text AS datum
       FROM einkauf e
-      WHERE e.bank_tx_id IS NULL AND e.gesamt_betrag IS NOT NULL
+      -- NOT restricted to unlinked receipts: with split shipments a receipt that already
+      -- has a (primary) booking can still take another sibling debit. Exclude only the
+      -- ones already tied to THIS booking (nothing to add). Order unlinked-first.
+      WHERE e.gesamt_betrag IS NOT NULL
+        AND e.bank_tx_id IS DISTINCT FROM ${id} AND e.id IS DISTINCT FROM ${bt.einkauf_id ?? null}
         AND (e.roh_ladenname ILIKE ${like}
              ${amtNum != null ? sql`OR ABS(e.gesamt_betrag - ${amtNum}) <= 0.01` : sql``}
              OR e.datum::text ILIKE ${like}
              OR EXISTS (SELECT 1 FROM artikel a WHERE a.einkauf_id = e.id AND a.name ILIKE ${like}))
         ${kontoScope(req.user, sql`e`)}
-      ORDER BY e.datum DESC
+      ORDER BY (e.bank_tx_id IS NOT NULL), e.datum DESC
       LIMIT 40`;
     return { kind: 'receipt', results: rows };
   });
@@ -1470,18 +1546,30 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
       const eid = parseInt(String(body.einkauf_id ?? ''), 10);
       if (!eid) return reply.code(400).send({ error: 'einkauf_id required' });
       return await sql.begin(async tx => {
-        const [cur] = await tx`SELECT id, private_for_user_id AS priv FROM einkauf WHERE bank_tx_id = ${id}`;
+        // Whatever this booking is currently attached to — primary (einkauf.bank_tx_id)
+        // OR sibling of a split (bank_tx.einkauf_id) — guard a non-owner's private receipt.
+        // FOR UPDATE so the current holder can't change between this check and the
+        // detach below (else a concurrent tx could swap in a different — possibly
+        // private — receipt and the unscoped detach would null the wrong one).
+        const [cur] = await tx`
+          SELECT e.id, e.private_for_user_id AS priv FROM einkauf e
+          WHERE e.bank_tx_id = ${id} OR e.id = (SELECT einkauf_id FROM bank_tx WHERE id = ${id}) LIMIT 1 FOR UPDATE`;
         if (cur && cur.priv != null && cur.priv !== uid && !seesAll) {
           reply.code(403); return { error: 'bank transaction already linked to a private receipt' };
         }
+        // Target must be visible; it MAY already have a primary (that's how a split
+        // shipment adds another sibling debit to the same receipt).
         const [target] = await tx`
-          SELECT id FROM einkauf
-          WHERE id = ${eid} AND bank_tx_id IS NULL
-            AND (${seesAll} OR private_for_user_id IS NULL OR private_for_user_id = ${uid})
+          SELECT id, bank_tx_id FROM einkauf
+          WHERE id = ${eid} AND (${seesAll} OR private_for_user_id IS NULL OR private_for_user_id = ${uid})
           FOR UPDATE`;
-        if (!target) { reply.code(404); return { error: 'receipt not found or already linked' }; }
-        if (cur) await tx`UPDATE einkauf SET bank_tx_id = NULL WHERE id = ${cur.id}`;
-        await tx`UPDATE einkauf SET bank_tx_id = ${id} WHERE id = ${target.id}`;
+        if (!target) { reply.code(404); return { error: 'receipt not found' }; }
+        // Detach this booking from its old primary receipt (by the exact row we locked
+        // + privacy-checked, not a re-matched WHERE) unless it's the target itself.
+        if (cur && cur.id !== target.id) await tx`UPDATE einkauf SET bank_tx_id = NULL WHERE id = ${cur.id}`;
+        await tx`UPDATE bank_tx SET einkauf_id = ${target.id} WHERE id = ${id}`;
+        // Become the target's primary only if it has none yet (drives receipt-detail + evidence).
+        await tx`UPDATE einkauf SET bank_tx_id = ${id} WHERE id = ${target.id} AND bank_tx_id IS NULL`;
         return { ok: true };
       });
     }
@@ -1502,8 +1590,21 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
   app.post('/api/finances/bank/:id/unlink', async (req, reply) => {
     const id = parseInt(String((req.params as { id: string }).id), 10);
     if (!id) return reply.code(400).send({ error: 'bad id' });
-    await sql`UPDATE einkauf SET bank_tx_id = NULL WHERE bank_tx_id = ${id} ${kontoScope(req.user, sql`einkauf`)}`;
-    await sql`UPDATE income SET bank_tx_id = NULL WHERE bank_tx_id = ${id}`;
+    await sql.begin(async tx => {
+      // If this booking is the PRIMARY of a split-shipment receipt, that receipt may
+      // also have SIBLING debits (bank_tx.einkauf_id = receipt). Detaching only this
+      // booking would orphan the receipt (primary gone, siblings still pointing at it),
+      // so fully detach the receipt: clear every sibling's link first (keyed off the
+      // primary, so BEFORE nulling einkauf.bank_tx_id).
+      await tx`UPDATE bank_tx SET einkauf_id = NULL
+        WHERE einkauf_id IN (SELECT e.id FROM einkauf e WHERE e.bank_tx_id = ${id} ${kontoScope(req.user, sql`e`)})`;
+      await tx`UPDATE einkauf SET bank_tx_id = NULL WHERE bank_tx_id = ${id} ${kontoScope(req.user, sql`einkauf`)}`;
+      // Drop THIS booking's own sibling link too (case: it was a sibling, not a primary),
+      // scoped so a non-owner can't detach a booking tied to someone else's private receipt.
+      await tx`UPDATE bank_tx SET einkauf_id = NULL WHERE id = ${id}
+        AND (einkauf_id IS NULL OR EXISTS (SELECT 1 FROM einkauf e WHERE e.id = bank_tx.einkauf_id ${kontoScope(req.user, sql`e`)}))`;
+      await tx`UPDATE income SET bank_tx_id = NULL WHERE bank_tx_id = ${id}`;
+    });
     return { ok: true };
   });
 
