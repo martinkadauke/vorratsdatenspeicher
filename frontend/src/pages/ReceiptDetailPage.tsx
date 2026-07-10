@@ -500,9 +500,11 @@ export function ReceiptDetailPage() {
 
       <ReceiptEditModal receipt={data} open={editReceipt} onClose={() => setEditReceipt(false)} />
 
-      <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
-        {/* Receipt image — zoomable in place so items list stays visible */}
-        <div className="lg:sticky lg:top-[60px] lg:self-start">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[320px_1fr]">
+        {/* Receipt image / e-mail preview — min-w-0 so a wide e-mail iframe (or a long
+            subject) can't blow the column past the mobile viewport; grid-cols-1 gives the
+            mobile track a minmax(0,1fr) floor so the item shrinks instead of overflowing. */}
+        <div className="min-w-0 lg:sticky lg:top-[60px] lg:self-start">
           {data.bild_pfad ? (
             /\.pdf$/i.test(data.bild_pfad) ? (
               // E-mail-imported invoices can be PDFs — render the PDF inline (the
