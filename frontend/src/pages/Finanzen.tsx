@@ -134,6 +134,7 @@ function MonthTab() {
   const { t, i18n } = useTranslation();
   const qc = useQueryClient();
   const [month, setMonth] = useUrlState('m', curMonth());
+  const [fx, setFx] = useUrlState('fx', '');   // deep-link from Auszüge: open this plan's evidence
   const [picker, setPicker] = useState<MonthFix | null>(null);
   const [budgetModal, setBudgetModal] = useState<Partial<MonthBudget> | null>(null);
   const [posBudget, setPosBudget] = useState<MonthBudget | null>(null);
@@ -222,6 +223,14 @@ function MonthTab() {
   const incomes = data?.incomes ?? [];   // recurring income PLANS (Einnahmen-Soll)
   const fixed = data?.fixed ?? [];
   const budgets = data?.budgets ?? [];
+
+  // Deep-link from the Auszüge list (?fx=<id>): open that plan's evidence modal so a
+  // statement allocated to a generated one-off income jumps straight to the entry.
+  useEffect(() => {
+    if (!fx || !data) return;
+    const f = [...(data.incomes ?? []), ...(data.fixed ?? [])].find(p => String(p.id) === fx);
+    if (f) { setEvidence({ id: f.id, label: f.label, kind: f.kind, expectReceipt: f.expect_receipt }); setFx(''); }
+  }, [fx, data, setFx]);
   // Summary mirrors fixed costs: sum the PLANS (Soll), not just the matched actuals.
   // Internal transfers (Umbuchung) net to zero across the household, so they're
   // excluded from the gross totals in the whole-household view; in a single-account
@@ -1369,7 +1378,7 @@ interface BankTx {
   status: 'open' | 'fixed' | 'receipt' | 'income';
   receipt: { id: number | null; laden: string | null; betrag: number | null; private: boolean } | null;
   income: { id: number; description: string | null; betrag: number } | null;
-  fixed: { id: number; label: string } | null;
+  fixed: { id: number; label: string; kind: 'expense' | 'income'; expect_receipt: boolean; month: string } | null;
   suggestion: { kind: 'receipt' | 'income' | 'fixed'; target_id: number; label: string | null; confidence: number; reason: string | null; private: boolean } | null;
 }
 
@@ -1447,22 +1456,25 @@ function BankUpload({ scopeKonten }: { scopeKonten: KontoLite[] }) {
   );
 }
 
-function BankRow({ tx, t, highlight, onOpen, onLink, onUnlink, onFlag, onGenerate, onApprove, onDismiss }: {
+function BankRow({ tx, t, highlight, onOpen, onOpenFixed, onLink, onUnlink, onFlag, onGenerate, onApprove, onDismiss }: {
   tx: BankTx; t: (k: string, o?: Record<string, unknown>) => string; highlight?: boolean;
-  onOpen: (receiptId: number) => void; onLink: (tx: BankTx) => void; onUnlink: (id: number) => void;
+  onOpen: (receiptId: number) => void; onOpenFixed: (tx: BankTx) => void; onLink: (tx: BankTx) => void; onUnlink: (id: number) => void;
   onFlag: (id: number, flag: boolean) => void; onGenerate: (tx: BankTx) => void;
   onApprove: (id: number) => void; onDismiss: (id: number) => void;
 }) {
   useEffect(() => { if (highlight) document.getElementById(`bank-row-${tx.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, [highlight, tx.id]);
   const credit = tx.amount > 0;
   const canOpen = tx.status === 'receipt' && tx.receipt?.id != null && !tx.receipt.private;
+  // A booking used as evidence for a fixed cost / one-off income (e.g. a generated
+  // "…Spesen" income) → jump to that plan's month so the user reaches the generated entry.
+  const canOpenFixed = tx.status === 'fixed' && tx.fixed != null;
   const canLink = tx.status === 'open'; // debit → receipt, credit → income row
   const isLinked = tx.status === 'receipt' || tx.status === 'income';
   const badge = tx.status === 'receipt' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
     : tx.status === 'income' ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300'
       : tx.status === 'fixed' ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300'
         : 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300';
-  const onClick = canOpen ? () => onOpen(tx.receipt!.id!) : canLink ? () => onLink(tx) : undefined;
+  const onClick = canOpen ? () => onOpen(tx.receipt!.id!) : canOpenFixed ? () => onOpenFixed(tx) : canLink ? () => onLink(tx) : undefined;
   // Long-press (touch or mouse-hold, ~500 ms) toggles the shared red review mark.
   // A fired long-press suppresses the click that follows it.
   const longPressed = useRef(false);
@@ -1896,7 +1908,7 @@ function BankTab() {
         <>
           <p className="-mb-1 text-[11px] text-zinc-400">{t('finances.bank.flagHint')}</p>
           <div className="flex flex-col gap-2">
-            {items.map(tx => <BankRow key={tx.id} tx={tx} t={t} highlight={highlightId !== '' && String(tx.id) === highlightId} onOpen={id => navigate(`/receipts/${id}`)} onLink={setLinkTx} onUnlink={unlink.mutate} onFlag={(id, on) => flag.mutate({ id, on })} onGenerate={setGenTx} onApprove={approve.mutate} onDismiss={dismiss.mutate} />)}
+            {items.map(tx => <BankRow key={tx.id} tx={tx} t={t} highlight={highlightId !== '' && String(tx.id) === highlightId} onOpen={id => navigate(`/receipts/${id}`)} onOpenFixed={b => navigate(`/finanzen?tab=monat&m=${b.fixed!.month}&fx=${b.fixed!.id}`)} onLink={setLinkTx} onUnlink={unlink.mutate} onFlag={(id, on) => flag.mutate({ id, on })} onGenerate={setGenTx} onApprove={approve.mutate} onDismiss={dismiss.mutate} />)}
           </div>
         </>
       )}

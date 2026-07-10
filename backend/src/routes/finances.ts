@@ -1219,7 +1219,7 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
              re.id AS receipt_id, re.roh_ladenname AS receipt_laden, re.gesamt_betrag::float8 AS receipt_betrag,
              re.private_for_user_id AS receipt_priv,
              inc.id AS income_id, inc.description AS income_desc, inc.amount::float8 AS income_betrag,
-             fx.fixed_id, fx.fixed_label,
+             fx.fixed_id, fx.fixed_label, fx.fixed_kind, fx.fixed_expect, fx.fixed_month,
              sg.target_kind AS sug_kind, sg.target_id AS sug_target_id, sg.target_label AS sug_label,
              sg.confidence::float8 AS sug_confidence, sg.reason AS sug_reason, sg.target_priv AS sug_priv
       FROM bank_tx bt
@@ -1232,7 +1232,8 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
                          FROM einkauf e WHERE e.bank_tx_id = bt.id OR e.id = bt.einkauf_id LIMIT 1) re ON TRUE
       LEFT JOIN LATERAL (SELECT i.id, i.description, i.amount
                          FROM income i WHERE i.bank_tx_id = bt.id LIMIT 1) inc ON TRUE
-      LEFT JOIN LATERAL (SELECT fc.fixed_cost_id AS fixed_id, f.label AS fixed_label
+      LEFT JOIN LATERAL (SELECT fc.fixed_cost_id AS fixed_id, f.label AS fixed_label, f.kind AS fixed_kind,
+                                f.expect_receipt AS fixed_expect, fc.month::text AS fixed_month
                          FROM fixed_cost_check fc JOIN fixed_cost f ON f.id = fc.fixed_cost_id
                          WHERE fc.bank_tx_id = bt.id LIMIT 1) fx ON TRUE
       LEFT JOIN LATERAL (
@@ -1273,7 +1274,7 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
             : { id: r.receipt_id, laden: r.receipt_laden, betrag: r.receipt_betrag, private: false })
           : null,
         income: r.income_id ? { id: r.income_id, description: r.income_desc, betrag: r.income_betrag } : null,
-        fixed: r.fixed_id ? { id: r.fixed_id, label: r.fixed_label } : null,
+        fixed: r.fixed_id ? { id: r.fixed_id, label: r.fixed_label, kind: r.fixed_kind, expect_receipt: r.fixed_expect, month: (r.fixed_month as string).slice(0, 7) } : null,
         // ⭐ pending AI suggestion (needs approval). A suggested private receipt has its label masked.
         suggestion: r.sug_kind ? (() => {
           const sm = (r.sug_priv as number | null) != null && (r.sug_priv as number | null) !== uid && !seesAll;
