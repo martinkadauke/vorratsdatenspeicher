@@ -1769,22 +1769,28 @@ function BankTab() {
         </div>
         {filtersOpen && (
           <>
-            <div className="flex flex-wrap gap-2">
-              <Select value={konto} onChange={e => setKonto(e.target.value)} className="min-w-0 flex-1">
+            {/* Stacks on mobile so the account name isn't truncated ("all accoun…") and
+                the clear-✕ never overlaps the native month picker's own dropdown arrow. */}
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+              <Select value={konto} onChange={e => setKonto(e.target.value)} className="w-full min-w-0 sm:flex-1">
                 <option value="">{t('finances.bank.allKonten')}</option>
                 {scopeKonten.map(k => <option key={k.id} value={k.id}>{scopeLabelOf(t, k)}</option>)}
               </Select>
-              <div className="relative flex items-center">
-                <Calendar size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
-                <Input type="month" value={month} onChange={e => setMonth(e.target.value)} aria-label={t('finances.bank.monthFilter')}
-                  className="w-[11rem] cursor-pointer pl-8 pr-7" title={t('finances.bank.monthFilter')} />
+              <div className="flex items-center gap-2">
+                {/* Calendar icon is on the LEFT only (the native picker's own control is on
+                    the right); the clear-✕ is a SEPARATE button, never overlapping it. */}
+                <div className="relative min-w-0 flex-1 sm:w-[10.5rem] sm:flex-none">
+                  <Calendar size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+                  <Input type="month" value={month} onChange={e => setMonth(e.target.value)} aria-label={t('finances.bank.monthFilter')}
+                    className="w-full cursor-pointer pl-8" title={t('finances.bank.monthFilter')} />
+                </div>
                 {month && <button type="button" onClick={() => setMonth('')} title={t('common.clear')}
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"><X size={13} /></button>}
+                  className="shrink-0 rounded-xl border border-zinc-200 p-2 text-zinc-400 hover:text-zinc-600 dark:border-zinc-800 dark:hover:text-zinc-200"><X size={15} /></button>}
+                <button onClick={() => rematch.mutate()} disabled={rematch.isPending} title={t('finances.bank.rematch')}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-zinc-300 px-2.5 py-2 text-xs font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
+                  <RefreshCw size={14} className={cn(rematch.isPending && 'animate-spin')} /> {t('finances.bank.rematch')}
+                </button>
               </div>
-              <button onClick={() => rematch.mutate()} disabled={rematch.isPending} title={t('finances.bank.rematch')}
-                className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-zinc-300 px-2.5 py-2 text-xs font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
-                <RefreshCw size={14} className={cn(rematch.isPending && 'animate-spin')} /> {t('finances.bank.rematch')}
-              </button>
             </div>
             <div className="flex flex-wrap gap-1.5">
               {chips.map(ch => (
