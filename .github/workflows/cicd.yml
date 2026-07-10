@@ -81,6 +81,16 @@ jobs:
       - uses: actions/checkout@v4
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      # Every deploy pulls a fresh <sha>-tagged image; old ones pile up and eventually
+      # fill the runner's small disk (No space left on device → deploy fails). Prune
+      # BEFORE the pull. `-a` keeps images still in use by a running service (all 3 envs
+      # + the image we're about to replace, so a rollback stays local), and only clears
+      # the orphaned older tags. `|| true` so a prune hiccup never blocks a deploy.
+      - name: Free disk (prune unused docker images/containers)
+        run: |
+          docker container prune -f || true
+          docker image prune -af || true
+          df -h / | tail -1 || true
       - name: Deploy stack (rolling update)
         env:
           IMAGE: ghcr.io/${{ github.repository }}:${{ github.sha }}
