@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Wallet, Plus, Pencil, Trash2, Home, User as UserIcon, Info,
   ChevronLeft, ChevronRight, ChevronDown, CheckCircle2, Circle, CircleDot, Search, X, Upload, Layers, Lock,
-  Link2, Link2Off, RefreshCw, Landmark, SlidersHorizontal, Flag, FilePlus2, Receipt, FileText, Paperclip,
+  Link2, Link2Off, RefreshCw, Landmark, SlidersHorizontal, Flag, FilePlus2, Receipt, FileText, Paperclip, Sparkles,
 } from 'lucide-react';
 import { api, getToken } from '../api/client';
 import { Card, Spinner, Button, Input, Label, Select, Switch, Modal, EmptyState, Badge } from '../components/ui';
@@ -1288,7 +1288,7 @@ function BankRow({ tx, t, highlight, onOpen, onLink, onUnlink, onFlag, onGenerat
           {canLink && !tx.suggestion && <span className="text-zinc-400">{credit ? t('finances.bank.tapToLinkIncome') : t('finances.bank.tapToLink')}</span>}
           {tx.suggestion && (
             <span className="inline-flex min-w-0 items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" title={tx.suggestion.reason ?? undefined}>
-              ⭐ {t('finances.bank.aiSuggests')} <span className="max-w-[10rem] truncate">{tx.suggestion.private ? t('finances.privatePurchase') : (tx.suggestion.label || '—')}</span> · {Math.round(tx.suggestion.confidence * 100)}%
+              <Sparkles size={11} className="shrink-0 text-amber-500" /> {t('finances.bank.aiSuggests')} <span className="max-w-[10rem] truncate">{tx.suggestion.private ? t('finances.privatePurchase') : (tx.suggestion.label || '—')}</span> · {Math.round(tx.suggestion.confidence * 100)}%
             </span>
           )}
         </div>
@@ -1321,34 +1321,51 @@ function BankRow({ tx, t, highlight, onOpen, onLink, onUnlink, onFlag, onGenerat
 
 /** Pick a receipt (debit) or income row (credit) to link to a bank transaction.
  *  Candidates come pre-filtered by amount + date window from the backend. */
-function BankLinkPicker({ tx, t, onClose, onPick }: {
-  tx: BankTx; t: (k: string, o?: Record<string, unknown>) => string; onClose: () => void; onPick: (id: number) => void;
+function BankLinkPicker({ tx, t, onClose, onPick, onApprove }: {
+  tx: BankTx; t: (k: string, o?: Record<string, unknown>) => string; onClose: () => void; onPick: (id: number) => void; onApprove: (id: number) => void;
 }) {
   const { data, isLoading } = useQuery({
     queryKey: ['bank-candidates', tx.id],
     queryFn: () => api<{ kind: 'receipt' | 'income'; candidates: { id: number; label: string | null; betrag: number; datum: string }[] }>(`/api/finances/bank/${tx.id}/candidates`),
   });
   const cands = data?.candidates ?? [];
+  const sug = tx.suggestion;
   return (
     <Modal open onClose={onClose} title={tx.amount > 0 ? t('finances.bank.linkIncomeTitle') : t('finances.bank.linkTitle')}>
       <div className="flex flex-col gap-3">
         <div className="text-xs text-zinc-500 dark:text-zinc-400">{tx.counterparty} · {eur(tx.amount)} · {ddmmyyyy(tx.booking_date)}</div>
+        {/* The AI proposal (⭐) sits on top, distinct from the deterministic matches,
+            and approving it turns it into the real link. */}
+        {sug && (
+          <button onClick={() => { onApprove(tx.id); onClose(); }}
+            className="flex w-full items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-left hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/30 dark:hover:bg-amber-950/50">
+            <Sparkles size={16} className="shrink-0 text-amber-500" />
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-medium">{sug.private ? t('finances.privatePurchase') : (sug.label || '—')}</div>
+              <div className="mt-0.5 truncate text-xs text-amber-700 dark:text-amber-300">{t('finances.bank.aiSuggests')} {Math.round(sug.confidence * 100)}%{sug.reason ? ` · ${sug.reason}` : ''}</div>
+            </div>
+            <CheckCircle2 size={16} className="shrink-0 text-emerald-600" />
+          </button>
+        )}
         {isLoading ? <Spinner /> : !cands.length ? (
-          <p className="py-4 text-center text-xs text-zinc-400">{t('finances.bank.noCandidates')}</p>
+          !sug && <p className="py-4 text-center text-xs text-zinc-400">{t('finances.bank.noCandidates')}</p>
         ) : (
-          <ul className="-mx-1 flex max-h-[55vh] flex-col divide-y divide-zinc-100 overflow-y-auto dark:divide-zinc-800">
-            {cands.map(c => (
-              <li key={c.id}>
-                <button onClick={() => onPick(c.id)} className="flex w-full items-center gap-2 rounded-lg px-1 py-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium">{c.label || '–'}</div>
-                    <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{ddmmyyyy(c.datum)}</div>
-                  </div>
-                  <span className="shrink-0 text-sm font-semibold">{eur(c.betrag)}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
+          <>
+            {sug && <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">{t('finances.bank.otherCandidates')}</div>}
+            <ul className="-mx-1 flex max-h-[55vh] flex-col divide-y divide-zinc-100 overflow-y-auto dark:divide-zinc-800">
+              {cands.map(c => (
+                <li key={c.id}>
+                  <button onClick={() => onPick(c.id)} className="flex w-full items-center gap-2 rounded-lg px-1 py-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium">{c.label || '–'}</div>
+                      <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{ddmmyyyy(c.datum)}</div>
+                    </div>
+                    <span className="shrink-0 text-sm font-semibold">{eur(c.betrag)}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
         )}
       </div>
     </Modal>
@@ -1590,7 +1607,7 @@ function BankTab() {
           </div>
         </>
       )}
-      {linkTx && <BankLinkPicker tx={linkTx} t={t} onClose={() => setLinkTx(null)} onPick={link.mutate} />}
+      {linkTx && <BankLinkPicker tx={linkTx} t={t} onClose={() => setLinkTx(null)} onPick={link.mutate} onApprove={approve.mutate} />}
       {genTx && <BankGenerateModal tx={genTx} t={t} onClose={() => setGenTx(null)}
         onDone={() => {
           setGenTx(null);

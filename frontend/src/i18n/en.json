@@ -96,6 +96,7 @@
       "rematchToast": "{{n}} linked · {{s}} AI suggestions (⭐)",
       "linkedToast": "Receipt linked",
       "aiSuggests": "AI:",
+      "otherCandidates": "Other candidates",
       "approveSuggestion": "Approve suggestion",
       "dismissSuggestion": "Dismiss suggestion",
       "approvedToast": "Suggestion approved"

@@ -730,6 +730,39 @@ export function financeRoutes(app: FastifyInstance): void {
     return d.toISOString().slice(0, 10);
   };
 
+  /** Auto-link by ORDER NUMBER — the strongest signal, immune to the date window.
+   *  Amazon (and similar) put the order number in the booking text ("304-8531658-…")
+   *  and the same number appears in the e-mail receipt's body/subject, so a pre-order
+   *  whose invoice is months before the charge still matches 1:1. Requires the amount
+   *  to still fit (guards partial shipments) and a UNIQUE receipt for that order. */
+  const ORDER_RE = /\d{3}-\d{7}-\d{7}/g; // JS \d (Postgres POSIX ~ would need [0-9])
+  const autoMatchBankByOrder = async (kontoId?: number | null): Promise<number> => {
+    const debits = await sql`
+      SELECT id, amount::float8 AS amount, description, raw, counterparty
+      FROM bank_tx bt
+      WHERE bt.amount < 0 AND NOT EXISTS (SELECT 1 FROM einkauf e WHERE e.bank_tx_id = bt.id)
+        ${kontoId ? sql`AND bt.konto_id = ${kontoId}` : sql``}`;
+    let linked = 0;
+    for (const d of debits) {
+      const text = `${(d.description as string | null) ?? ''}\n${(d.raw as string | null) ?? ''}\n${(d.counterparty as string | null) ?? ''}`;
+      const orders = [...new Set(text.match(ORDER_RE) ?? [])];
+      if (!orders.length) continue;
+      const target = Math.abs(d.amount as number);
+      const tol = Math.max(1, target * 0.05);
+      for (const ord of orders) {
+        const like = `%${ord}%`;
+        const cands = await sql`
+          SELECT e.id, e.gesamt_betrag::float8 AS betrag
+          FROM einkauf e JOIN email_message em ON em.einkauf_id = e.id
+          WHERE e.bank_tx_id IS NULL AND e.gesamt_betrag IS NOT NULL
+            AND (em.body_text ILIKE ${like} OR em.html ILIKE ${like} OR em.subject ILIKE ${like})`;
+        const m = cands.filter(c => Math.abs((c.betrag as number) - target) <= tol);
+        if (m.length === 1) { await sql`UPDATE einkauf SET bank_tx_id = ${d.id} WHERE id = ${m[0].id}`; linked++; break; }
+      }
+    }
+    return linked;
+  };
+
   /** Auto-link bank debits to scanned receipts. A match needs the exact amount, a
    *  shared merchant token AND a date window: the booking lags a few days behind the
    *  purchase, so the receipt must fall on/before the booking day (≤10 days back) or
@@ -942,7 +975,7 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
         ON CONFLICT DO NOTHING RETURNING id`;
       if (ins.length) imported++; else skipped++;
     }
-    const matched = imported ? (await autoMatchBank(kontoId)) + (await autoMatchBankCredits(kontoId)) : 0;
+    const matched = imported ? (await autoMatchBankByOrder(kontoId)) + (await autoMatchBank(kontoId)) + (await autoMatchBankCredits(kontoId)) : 0;
     return { ok: true, filename: bdy.filename ?? null, account: parsed.account, period: parsed.period, imported, skipped, matched, total: parsed.rows.length };
   });
 
@@ -1183,7 +1216,7 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
   app.post('/api/finances/bank/rematch', async (req) => {
     const body = (req.body ?? {}) as { konto_id?: number; ai?: boolean };
     const kontoId = body.konto_id != null ? parseInt(String(body.konto_id), 10) : null;
-    const linked = (await autoMatchBank(kontoId)) + (await autoMatchBankCredits(kontoId));
+    const linked = (await autoMatchBankByOrder(kontoId)) + (await autoMatchBank(kontoId)) + (await autoMatchBankCredits(kontoId));
     let suggested = 0;
     if (body.ai !== false) {
       try { suggested = await aiMatchBank(kontoId); }

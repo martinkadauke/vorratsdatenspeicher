@@ -96,6 +96,7 @@
       "rematchToast": "{{n}} verknüpft · {{s}} KI-Vorschläge (⭐)",
       "linkedToast": "Beleg verknüpft",
       "aiSuggests": "KI:",
+      "otherCandidates": "Andere Kandidaten",
       "approveSuggestion": "Vorschlag übernehmen",
       "dismissSuggestion": "Vorschlag verwerfen",
       "approvedToast": "Vorschlag übernommen"
