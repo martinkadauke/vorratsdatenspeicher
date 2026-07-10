@@ -391,8 +391,9 @@ export function receiptRoutes(app: FastifyInstance): void {
       else {
         const n = parseInt(String(v), 10);
         if (!Number.isFinite(n)) return reply.code(400).send({ error: 'invalid snapped_by_member_id' });
-        const [m] = await sql`SELECT id FROM family_member WHERE id = ${n}`;
-        if (!m) return reply.code(400).send({ error: 'unknown member' });
+        // Only members with a login can scan/upload receipts, so only they can be the snapper.
+        const [m] = await sql`SELECT id FROM family_member WHERE id = ${n} AND user_id IS NOT NULL`;
+        if (!m) return reply.code(400).send({ error: 'member cannot be a snapper (no user account)' });
         updates.snapped_by_member_id = n;
       }
     }

@@ -108,8 +108,10 @@ export function ReceiptDetailPage() {
   // the uploader; new scans auto-attribute the logged-in member).
   const { data: family } = useQuery({
     queryKey: ['family'],
-    queryFn: () => api<{ id: number; name: string; emoji: string | null }[]>('/api/family'),
+    queryFn: () => api<{ id: number; name: string; emoji: string | null; user_id: number | null }[]>('/api/family'),
   });
+  // Only members with a login account can scan/upload → only they are valid snappers.
+  const snappers = (family ?? []).filter(m => m.user_id != null);
   const setSnappedBy = useMutation({
     mutationFn: (memberId: number | null) => api(`/api/receipts/${id}`, { method: 'PATCH', body: { snapped_by_member_id: memberId } }),
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ['receipt', id] }); void qc.invalidateQueries({ queryKey: ['receipts'] }); },
@@ -304,14 +306,14 @@ export function ReceiptDetailPage() {
           )}
           {/* Who scanned/uploaded this receipt (household member) — set the uploader on
               legacy PWA receipts that never captured it; new scans auto-fill it. */}
-          {(family?.length ?? 0) > 0 && (
+          {snappers.length > 0 && (
             <label className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-950/50 dark:text-amber-300" title={t('receiptDetail.snappedBy')}>
               <Camera size={11} />
               <select value={data.snapped_by_member_id ?? ''} disabled={!canWrite || setSnappedBy.isPending}
                 onChange={e => setSnappedBy.mutate(e.target.value ? Number(e.target.value) : null)}
                 className="cursor-pointer bg-transparent text-[11px] font-medium outline-none disabled:cursor-default">
                 <option value="">{t('receiptDetail.snappedByUnset')}</option>
-                {family!.map(m => <option key={m.id} value={m.id}>{m.emoji ? `${m.emoji} ` : ''}{m.name}</option>)}
+                {snappers.map(m => <option key={m.id} value={m.id}>{m.emoji ? `${m.emoji} ` : ''}{m.name}</option>)}
               </select>
             </label>
           )}
