@@ -425,6 +425,12 @@ function FixedEvidenceModal({ id, label, kind, month, t, expectReceipt, onClose,
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ['fix-evidence'] }); void qc.invalidateQueries({ queryKey: ['fin-month'] }); void qc.invalidateQueries({ queryKey: ['fin-income'] }); toast(t('finances.income.attached'), 'success'); },
     onError: (e: Error) => toast(e.message, 'error'),
   });
+  // Detach a single evidence leg (bank statement / receipt / income) from this month.
+  const unlink = useMutation({
+    mutationFn: (leg: 'bank' | 'receipt' | 'income') => api(`/api/finances/fixed-cost/${id}/evidence/unlink`, { method: 'POST', body: { month, leg } }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['fix-evidence'] }); void qc.invalidateQueries({ queryKey: ['fin-month'] }); toast(t('finances.evUnlinked'), 'success'); },
+    onError: (e: Error) => toast(e.message, 'error'),
+  });
   const go = (to: string) => { onClose(); navigate(to); };
   const rowCls = 'flex items-center gap-3 rounded-xl border border-zinc-200 p-3 text-left dark:border-zinc-800';
   const dashCls = 'flex items-center gap-2 rounded-xl border border-dashed border-zinc-200 p-3 text-xs text-zinc-400 dark:border-zinc-800';
@@ -438,36 +444,44 @@ function FixedEvidenceModal({ id, label, kind, month, t, expectReceipt, onClose,
             {/* Bank booking — the source of truth. Only a link when there's a
                 counterparty to search Auszüge by (else it would land unfiltered). */}
             {data.bank ? (() => { const bankLink = !data.bank.private && !!data.bank.counterparty; return (
-              <button type="button" disabled={!bankLink} onClick={() => bankLink && go(`/finanzen?tab=bank&bq=${encodeURIComponent(data.bank!.counterparty!)}&bhl=${data.bank!.id}`)}
-                className={cn(rowCls, bankLink && 'hover:bg-zinc-50 dark:hover:bg-zinc-800/50')}>
-                <Landmark size={18} className="shrink-0 text-sky-500" />
-                <div className="min-w-0 flex-1">
-                  <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">{t('finances.evidenceBank')}</div>
-                  <div className="truncate text-sm">{data.bank.private ? t('finances.privatePurchase') : (data.bank.counterparty || '—')}</div>
-                </div>
-                <div className="shrink-0 text-right">
-                  <div className="text-sm font-semibold">{eur(data.bank.amount)}</div>
-                  <div className="text-[10px] text-zinc-400">{ddmmyyyy(data.bank.datum)}</div>
-                </div>
-                {bankLink && <ChevronRight size={15} className="shrink-0 text-zinc-300 dark:text-zinc-600" />}
-              </button>); })()
+              <div className={rowCls}>
+                <button type="button" disabled={!bankLink} onClick={() => bankLink && go(`/finanzen?tab=bank&bq=${encodeURIComponent(data.bank!.counterparty!)}&bhl=${data.bank!.id}`)}
+                  className={cn('flex min-w-0 flex-1 items-center gap-3 text-left', bankLink && 'hover:opacity-75')}>
+                  <Landmark size={18} className="shrink-0 text-sky-500" />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">{t('finances.evidenceBank')}</div>
+                    <div className="truncate text-sm">{data.bank.private ? t('finances.privatePurchase') : (data.bank.counterparty || '—')}</div>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <div className="text-sm font-semibold">{eur(data.bank.amount)}</div>
+                    <div className="text-[10px] text-zinc-400">{ddmmyyyy(data.bank.datum)}</div>
+                  </div>
+                  {bankLink && <ChevronRight size={15} className="shrink-0 text-zinc-300 dark:text-zinc-600" />}
+                </button>
+                {!data.bank.private && <button type="button" onClick={() => unlink.mutate('bank')} disabled={unlink.isPending} title={t('finances.evUnlink')}
+                  className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30"><Link2Off size={15} /></button>}
+              </div>); })()
             : <div className={dashCls}><Landmark size={14} /> {t('finances.evidenceNoBank')}</div>}
             {/* Receipt / e-mail invoice (expense) */}
             {kind === 'expense' && data.receipt && (
-              <button type="button" disabled={data.receipt.private || data.receipt.id == null}
-                onClick={() => data.receipt?.id != null && go(`/receipts/${data.receipt.id}`)}
-                className={cn(rowCls, !data.receipt.private && data.receipt.id != null && 'hover:bg-zinc-50 dark:hover:bg-zinc-800/50')}>
-                {data.receipt.private ? <Lock size={18} className="shrink-0 text-zinc-400" /> : <Receipt size={18} className="shrink-0 text-emerald-500" />}
-                <div className="min-w-0 flex-1">
-                  <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">{t('finances.evidenceReceipt')}</div>
-                  <div className="truncate text-sm">{data.receipt.private ? t('finances.privatePurchase') : (data.receipt.laden || '—')}</div>
-                </div>
-                <div className="shrink-0 text-right">
-                  <div className="text-sm font-semibold">{eur(data.receipt.betrag)}</div>
-                  <div className="text-[10px] text-zinc-400">{ddmmyyyy(data.receipt.datum)}</div>
-                </div>
-                {!data.receipt.private && data.receipt.id != null && <ChevronRight size={15} className="shrink-0 text-zinc-300 dark:text-zinc-600" />}
-              </button>
+              <div className={rowCls}>
+                <button type="button" disabled={data.receipt.private || data.receipt.id == null}
+                  onClick={() => data.receipt?.id != null && go(`/receipts/${data.receipt.id}`)}
+                  className={cn('flex min-w-0 flex-1 items-center gap-3 text-left', !data.receipt.private && data.receipt.id != null && 'hover:opacity-75')}>
+                  {data.receipt.private ? <Lock size={18} className="shrink-0 text-zinc-400" /> : <Receipt size={18} className="shrink-0 text-emerald-500" />}
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">{t('finances.evidenceReceipt')}</div>
+                    <div className="truncate text-sm">{data.receipt.private ? t('finances.privatePurchase') : (data.receipt.laden || '—')}</div>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <div className="text-sm font-semibold">{eur(data.receipt.betrag)}</div>
+                    <div className="text-[10px] text-zinc-400">{ddmmyyyy(data.receipt.datum)}</div>
+                  </div>
+                  {!data.receipt.private && data.receipt.id != null && <ChevronRight size={15} className="shrink-0 text-zinc-300 dark:text-zinc-600" />}
+                </button>
+                {!data.receipt.private && <button type="button" onClick={() => unlink.mutate('receipt')} disabled={unlink.isPending} title={t('finances.evUnlink')}
+                  className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30"><Link2Off size={15} /></button>}
+              </div>
             )}
             {/* Income row (pay slip) — the proof for an income plan; view / attach here */}
             {kind === 'income' && data.income && (
@@ -490,6 +504,8 @@ function FixedEvidenceModal({ id, label, kind, month, t, expectReceipt, onClose,
                     <input type="file" accept=".pdf,image/*" className="hidden" onChange={e => { const fl = e.target.files?.[0]; const inc = data.income; if (fl && inc) attach.mutate({ id: inc.id, file: fl }); e.currentTarget.value = ''; }} />
                   </label>
                 )}
+                <button type="button" onClick={() => unlink.mutate('income')} disabled={unlink.isPending} title={t('finances.evUnlink')}
+                  className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30"><Link2Off size={15} /></button>
               </div>
             )}
             {/* Proof resolution: find, (income) attach above, or mark "kein Beleg" (undo-able) */}

@@ -143,6 +143,8 @@
     "evNoReceiptDone": "No longer expecting a receipt",
     "evNoReceiptState": "No receipt expected",
     "evExpectReceiptOn": "Expect a receipt again",
+    "evUnlink": "Unlink",
+    "evUnlinked": "Unlinked",
     "evidenceNoProof": "No proof linked",
     "allocatedTitle": "Allocated",
     "receiptOpen": "Receipt open",

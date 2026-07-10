@@ -572,6 +572,55 @@ export function financeRoutes(app: FastifyInstance): void {
     };
   });
 
+  /** Detach ONE leg of a fixed-cost check's evidence for a month, from the clickable
+   *  evidence modal. leg='receipt'/'income' clears that ref on the check; leg='bank'
+   *  drops the bank either from the check directly, or (when it's only shown via the
+   *  married receipt/income) unmarries it there. If the check ends up with no evidence
+   *  left, the month is reopened (check deleted). Private receipts are owner-guarded. */
+  app.post('/api/finances/fixed-cost/:id/evidence/unlink', async (req, reply) => {
+    const id = parseInt(String((req.params as { id: string }).id), 10);
+    const body = (req.body ?? {}) as { month?: string; leg?: string };
+    const leg = body.leg;
+    const b = monthBounds((body.month ?? '').trim());
+    if (!id || !b) return reply.code(400).send({ error: 'id and month (YYYY-MM) required' });
+    if (leg !== 'bank' && leg !== 'receipt' && leg !== 'income') return reply.code(400).send({ error: 'leg must be bank|receipt|income' });
+    const [f] = await sql`SELECT frequency FROM fixed_cost WHERE id = ${id}`;
+    if (!f) return reply.code(404).send({ error: 'not found' });
+    const checkMonth = anchorMonth(b.first, f.frequency as string | null);
+    const uid = req.user?.id ?? -1;
+    const seesAll = !!req.user?.sees_all_konten;
+    return await sql.begin(async tx => {
+      const [c] = await tx`SELECT einkauf_id, bank_tx_id, income_id, status FROM fixed_cost_check WHERE fixed_cost_id = ${id} AND month = ${checkMonth} FOR UPDATE`;
+      if (!c) { reply.code(404); return { error: 'no check for this month' }; }
+      // A private receipt on this check may only be detached by its owner / super-admin.
+      if (c.einkauf_id != null) {
+        const [e] = await tx`SELECT private_for_user_id AS priv FROM einkauf WHERE id = ${c.einkauf_id}`;
+        if (e && e.priv != null && e.priv !== uid && !seesAll) { reply.code(403); return { error: 'private receipt' }; }
+      }
+      if (leg === 'receipt') {
+        await tx`UPDATE fixed_cost_check SET einkauf_id = NULL WHERE fixed_cost_id = ${id} AND month = ${checkMonth}`;
+      } else if (leg === 'income') {
+        await tx`UPDATE fixed_cost_check SET income_id = NULL WHERE fixed_cost_id = ${id} AND month = ${checkMonth}`;
+      } else { // bank
+        if (c.bank_tx_id != null) {
+          await tx`UPDATE fixed_cost_check SET bank_tx_id = NULL WHERE fixed_cost_id = ${id} AND month = ${checkMonth}`;
+        } else if (c.einkauf_id != null) {
+          // bank shown only via the receipt marriage → unmarry (incl. split siblings).
+          await tx`UPDATE bank_tx SET einkauf_id = NULL WHERE einkauf_id = ${c.einkauf_id}`;
+          await tx`UPDATE einkauf SET bank_tx_id = NULL WHERE id = ${c.einkauf_id}`;
+        } else if (c.income_id != null) {
+          await tx`UPDATE income SET bank_tx_id = NULL WHERE id = ${c.income_id}`;
+        }
+      }
+      // No evidence left → reopen the month (a deliberately skipped check stays).
+      const [c2] = await tx`SELECT einkauf_id, bank_tx_id, income_id, status FROM fixed_cost_check WHERE fixed_cost_id = ${id} AND month = ${checkMonth}`;
+      if (c2 && c2.status !== 'skipped' && c2.einkauf_id == null && c2.bank_tx_id == null && c2.income_id == null) {
+        await tx`DELETE FROM fixed_cost_check WHERE fixed_cost_id = ${id} AND month = ${checkMonth}`;
+      }
+      return { ok: true };
+    });
+  });
+
   /** Decide a fixed-cost check for one month.
    *  action 'confirm' (+ optional einkauf_id as evidence), 'skip' ("this month is
    *  fine without evidence") or 'clear' (reopen). Confirming with a receipt LEARNS

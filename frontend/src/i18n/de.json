@@ -143,6 +143,8 @@
     "evNoReceiptDone": "Kein Beleg mehr erwartet",
     "evNoReceiptState": "Kein Beleg erwartet",
     "evExpectReceiptOn": "Doch Beleg erwarten",
+    "evUnlink": "Verknüpfung lösen",
+    "evUnlinked": "Verknüpfung gelöst",
     "evidenceNoProof": "Kein Nachweis verknüpft",
     "allocatedTitle": "Zugeordnet",
     "receiptOpen": "Beleg offen",
