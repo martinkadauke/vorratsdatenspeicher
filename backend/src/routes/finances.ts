@@ -592,29 +592,32 @@ export function financeRoutes(app: FastifyInstance): void {
     return await sql.begin(async tx => {
       const [c] = await tx`SELECT einkauf_id, bank_tx_id, income_id, status FROM fixed_cost_check WHERE fixed_cost_id = ${id} AND month = ${checkMonth} FOR UPDATE`;
       if (!c) { reply.code(404); return { error: 'no check for this month' }; }
-      // A private receipt on this check may only be detached by its owner / super-admin.
-      if (c.einkauf_id != null) {
-        const [e] = await tx`SELECT private_for_user_id AS priv FROM einkauf WHERE id = ${c.einkauf_id}`;
+      // Reverse-resolve the legs the SAME way the evidence GET does, so we detach the
+      // exact thing the modal showed — whether it sits on the check or only surfaces
+      // through a receipt/income ↔ bank marriage.
+      let bankId = c.bank_tx_id as number | null;
+      let einkaufId = c.einkauf_id as number | null;
+      let incomeId = c.income_id as number | null;
+      if (bankId && !einkaufId) { const [e] = await tx`SELECT id FROM einkauf WHERE bank_tx_id = ${bankId} LIMIT 1`; einkaufId = (e?.id as number) ?? null; }
+      if (bankId && !incomeId) { const [i] = await tx`SELECT id FROM income WHERE bank_tx_id = ${bankId} LIMIT 1`; incomeId = (i?.id as number) ?? null; }
+      if (einkaufId && !bankId) { const [e] = await tx`SELECT bank_tx_id FROM einkauf WHERE id = ${einkaufId}`; bankId = (e?.bank_tx_id as number) ?? null; }
+      if (incomeId && !bankId) { const [i] = await tx`SELECT bank_tx_id FROM income WHERE id = ${incomeId}`; bankId = (i?.bank_tx_id as number) ?? null; }
+      // A private receipt (on the check OR reverse-resolved) is owner/super-admin only.
+      if (einkaufId != null) {
+        const [e] = await tx`SELECT private_for_user_id AS priv FROM einkauf WHERE id = ${einkaufId}`;
         if (e && e.priv != null && e.priv !== uid && !seesAll) { reply.code(403); return { error: 'private receipt' }; }
       }
-      if (leg === 'receipt') {
-        await tx`UPDATE fixed_cost_check SET einkauf_id = NULL WHERE fixed_cost_id = ${id} AND month = ${checkMonth}`;
-      } else if (leg === 'income') {
-        await tx`UPDATE fixed_cost_check SET income_id = NULL WHERE fixed_cost_id = ${id} AND month = ${checkMonth}`;
-      } else { // bank
-        if (c.bank_tx_id != null) {
-          await tx`UPDATE fixed_cost_check SET bank_tx_id = NULL WHERE fixed_cost_id = ${id} AND month = ${checkMonth}`;
-        } else if (c.einkauf_id != null) {
-          // bank shown only via the receipt marriage → unmarry (incl. split siblings).
-          await tx`UPDATE bank_tx SET einkauf_id = NULL WHERE einkauf_id = ${c.einkauf_id}`;
-          await tx`UPDATE einkauf SET bank_tx_id = NULL WHERE id = ${c.einkauf_id}`;
-        } else if (c.income_id != null) {
-          await tx`UPDATE income SET bank_tx_id = NULL WHERE id = ${c.income_id}`;
-        }
-      }
+      // Keep the OTHER legs — promoting a married one onto the check so it survives —
+      // and break the removed leg's marriage so it can't reverse-resolve back in.
+      let keepEinkauf = einkaufId, keepIncome = incomeId, keepBank = bankId;
+      const breakReceiptBank = async () => { if (einkaufId != null) { await tx`UPDATE bank_tx SET einkauf_id = NULL WHERE einkauf_id = ${einkaufId}`; await tx`UPDATE einkauf SET bank_tx_id = NULL WHERE id = ${einkaufId}`; } };
+      const breakIncomeBank = async () => { if (incomeId != null) await tx`UPDATE income SET bank_tx_id = NULL WHERE id = ${incomeId}`; };
+      if (leg === 'bank') { keepBank = null; await breakReceiptBank(); await breakIncomeBank(); }
+      else if (leg === 'receipt') { keepEinkauf = null; await breakReceiptBank(); }
+      else { keepIncome = null; await breakIncomeBank(); }
+      await tx`UPDATE fixed_cost_check SET einkauf_id = ${keepEinkauf}, bank_tx_id = ${keepBank}, income_id = ${keepIncome} WHERE fixed_cost_id = ${id} AND month = ${checkMonth}`;
       // No evidence left → reopen the month (a deliberately skipped check stays).
-      const [c2] = await tx`SELECT einkauf_id, bank_tx_id, income_id, status FROM fixed_cost_check WHERE fixed_cost_id = ${id} AND month = ${checkMonth}`;
-      if (c2 && c2.status !== 'skipped' && c2.einkauf_id == null && c2.bank_tx_id == null && c2.income_id == null) {
+      if (c.status !== 'skipped' && keepEinkauf == null && keepBank == null && keepIncome == null) {
         await tx`DELETE FROM fixed_cost_check WHERE fixed_cost_id = ${id} AND month = ${checkMonth}`;
       }
       return { ok: true };
