@@ -6,6 +6,7 @@ import Jimp from 'jimp';
 import sql from '../db.js';
 import { requireAdmin } from '../auth/plugin.js';
 import { kontoScope, canSeeKonto } from '../auth/konto.js';
+import { accountHasStatements } from './konten.js';
 import { ocrFromImage, type OcrResult } from '../llm/ocr.js';
 import { searchFilter, col, numCol, lk, type Frag } from '../lib/search.js';
 import { cleanMatch } from '../lib/canonicalMatch.js';
@@ -170,7 +171,7 @@ export function receiptRoutes(app: FastifyInstance): void {
 
     const rows = await sql`
       SELECT e.id, e.datum, e.roh_ladenname, e.bild_pfad, e.gesamt_betrag, e.geprueft,
-             e.konto_id, e.quelle, k.name AS konto_name, e.ocr_pending, e.date_uncertain,
+             e.konto_id, e.quelle, k.name AS konto_name, k.account_type, e.ocr_pending, e.date_uncertain,
              (e.private_for_user_id IS NOT NULL) AS private,
              COUNT(a.id)::int AS item_count
       FROM einkauf e
@@ -185,7 +186,7 @@ export function receiptRoutes(app: FastifyInstance): void {
         ${q.from ? sql`AND e.datum >= ${q.from}` : sql``}
         ${q.to ? sql`AND e.datum <= ${q.to}` : sql``}
         ${kontoScope(req.user, sql`e`)}
-      GROUP BY e.id, k.name
+      GROUP BY e.id, k.name, k.account_type
       ORDER BY e.datum DESC, e.id DESC
       LIMIT ${limit} OFFSET ${offset}
     `;
@@ -433,6 +434,30 @@ export function receiptRoutes(app: FastifyInstance): void {
       const [cur] = await sql`SELECT date_uncertain FROM einkauf WHERE id = ${id}`;
       if (cur?.date_uncertain) return reply.code(400).send({ error: 'date_required', message: 'Bitte zuerst das Datum eingeben.' });
     }
+    // Finalise gate: a receipt paid from an account WITH bank statements (Giro / Kredit-
+    // karte) needs a linked bank booking to be complete — the proof the money left the
+    // account. But only when statements are actually IMPORTED for that account: a house-
+    // hold that never imports bank CSVs, or a cash / crypto / securities / PayPal account,
+    // finalises without one (nothing to reconcile against). Both link directions count.
+    if (updates.geprueft === true) {
+      // The account being SET in this same PATCH wins over the stored one (avoid gating
+      // on a stale account when konto_id + geprueft change together).
+      const kId = ('konto_id' in updates)
+        ? (updates.konto_id as number | null)
+        : (((await sql`SELECT konto_id FROM einkauf WHERE id = ${id}`)[0]?.konto_id ?? null) as number | null);
+      if (kId != null) {
+        const [k] = await sql`
+          SELECT account_type, EXISTS(SELECT 1 FROM bank_tx WHERE konto_id = ${kId}) AS imported
+          FROM konto WHERE id = ${kId}`;
+        if (k && accountHasStatements(k.account_type as string | null) && k.imported === true) {
+          const [e] = await sql`
+            SELECT bank_tx_id, EXISTS(SELECT 1 FROM bank_tx bt WHERE bt.einkauf_id = ${id}) AS has_sibling
+            FROM einkauf WHERE id = ${id}`;
+          const hasBank = e && (e.bank_tx_id != null || e.has_sibling === true);
+          if (!hasBank) return reply.code(400).send({ error: 'bank_required', message: 'Bitte zuerst einen Bankauszug verknüpfen (Girokonto/Kreditkarte).' });
+        }
+      }
+    }
     if (!Object.keys(updates).length) return reply.code(400).send({ error: 'no patchable fields' });
     const rows = await sql`UPDATE einkauf SET ${sql(updates)} WHERE id = ${id} RETURNING id`;
     if (!rows.length) return reply.code(404).send({ error: 'not found' });
@@ -577,7 +602,10 @@ export function receiptRoutes(app: FastifyInstance): void {
 
     const receipts = await sql`
       SELECT e.id, e.datum, e.roh_ladenname, e.bild_pfad, e.gesamt_betrag, e.geprueft,
-             e.konto_id, e.quelle, k.name AS konto_name, e.ocr_pending, e.date_uncertain,
+             e.konto_id, e.quelle, k.name AS konto_name, k.account_type, e.ocr_pending, e.date_uncertain,
+             -- a bank link is REQUIRED for completeness only when this account both has
+             -- statements (Giro/Kreditkarte) and actually has some imported (else nothing to link).
+             (k.account_type IN ('giro', 'kreditkarte') AND EXISTS(SELECT 1 FROM bank_tx bx WHERE bx.konto_id = e.konto_id)) AS bank_expected,
              e.private_for_user_id, e.bank_tx_id, e.snapped_by_member_id,
              bt.booking_date::text AS bank_booking, bt.amount::float8 AS bank_amount, bt.counterparty AS bank_counterparty,
              (e.private_for_user_id IS NOT NULL) AS private,
@@ -652,6 +680,39 @@ export function receiptRoutes(app: FastifyInstance): void {
         };
       }),
     };
+  });
+
+  /** Candidate bank bookings to attach to THIS receipt, for the receipt-side "Bankauszug
+   *  finden" picker (completeness on Giro/Kreditkarte accounts). Debits on the receipt's
+   *  OWN account that aren't linked yet — you pay a receipt from one account, so its
+   *  statement lives there. Amount-closest first; optional free text over
+   *  counterparty/description/amount/date. Then link via POST /api/finances/bank/:id/link. */
+  app.get('/api/receipts/:id/bank-candidates', async (req, reply) => {
+    const id = parseInt((req.params as { id: string }).id, 10);
+    if (!id) return reply.code(400).send({ error: 'invalid id' });
+    if (!await guardReceipt(req, reply, id)) return;
+    const [e] = await sql`SELECT konto_id, gesamt_betrag::float8 AS betrag, datum::text AS datum FROM einkauf WHERE id = ${id}`;
+    if (!e) return reply.code(404).send({ error: 'not found' });
+    if (e.konto_id == null) return { results: [] };
+    const q = String((req.query as { q?: string }).q ?? '').trim();
+    const like = `%${q}%`;
+    const amtQ = q.replace(/\./g, '').replace(',', '.');
+    const amtNum = /^\d+(\.\d+)?$/.test(amtQ) ? parseFloat(amtQ) : null;
+    const target = e.betrag != null ? Math.abs(e.betrag as number) : null;
+    const results = await sql`
+      SELECT bt.id, bt.booking_date::text AS datum, bt.amount::float8 AS amount, bt.counterparty, bt.description
+      FROM bank_tx bt
+      WHERE bt.konto_id = ${e.konto_id} AND bt.amount < 0 AND bt.einkauf_id IS NULL
+        -- also exclude bookings that are already a receipt's PRIMARY link (einkauf.bank_tx_id
+        -- set but bank_tx.einkauf_id still NULL — e.g. generated/auto-matched receipts),
+        -- else linking one here would silently steal it from that receipt.
+        AND NOT EXISTS (SELECT 1 FROM einkauf e2 WHERE e2.bank_tx_id = bt.id)
+        ${q ? sql`AND (bt.counterparty ILIKE ${like} OR bt.description ILIKE ${like}
+                       ${amtNum != null ? sql`OR ABS(ABS(bt.amount) - ${amtNum}) <= 0.01` : sql``}
+                       OR bt.booking_date::text ILIKE ${like})` : sql``}
+      ORDER BY ABS(ABS(bt.amount) - COALESCE(${target}::float8, ABS(bt.amount))) ASC, bt.booking_date DESC
+      LIMIT 30`;
+    return { results, receipt: { betrag: e.betrag, datum: e.datum } };
   });
 
   /** The source e-mail behind an e-mail-imported receipt (privacy-guarded). HTML

@@ -357,6 +357,13 @@
     "bankMatch": "Kontobewegung",
     "bankMatches": "{{n}} Bankauszüge",
     "bankMatchesTitle": "Verknüpfte Bankauszüge",
+    "bankRequired": "Girokonto/Kreditkarte: bitte zuerst einen Bankauszug verknüpfen",
+    "findBank": "Bankauszug finden",
+    "findBankTitle": "Bankauszug verknüpfen",
+    "findBankHint": "Offene Buchungen dieses Kontos, passendster Betrag zuerst. Zum Verknüpfen antippen.",
+    "findBankSearch": "Suchen (Gegenpartei, Betrag, Datum) …",
+    "findBankEmpty": "Keine passende offene Buchung gefunden",
+    "bankLinked": "Bankauszug verknüpft",
     "snappedBy": "Aufgenommen von",
     "snappedByUnset": "— wer?",
     "reocr": "OCR erneut ausführen",
@@ -770,6 +777,8 @@
     "kontenHint": "Zahlkonten. GKK ist geteilt (alle sehen es). Private Konten gehören einem User und sind nur für ihn (+ Super-Admins) sichtbar. Jeder Beleg gehört genau einem Konto.",
     "kontoShared": "geteilt",
     "kontoName": "Konto-Name",
+    "kontoType": "Typ",
+    "kontoTypeHint": "Nur Girokonto & Kreditkarte haben Bankauszüge — Belege darauf brauchen einen verknüpften Auszug, um „geprüft“ zu sein.",
     "kontoOwner": "Gehört zu",
     "kontoNoOwner": "— niemand —",
     "kontoHasReceipts": "Konto hat noch Belege — erst verschieben",
@@ -1186,6 +1195,14 @@
     "unsubscribeOffers": "Abonnement beenden",
     "subscribed": "{{count}} Artikel für Angebote abonniert",
     "unsubscribed": "{{count}} Abonnement(s) beendet"
+  },
+  "accountTypes": {
+    "giro": "Girokonto",
+    "kreditkarte": "Kreditkarte",
+    "paypal": "PayPal",
+    "bargeld": "Bargeld",
+    "krypto": "Krypto-Konto",
+    "depot": "Depot"
   },
   "common": {
     "searchOps": "Suchoperatoren: »eier bio« = beide · »äpfel, bananen« = oder · »eier -bio« = ohne »bio« · \"genaue phrase\" · laden:lidl · kategorie:obst · preis>2 (Akzente/Groß-klein egal)",

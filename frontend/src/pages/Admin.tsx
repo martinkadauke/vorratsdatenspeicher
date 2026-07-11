@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { Trash2, Play, ChevronRight, ChevronDown, History, Square, Image as ImageIcon, Download, ExternalLink, Store, Search } from 'lucide-react';
 import { api } from '../api/client';
 import type { FamilyMember, MaintenanceEvent, User } from '../api/types';
+import { ACCOUNT_TYPES } from '../api/types';
 import { Card, Button, Input, Label, Select, Switch, Spinner, Badge, ProgressBar } from '../components/ui';
 import { useFamily } from '../components/ConsumerChips';
 import { useAuth } from '../context/auth';
@@ -1072,13 +1073,14 @@ function UsersSection() {
 }
 
 // ── Konten (payment accounts) ────────────────────────────────────────────
-interface KontoRow { id: number; name: string; is_shared: boolean; user_id: number | null; owner: string | null; receipts: number }
+interface KontoRow { id: number; name: string; is_shared: boolean; account_type: string; user_id: number | null; owner: string | null; receipts: number }
 
 function KontenSection() {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [newName, setNewName] = useState('');
   const [newUser, setNewUser] = useState<number | ''>('');
+  const [newType, setNewType] = useState<string>('giro');
 
   const { data: konten } = useQuery({
     queryKey: ['admin-konten'],
@@ -1091,8 +1093,8 @@ function KontenSection() {
 
   const invalidate = () => void qc.invalidateQueries({ queryKey: ['admin-konten'] });
   const create = useMutation({
-    mutationFn: () => api('/api/admin/konten', { method: 'POST', body: { name: newName, user_id: newUser || null } }),
-    onSuccess: () => { setNewName(''); setNewUser(''); invalidate(); },
+    mutationFn: () => api('/api/admin/konten', { method: 'POST', body: { name: newName, user_id: newUser || null, account_type: newType } }),
+    onSuccess: () => { setNewName(''); setNewUser(''); setNewType('giro'); invalidate(); },
   });
   const patch = useMutation({
     mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) =>
@@ -1126,21 +1128,33 @@ function KontenSection() {
                 ><Trash2 size={15} /></Button>
               )}
             </div>
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="shrink-0 text-xs text-zinc-400">{k.receipts} {t('stores.receipts')}</span>
-              {!k.is_shared && (
-                <label className="flex min-w-0 items-center gap-1.5 text-xs text-zinc-500">
-                  <span className="shrink-0">{t('admin.kontoOwner')}</span>
+              <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
+                <label className="flex min-w-0 items-center gap-1.5 text-xs text-zinc-500" title={t('admin.kontoTypeHint')}>
+                  <span className="shrink-0">{t('admin.kontoType')}</span>
                   <Select
-                    value={k.user_id ?? ''}
-                    onChange={e => patch.mutate({ id: k.id, body: { user_id: e.target.value ? parseInt(e.target.value, 10) : null } })}
-                    className="min-w-0 flex-1"
+                    value={k.account_type}
+                    onChange={e => patch.mutate({ id: k.id, body: { account_type: e.target.value } })}
+                    className="min-w-0"
                   >
-                    <option value="">{t('admin.kontoNoOwner')}</option>
-                    {users?.map(u => <option key={u.id} value={u.id}>{u.username}</option>)}
+                    {ACCOUNT_TYPES.map(ty => <option key={ty} value={ty}>{t(`accountTypes.${ty}`)}</option>)}
                   </Select>
                 </label>
-              )}
+                {!k.is_shared && (
+                  <label className="flex min-w-0 items-center gap-1.5 text-xs text-zinc-500">
+                    <span className="shrink-0">{t('admin.kontoOwner')}</span>
+                    <Select
+                      value={k.user_id ?? ''}
+                      onChange={e => patch.mutate({ id: k.id, body: { user_id: e.target.value ? parseInt(e.target.value, 10) : null } })}
+                      className="min-w-0"
+                    >
+                      <option value="">{t('admin.kontoNoOwner')}</option>
+                      {users?.map(u => <option key={u.id} value={u.id}>{u.username}</option>)}
+                    </Select>
+                  </label>
+                )}
+              </div>
             </div>
           </div>
         ))}
@@ -1155,6 +1169,12 @@ function KontenSection() {
             <Select value={newUser} onChange={e => setNewUser(e.target.value ? parseInt(e.target.value, 10) : '')} className="w-36">
               <option value="">{t('admin.kontoNoOwner')}</option>
               {users?.map(u => <option key={u.id} value={u.id}>{u.username}</option>)}
+            </Select>
+          </div>
+          <div>
+            <Label>{t('admin.kontoType')}</Label>
+            <Select value={newType} onChange={e => setNewType(e.target.value)} className="w-36">
+              {ACCOUNT_TYPES.map(ty => <option key={ty} value={ty}>{t(`accountTypes.${ty}`)}</option>)}
             </Select>
           </div>
           <Button type="submit" className="shrink-0" disabled={!newName.trim() || create.isPending}>{t('common.add')}</Button>

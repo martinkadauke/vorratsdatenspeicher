@@ -12,8 +12,8 @@ import { toast } from './Toast';
 import type { FamilyMember } from '../api/types';
 import { cn } from '../lib/utils';
 
-interface Konto { id: number; name: string; is_shared: boolean; payment_type: string | null }
-const KONTO_TYPES = ['bar', 'karte', 'kreditkarte', 'paypal'];
+interface Konto { id: number; name: string; is_shared: boolean; account_type: string }
+const KONTO_TYPES = ['giro', 'kreditkarte', 'paypal', 'bargeld', 'krypto', 'depot'];
 const DETAILS = ['grob', 'mittel', 'fein'];
 const PROVIDERS = ['ollama', 'deepseek', 'anthropic'];
 const AI_TASKS: [string, string][] = [
@@ -94,10 +94,10 @@ export function Onboarding() {
 
   const invKonten = () => void qc.invalidateQueries({ queryKey: ['konten-admin'] });
   const patchKonto = useMutation({ mutationFn: (b: { id: number; body: Partial<Konto> }) => api(`/api/admin/konten/${b.id}`, { method: 'PATCH', body: b.body }), onSuccess: invKonten, onError: (e: Error) => toast(e.message, 'error') });
-  const [newKonto, setNewKonto] = useState({ name: '', is_shared: false, payment_type: 'karte' });
+  const [newKonto, setNewKonto] = useState({ name: '', is_shared: false, account_type: 'giro' });
   const addKonto = useMutation({
-    mutationFn: () => api('/api/admin/konten', { method: 'POST', body: { name: newKonto.name.trim(), is_shared: newKonto.is_shared, payment_type: newKonto.payment_type } }),
-    onSuccess: () => { setNewKonto({ name: '', is_shared: false, payment_type: 'karte' }); invKonten(); },
+    mutationFn: () => api('/api/admin/konten', { method: 'POST', body: { name: newKonto.name.trim(), is_shared: newKonto.is_shared, account_type: newKonto.account_type } }),
+    onSuccess: () => { setNewKonto({ name: '', is_shared: false, account_type: 'giro' }); invKonten(); },
     onError: (e: Error) => toast(e.message, 'error'),
   });
   const delKonto = useMutation({ mutationFn: (id: number) => api(`/api/admin/konten/${id}`, { method: 'DELETE' }), onSuccess: invKonten, onError: (e: Error) => toast(e.message, 'error') });
@@ -232,9 +232,8 @@ export function Onboarding() {
                 <div key={k.id} className="flex items-center gap-2">
                   <Input className="flex-1" defaultValue={k.name}
                     onBlur={e => e.target.value.trim() && e.target.value !== k.name && patchKonto.mutate({ id: k.id, body: { name: e.target.value.trim() } })} />
-                  <Select className="w-32" value={k.payment_type ?? ''} onChange={e => patchKonto.mutate({ id: k.id, body: { payment_type: e.target.value || null } })}>
-                    <option value="">—</option>
-                    {KONTO_TYPES.map(ty => <option key={ty} value={ty}>{t(`onboarding.konten.types.${ty}`)}</option>)}
+                  <Select className="w-32" value={k.account_type} onChange={e => patchKonto.mutate({ id: k.id, body: { account_type: e.target.value } })}>
+                    {KONTO_TYPES.map(ty => <option key={ty} value={ty}>{t(`accountTypes.${ty}`)}</option>)}
                   </Select>
                   {k.is_shared
                     ? <span className="w-8 shrink-0 text-center text-xs text-emerald-600" title={t('onboarding.konten.shared')}>🏠</span>
@@ -245,8 +244,8 @@ export function Onboarding() {
                 <Input className="flex-1" placeholder={t('onboarding.konten.namePlaceholder')} value={newKonto.name}
                   onChange={e => setNewKonto(v => ({ ...v, name: e.target.value }))}
                   onKeyDown={e => { if (e.key === 'Enter' && newKonto.name.trim()) addKonto.mutate(); }} />
-                <Select className="w-32" value={newKonto.payment_type} onChange={e => setNewKonto(v => ({ ...v, payment_type: e.target.value }))}>
-                  {KONTO_TYPES.map(ty => <option key={ty} value={ty}>{t(`onboarding.konten.types.${ty}`)}</option>)}
+                <Select className="w-32" value={newKonto.account_type} onChange={e => setNewKonto(v => ({ ...v, account_type: e.target.value }))}>
+                  {KONTO_TYPES.map(ty => <option key={ty} value={ty}>{t(`accountTypes.${ty}`)}</option>)}
                 </Select>
                 <label className="flex shrink-0 items-center gap-1 text-[11px] text-zinc-500"><Switch checked={newKonto.is_shared} onChange={v => setNewKonto(s => ({ ...s, is_shared: v }))} />{t('onboarding.konten.shared')}</label>
                 <Button className="shrink-0" disabled={!newKonto.name.trim() || addKonto.isPending} onClick={() => addKonto.mutate()}><Plus size={16} /></Button>

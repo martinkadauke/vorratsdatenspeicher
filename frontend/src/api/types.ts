@@ -16,6 +16,14 @@ export interface User {
   invite_expired?: boolean;
 }
 
+// Account nature. Only these two have importable bank statements → a receipt on such
+// an account needs a linked bank booking to count as complete. Keep in sync with the
+// backend ACCOUNT_TYPES (backend/src/routes/konten.ts).
+export const ACCOUNT_TYPES = ['giro', 'kreditkarte', 'paypal', 'bargeld', 'krypto', 'depot'] as const;
+export type AccountType = typeof ACCOUNT_TYPES[number];
+export const STATEMENT_TYPES: readonly AccountType[] = ['giro', 'kreditkarte'];
+export const accountHasStatements = (t: string | null | undefined): boolean => STATEMENT_TYPES.includes((t ?? '') as AccountType);
+
 export interface Receipt {
   id: number;
   datum: string;
@@ -25,6 +33,7 @@ export interface Receipt {
   geprueft?: boolean;
   konto_id?: number | null;
   konto_name?: string | null;
+  account_type?: string | null;
   quelle?: string;
   item_count?: number;
   private?: boolean;
@@ -67,6 +76,9 @@ export interface ReceiptDetail extends Receipt {
   banks?: { id: number; booking_date: string; amount: number; counterparty: string | null }[];
   /** Household member who scanned/uploaded this receipt (family_member id). */
   snapped_by_member_id?: number | null;
+  /** True when this receipt's account has bank statements (Giro/Kreditkarte) AND some are
+   *  imported — i.e. a bank booking must be linked before it can be marked complete. */
+  bank_expected?: boolean;
 }
 
 /** A single line item ("Position") — one artikel row joined with its receipt's

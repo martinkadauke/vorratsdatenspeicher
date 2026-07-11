@@ -357,6 +357,13 @@
     "bankMatch": "Bank transaction",
     "bankMatches": "{{n}} bank statements",
     "bankMatchesTitle": "Linked bank statements",
+    "bankRequired": "Checking/credit-card account: link a bank statement first",
+    "findBank": "Find bank statement",
+    "findBankTitle": "Link a bank statement",
+    "findBankHint": "Open bookings on this account, closest amount first. Tap to link.",
+    "findBankSearch": "Search (counterparty, amount, date) …",
+    "findBankEmpty": "No matching open booking found",
+    "bankLinked": "Bank statement linked",
     "snappedBy": "Scanned by",
     "snappedByUnset": "— who?",
     "reocr": "Re-run OCR",
@@ -1186,6 +1193,14 @@
     "unsubscribeOffers": "End subscription",
     "subscribed": "Subscribed {{count}} items to offers",
     "unsubscribed": "Ended {{count}} subscription(s)"
+  },
+  "accountTypes": {
+    "giro": "Checking account",
+    "kreditkarte": "Credit card",
+    "paypal": "PayPal",
+    "bargeld": "Cash",
+    "krypto": "Crypto account",
+    "depot": "Securities account"
   },
   "common": {
     "searchOps": "Search operators: “eggs organic” = both · “apples, bananas” = or · “eggs -organic” = without “organic” · \"exact phrase\" · laden:lidl · kategorie:fruit · preis>2 (accent/case-insensitive)",

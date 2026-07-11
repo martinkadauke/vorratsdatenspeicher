@@ -165,6 +165,7 @@ export function ReceiptDetailPage() {
   const wasMatched = useRef(false);
   const [matchFlash, setMatchFlash] = useState(false);
   const [banksOpen, setBanksOpen] = useState(false); // multi-link: list all matched bank bookings
+  const [bankPickerOpen, setBankPickerOpen] = useState(false); // receipt-side "Bankauszug finden" picker
   useEffect(() => {
     if (!data) return;
     const sum = data.artikel.reduce((acc, a) => {
@@ -251,6 +252,12 @@ export function ReceiptDetailPage() {
   // users never gain edit rights regardless.
   const locked = !!data.geprueft;
   const editable = canWrite && !locked;
+  // Completeness gate: a receipt on an account WITH imported bank statements (Giro/
+  // Kreditkarte) needs a linked bank booking before it can be marked "geprüft". Backend
+  // computes `bank_expected` (statement account AND some statements imported); cash/crypto/
+  // depot/PayPal — or an account with no imported statements yet — finalise without one.
+  const bankCount = (data.banks ?? (data.bank ? [data.bank] : [])).length;
+  const needsBank = !!data.bank_expected && bankCount === 0;
 
   // Which line items to spotlight. Supports the shared search operators
   // (foo bar = AND, "foo, bar" = OR, -foo = exclude, "phrase", accent-insensitive).
@@ -334,7 +341,14 @@ export function ReceiptDetailPage() {
           {(() => {
             const banks = data.banks ?? (data.bank ? [data.bank] : []);
             const cls = 'inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-700 hover:bg-sky-200 dark:bg-sky-950/50 dark:text-sky-300 dark:hover:bg-sky-900/50';
-            if (!banks.length) return null;
+            // No booking yet: on a statement account (Giro/Kreditkarte) offer to find one
+            // (it's required for completeness); other account types need none, show nothing.
+            if (!banks.length) return needsBank && canWrite ? (
+              <button type="button" onClick={() => setBankPickerOpen(true)} title={t('receiptDetail.bankRequired')}
+                className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700 hover:bg-amber-200 dark:bg-amber-950/50 dark:text-amber-300 dark:hover:bg-amber-900/50">
+                <Landmark size={11} /> {t('receiptDetail.findBank')}
+              </button>
+            ) : null;
             if (banks.length === 1) {
               const b = banks[0];
               return (
@@ -393,10 +407,15 @@ export function ReceiptDetailPage() {
             </span>
           ) : (
             <button
-              onClick={() => { if (canWrite && !setReviewed.isPending && !data.date_uncertain) setReviewed.mutate(true); }}
+              onClick={() => {
+                if (!canWrite || setReviewed.isPending || data.date_uncertain) return;
+                if (needsBank) { setBankPickerOpen(true); return; }   // guide to the missing bank link
+                setReviewed.mutate(true);
+              }}
               disabled={!canWrite || setReviewed.isPending || !!data.date_uncertain}
-              className={cn('shrink-0 rounded-xl p-2 text-emerald-600 hover:bg-emerald-50 disabled:cursor-default disabled:opacity-60 dark:text-emerald-500 dark:hover:bg-emerald-950/30')}
-              title={data.date_uncertain ? t('receiptDetail.dateRequired') : t('receiptDetail.verifyHint')}
+              className={cn('shrink-0 rounded-xl p-2 hover:bg-emerald-50 disabled:cursor-default disabled:opacity-60 dark:hover:bg-emerald-950/30',
+                needsBank ? 'text-amber-500' : 'text-emerald-600 dark:text-emerald-500')}
+              title={data.date_uncertain ? t('receiptDetail.dateRequired') : needsBank ? t('receiptDetail.bankRequired') : t('receiptDetail.verifyHint')}
             >
               <Check size={18} />
             </button>
@@ -662,12 +681,65 @@ export function ReceiptDetailPage() {
           </div>
         </Modal>
       )}
+      {bankPickerOpen && data && (
+        <BankStatementPicker
+          receiptId={data.id}
+          onClose={() => setBankPickerOpen(false)}
+          onLinked={() => { setBankPickerOpen(false); void qc.invalidateQueries({ queryKey: ['receipt', id] }); void qc.invalidateQueries({ queryKey: ['receipts'] }); }}
+        />
+      )}
     </div>
   );
 }
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+}
+
+/** Receipt-side "Bankauszug finden": pick an unlinked debit on the receipt's own account
+ *  (amount-closest first, searchable) and attach it — reuses the bank→receipt link
+ *  endpoint. Needed so a receipt on a Giro/Kreditkarte account can be completed. */
+function BankStatementPicker({ receiptId, onClose, onLinked }: { receiptId: number; onClose: () => void; onLinked: () => void }) {
+  const { t } = useTranslation();
+  const [q, setQ] = useState('');
+  const { data, isLoading } = useQuery({
+    queryKey: ['receipt-bank-candidates', receiptId, q],
+    queryFn: () => api<{ results: { id: number; datum: string; amount: number; counterparty: string | null; description: string | null }[] }>(`/api/receipts/${receiptId}/bank-candidates?q=${encodeURIComponent(q)}`),
+  });
+  const link = useMutation({
+    mutationFn: (bankId: number) => api(`/api/finances/bank/${bankId}/link`, { method: 'POST', body: { einkauf_id: receiptId } }),
+    onSuccess: () => { toast(t('receiptDetail.bankLinked'), 'success'); onLinked(); },
+    onError: (e: Error) => toast(e.message, 'error'),
+  });
+  const results = data?.results ?? [];
+  return (
+    <Modal open onClose={onClose} title={t('receiptDetail.findBankTitle')}>
+      <div className="flex flex-col gap-2">
+        <p className="text-xs text-zinc-400">{t('receiptDetail.findBankHint')}</p>
+        <div className="relative">
+          <Search size={15} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+          <Input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder={t('receiptDetail.findBankSearch')} className="pl-8" />
+        </div>
+        {isLoading ? <Spinner /> : !results.length ? (
+          <p className="py-4 text-center text-xs text-zinc-400">{t('receiptDetail.findBankEmpty')}</p>
+        ) : (
+          <div className="flex max-h-80 flex-col gap-1.5 overflow-y-auto">
+            {results.map(b => (
+              <button key={b.id} type="button" disabled={link.isPending} onClick={() => link.mutate(b.id)}
+                className="flex items-center gap-3 rounded-xl border border-zinc-200 p-3 text-left hover:border-sky-400 hover:bg-sky-50/50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-sky-950/20">
+                <Landmark size={16} className="shrink-0 text-sky-500" />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm">{b.counterparty || b.description || '—'}</div>
+                  <div className="text-[10px] text-zinc-400">{b.datum.slice(8, 10)}.{b.datum.slice(5, 7)}.{b.datum.slice(0, 4)}</div>
+                </div>
+                <span className="shrink-0 text-sm font-semibold">{eur(b.amount)}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
 }
 
 /** Shows the source e-mail of an e-mail-imported receipt. The body is rendered in

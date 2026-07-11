@@ -81,7 +81,10 @@ export async function ensureCashKonten(): Promise<void> {
       if (has) continue;
       const swapped = (k.name as string).replace(/Konto/i, 'Bargeld').trim();
       const name = swapped && swapped !== (k.name as string) ? swapped : `${k.name} Bargeld`;
-      await sql`INSERT INTO konto (name, is_shared, is_cash, user_id) VALUES (${name}, FALSE, TRUE, ${k.user_id})`;
+      // account_type 'bargeld' keeps it in lockstep with is_cash (a cash account has no
+      // bank statement) — else it would default to 'giro' and mislabel + wrongly trip the
+      // receipt-completeness gate for a brand-new cash account.
+      await sql`INSERT INTO konto (name, is_shared, is_cash, user_id, account_type) VALUES (${name}, FALSE, TRUE, ${k.user_id}, 'bargeld')`;
       console.log(`[seed] created cash account "${name}" for user ${k.user_id}`);
     }
   } catch (err) {
