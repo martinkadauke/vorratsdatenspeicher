@@ -241,8 +241,6 @@ function MonthTab() {
   // the receipt / bank / pay slip) replaces the plan value (e.g. a salary with a bonus,
   // or a month where it was less than planned). Falls back to the plan (Soll) until then.
   const effEur = (f: MonthFix) => amortized(f.check?.status === 'confirmed' && f.check.amount != null ? f.check.amount : f.monthly_eur, f.frequency);
-  const incomeTotal = incomes.reduce((s, f) => s + (counts(f) ? effEur(f) : 0), 0);
-  const fixTotal = fixed.reduce((s, f) => s + (counts(f) ? effEur(f) : 0), 0);
   // 2×2 for the month lists: FIXED (recurring) vs VARIABLE (single-month one-off) on
   // both the income and the cost side. One-offs are the generated single-month entries.
   const fixedIncome = incomes.filter(f => !f.one_off);
@@ -255,17 +253,22 @@ function MonthTab() {
       onClear={() => check.mutate({ fixed_cost_id: f.id, month, action: 'clear' })}
       onShowEvidence={() => setEvidence({ id: f.id, label: f.label, kind: f.kind, expectReceipt: f.expect_receipt })} />
   );
-  // Reconciliation completeness: a plan is "complete" when its bank booking is linked
-  // AND the receipt question is resolved (attached / pay slip / "kein Beleg") — the
-  // backend decides. The month %-bar covers income plans + fixed costs together.
-  const fixDone = fixed.filter(f => f.complete).length;
-  const incDone = incomes.filter(f => f.complete).length;
-  const planTotal = incomes.length + fixed.length;
-  const planDone = fixDone + incDone;
-  const donePct = planTotal ? Math.round((planDone / planTotal) * 100) : 100;
-  const varActual = budgets.reduce((s, b) => s + b.actual, 0);
+  // Summary tiles mirror the 2×2 lists so the numbers match the sections beneath them:
+  //   Einnahmen = ALL income · Fixkosten = RECURRING costs only (one-offs live under
+  //   Variable Kosten) · Variable Kosten = budgets + one-off costs. Net covers all costs.
+  const incomeTotal = incomes.reduce((s, f) => s + (counts(f) ? effEur(f) : 0), 0);
+  const fixTotal = fixedCosts.reduce((s, f) => s + (counts(f) ? effEur(f) : 0), 0);
+  const oneOffCostTotal = oneOffCosts.reduce((s, f) => s + (counts(f) ? effEur(f) : 0), 0);
+  const varActual = budgets.reduce((s, b) => s + b.actual, 0) + oneOffCostTotal;
   const varTarget = budgets.reduce((s, b) => s + b.monthly_target, 0);
   const net = Math.round((incomeTotal - fixTotal - varActual) * 100) / 100;
+  // Reconciliation completeness covers only the RECURRING plans that need monthly
+  // matching; one-offs are settled on creation (a confirmed bank leg) → excluded.
+  const fixDone = fixedCosts.filter(f => f.complete).length;
+  const incDone = fixedIncome.filter(f => f.complete).length;
+  const planTotal = fixedIncome.length + fixedCosts.length;
+  const planDone = fixDone + incDone;
+  const donePct = planTotal ? Math.round((planDone / planTotal) * 100) : 100;
 
   // When the evidence amount differs from the plan (a bonus on the salary, a cheaper
   // month …), ask whether to accept the delta; the real value then replaces the plan.
@@ -337,8 +340,8 @@ function MonthTab() {
               <div>
                 <div className="text-xs text-zinc-500 dark:text-zinc-400">{t('finances.fixTitle')}</div>
                 <div className="text-lg font-bold">{eur(fixTotal)}</div>
-                <div className={cn('text-xs', fixDone === fixed.length && fixed.length > 0 ? 'text-emerald-600 dark:text-emerald-500' : 'text-amber-600 dark:text-amber-500')}>
-                  {t('finances.checkedOf', { done: fixDone, total: fixed.length })}
+                <div className={cn('text-xs', fixDone === fixedCosts.length && fixedCosts.length > 0 ? 'text-emerald-600 dark:text-emerald-500' : 'text-amber-600 dark:text-amber-500')}>
+                  {t('finances.checkedOf', { done: fixDone, total: fixedCosts.length })}
                 </div>
               </div>
               <div>
