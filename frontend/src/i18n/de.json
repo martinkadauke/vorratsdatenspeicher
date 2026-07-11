@@ -217,6 +217,8 @@
     "pickIncomeDoc": "Gehaltszettel / Einnahme",
     "pickStatement": "Bankbuchung",
     "pickNoStatements": "Keine Bankbuchungen im Zeitraum",
+    "pickAlreadyLinked": "Bereits einem Beleg zugeordnet — erst dort lösen, um sie neu zu verknüpfen",
+    "pickLinkedTo": "→ Beleg #{{id}}",
     "income": {
       "heading": "Gehaltszettel hochladen",
       "intro": "Lade Gehaltsabrechnungen (DATEV o. ä.) als PDF hoch – VDS liest den Auszahlungsbetrag aus und legt ihn als Einkommen an. Mehrere Dateien auf einmal möglich.",

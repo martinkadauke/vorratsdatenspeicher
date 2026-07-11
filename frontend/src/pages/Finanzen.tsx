@@ -899,7 +899,7 @@ function ReceiptPicker({ month, fix, onClose, onPick }: {
     // freq widens the candidate window to the plan's whole quarter/year so a periodic
     // payment (e.g. a yearly membership charged once) is findable from any month.
     queryKey: ['fin-picker', fix.kind, fix.frequency, month],
-    queryFn: () => api<{ items: { source: 'income' | 'bank' | 'receipt'; id: number; datum: string; amount: number; label: string }[] }>(
+    queryFn: () => api<{ items: { source: 'income' | 'bank' | 'receipt'; id: number; datum: string; amount: number; label: string; linked_einkauf_id?: number | null }[] }>(
       `/api/finances/${isIncome ? 'income' : 'expense'}-evidence?month=${month}&freq=${fix.frequency}`),
   });
   const isLoading = evidenceQ.isLoading;
@@ -915,16 +915,28 @@ function ReceiptPicker({ month, fix, onClose, onPick }: {
     if (bankSel) ev.bank_tx_id = bankSel.id;
     onPick(ev, docSel?.amount ?? bankSel?.amount ?? null);
   };
-  const evRow = (i: { source: string; id: number; datum: string; amount: number; label: string }, selected: boolean, onClick: () => void) => (
-    <button key={`${i.source}:${i.id}`} type="button" onClick={onClick}
-      className={cn('flex items-center gap-2 rounded-xl border px-3 py-2 text-left transition',
-        selected ? 'border-emerald-500 bg-emerald-50 dark:border-emerald-600 dark:bg-emerald-950/30'
-          : 'border-zinc-200 hover:border-emerald-400 hover:bg-emerald-50/50 dark:border-zinc-800 dark:hover:bg-emerald-950/20')}>
-      <span className="w-12 shrink-0 text-xs text-zinc-400">{i.datum?.slice(8, 10)}.{i.datum?.slice(5, 7)}.</span>
-      <span className="min-w-0 flex-1 truncate text-sm">{i.label}</span>
-      <span className="shrink-0 text-sm font-medium">{i.amount != null ? eur(i.amount) : '–'}</span>
-      {selected ? <CheckCircle2 size={16} className="shrink-0 text-emerald-500" /> : <Circle size={16} className="shrink-0 text-zinc-300 dark:text-zinc-600" />}
-    </button>
+  const evRow = (i: { source: string; id: number; datum: string; amount: number; label: string }, selected: boolean, onClick: () => void, linkedTo?: number | null) => (
+    // A bank debit already tied to a receipt is that receipt's payment — shown greyed &
+    // non-selectable (with a link to it) so you can see where it went, not re-assign it.
+    linkedTo ? (
+      <div key={`${i.source}:${i.id}`} title={t('finances.pickAlreadyLinked')}
+        className="flex items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2 opacity-60 dark:border-zinc-800">
+        <span className="w-12 shrink-0 text-xs text-zinc-400">{i.datum?.slice(8, 10)}.{i.datum?.slice(5, 7)}.</span>
+        <span className="min-w-0 flex-1 truncate text-sm text-zinc-500 dark:text-zinc-400">{i.label}</span>
+        <span className="shrink-0 text-[10px] text-zinc-400">{t('finances.pickLinkedTo', { id: linkedTo })}</span>
+        <span className="shrink-0 text-sm font-medium text-zinc-400">{i.amount != null ? eur(i.amount) : '–'}</span>
+      </div>
+    ) : (
+      <button key={`${i.source}:${i.id}`} type="button" onClick={onClick}
+        className={cn('flex items-center gap-2 rounded-xl border px-3 py-2 text-left transition',
+          selected ? 'border-emerald-500 bg-emerald-50 dark:border-emerald-600 dark:bg-emerald-950/30'
+            : 'border-zinc-200 hover:border-emerald-400 hover:bg-emerald-50/50 dark:border-zinc-800 dark:hover:bg-emerald-950/20')}>
+        <span className="w-12 shrink-0 text-xs text-zinc-400">{i.datum?.slice(8, 10)}.{i.datum?.slice(5, 7)}.</span>
+        <span className="min-w-0 flex-1 truncate text-sm">{i.label}</span>
+        <span className="shrink-0 text-sm font-medium">{i.amount != null ? eur(i.amount) : '–'}</span>
+        {selected ? <CheckCircle2 size={16} className="shrink-0 text-emerald-500" /> : <Circle size={16} className="shrink-0 text-zinc-300 dark:text-zinc-600" />}
+      </button>
+    )
   );
 
   return (
@@ -943,7 +955,7 @@ function ReceiptPicker({ month, fix, onClose, onPick }: {
             </div>
             <div className="flex flex-col gap-1">
               <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">{t('finances.pickStatement')}</div>
-              {banks.length ? banks.map(i => evRow(i, bankSel?.id === i.id, () => setBankSel(s => s?.id === i.id ? null : { id: i.id, amount: i.amount })))
+              {banks.length ? banks.map(i => evRow(i, bankSel?.id === i.id, () => setBankSel(s => s?.id === i.id ? null : { id: i.id, amount: i.amount }), i.linked_einkauf_id))
                 : <p className="px-1 py-1 text-xs text-zinc-400">{t('finances.pickNoStatements')}</p>}
             </div>
           </div>

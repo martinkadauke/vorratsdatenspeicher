@@ -217,6 +217,8 @@
     "pickIncomeDoc": "Pay slip / income",
     "pickStatement": "Bank statement",
     "pickNoStatements": "No bank statements in range",
+    "pickAlreadyLinked": "Already linked to a receipt — unlink it there first to reuse it",
+    "pickLinkedTo": "→ receipt #{{id}}",
     "income": {
       "heading": "Upload pay slips",
       "intro": "Upload pay slips (DATEV etc.) as PDF – VDS reads the net payout and records it as income. Several files at once are fine.",

@@ -382,10 +382,9 @@ export function financeRoutes(app: FastifyInstance): void {
     // payments carry "Kartenzahlung comdirect Visa-Debitkarte …" boilerplate in the
     // description, which would false-match e.g. a "Comdirect" fixed cost to every card
     // purchase. The counterparty is the real vendor ("Lidl sagt Danke", "Telekom …").
-    // `linked` = this debit is already a receipt's payment. We DON'T drop those (a fixed
-    // cost's own invoice-married debit, e.g. Telekom, must stay linkable) — instead they
-    // lose ties to an OPEN match in the suggestion sort below, so an ordinary Amazon order
-    // never wins over the genuinely-open Prime debit.
+    // `linked` = this debit is already a receipt's payment. The AUTO-SUGGESTION skips them
+    // (a fixed cost must never grab a debit that belongs to a receipt); the manual picker
+    // still surfaces them, greyed-out, so you can see where a debit went.
     const evExpense: Ev[] = [
       ...receipts.map(r => ({ source: 'receipt' as const, id: r.id as number, laden: r.roh_ladenname as string | null, betrag: r.gesamt_betrag as number, datum: String(r.datum), linked: false })),
       ...banktx.filter(bt => (bt.amount as number) < 0).map(bt => ({ source: 'bank' as const, id: bt.id as number, laden: bt.counterparty as string | null, betrag: Math.abs(bt.amount as number), datum: String(bt.datum), linked: bt.receipt_linked === true })),
@@ -430,7 +429,7 @@ export function financeRoutes(app: FastifyInstance): void {
     // Deterministic suggestion: merchant match (learned match_merchant, else label
     // tokens) and/or amount within ±max(1 €, 2 %). Greedy: best score first, one
     // piece of evidence serves at most one position.
-    type Cand = { fixedId: number; source: 'receipt' | 'bank' | 'income'; einkaufId: number | null; bankTxId: number | null; incomeId: number | null; score: number; laden: string | null; betrag: number; datum: string; amountOk: boolean; merchantOk: boolean; linked: boolean; amtDiff: number };
+    type Cand = { fixedId: number; source: 'receipt' | 'bank' | 'income'; einkaufId: number | null; bankTxId: number | null; incomeId: number | null; score: number; laden: string | null; betrag: number; datum: string; amountOk: boolean; merchantOk: boolean; amtDiff: number };
     const cands: Cand[] = [];
     for (const f of fixed) {
       // Skip only FULLY reconciled (or deliberately skipped) rows. A PARTIAL check —
@@ -447,6 +446,7 @@ export function financeRoutes(app: FastifyInstance): void {
       const per = periodBounds(b, f.frequency as string);
       const pool = (f.kind === 'income' ? evIncome : evExpense)
         .filter(ev => !noReceipt || ev.source === 'bank')
+        .filter(ev => !ev.linked)                                  // never auto-grab a receipt's own debit
         .filter(ev => ev.datum >= per.lo && ev.datum <= per.hi);
       const target = f.monthly_eur as number;
       const tol = Math.max(1, Math.abs(target) * 0.02);
@@ -469,15 +469,13 @@ export function financeRoutes(app: FastifyInstance): void {
           einkaufId: ev.source === 'receipt' ? ev.id : null, bankTxId: ev.source === 'bank' ? ev.id : null, incomeId: ev.source === 'income' ? ev.id : null,
           score: (merchantOk ? 2 : 0) + (amountOk ? 1 : 0) + (merchantHit ? 1 : 0),
           laden: ev.laden, betrag: ev.betrag, datum: ev.datum, amountOk, merchantOk,
-          linked: ev.linked, amtDiff: Math.abs(ev.betrag - target),
+          amtDiff: Math.abs(ev.betrag - target),
         });
       }
     }
-    // Best score first; then prefer OPEN evidence over one already tied to a receipt (so a
-    // yearly membership's genuinely-open debit beats an ordinary same-amount order); then
-    // the closest amount. Keeps periodic plans from grabbing an unrelated linked debit
-    // without hard-excluding the invoice-married debits a plan legitimately needs.
-    cands.sort((a, c) => (c.score - a.score) || (Number(a.linked) - Number(c.linked)) || (a.amtDiff - c.amtDiff));
+    // Best score first, then the closest amount (receipt-linked debits are already out of
+    // the pool, so a periodic plan can only match a genuinely-open payment).
+    cands.sort((a, c) => (c.score - a.score) || (a.amtDiff - c.amtDiff));
     const sugByFixed = new Map<number, Cand>();
     const takenKeys = new Set<string>();
     for (const c of cands) {
@@ -813,15 +811,18 @@ export function financeRoutes(app: FastifyInstance): void {
         ${kontoScope(req.user, sql`e`)}
       ORDER BY e.datum DESC`;
     const bank = await sql`
-      SELECT id, booking_date::text AS datum, amount::float8 AS amount, counterparty
+      SELECT id, booking_date::text AS datum, amount::float8 AS amount, counterparty,
+             -- the receipt this debit is already the payment of, if any (either link direction)
+             COALESCE(einkauf_id, (SELECT e.id FROM einkauf e WHERE e.bank_tx_id = bank_tx.id LIMIT 1)) AS linked_einkauf_id
       FROM bank_tx WHERE booking_date BETWEEN ${bankLo} AND ${bankHi} AND amount < 0
-      -- OPEN debits first (a debit already tied to a receipt is that receipt's payment), but
-      -- keep the linked ones available too — an invoice-married debit may be the right one.
+      -- OPEN debits first; the linked ones are still returned so the picker can show them
+      -- greyed-out (transparency), but they are not selectable there. (Repeat the openness
+      -- expression here — a SELECT alias isn't visible inside an ORDER BY expression.)
       ORDER BY (einkauf_id IS NULL AND NOT EXISTS (SELECT 1 FROM einkauf e WHERE e.bank_tx_id = bank_tx.id)) DESC, booking_date DESC`;
     return {
       items: [
-        ...rec.map(r => ({ source: 'receipt' as const, id: r.id, datum: String(r.datum), amount: r.amount, label: (r.roh_ladenname as string | null) || 'Beleg' })),
-        ...bank.map(bt => ({ source: 'bank' as const, id: bt.id, datum: String(bt.datum), amount: Math.abs(bt.amount as number), label: (bt.counterparty as string | null) || 'Kontobewegung' })),
+        ...rec.map(r => ({ source: 'receipt' as const, id: r.id, datum: String(r.datum), amount: r.amount, label: (r.roh_ladenname as string | null) || 'Beleg', linked_einkauf_id: null as number | null })),
+        ...bank.map(bt => ({ source: 'bank' as const, id: bt.id, datum: String(bt.datum), amount: Math.abs(bt.amount as number), label: (bt.counterparty as string | null) || 'Kontobewegung', linked_einkauf_id: (bt.linked_einkauf_id as number | null) ?? null })),
       ],
     };
   });
