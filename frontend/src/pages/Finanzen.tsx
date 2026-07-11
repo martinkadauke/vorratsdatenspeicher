@@ -243,6 +243,18 @@ function MonthTab() {
   const effEur = (f: MonthFix) => amortized(f.check?.status === 'confirmed' && f.check.amount != null ? f.check.amount : f.monthly_eur, f.frequency);
   const incomeTotal = incomes.reduce((s, f) => s + (counts(f) ? effEur(f) : 0), 0);
   const fixTotal = fixed.reduce((s, f) => s + (counts(f) ? effEur(f) : 0), 0);
+  // 2×2 for the month lists: FIXED (recurring) vs VARIABLE (single-month one-off) on
+  // both the income and the cost side. One-offs are the generated single-month entries.
+  const fixedIncome = incomes.filter(f => !f.one_off);
+  const varIncome = incomes.filter(f => f.one_off);
+  const fixedCosts = fixed.filter(f => !f.one_off);
+  const oneOffCosts = fixed.filter(f => f.one_off);
+  const fixRow = (f: MonthFix) => (
+    <FixCheckRow key={f.id} f={f} month={month} t={t} excluded={isAll && f.is_transfer}
+      onConfirmSuggestion={() => confirmSug(f)}
+      onClear={() => check.mutate({ fixed_cost_id: f.id, month, action: 'clear' })}
+      onShowEvidence={() => setEvidence({ id: f.id, label: f.label, kind: f.kind, expectReceipt: f.expect_receipt })} />
+  );
   // Reconciliation completeness: a plan is "complete" when its bank booking is linked
   // AND the receipt question is resolved (attached / pay slip / "kein Beleg") — the
   // backend decides. The month %-bar covers income plans + fixed costs together.
@@ -353,30 +365,30 @@ function MonthTab() {
             )}
           </Card>
 
-          {/* income plans (Einnahmen) — each shows its matched actual pay-slip / bank credit as evidence */}
-          <Section title={t('finances.incomeTitle')} count={incomes.length}>
-            {!incomes.length && <Card className="p-3 text-xs text-zinc-400">{t('finances.noIncomePlans')}</Card>}
-            {incomes.map(f => <FixCheckRow key={f.id} f={f} month={month} t={t} excluded={isAll && f.is_transfer}
-              onConfirmSuggestion={() => confirmSug(f)}
-              onClear={() => check.mutate({ fixed_cost_id: f.id, month, action: 'clear' })}
-              onShowEvidence={() => setEvidence({ id: f.id, label: f.label, kind: f.kind, expectReceipt: f.expect_receipt })}
-            />)}
+          {/* 2×2, all collapsed by default: Fixed/Variable income, Fixed/Variable costs */}
+          {/* Fixed income — recurring income plans (salary, Kindergeld, Beiträge) */}
+          <Section title={t('finances.fixedIncomeTitle')} count={fixedIncome.length} defaultOpen={false}>
+            {!fixedIncome.length && <Card className="p-3 text-xs text-zinc-400">{t('finances.noIncomePlans')}</Card>}
+            {fixedIncome.map(fixRow)}
           </Section>
 
-          {/* fixed costs */}
-          <Section title={t('finances.fixTitle')} count={fixed.length}>
-            {!fixed.length && <Card className="p-3 text-xs text-zinc-400">{t('finances.noFixThisMonth')}</Card>}
-            {fixed.map(f => <FixCheckRow key={f.id} f={f} month={month} t={t} excluded={isAll && f.is_transfer}
-              onConfirmSuggestion={() => confirmSug(f)}
-              onClear={() => check.mutate({ fixed_cost_id: f.id, month, action: 'clear' })}
-              onShowEvidence={() => setEvidence({ id: f.id, label: f.label, kind: f.kind, expectReceipt: f.expect_receipt })}
-            />)}
+          {/* Variable income — one-off incomes (generated single-month, e.g. "…Spesen") */}
+          <Section title={t('finances.varIncomeTitle')} count={varIncome.length} defaultOpen={false}>
+            {!varIncome.length && <Card className="p-3 text-xs text-zinc-400">{t('finances.noVarIncome')}</Card>}
+            {varIncome.map(fixRow)}
           </Section>
 
-          {/* variable budgets */}
-          <Section title={t('finances.varTitle')} count={budgets.length}
+          {/* Fixed costs — recurring expense plans (rent, internet, subscriptions) */}
+          <Section title={t('finances.fixTitle')} count={fixedCosts.length} defaultOpen={false}>
+            {!fixedCosts.length && <Card className="p-3 text-xs text-zinc-400">{t('finances.noFixThisMonth')}</Card>}
+            {fixedCosts.map(fixRow)}
+          </Section>
+
+          {/* Variable costs — category budgets + one-off (single-month) expenses */}
+          <Section title={t('finances.varTitle')} count={budgets.length + oneOffCosts.length} defaultOpen={false}
             right={<Button variant="secondary" className="px-2.5 py-1.5 text-xs" onClick={() => setBudgetModal({})}><Plus size={14} /> {t('finances.addBudget')}</Button>}>
-            {!budgets.length && <Card className="p-3 text-xs text-zinc-400">{t('finances.noBudgets')}</Card>}
+            {oneOffCosts.map(fixRow)}
+            {!budgets.length && !oneOffCosts.length && <Card className="p-3 text-xs text-zinc-400">{t('finances.noBudgets')}</Card>}
             {budgets.map(b => <BudgetRow key={b.id} b={b} t={t} onEdit={() => setBudgetModal(b)} onOpen={() => setPosBudget(b)} />)}
           </Section>
         </>
