@@ -405,7 +405,7 @@ function MonthTab() {
           }} />
       )}
       {budgetModal && <BudgetModal initial={budgetModal} onClose={() => setBudgetModal(null)} onSaved={invalidate} />}
-      {posBudget && <BudgetPositions budget={posBudget} month={month} onClose={() => setPosBudget(null)} />}
+      {posBudget && <BudgetPositions budget={posBudget} month={month} konten={kontenParam} onClose={() => setPosBudget(null)} />}
       {evidence && <FixedEvidenceModal id={evidence.id} label={evidence.label} kind={evidence.kind} month={month} t={t}
         expectReceipt={evidence.expectReceipt}
         onClose={() => setEvidence(null)}
@@ -768,14 +768,14 @@ function CatGroup({ g, t, onOpen }: { g: { key: string; label: string; total: nu
  *  (Ist) for the month. The list total equals the Ist shown on the budget tile —
  *  the backend reuses the same query. Positions can be sorted (date / price) and
  *  grouped into the budget's sub-categories with per-group totals. */
-function BudgetPositions({ budget, month, onClose }: { budget: MonthBudget; month: string; onClose: () => void }) {
+function BudgetPositions({ budget, month, konten, onClose }: { budget: MonthBudget; month: string; konten: string; onClose: () => void }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [sort, setSort] = useState<PosSort>('date_desc');
   const [grouped, setGrouped] = useState(false);
   const { data, isLoading } = useQuery({
-    queryKey: ['budget-positions', budget.id, month],
-    queryFn: () => api<{ positions: BudgetPos[]; total: number }>(`/api/finances/budget/${budget.id}/positions?month=${month}`),
+    queryKey: ['budget-positions', budget.id, month, konten],   // refetch when the person/household scope changes
+    queryFn: () => api<{ positions: BudgetPos[]; total: number }>(`/api/finances/budget/${budget.id}/positions?month=${month}${konten}`),
   });
   const rows = data?.positions ?? [];
   // Masked (private) positions carry no einkauf_id → not navigable.

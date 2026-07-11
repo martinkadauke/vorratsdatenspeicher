@@ -300,6 +300,10 @@ export function financeRoutes(app: FastifyInstance): void {
     const kIds = kraw ? kraw.split(',').map(s => parseInt(s, 10)).filter(Number.isFinite) : null;
     const fixKonto = kIds && kIds.length ? sql`AND f.konto_id = ANY(${kIds})` : sql``;
     const budKonto = kIds && kIds.length ? sql`AND (bu.konto_id = ANY(${kIds}) OR bu.konto_id IS NULL)` : sql``;
+    // Variable-cost actuals are attributed to the account the RECEIPT was charged to
+    // (einkauf.konto_id), whose owner defines the person/household scope — NOT the
+    // snapper (any member may hold the household card). Scope the budget sums by it.
+    const sumsKonto = kIds && kIds.length ? sql`AND e.konto_id = ANY(${kIds})` : sql``;
 
     // 1) Recurring plans active this month + their check. `kind` splits them into
     //    expenses (Fixkosten) and income (Einnahmen-Soll); both share the same
@@ -485,12 +489,13 @@ export function financeRoutes(app: FastifyInstance): void {
       JOIN einkauf e ON e.id = a.einkauf_id
       WHERE bu.active AND e.datum BETWEEN ${prevFirst} AND ${b.last}
         AND (bu.konto_id IS NULL OR e.konto_id = bu.konto_id)
+        ${sumsKonto}
         AND NOT EXISTS (SELECT 1 FROM fixed_cost_check fc WHERE fc.einkauf_id = e.id)
       GROUP BY bu.id, date_trunc('month', e.datum)
     `;
-    // NB: no kontoScope here on purpose — a private receipt still counts toward the
-    // (shared) budget total; the drill-down masks its details for non-owners. The
-    // budget Ist is a household aggregate, so the amount is visible to everyone.
+    // NB: no PRIVACY kontoScope here on purpose — a private receipt still counts toward
+    // the budget total; the drill-down masks its details for non-owners. (The account
+    // scope above, sumsKonto, is a different thing: which account was charged.)
     // NB: an artikel matching two category prefixes of the SAME budget would double-
     // count — the UI prevents nesting by keeping picks distinct; acceptable for v1.
     const actualBy = new Map<number, number>();
@@ -1746,8 +1751,13 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
   app.get('/api/finances/budget/:id/positions', async (req, reply) => {
     const id = parseInt(String((req.params as { id: string }).id), 10);
     if (!id) return reply.code(400).send({ error: 'invalid id' });
-    const b = monthBounds(((req.query as { month?: string }).month ?? '').trim());
+    const q = req.query as { month?: string; konten?: string };
+    const b = monthBounds((q.month ?? '').trim());
     if (!b) return reply.code(400).send({ error: 'month must be YYYY-MM' });
+    // Same account scope as the month tile (charged account = einkauf.konto_id) so the
+    // drill-down total matches the tile's Ist under a person/household filter.
+    const kIds = (q.konten ?? '').trim() ? q.konten!.split(',').map(s => parseInt(s, 10)).filter(Number.isFinite) : null;
+    const posKonto = kIds && kIds.length ? sql`AND e.konto_id = ANY(${kIds})` : sql``;
     const rows = await sql`
       SELECT a.id, COALESCE(NULLIF(a.canonical_name, ''), a.name) AS name,
              a.preis::float8 AS preis, a.menge::float8 AS menge, a.einheit, a.category_path,
@@ -1760,6 +1770,7 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
       JOIN einkauf e ON e.id = a.einkauf_id
       WHERE bu.id = ${id} AND bu.active AND e.datum BETWEEN ${b.first} AND ${b.last}
         AND (bu.konto_id IS NULL OR e.konto_id = bu.konto_id)
+        ${posKonto}
         AND NOT EXISTS (SELECT 1 FROM fixed_cost_check fc WHERE fc.einkauf_id = e.id)
       ORDER BY e.datum DESC, a.id
     `;
