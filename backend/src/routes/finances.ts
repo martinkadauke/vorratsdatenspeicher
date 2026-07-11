@@ -10,6 +10,7 @@ import { extractPayslip } from '../llm/ocr.js';
 import { providerForTask } from '../llm/provider.js';
 import { parseLlmJson } from '../llm/ollama.js';
 import { parseComdirectCsv } from '../finances/bankCsv.js';
+import { normMerchant, alignInvoiceToBank } from '../lib/merchant.js';
 
 /** Pay-slip files live in a NON-static subdir of the receipts volume (the static
  *  /receipts/:file route rejects any name containing '/'), so they're reachable
@@ -271,9 +272,6 @@ export function financeRoutes(app: FastifyInstance): void {
     const last = new Date(Date.UTC(y, mo, 0)).toISOString().slice(0, 10); // day 0 of next month
     return { first, last };
   };
-  const normMerchant = (s: string): string =>
-    s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9äöüß ]/gi, ' ').replace(/\s+/g, ' ').trim();
-
   // Check "anchor" month: monthly costs are checked per month; quarterly costs
   // share one check across their quarter, yearly across their year — so a single
   // quarterly/yearly invoice, confirmed once, covers every month of that period.
@@ -696,6 +694,7 @@ export function financeRoutes(app: FastifyInstance): void {
 
     let einkaufId: number | null = null;
     let bankTxId: number | null = null;
+    let bankKonto: number | null = null;
     let incomeId: number | null = null;
     let amount: number | null = null;
     // A confirm may carry a DOCUMENT (invoice / pay slip) AND the bank STATEMENT (the
@@ -724,9 +723,10 @@ export function financeRoutes(app: FastifyInstance): void {
         learnMerchant = ((e.roh_ladenname as string | null) ?? '').trim() || learnMerchant;
       }
       if (bdy.bank_tx_id) {
-        const [bt] = await sql`SELECT id, amount::float8 AS amount, counterparty, description FROM bank_tx WHERE id = ${bdy.bank_tx_id}`;
+        const [bt] = await sql`SELECT id, amount::float8 AS amount, counterparty, description, konto_id FROM bank_tx WHERE id = ${bdy.bank_tx_id}`;
         if (!bt) return reply.code(404).send({ error: 'bank transaction not found' });
         bankTxId = bt.id as number;
+        bankKonto = (bt.konto_id as number | null) ?? null;
         if (amount == null) amount = Math.abs(bt.amount as number);
         if (!learnMerchant) learnMerchant = ((bt.counterparty as string | null) ?? '').trim() || ((bt.description as string | null) ?? '').trim();
       }
@@ -739,6 +739,10 @@ export function financeRoutes(app: FastifyInstance): void {
       ON CONFLICT (fixed_cost_id, month) DO UPDATE SET
         status = EXCLUDED.status, einkauf_id = EXCLUDED.einkauf_id, bank_tx_id = EXCLUDED.bank_tx_id,
         income_id = EXCLUDED.income_id, amount = EXCLUDED.amount, decided_by = EXCLUDED.decided_by, decided_at = NOW()`;
+    // Reconciling a fixed cost with BOTH an invoice and a bank statement: marry them (so the
+    // receipt itself shows the payment) and move the invoice onto the account that paid it +
+    // learn biller -> account. (The UI confirms any account move before sending this.)
+    if (einkaufId != null && bankTxId != null) await alignInvoiceToBank(einkaufId, bankTxId, bankKonto);
     return { ok: true };
   });
 
@@ -804,14 +808,15 @@ export function financeRoutes(app: FastifyInstance): void {
     const p = periodBounds(b, query.freq);
     const bankLo = isoMinusDays(p.lo, 7), bankHi = isoPlusDays(p.hi, 12);
     const rec = await sql`
-      SELECT e.id, e.datum::text AS datum, e.gesamt_betrag::float8 AS amount, e.roh_ladenname
-      FROM einkauf e
+      SELECT e.id, e.datum::text AS datum, e.gesamt_betrag::float8 AS amount, e.roh_ladenname, e.konto_id, k.name AS konto_name
+      FROM einkauf e LEFT JOIN konto k ON k.id = e.konto_id
       WHERE e.datum BETWEEN ${p.lo} AND ${p.hi} AND e.gesamt_betrag IS NOT NULL
         AND e.quelle IN ('email', 'upload')
         ${kontoScope(req.user, sql`e`)}
       ORDER BY e.datum DESC`;
     const bank = await sql`
-      SELECT id, booking_date::text AS datum, amount::float8 AS amount, counterparty,
+      SELECT bank_tx.id, booking_date::text AS datum, amount::float8 AS amount, counterparty, konto_id,
+             (SELECT name FROM konto WHERE id = bank_tx.konto_id) AS konto_name,
              -- the receipt this debit is already the payment of, if any (either link direction)
              COALESCE(einkauf_id, (SELECT e.id FROM einkauf e WHERE e.bank_tx_id = bank_tx.id LIMIT 1)) AS linked_einkauf_id
       FROM bank_tx WHERE booking_date BETWEEN ${bankLo} AND ${bankHi} AND amount < 0
@@ -821,8 +826,8 @@ export function financeRoutes(app: FastifyInstance): void {
       ORDER BY (einkauf_id IS NULL AND NOT EXISTS (SELECT 1 FROM einkauf e WHERE e.bank_tx_id = bank_tx.id)) DESC, booking_date DESC`;
     return {
       items: [
-        ...rec.map(r => ({ source: 'receipt' as const, id: r.id, datum: String(r.datum), amount: r.amount, label: (r.roh_ladenname as string | null) || 'Beleg', linked_einkauf_id: null as number | null })),
-        ...bank.map(bt => ({ source: 'bank' as const, id: bt.id, datum: String(bt.datum), amount: Math.abs(bt.amount as number), label: (bt.counterparty as string | null) || 'Kontobewegung', linked_einkauf_id: (bt.linked_einkauf_id as number | null) ?? null })),
+        ...rec.map(r => ({ source: 'receipt' as const, id: r.id, datum: String(r.datum), amount: r.amount, label: (r.roh_ladenname as string | null) || 'Beleg', linked_einkauf_id: null as number | null, konto_id: (r.konto_id as number | null) ?? null, konto_name: (r.konto_name as string | null) ?? null })),
+        ...bank.map(bt => ({ source: 'bank' as const, id: bt.id, datum: String(bt.datum), amount: Math.abs(bt.amount as number), label: (bt.counterparty as string | null) || 'Kontobewegung', linked_einkauf_id: (bt.linked_einkauf_id as number | null) ?? null, konto_id: (bt.konto_id as number | null) ?? null, konto_name: (bt.konto_name as string | null) ?? null })),
       ],
     };
   });
@@ -1665,14 +1670,15 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
     const id = parseInt(String((req.params as { id: string }).id), 10);
     const body = (req.body ?? {}) as { einkauf_id?: number; income_id?: number };
     if (!id) return reply.code(400).send({ error: 'bad id' });
-    const [bt] = await sql`SELECT id, amount::float8 AS amount FROM bank_tx WHERE id = ${id}`;
+    const [bt] = await sql`SELECT id, amount::float8 AS amount, konto_id FROM bank_tx WHERE id = ${id}`;
     if (!bt) return reply.code(404).send({ error: 'bank tx not found' });
     const uid = req.user?.id ?? -1;
     const seesAll = !!req.user?.sees_all_konten;
     if ((bt.amount as number) < 0) {
       const eid = parseInt(String(body.einkauf_id ?? ''), 10);
       if (!eid) return reply.code(400).send({ error: 'einkauf_id required' });
-      return await sql.begin(async tx => {
+      let linkedId: number | null = null;                 // set only on the success path
+      const err = await sql.begin(async tx => {
         // Whatever this booking is currently attached to — primary (einkauf.bank_tx_id)
         // OR sibling of a split (bank_tx.einkauf_id) — guard a non-owner's private receipt.
         // FOR UPDATE so the current holder can't change between this check and the
@@ -1682,7 +1688,7 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
           SELECT e.id, e.private_for_user_id AS priv FROM einkauf e
           WHERE e.bank_tx_id = ${id} OR e.id = (SELECT einkauf_id FROM bank_tx WHERE id = ${id}) LIMIT 1 FOR UPDATE`;
         if (cur && cur.priv != null && cur.priv !== uid && !seesAll) {
-          reply.code(403); return { error: 'bank transaction already linked to a private receipt' };
+          return { code: 403, error: 'bank transaction already linked to a private receipt' };
         }
         // Target must be visible; it MAY already have a primary (that's how a split
         // shipment adds another sibling debit to the same receipt).
@@ -1690,15 +1696,22 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
           SELECT id, bank_tx_id FROM einkauf
           WHERE id = ${eid} AND (${seesAll} OR private_for_user_id IS NULL OR private_for_user_id = ${uid})
           FOR UPDATE`;
-        if (!target) { reply.code(404); return { error: 'receipt not found' }; }
+        if (!target) { return { code: 404, error: 'receipt not found' }; }
         // Detach this booking from its old primary receipt (by the exact row we locked
         // + privacy-checked, not a re-matched WHERE) unless it's the target itself.
         if (cur && cur.id !== target.id) await tx`UPDATE einkauf SET bank_tx_id = NULL WHERE id = ${cur.id}`;
         await tx`UPDATE bank_tx SET einkauf_id = ${target.id} WHERE id = ${id}`;
         // Become the target's primary only if it has none yet (drives receipt-detail + evidence).
         await tx`UPDATE einkauf SET bank_tx_id = ${id} WHERE id = ${target.id} AND bank_tx_id IS NULL`;
-        return { ok: true };
+        linkedId = target.id as number;
+        return null;
       });
+      if (err) return reply.code(err.code).send({ error: err.error });
+      // Canonicalise: the invoice now sits on the account that actually paid it; learn the
+      // biller -> account so its future invoices self-file there. (Mismatch is confirmed
+      // in the UI before we get here.)
+      if (linkedId != null) await alignInvoiceToBank(linkedId, id, (bt.konto_id as number | null) ?? null);
+      return { ok: true };
     }
     // Credit → income row (income is shared finance data, no per-row privacy).
     const iid = parseInt(String(body.income_id ?? ''), 10);

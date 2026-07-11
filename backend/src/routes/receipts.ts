@@ -683,26 +683,28 @@ export function receiptRoutes(app: FastifyInstance): void {
   });
 
   /** Candidate bank bookings to attach to THIS receipt, for the receipt-side "Bankauszug
-   *  finden" picker (completeness on Giro/Kreditkarte accounts). Debits on the receipt's
-   *  OWN account that aren't linked yet — you pay a receipt from one account, so its
-   *  statement lives there. Amount-closest first; optional free text over
-   *  counterparty/description/amount/date. Then link via POST /api/finances/bank/:id/link. */
+   *  finden" picker (completeness on Giro/Kreditkarte accounts). Searches OPEN debits across
+   *  ALL accounts — an invoice can be paid from a different account than it's filed under
+   *  (e.g. a household bill arriving in a personal mailbox), so discovering the paying account
+   *  is the point; linking then moves the invoice onto the matched statement's account. Each
+   *  candidate carries its konto so the UI can flag/confirm an account move. Amount-closest
+   *  first; optional free text. Link via POST /api/finances/bank/:id/link. */
   app.get('/api/receipts/:id/bank-candidates', async (req, reply) => {
     const id = parseInt((req.params as { id: string }).id, 10);
     if (!id) return reply.code(400).send({ error: 'invalid id' });
     if (!await guardReceipt(req, reply, id)) return;
     const [e] = await sql`SELECT konto_id, gesamt_betrag::float8 AS betrag, datum::text AS datum FROM einkauf WHERE id = ${id}`;
     if (!e) return reply.code(404).send({ error: 'not found' });
-    if (e.konto_id == null) return { results: [] };
     const q = String((req.query as { q?: string }).q ?? '').trim();
     const like = `%${q}%`;
     const amtQ = q.replace(/\./g, '').replace(',', '.');
     const amtNum = /^\d+(\.\d+)?$/.test(amtQ) ? parseFloat(amtQ) : null;
     const target = e.betrag != null ? Math.abs(e.betrag as number) : null;
     const results = await sql`
-      SELECT bt.id, bt.booking_date::text AS datum, bt.amount::float8 AS amount, bt.counterparty, bt.description
+      SELECT bt.id, bt.booking_date::text AS datum, bt.amount::float8 AS amount, bt.counterparty, bt.description,
+             bt.konto_id, (SELECT name FROM konto WHERE id = bt.konto_id) AS konto_name
       FROM bank_tx bt
-      WHERE bt.konto_id = ${e.konto_id} AND bt.amount < 0 AND bt.einkauf_id IS NULL
+      WHERE bt.amount < 0 AND bt.einkauf_id IS NULL
         -- also exclude bookings that are already a receipt's PRIMARY link (einkauf.bank_tx_id
         -- set but bank_tx.einkauf_id still NULL — e.g. generated/auto-matched receipts),
         -- else linking one here would silently steal it from that receipt.
@@ -710,9 +712,10 @@ export function receiptRoutes(app: FastifyInstance): void {
         ${q ? sql`AND (bt.counterparty ILIKE ${like} OR bt.description ILIKE ${like}
                        ${amtNum != null ? sql`OR ABS(ABS(bt.amount) - ${amtNum}) <= 0.01` : sql``}
                        OR bt.booking_date::text ILIKE ${like})` : sql``}
-      ORDER BY ABS(ABS(bt.amount) - COALESCE(${target}::float8, ABS(bt.amount))) ASC, bt.booking_date DESC
+      -- same account first (the common case), then amount-closest, then newest.
+      ORDER BY (bt.konto_id IS DISTINCT FROM ${e.konto_id ?? null}), ABS(ABS(bt.amount) - COALESCE(${target}::float8, ABS(bt.amount))) ASC, bt.booking_date DESC
       LIMIT 30`;
-    return { results, receipt: { betrag: e.betrag, datum: e.datum } };
+    return { results, receipt: { betrag: e.betrag, datum: e.datum, konto_id: e.konto_id } };
   });
 
   /** The source e-mail behind an e-mail-imported receipt (privacy-guarded). HTML

@@ -899,7 +899,7 @@ function ReceiptPicker({ month, fix, onClose, onPick }: {
     // freq widens the candidate window to the plan's whole quarter/year so a periodic
     // payment (e.g. a yearly membership charged once) is findable from any month.
     queryKey: ['fin-picker', fix.kind, fix.frequency, month],
-    queryFn: () => api<{ items: { source: 'income' | 'bank' | 'receipt'; id: number; datum: string; amount: number; label: string; linked_einkauf_id?: number | null }[] }>(
+    queryFn: () => api<{ items: { source: 'income' | 'bank' | 'receipt'; id: number; datum: string; amount: number; label: string; linked_einkauf_id?: number | null; konto_id?: number | null; konto_name?: string | null }[] }>(
       `/api/finances/${isIncome ? 'income' : 'expense'}-evidence?month=${month}&freq=${fix.frequency}`),
   });
   const isLoading = evidenceQ.isLoading;
@@ -909,7 +909,17 @@ function ReceiptPicker({ month, fix, onClose, onPick }: {
   const docs = items.filter(i => i.source !== 'bank' && hit(i.label));   // invoices / pay-slip rows
   const banks = items.filter(i => i.source === 'bank' && hit(i.label));  // bank statement lines
   const canLink = !!docSel || !!bankSel;
-  const doLink = () => {
+  const doLink = async () => {
+    // Linking an invoice to a statement on a DIFFERENT account moves the invoice there (the
+    // account that paid it). Confirm the move first so a mis-pick can't silently relocate it.
+    if (!isIncome && docSel && bankSel) {
+      const docItem = items.find(i => i.source !== 'bank' && i.id === docSel.id);
+      const bankItem = items.find(i => i.source === 'bank' && i.id === bankSel.id);
+      if (docItem?.konto_id != null && bankItem?.konto_id != null && docItem.konto_id !== bankItem.konto_id) {
+        const ok = await confirm({ title: t('receiptDetail.moveKontoTitle'), message: t('receiptDetail.moveKontoMsg', { konto: bankItem.konto_name ?? '?' }), confirmLabel: t('receiptDetail.moveKontoConfirm'), cancelLabel: t('common.cancel') });
+        if (!ok) return;
+      }
+    }
     const ev: PickEv = {};
     if (docSel) { if (isIncome) ev.income_id = docSel.id; else ev.einkauf_id = docSel.id; }
     if (bankSel) ev.bank_tx_id = bankSel.id;
@@ -962,7 +972,7 @@ function ReceiptPicker({ month, fix, onClose, onPick }: {
         )}
         <div className="flex items-center justify-end gap-2 border-t border-zinc-100 pt-2.5 dark:border-zinc-800">
           <Button variant="ghost" className="px-3 py-1.5 text-xs" onClick={onClose}>{t('common.cancel')}</Button>
-          <Button className="px-3 py-1.5 text-xs" disabled={!canLink} onClick={doLink}><Link2 size={14} className="mr-1 inline" />{t('finances.linkSelected')}</Button>
+          <Button className="px-3 py-1.5 text-xs" disabled={!canLink} onClick={() => void doLink()}><Link2 size={14} className="mr-1 inline" />{t('finances.linkSelected')}</Button>
         </div>
       </div>
     </Modal>

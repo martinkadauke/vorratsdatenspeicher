@@ -704,13 +704,23 @@ function BankStatementPicker({ receiptId, onClose, onLinked }: { receiptId: numb
   const [q, setQ] = useState('');
   const { data, isLoading } = useQuery({
     queryKey: ['receipt-bank-candidates', receiptId, q],
-    queryFn: () => api<{ results: { id: number; datum: string; amount: number; counterparty: string | null; description: string | null }[] }>(`/api/receipts/${receiptId}/bank-candidates?q=${encodeURIComponent(q)}`),
+    queryFn: () => api<{ results: { id: number; datum: string; amount: number; counterparty: string | null; description: string | null; konto_id: number | null; konto_name: string | null }[]; receipt: { konto_id: number | null } }>(`/api/receipts/${receiptId}/bank-candidates?q=${encodeURIComponent(q)}`),
   });
   const link = useMutation({
     mutationFn: (bankId: number) => api(`/api/finances/bank/${bankId}/link`, { method: 'POST', body: { einkauf_id: receiptId } }),
     onSuccess: () => { toast(t('receiptDetail.bankLinked'), 'success'); onLinked(); },
     onError: (e: Error) => toast(e.message, 'error'),
   });
+  const receiptKonto = data?.receipt.konto_id ?? null;
+  // Linking a statement on a DIFFERENT account moves the invoice there (that's the account
+  // that actually paid it) — confirm the move first so a mis-click can't silently relocate it.
+  const pick = async (b: { id: number; konto_id: number | null; konto_name: string | null }) => {
+    if (b.konto_id != null && receiptKonto != null && b.konto_id !== receiptKonto) {
+      const ok = await confirm({ title: t('receiptDetail.moveKontoTitle'), message: t('receiptDetail.moveKontoMsg', { konto: b.konto_name ?? '?' }), confirmLabel: t('receiptDetail.moveKontoConfirm'), cancelLabel: t('common.cancel') });
+      if (!ok) return;
+    }
+    link.mutate(b.id);
+  };
   const results = data?.results ?? [];
   return (
     <Modal open onClose={onClose} title={t('receiptDetail.findBankTitle')}>
@@ -724,17 +734,22 @@ function BankStatementPicker({ receiptId, onClose, onLinked }: { receiptId: numb
           <p className="py-4 text-center text-xs text-zinc-400">{t('receiptDetail.findBankEmpty')}</p>
         ) : (
           <div className="flex max-h-80 flex-col gap-1.5 overflow-y-auto">
-            {results.map(b => (
-              <button key={b.id} type="button" disabled={link.isPending} onClick={() => link.mutate(b.id)}
+            {results.map(b => {
+              const otherKonto = b.konto_id != null && receiptKonto != null && b.konto_id !== receiptKonto;
+              return (
+              <button key={b.id} type="button" disabled={link.isPending} onClick={() => void pick(b)}
                 className="flex items-center gap-3 rounded-xl border border-zinc-200 p-3 text-left hover:border-sky-400 hover:bg-sky-50/50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-sky-950/20">
                 <Landmark size={16} className="shrink-0 text-sky-500" />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm">{b.counterparty || b.description || '—'}</div>
-                  <div className="text-[10px] text-zinc-400">{b.datum.slice(8, 10)}.{b.datum.slice(5, 7)}.{b.datum.slice(0, 4)}</div>
+                  <div className="flex items-center gap-1.5 text-[10px] text-zinc-400">
+                    <span>{b.datum.slice(8, 10)}.{b.datum.slice(5, 7)}.{b.datum.slice(0, 4)}</span>
+                    {b.konto_name && <span className={cn('rounded-full px-1.5 py-0.5', otherKonto ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300' : 'bg-zinc-100 dark:bg-zinc-800')}>{b.konto_name}</span>}
+                  </div>
                 </div>
                 <span className="shrink-0 text-sm font-semibold">{eur(b.amount)}</span>
               </button>
-            ))}
+            ); })}
           </div>
         )}
       </div>

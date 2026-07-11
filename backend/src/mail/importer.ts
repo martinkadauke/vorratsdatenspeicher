@@ -7,6 +7,7 @@ import sql from '../db.js';
 import { decryptSecret } from '../lib/crypto.js';
 import { ocrFromText, type OcrResult } from '../llm/ocr.js';
 import { ocrAndStore, storeOcrResult } from '../routes/receipts.js';
+import { applyLearnedKonto } from '../lib/merchant.js';
 
 /** Local mount where receipt photos/PDFs are persisted (shared with receipts.ts;
  *  the host path is mapped here via the docker volume in deploy/stack.yml). */
@@ -289,6 +290,10 @@ async function processMessage(mb: MailboxRow, kontoId: number | null, raw: Buffe
       UPDATE einkauf SET datum = ${datum}::date, date_uncertain = FALSE
       WHERE id = ${einkaufId} AND (datum IS NULL OR date_uncertain = TRUE OR ABS(datum - ${datum}::date) > 21)`.catch(() => {});
   }
+
+  // Now the real biller is known (post-OCR): if we've learned which account this biller is
+  // paid from, move the invoice there (it inherited the mailbox owner's account on insert).
+  if (einkaufId) await applyLearnedKonto(einkaufId).catch(() => {});
 
   // Keep the source mail so the detail page can show it (best-effort, non-fatal).
   if (einkaufId) {

@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import sql from '../db.js';
 import { getConfig } from '../config.js';
 import { ocrAndStore } from '../routes/receipts.js';
+import { applyLearnedKonto } from '../lib/merchant.js';
 
 // Same store dir the whole app uses; a dropped file is COPIED here (as vds-<uuid>.<ext>)
 // so it's servable at /receipts/<name> and reachable by ocrAndStore, which resolves
@@ -152,6 +153,8 @@ async function importOne(sourceName: string, buf: Buffer, konto: number | null):
   try {
     await ocrAndStore(einkaufId, bildPfad);   // ocrFromImage (pdf+image) → storeOcrResult → churn
     await sql`UPDATE einkauf SET ocr_pending = FALSE WHERE id = ${einkaufId}`.catch(() => {});
+    // Biller now known → move it onto the learned account for this biller, if any.
+    await applyLearnedKonto(einkaufId).catch(() => {});
     return einkaufId;
   } catch (err) {
     await sql`DELETE FROM einkauf WHERE id = ${einkaufId}`.catch(() => {});
