@@ -345,20 +345,27 @@ export function financeRoutes(app: FastifyInstance): void {
     //    at all. So Kassenbons ('zettel') and cash ('bar') must never be offered as
     //    evidence — only invoice-type sources. (Manual app entries are zettel/bar,
     //    so 'upload' only ever means a dropped invoice PDF.)
+    // Evidence candidates are pulled for the whole YEAR of the viewed month, so a quarterly
+    // or yearly plan can match its single payment in ANY month of its period (each plan is
+    // filtered back to its own period in the matching loop below). A monthly plan is filtered
+    // to just this month, so nothing changes for it.
+    const evYear = b.first.slice(0, 4);
+    const yLo = `${evYear}-01-01`, yHi = `${evYear}-12-31`;
     const receipts = await sql`
       SELECT e.id, e.datum::text AS datum, e.roh_ladenname, e.gesamt_betrag::float8 AS gesamt_betrag
       FROM einkauf e
-      WHERE e.datum BETWEEN ${b.first} AND ${b.last} AND e.gesamt_betrag IS NOT NULL
+      WHERE e.datum BETWEEN ${yLo} AND ${yHi} AND e.gesamt_betrag IS NOT NULL
         AND e.quelle IN ('email', 'upload')
         ${kontoScope(req.user, sql`e`)}
     `;
-    // Bank transactions of the month (both signs) + actual income rows (pay slips)
+    // Bank transactions of the year (both signs) + actual income rows (pay slips)
     // — the evidence for income plans. Expense plans match invoices + bank debits;
     // income plans match income rows + bank credits.
     const banktx = await sql`
-      SELECT bt.id, bt.booking_date::text AS datum, bt.counterparty, bt.description, bt.amount::float8 AS amount
+      SELECT bt.id, bt.booking_date::text AS datum, bt.counterparty, bt.description, bt.amount::float8 AS amount,
+             (bt.einkauf_id IS NOT NULL OR EXISTS(SELECT 1 FROM einkauf e WHERE e.bank_tx_id = bt.id)) AS receipt_linked
       FROM bank_tx bt
-      WHERE bt.booking_date BETWEEN ${b.first} AND ${b.last}
+      WHERE bt.booking_date BETWEEN ${yLo} AND ${yHi}
     `;
     const income = await sql`
       SELECT i.id, i.datum::text AS datum, i.amount::float8 AS amount, i.source, i.description,
@@ -366,22 +373,26 @@ export function financeRoutes(app: FastifyInstance): void {
       FROM income i
       LEFT JOIN konto k ON k.id = i.konto_id
       LEFT JOIN users u ON u.id = k.user_id
-      WHERE i.datum BETWEEN ${b.first} AND ${b.last}
+      WHERE i.datum BETWEEN ${yLo} AND ${yHi}
       ORDER BY i.amount DESC, i.id DESC`;
     // Two evidence pools; a candidate is keyed "<source>:<id>" so one piece of
     // evidence never serves two positions and a confirmed one is never re-suggested.
-    type Ev = { source: 'receipt' | 'bank' | 'income'; id: number; laden: string | null; betrag: number; datum: string };
+    type Ev = { source: 'receipt' | 'bank' | 'income'; id: number; laden: string | null; betrag: number; datum: string; linked: boolean };
     // Match merchant on the COUNTERPARTY only, not counterparty+description: card
     // payments carry "Kartenzahlung comdirect Visa-Debitkarte …" boilerplate in the
     // description, which would false-match e.g. a "Comdirect" fixed cost to every card
     // purchase. The counterparty is the real vendor ("Lidl sagt Danke", "Telekom …").
+    // `linked` = this debit is already a receipt's payment. We DON'T drop those (a fixed
+    // cost's own invoice-married debit, e.g. Telekom, must stay linkable) — instead they
+    // lose ties to an OPEN match in the suggestion sort below, so an ordinary Amazon order
+    // never wins over the genuinely-open Prime debit.
     const evExpense: Ev[] = [
-      ...receipts.map(r => ({ source: 'receipt' as const, id: r.id as number, laden: r.roh_ladenname as string | null, betrag: r.gesamt_betrag as number, datum: String(r.datum) })),
-      ...banktx.filter(bt => (bt.amount as number) < 0).map(bt => ({ source: 'bank' as const, id: bt.id as number, laden: bt.counterparty as string | null, betrag: Math.abs(bt.amount as number), datum: String(bt.datum) })),
+      ...receipts.map(r => ({ source: 'receipt' as const, id: r.id as number, laden: r.roh_ladenname as string | null, betrag: r.gesamt_betrag as number, datum: String(r.datum), linked: false })),
+      ...banktx.filter(bt => (bt.amount as number) < 0).map(bt => ({ source: 'bank' as const, id: bt.id as number, laden: bt.counterparty as string | null, betrag: Math.abs(bt.amount as number), datum: String(bt.datum), linked: bt.receipt_linked === true })),
     ];
     const evIncome: Ev[] = [
-      ...income.map(i => ({ source: 'income' as const, id: i.id as number, laden: i.description as string | null, betrag: i.amount as number, datum: String(i.datum) })),
-      ...banktx.filter(bt => (bt.amount as number) > 0).map(bt => ({ source: 'bank' as const, id: bt.id as number, laden: bt.counterparty as string | null, betrag: bt.amount as number, datum: String(bt.datum) })),
+      ...income.map(i => ({ source: 'income' as const, id: i.id as number, laden: i.description as string | null, betrag: i.amount as number, datum: String(i.datum), linked: false })),
+      ...banktx.filter(bt => (bt.amount as number) > 0).map(bt => ({ source: 'bank' as const, id: bt.id as number, laden: bt.counterparty as string | null, betrag: bt.amount as number, datum: String(bt.datum), linked: false })),
     ];
     const usedKeys = new Set<string>();
     for (const f of fixed) {
@@ -419,7 +430,7 @@ export function financeRoutes(app: FastifyInstance): void {
     // Deterministic suggestion: merchant match (learned match_merchant, else label
     // tokens) and/or amount within ±max(1 €, 2 %). Greedy: best score first, one
     // piece of evidence serves at most one position.
-    type Cand = { fixedId: number; source: 'receipt' | 'bank' | 'income'; einkaufId: number | null; bankTxId: number | null; incomeId: number | null; score: number; laden: string | null; betrag: number; datum: string; amountOk: boolean; merchantOk: boolean };
+    type Cand = { fixedId: number; source: 'receipt' | 'bank' | 'income'; einkaufId: number | null; bankTxId: number | null; incomeId: number | null; score: number; laden: string | null; betrag: number; datum: string; amountOk: boolean; merchantOk: boolean; linked: boolean; amtDiff: number };
     const cands: Cand[] = [];
     for (const f of fixed) {
       // Skip only FULLY reconciled (or deliberately skipped) rows. A PARTIAL check —
@@ -431,7 +442,12 @@ export function financeRoutes(app: FastifyInstance): void {
       // suggested — it just never has an invoice/pay slip, so offer bank evidence only
       // (don't propose a coincidental receipt for something that has none).
       const noReceipt = f.expect_receipt === false;
-      const pool = (f.kind === 'income' ? evIncome : evExpense).filter(ev => !noReceipt || ev.source === 'bank');
+      // A plan's evidence may fall anywhere in its PERIOD (a quarterly/yearly payment lands
+      // in one month of the quarter/year); a monthly plan is bounded to the viewed month.
+      const per = periodBounds(b, f.frequency as string);
+      const pool = (f.kind === 'income' ? evIncome : evExpense)
+        .filter(ev => !noReceipt || ev.source === 'bank')
+        .filter(ev => ev.datum >= per.lo && ev.datum <= per.hi);
       const target = f.monthly_eur as number;
       const tol = Math.max(1, Math.abs(target) * 0.02);
       const needle = normMerchant((f.match_merchant as string | null) ?? '');
@@ -453,10 +469,15 @@ export function financeRoutes(app: FastifyInstance): void {
           einkaufId: ev.source === 'receipt' ? ev.id : null, bankTxId: ev.source === 'bank' ? ev.id : null, incomeId: ev.source === 'income' ? ev.id : null,
           score: (merchantOk ? 2 : 0) + (amountOk ? 1 : 0) + (merchantHit ? 1 : 0),
           laden: ev.laden, betrag: ev.betrag, datum: ev.datum, amountOk, merchantOk,
+          linked: ev.linked, amtDiff: Math.abs(ev.betrag - target),
         });
       }
     }
-    cands.sort((a, c) => c.score - a.score);
+    // Best score first; then prefer OPEN evidence over one already tied to a receipt (so a
+    // yearly membership's genuinely-open debit beats an ordinary same-amount order); then
+    // the closest amount. Keeps periodic plans from grabbing an unrelated linked debit
+    // without hard-excluding the invoice-married debits a plan legitimately needs.
+    cands.sort((a, c) => (c.score - a.score) || (Number(a.linked) - Number(c.linked)) || (a.amtDiff - c.amtDiff));
     const sugByFixed = new Map<number, Cand>();
     const takenKeys = new Set<string>();
     for (const c of cands) {
@@ -755,10 +776,14 @@ export function financeRoutes(app: FastifyInstance): void {
   /** Income-evidence candidates of a month for the manual picker on an income plan:
    *  actual income rows (pay slips) + bank credits (Gutschriften, amount > 0). */
   app.get('/api/finances/income-evidence', async (req, reply) => {
-    const b = monthBounds(((req.query as { month?: string }).month ?? '').trim());
+    const query = req.query as { month?: string; freq?: string };
+    const b = monthBounds((query.month ?? '').trim());
     if (!b) return reply.code(400).send({ error: 'month must be YYYY-MM' });
-    const inc = await sql`SELECT id, datum::text AS datum, amount::float8 AS amount, description FROM income WHERE datum BETWEEN ${b.first} AND ${b.last} ORDER BY datum DESC, id DESC`;
-    const bank = await sql`SELECT id, booking_date::text AS datum, amount::float8 AS amount, counterparty, description FROM bank_tx WHERE booking_date BETWEEN ${b.first} AND ${b.last} AND amount > 0 ORDER BY booking_date DESC`;
+    // Income keeps the tight period bounds (no bank booking-lag) so a MONTHLY income plan is
+    // unchanged from before; a periodic income plan (rare) still spans its quarter/year.
+    const p = periodBounds(b, query.freq);
+    const inc = await sql`SELECT id, datum::text AS datum, amount::float8 AS amount, description FROM income WHERE datum BETWEEN ${p.lo} AND ${p.hi} ORDER BY datum DESC, id DESC`;
+    const bank = await sql`SELECT id, booking_date::text AS datum, amount::float8 AS amount, counterparty, description FROM bank_tx WHERE booking_date BETWEEN ${p.lo} AND ${p.hi} AND amount > 0 ORDER BY booking_date DESC`;
     return {
       items: [
         ...inc.map(i => ({ source: 'income' as const, id: i.id, datum: String(i.datum), amount: i.amount, label: (i.description as string | null) || 'Einnahme' })),
@@ -772,21 +797,27 @@ export function financeRoutes(app: FastifyInstance): void {
    *  spills a few days into the neighbouring months because bank bookings lag — e.g. a
    *  loan installment due end-of-month often books on the 1st of the next month. */
   app.get('/api/finances/expense-evidence', async (req, reply) => {
-    const b = monthBounds(((req.query as { month?: string }).month ?? '').trim());
+    const query = req.query as { month?: string; freq?: string };
+    const b = monthBounds((query.month ?? '').trim());
     if (!b) return reply.code(400).send({ error: 'month must be YYYY-MM' });
+    // A quarterly/yearly plan's single payment can land in any month of its period, so widen
+    // the candidate window to the whole quarter/year; the bank window keeps the ±booking-lag
+    // so an end-of-period charge that books a few days later is still offered.
+    const p = periodBounds(b, query.freq);
+    const bankLo = isoMinusDays(p.lo, 7), bankHi = isoPlusDays(p.hi, 12);
     const rec = await sql`
       SELECT e.id, e.datum::text AS datum, e.gesamt_betrag::float8 AS amount, e.roh_ladenname
       FROM einkauf e
-      WHERE e.datum BETWEEN ${b.first} AND ${b.last} AND e.gesamt_betrag IS NOT NULL
+      WHERE e.datum BETWEEN ${p.lo} AND ${p.hi} AND e.gesamt_betrag IS NOT NULL
         AND e.quelle IN ('email', 'upload')
         ${kontoScope(req.user, sql`e`)}
       ORDER BY e.datum DESC`;
-    const lo = isoMinusDays(b.first, 7);
-    const hi = isoPlusDays(b.last, 12);
     const bank = await sql`
       SELECT id, booking_date::text AS datum, amount::float8 AS amount, counterparty
-      FROM bank_tx WHERE booking_date BETWEEN ${lo} AND ${hi} AND amount < 0
-      ORDER BY booking_date DESC`;
+      FROM bank_tx WHERE booking_date BETWEEN ${bankLo} AND ${bankHi} AND amount < 0
+      -- OPEN debits first (a debit already tied to a receipt is that receipt's payment), but
+      -- keep the linked ones available too — an invoice-married debit may be the right one.
+      ORDER BY (einkauf_id IS NULL AND NOT EXISTS (SELECT 1 FROM einkauf e WHERE e.bank_tx_id = bank_tx.id)) DESC, booking_date DESC`;
     return {
       items: [
         ...rec.map(r => ({ source: 'receipt' as const, id: r.id, datum: String(r.datum), amount: r.amount, label: (r.roh_ladenname as string | null) || 'Beleg' })),
@@ -902,6 +933,17 @@ export function financeRoutes(app: FastifyInstance): void {
   const isoPlusDays = (iso: string, n: number): string => {
     const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n);
     return d.toISOString().slice(0, 10);
+  };
+  // The period a plan's evidence may fall in: its whole quarter/year for a periodic plan
+  // (its one payment lands in a single month of the period), else just the viewed month.
+  const periodBounds = (b: { first: string; last: string }, freq: string | undefined): { lo: string; hi: string } => {
+    const y = b.first.slice(0, 4), mo = Number(b.first.slice(5, 7));
+    if (freq === 'yearly') return { lo: `${y}-01-01`, hi: `${y}-12-31` };
+    if (freq === 'quarterly') {
+      const qs = Math.floor((mo - 1) / 3) * 3 + 1;
+      return { lo: `${y}-${String(qs).padStart(2, '0')}-01`, hi: new Date(Date.UTC(Number(y), qs - 1 + 3, 0)).toISOString().slice(0, 10) };
+    }
+    return { lo: b.first, hi: b.last };
   };
 
   /** Auto-link by ORDER NUMBER — the strongest signal, immune to the date window.

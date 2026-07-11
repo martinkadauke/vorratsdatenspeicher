@@ -896,9 +896,11 @@ function ReceiptPicker({ month, fix, onClose, onPick }: {
   // Both kinds return {items:[{source,id,datum,amount,label}]}: income → pay-slip rows
   // + bank credits; expense → invoices + bank debits (wide window for booking lag).
   const evidenceQ = useQuery({
-    queryKey: ['fin-picker', fix.kind, month],
+    // freq widens the candidate window to the plan's whole quarter/year so a periodic
+    // payment (e.g. a yearly membership charged once) is findable from any month.
+    queryKey: ['fin-picker', fix.kind, fix.frequency, month],
     queryFn: () => api<{ items: { source: 'income' | 'bank' | 'receipt'; id: number; datum: string; amount: number; label: string }[] }>(
-      isIncome ? `/api/finances/income-evidence?month=${month}` : `/api/finances/expense-evidence?month=${month}`),
+      `/api/finances/${isIncome ? 'income' : 'expense'}-evidence?month=${month}&freq=${fix.frequency}`),
   });
   const isLoading = evidenceQ.isLoading;
 
