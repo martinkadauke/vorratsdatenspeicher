@@ -67,7 +67,7 @@ export function financeRoutes(app: FastifyInstance): void {
   app.get('/api/fixed-costs', async () => {
     return sql`
       SELECT f.id, f.label, f.category_path, f.monthly_eur::float8 AS monthly_eur, f.kind, f.frequency, f.is_transfer,
-             f.konto_id, f.start_date::text AS start_date, f.end_date::text AS end_date, f.active,
+             f.konto_id, f.start_date::text AS start_date, f.end_date::text AS end_date, f.active, f.one_off,
              f.expect_receipt, f.match_merchant, f.counterpart_id,
              cp.label AS counterpart_label, ck.name AS counterpart_konto,
              k.name AS konto_name, k.is_shared, k.user_id AS konto_user_id, u.username AS owner
@@ -94,13 +94,14 @@ export function financeRoutes(app: FastifyInstance): void {
     const kind = b.kind === 'income' ? 'income' : 'expense';
     const freq = ['monthly', 'quarterly', 'yearly'].includes(String(b.frequency)) ? String(b.frequency) : 'monthly';
     const isTransfer = b.is_transfer === true;
+    const oneOff = b.one_off === true;   // preserved on undo-delete (readd); default false for manual creates
     const cpId = b.counterpart_id != null ? parseInt(String(b.counterpart_id), 10) : null;
     try {
       const id = await sql.begin(async tx => {
         const [row] = await tx`
-          INSERT INTO fixed_cost (label, category_path, monthly_eur, kind, frequency, is_transfer, konto_id, start_date, end_date, active, expect_receipt, match_merchant, created_by)
+          INSERT INTO fixed_cost (label, category_path, monthly_eur, kind, frequency, is_transfer, konto_id, start_date, end_date, active, expect_receipt, match_merchant, one_off, created_by)
           VALUES (${label}, ${category}, ${monthly}, ${kind}, ${freq}, ${isTransfer}, ${kontoId}, ${start}, ${end}, ${b.active !== false},
-                  ${b.expect_receipt !== false}, ${(b.match_merchant ?? '').toString().trim() || null}, ${req.user?.id ?? null})
+                  ${b.expect_receipt !== false}, ${(b.match_merchant ?? '').toString().trim() || null}, ${oneOff}, ${req.user?.id ?? null})
           RETURNING id`;
         if (cpId) {
           if (!isTransfer) throw new HttpError(400, 'Nur Umbuchungen können eine Gegenbuchung haben');
@@ -243,8 +244,8 @@ export function financeRoutes(app: FastifyInstance): void {
         if (!mb) throw new HttpError(400, 'bad booking date');
         const start = `${month}-01`;
         const [nf] = await tx`
-          INSERT INTO fixed_cost (label, category_path, monthly_eur, kind, frequency, is_transfer, konto_id, start_date, end_date, active, expect_receipt, match_merchant, created_by)
-          VALUES (${(f.label as string | null) ?? 'Umbuchung'}, NULL, ${amount}, ${oppKind}, 'monthly', TRUE, ${bt.konto_id}, ${start}, ${mb.last}, TRUE, FALSE, NULL, ${req.user?.id ?? null})
+          INSERT INTO fixed_cost (label, category_path, monthly_eur, kind, frequency, is_transfer, konto_id, start_date, end_date, active, expect_receipt, match_merchant, one_off, created_by)
+          VALUES (${(f.label as string | null) ?? 'Umbuchung'}, NULL, ${amount}, ${oppKind}, 'monthly', TRUE, ${bt.konto_id}, ${start}, ${mb.last}, TRUE, FALSE, NULL, TRUE, ${req.user?.id ?? null})
           RETURNING id`;
         await tx`
           INSERT INTO fixed_cost_check (fixed_cost_id, month, status, bank_tx_id, amount, decided_by)
@@ -310,7 +311,7 @@ export function financeRoutes(app: FastifyInstance): void {
     //    check + evidence-matching engine, just against different evidence pools.
     const fixed = await sql`
       SELECT f.id, f.label, f.monthly_eur::float8 AS monthly_eur, f.kind, f.frequency, f.is_transfer, f.expect_receipt, f.match_merchant,
-             (f.end_date IS NOT NULL AND date_trunc('month', f.start_date) = date_trunc('month', f.end_date)) AS one_off,
+             f.one_off, f.counterpart_id,
              f.konto_id, k.name AS konto_name, k.is_shared, u.username AS owner,
              c.id AS check_id, c.status AS check_status, c.einkauf_id AS check_einkauf_id,
              c.bank_tx_id AS check_bank_tx_id, c.income_id AS check_income_id, c.amount::float8 AS check_amount,
@@ -479,13 +480,18 @@ export function financeRoutes(app: FastifyInstance): void {
       GROUP BY bu.id, k.name, k.is_shared, u.username
       ORDER BY bu.label
     `;
-    const prevFirst = new Date(Date.UTC(Number(m.slice(0, 4)), Number(m.slice(5, 7)) - 1 - 3, 1)).toISOString().slice(0, 10);
+    // The 3 calendar months before the current one (for the forecast median). Kept as
+    // explicit keys so a month with NO spend enters the median as 0 (a real €0 month),
+    // instead of being silently dropped and biasing the forecast upward.
+    const priorKeys: string[] = [];
+    for (let k = 3; k >= 1; k--) priorKeys.push(new Date(Date.UTC(Number(m.slice(0, 4)), Number(m.slice(5, 7)) - 1 - k, 1)).toISOString().slice(0, 10));
+    const prevFirst = priorKeys[0];
     const sums = await sql`
       SELECT bu.id AS budget_id, date_trunc('month', e.datum)::date::text AS mon, SUM(a.preis)::float8 AS total
       FROM budget bu
-      JOIN budget_category bc ON bc.budget_id = bu.id
       JOIN artikel a ON a.preis IS NOT NULL AND a.category_path IS NOT NULL
-        AND (a.category_path = bc.category_path OR a.category_path LIKE bc.category_path || '/%')
+        AND EXISTS (SELECT 1 FROM budget_category bc WHERE bc.budget_id = bu.id
+                    AND (a.category_path = bc.category_path OR a.category_path LIKE bc.category_path || '/%'))
       JOIN einkauf e ON e.id = a.einkauf_id
       WHERE bu.active AND e.datum BETWEEN ${prevFirst} AND ${b.last}
         AND (bu.konto_id IS NULL OR e.konto_id = bu.konto_id)
@@ -496,17 +502,18 @@ export function financeRoutes(app: FastifyInstance): void {
     // NB: no PRIVACY kontoScope here on purpose — a private receipt still counts toward
     // the budget total; the drill-down masks its details for non-owners. (The account
     // scope above, sumsKonto, is a different thing: which account was charged.)
-    // NB: an artikel matching two category prefixes of the SAME budget would double-
-    // count — the UI prevents nesting by keeping picks distinct; acceptable for v1.
+    // NB: the EXISTS match (not a JOIN on budget_category) is deliberate: an artikel that
+    // falls under BOTH a parent and a nested child category of the SAME budget must count
+    // ONCE, not once per matching category row.
     const actualBy = new Map<number, number>();
-    const histBy = new Map<number, number[]>();
+    const histByMonth = new Map<number, Map<string, number>>();
     for (const s of sums) {
       const mon = String(s.mon);
       if (mon === b.first) actualBy.set(s.budget_id as number, s.total as number);
       else {
-        const arr = histBy.get(s.budget_id as number) ?? [];
-        arr.push(s.total as number);
-        histBy.set(s.budget_id as number, arr);
+        let mm = histByMonth.get(s.budget_id as number);
+        if (!mm) { mm = new Map<string, number>(); histByMonth.set(s.budget_id as number, mm); }
+        mm.set(mon, s.total as number);
       }
     }
     const median = (xs: number[]): number | null => {
@@ -514,11 +521,16 @@ export function financeRoutes(app: FastifyInstance): void {
       const s = [...xs].sort((a, c) => a - c);
       return Math.round(s[Math.floor((s.length - 1) / 2)] * 100) / 100;
     };
+    // Forecast = median of the 3 prior months, a month with no matching spend counted
+    // as 0. A budget with NO prior spend at all keeps a null forecast ("–") rather than
+    // a misleading €0 (no history to base a forecast on).
+    const forecastBy = new Map<number, number | null>();
+    for (const [bid, mm] of histByMonth) forecastBy.set(bid, median(priorKeys.map(k => mm.get(k) ?? 0)));
 
     // Map a plan row (expense or income) to its month-view shape (check + suggestion).
     const mapPlan = (f: typeof fixed[number]) => ({
       id: f.id, label: f.label, monthly_eur: f.monthly_eur, kind: f.kind, frequency: f.frequency, is_transfer: f.is_transfer, expect_receipt: f.expect_receipt,
-      one_off: f.one_off === true,
+      one_off: f.one_off === true, counterpart_id: f.counterpart_id,
       match_merchant: f.match_merchant, konto_id: f.konto_id, konto_name: f.konto_name,
       is_shared: f.is_shared, owner: f.owner,
       complete: isComplete(f),
@@ -535,12 +547,9 @@ export function financeRoutes(app: FastifyInstance): void {
 
     return {
       month: m,
-      // actual income entries of the month (pay slips) — shown as the summary total
-      income: income.map(i => ({
-        id: i.id, datum: String(i.datum), amount: i.amount, source: i.source, description: i.description,
-        konto_id: i.konto_id, konto_name: i.konto_name, is_shared: i.is_shared, owner: i.owner,
-      })),
-      // recurring income PLANS (Einnahmen-Soll), matched vs actual income/bank credits
+      // recurring income PLANS (Einnahmen-Soll), matched vs actual income/bank credits.
+      // (The raw actual-income rows are consumed only as evidence candidates above;
+      // the month view sums the PLANS, so they are not returned.)
       incomes: fixed.filter(f => f.kind === 'income').map(mapPlan),
       fixed: fixed.filter(f => f.kind !== 'income').map(mapPlan),
       budgets: budgets.map(bu => ({
@@ -548,7 +557,7 @@ export function financeRoutes(app: FastifyInstance): void {
         konto_name: bu.konto_name, is_shared: bu.is_shared, owner: bu.owner,
         categories: bu.categories,
         actual: Math.round(((actualBy.get(bu.id as number) ?? 0)) * 100) / 100,
-        forecast: median(histBy.get(bu.id as number) ?? []),
+        forecast: forecastBy.get(bu.id as number) ?? null,
       })),
     };
   });
@@ -1416,10 +1425,11 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
         const mb = monthBounds(month);
         if (!mb) throw new HttpError(400, 'bad booking date');
         const start = `${month}-01`;
-        const end = body.one_month === false ? null : mb.last; // default: scoped to the booking month
+        const oneOff = body.one_month !== false;               // default: scoped to the booking month → a one-off
+        const end = oneOff ? mb.last : null;
         const [f] = await tx`
-          INSERT INTO fixed_cost (label, category_path, monthly_eur, kind, frequency, is_transfer, konto_id, start_date, end_date, active, expect_receipt, match_merchant, created_by)
-          VALUES (${label}, NULL, ${amount}, ${kind}, 'monthly', ${body.is_transfer === true}, ${bt.konto_id}, ${start}, ${end}, TRUE, FALSE, NULL, ${req.user?.id ?? null})
+          INSERT INTO fixed_cost (label, category_path, monthly_eur, kind, frequency, is_transfer, konto_id, start_date, end_date, active, expect_receipt, match_merchant, one_off, created_by)
+          VALUES (${label}, NULL, ${amount}, ${kind}, 'monthly', ${body.is_transfer === true}, ${bt.konto_id}, ${start}, ${end}, TRUE, FALSE, NULL, ${oneOff}, ${req.user?.id ?? null})
           RETURNING id`;
         await tx`
           INSERT INTO fixed_cost_check (fixed_cost_id, month, status, bank_tx_id, amount, decided_by)
@@ -1764,9 +1774,9 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
              e.id AS einkauf_id, e.datum::text AS datum, e.roh_ladenname AS laden,
              e.private_for_user_id
       FROM budget bu
-      JOIN budget_category bc ON bc.budget_id = bu.id
       JOIN artikel a ON a.preis IS NOT NULL AND a.category_path IS NOT NULL
-        AND (a.category_path = bc.category_path OR a.category_path LIKE bc.category_path || '/%')
+        AND EXISTS (SELECT 1 FROM budget_category bc WHERE bc.budget_id = bu.id
+                    AND (a.category_path = bc.category_path OR a.category_path LIKE bc.category_path || '/%'))
       JOIN einkauf e ON e.id = a.einkauf_id
       WHERE bu.id = ${id} AND bu.active AND e.datum BETWEEN ${b.first} AND ${b.last}
         AND (bu.konto_id IS NULL OR e.konto_id = bu.konto_id)

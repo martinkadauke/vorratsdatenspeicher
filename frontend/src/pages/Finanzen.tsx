@@ -25,7 +25,7 @@ const amortized = (eur: number, freq?: Freq | null) => eur / (PERIOD_MONTHS[(fre
 interface FixedCost {
   id: number; label: string; category_path: string | null; monthly_eur: number; kind: 'expense' | 'income'; frequency: Freq; is_transfer: boolean;
   konto_id: number | null; start_date: string; end_date: string | null; active: boolean;
-  expect_receipt: boolean; match_merchant: string | null;
+  expect_receipt: boolean; match_merchant: string | null; one_off: boolean;
   counterpart_id: number | null; counterpart_label: string | null; counterpart_konto: string | null;
   konto_name: string | null; is_shared: boolean | null; konto_user_id: number | null; owner: string | null;
 }
@@ -33,7 +33,7 @@ interface KontoLite { id: number; name: string; is_shared: boolean; is_cash: boo
 
 interface MonthFix {
   id: number; label: string; monthly_eur: number; kind: 'expense' | 'income'; frequency: Freq; is_transfer: boolean; expect_receipt: boolean; match_merchant: string | null;
-  one_off: boolean;
+  one_off: boolean; counterpart_id: number | null;
   konto_id: number | null; konto_name: string | null; is_shared: boolean | null; owner: string | null;
   complete: boolean; bank_linked: boolean;
   check: { status: 'confirmed' | 'skipped'; source: 'receipt' | 'bank' | 'income' | 'none'; einkauf_id: number | null; bank_tx_id: number | null; income_id: number | null; amount: number | null; laden: string | null; datum: string | null } | null;
@@ -44,11 +44,7 @@ interface MonthBudget {
   konto_name: string | null; is_shared: boolean | null; owner: string | null;
   categories: string[]; actual: number; forecast: number | null;
 }
-interface MonthIncome {
-  id: number; datum: string; amount: number; source: string; description: string | null;
-  konto_id: number | null; konto_name: string | null; is_shared: boolean | null; owner: string | null;
-}
-interface MonthData { month: string; income: MonthIncome[]; incomes: MonthFix[]; fixed: MonthFix[]; budgets: MonthBudget[] }
+interface MonthData { month: string; incomes: MonthFix[]; fixed: MonthFix[]; budgets: MonthBudget[] }
 
 const today = () => new Date().toISOString().slice(0, 10);
 const curMonth = () => new Date().toISOString().slice(0, 7);
@@ -233,10 +229,16 @@ function MonthTab() {
     if (f) { setEvidence({ id: f.id, label: f.label, kind: f.kind, expectReceipt: f.expect_receipt }); setFx(''); }
   }, [fx, data, setFx]);
   // Summary mirrors fixed costs: sum the PLANS (Soll), not just the matched actuals.
-  // Internal transfers (Umbuchung) net to zero across the household, so they're
-  // excluded from the gross totals in the whole-household view; in a single-account
-  // scope only one leg is present, so they count (Martin −2000 / Haushalt +2000).
-  const counts = (f: MonthFix) => !isAll || !f.is_transfer;
+  // Internal transfers (Umbuchung) net to zero ONLY when BOTH legs are in scope — then
+  // the +X income and −X expense cancel and neither should inflate the gross totals. A
+  // transfer whose counterpart is NOT in the current data — a single-account view (only
+  // one leg fetched) or an untracked/external transfer (no counterpart at all) — is real
+  // money moving in/out of the visible accounts, so it counts. Keying off counterpart
+  // presence (not the coarse isAll flag) fixes: partial scopes double-counting both
+  // legs, and the household view silently dropping an unpaired transfer.
+  const presentIds = useMemo(() => new Set([...incomes, ...fixed].map(f => f.id)), [incomes, fixed]);
+  const nets = (f: MonthFix) => f.is_transfer && f.counterpart_id != null && presentIds.has(f.counterpart_id);
+  const counts = (f: MonthFix) => !nets(f);
   // Effective amount for the summary: once a match is CONFIRMED, the real value (from
   // the receipt / bank / pay slip) replaces the plan value (e.g. a salary with a bonus,
   // or a month where it was less than planned). Falls back to the plan (Soll) until then.
@@ -248,7 +250,7 @@ function MonthTab() {
   const fixedCosts = fixed.filter(f => !f.one_off);
   const oneOffCosts = fixed.filter(f => f.one_off);
   const fixRow = (f: MonthFix) => (
-    <FixCheckRow key={f.id} f={f} month={month} t={t} excluded={isAll && f.is_transfer}
+    <FixCheckRow key={f.id} f={f} month={month} t={t} excluded={!counts(f)}
       onConfirmSuggestion={() => confirmSug(f)}
       onClear={() => check.mutate({ fixed_cost_id: f.id, month, action: 'clear' })}
       onShowEvidence={() => setEvidence({ id: f.id, label: f.label, kind: f.kind, expectReceipt: f.expect_receipt })} />
@@ -260,14 +262,23 @@ function MonthTab() {
   const fixTotal = fixedCosts.reduce((s, f) => s + (counts(f) ? effEur(f) : 0), 0);
   const oneOffCostTotal = oneOffCosts.reduce((s, f) => s + (counts(f) ? effEur(f) : 0), 0);
   const varActual = budgets.reduce((s, b) => s + b.actual, 0) + oneOffCostTotal;
-  const varTarget = budgets.reduce((s, b) => s + b.monthly_target, 0);
+  // The "of target" comparison is only coherent in the whole-household view: there both
+  // varActual and varTarget cover the full budget set. Under any partial scope varActual
+  // is a person-scoped slice while the (household) targets are not, so we drop the target
+  // line entirely rather than compare mismatched populations (individual account-specific
+  // BudgetRows still show their own bar). varActual stays the person's FULL variable spend.
+  const varTarget = isAll ? budgets.reduce((s, b) => s + b.monthly_target, 0) : 0;
   const net = Math.round((incomeTotal - fixTotal - varActual) * 100) / 100;
-  // Reconciliation completeness covers only the RECURRING plans that need monthly
-  // matching; one-offs are settled on creation (a confirmed bank leg) → excluded.
-  const fixDone = fixedCosts.filter(f => f.complete).length;
-  const incDone = fixedIncome.filter(f => f.complete).length;
-  const planTotal = fixedIncome.length + fixedCosts.length;
-  const planDone = fixDone + incDone;
+  // Reconciliation completeness covers EVERY plan that still needs a bank match —
+  // recurring AND one-off, income AND cost — except internal transfers that net out
+  // (shown struck through / "nicht gezählt"), which mirrors the euro totals above. A
+  // generated one-off that arrived with its bank leg is already `complete`, so it counts
+  // as done and never falsely drags the meter down.
+  const countableFixed = fixedCosts.filter(counts);
+  const fixDone = countableFixed.filter(f => f.complete).length;
+  const reconItems = [...incomes, ...fixed].filter(counts);
+  const planTotal = reconItems.length;
+  const planDone = reconItems.filter(f => f.complete).length;
   const donePct = planTotal ? Math.round((planDone / planTotal) * 100) : 100;
 
   // When the evidence amount differs from the plan (a bonus on the salary, a cheaper
@@ -340,8 +351,8 @@ function MonthTab() {
               <div>
                 <div className="text-xs text-zinc-500 dark:text-zinc-400">{t('finances.fixTitle')}</div>
                 <div className="text-lg font-bold">{eur(fixTotal)}</div>
-                <div className={cn('text-xs', fixDone === fixedCosts.length && fixedCosts.length > 0 ? 'text-emerald-600 dark:text-emerald-500' : 'text-amber-600 dark:text-amber-500')}>
-                  {t('finances.checkedOf', { done: fixDone, total: fixedCosts.length })}
+                <div className={cn('text-xs', fixDone === countableFixed.length && countableFixed.length > 0 ? 'text-emerald-600 dark:text-emerald-500' : 'text-amber-600 dark:text-amber-500')}>
+                  {t('finances.checkedOf', { done: fixDone, total: countableFixed.length })}
                 </div>
               </div>
               <div>
@@ -392,7 +403,7 @@ function MonthTab() {
             right={<Button variant="secondary" className="px-2.5 py-1.5 text-xs" onClick={() => setBudgetModal({})}><Plus size={14} /> {t('finances.addBudget')}</Button>}>
             {oneOffCosts.map(fixRow)}
             {!budgets.length && !oneOffCosts.length && <Card className="p-3 text-xs text-zinc-400">{t('finances.noBudgets')}</Card>}
-            {budgets.map(b => <BudgetRow key={b.id} b={b} t={t} onEdit={() => setBudgetModal(b)} onOpen={() => setPosBudget(b)} />)}
+            {budgets.map(b => <BudgetRow key={b.id} b={b} t={t} hideTarget={!isAll && b.konto_id == null} onEdit={() => setBudgetModal(b)} onOpen={() => setPosBudget(b)} />)}
           </Section>
         </>
       )}
@@ -654,8 +665,12 @@ function FixCheckRow({ f, t, excluded, onConfirmSuggestion, onClear, onShowEvide
   );
 }
 
-function BudgetRow({ b, t, onEdit, onOpen }: { b: MonthBudget; t: (k: string, o?: Record<string, unknown>) => string; onEdit: () => void; onOpen: () => void }) {
-  const pct = b.monthly_target > 0 ? (b.actual / b.monthly_target) * 100 : null;
+function BudgetRow({ b, t, hideTarget, onEdit, onOpen }: { b: MonthBudget; t: (k: string, o?: Record<string, unknown>) => string; hideTarget?: boolean; onEdit: () => void; onOpen: () => void }) {
+  // hideTarget: a household budget viewed under a single-person scope has no per-person
+  // target, so we show its (person-scoped) actual + forecast but drop the target line
+  // and the progress bar — comparing a person's spend to the household target is apples
+  // to oranges.
+  const pct = !hideTarget && b.monthly_target > 0 ? (b.actual / b.monthly_target) * 100 : null;
   const barColor = pct == null ? 'bg-zinc-300' : pct > 100 ? 'bg-red-500' : pct >= 80 ? 'bg-amber-500' : 'bg-emerald-500';
   return (
     <Card
@@ -673,7 +688,8 @@ function BudgetRow({ b, t, onEdit, onOpen }: { b: MonthBudget; t: (k: string, o?
             <span className="shrink-0 text-xs text-zinc-400">{b.konto_id ? scopeLabelOf(t, b) : t('finances.wholeHousehold')}</span>
           </div>
           <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-            {t('finances.forecast')}: {b.forecast != null ? eur(b.forecast) : '–'} · {t('finances.target')}: {eur(b.monthly_target)}
+            {t('finances.forecast')}: {b.forecast != null ? eur(b.forecast) : '–'}
+            {!hideTarget && <> · {t('finances.target')}: {eur(b.monthly_target)}</>}
           </div>
         </div>
         <span className={cn('shrink-0 text-sm font-semibold', pct != null && pct > 100 && 'text-red-600 dark:text-red-400')}>{eur(b.actual)}</span>
@@ -1001,7 +1017,13 @@ function BudgetModal({ initial, onClose, onSaved }: {
               ))}
             </div>
           )}
-          <CategoryPicker value={null} onChange={p => { if (p && !cats.includes(p)) setCats([...cats, p]); }} />
+          {/* Keep picks non-overlapping: a parent+child pair would double-count an
+              article that falls under both. Skip a pick already covered by an ancestor;
+              adding a parent drops the now-redundant descendants. */}
+          <CategoryPicker value={null} onChange={p => {
+            if (!p) return;
+            setCats(prev => prev.some(c => c === p || p.startsWith(c + '/')) ? prev : [...prev.filter(c => !c.startsWith(p + '/')), p]);
+          }} />
           <p className="mt-1 text-xs text-zinc-400">{t('finances.categoriesHint')}</p>
         </div>
         <div className="mt-1 flex items-center justify-between gap-2">
@@ -1945,7 +1967,10 @@ function BankTab() {
 /** A one-off = a single-month bounded fixed_cost (start & end in the same month), e.g. a
  *  generated one-time income ("…Spesen") or cost. Not a recurring plan → kept OUT of the
  *  manage lists; it lives in its month in the Monat view (+ a collapsed section here). */
-const isOneOff = (c: FixedCost): boolean => c.end_date != null && c.start_date.slice(0, 7) === c.end_date.slice(0, 7);
+// A one-off is an explicit flag now (set by the generate / bank-pairing flows), NOT
+// derived from the dates — so a recurring plan that merely got an end date within its
+// start month is no longer mis-classified as a settled one-off.
+const isOneOff = (c: FixedCost): boolean => c.one_off === true;
 
 function ManageTab() {
   const { t } = useTranslation();
@@ -1995,7 +2020,7 @@ function ManageTab() {
   const readd = useMutation({
     mutationFn: (c: FixedCost) => api('/api/fixed-costs', {
       method: 'POST',
-      body: { label: c.label, monthly_eur: c.monthly_eur, kind: c.kind, frequency: c.frequency, is_transfer: c.is_transfer, konto_id: c.konto_id, category_path: c.category_path, start_date: c.start_date, end_date: c.end_date, active: c.active, expect_receipt: c.expect_receipt, match_merchant: c.match_merchant },
+      body: { label: c.label, monthly_eur: c.monthly_eur, kind: c.kind, frequency: c.frequency, is_transfer: c.is_transfer, konto_id: c.konto_id, category_path: c.category_path, start_date: c.start_date, end_date: c.end_date, active: c.active, expect_receipt: c.expect_receipt, match_merchant: c.match_merchant, one_off: c.one_off },
     }),
     onSuccess: invalidate,
   });
@@ -2055,7 +2080,9 @@ function ManageTab() {
       </Card>
 
       {groups.filter(g => g.items.length > 0 || g.konto).map(g => {
-        const sum = g.items.filter(c => c.active && c.kind !== 'income').reduce((s, c) => s + amortized(c.monthly_eur, c.frequency), 0);
+        // Match the household total (excludes internal transfers) so the per-account
+        // subtotals actually sum to it, instead of presenting Umbuchungen as spend.
+        const sum = g.items.filter(c => c.active && c.kind !== 'income' && !c.is_transfer).reduce((s, c) => s + amortized(c.monthly_eur, c.frequency), 0);
         const isHome = !!g.konto?.is_shared;
         return (
           <div key={g.konto?.id ?? 'none'} className="flex flex-col gap-2">
