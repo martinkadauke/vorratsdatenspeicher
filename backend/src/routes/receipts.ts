@@ -284,7 +284,7 @@ export function receiptRoutes(app: FastifyInstance): void {
     let bildPfad: string | null = null;
     if (b.photo_base64) {
       const mime = b.photo_mime || 'image/jpeg';
-      const ext = mime.includes('png') ? 'png' : 'jpg';
+      const ext = mime.includes('pdf') ? 'pdf' : mime.includes('png') ? 'png' : 'jpg';
       const data = b.photo_base64.replace(/^data:[^,]+,/, '');
       try {
         const filename = `vds-${crypto.randomUUID()}.${ext}`;

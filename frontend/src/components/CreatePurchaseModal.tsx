@@ -2,11 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Camera, ImagePlus, Banknote, CreditCard, Lock } from 'lucide-react';
+import { Camera, ImagePlus, Banknote, CreditCard, Lock, FileText } from 'lucide-react';
 import { api } from '../api/client';
 import { Modal, Button, Input, Label, Select } from './ui';
 import { toast } from './Toast';
-import { cn, fileToResizedDataUrl } from '../lib/utils';
+import { cn, fileToResizedDataUrl, fileToDataUrl } from '../lib/utils';
 
 interface StoreRow { display: string; raw: string[]; filialen?: { name: string }[] }
 interface Konto { id: number; name: string; is_shared: boolean; is_cash: boolean }
@@ -37,6 +37,8 @@ export function CreatePurchaseModal({ open, onClose }: { open: boolean; onClose:
   const [betrag, setBetrag] = useState('');
   const [kontoId, setKontoId] = useState('');
   const [photo, setPhoto] = useState<string | null>(null);
+  const [photoMime, setPhotoMime] = useState('image/jpeg');
+  const [photoName, setPhotoName] = useState('');
   const [photoBusy, setPhotoBusy] = useState(false);
   const [isPrivate, setIsPrivate] = useState(false);
 
@@ -61,7 +63,7 @@ export function CreatePurchaseModal({ open, onClose }: { open: boolean; onClose:
 
   const reset = () => {
     setQuelle('zettel'); setLaden(''); setDatum(today()); setBetrag('');
-    setKontoId(''); setPhoto(null); setIsPrivate(false);
+    setKontoId(''); setPhoto(null); setPhotoMime('image/jpeg'); setPhotoName(''); setIsPrivate(false);
   };
   const close = () => { reset(); onClose(); };
 
@@ -72,7 +74,7 @@ export function CreatePurchaseModal({ open, onClose }: { open: boolean; onClose:
         quelle, roh_ladenname: laden, datum, gesamt_betrag: betrag,
         konto_id: kontoId ? parseInt(kontoId, 10) : null,
         private: isPrivate,
-        photo_base64: photo ?? undefined, photo_mime: photo ? 'image/jpeg' : undefined,
+        photo_base64: photo ?? undefined, photo_mime: photo ? photoMime : undefined,
       },
     }),
     onSuccess: (r) => {
@@ -92,8 +94,14 @@ export function CreatePurchaseModal({ open, onClose }: { open: boolean; onClose:
     e.target.value = '';
     if (!f) return;
     setPhotoBusy(true);
-    try { setPhoto(await fileToResizedDataUrl(f)); }
-    catch { toast(t('createPurchase.photoError'), 'error'); }
+    try {
+      // Invoices from a portal / file share are often PDFs — keep those as-is (the same
+      // Vision OCR handles PDF + image); only resize actual images.
+      const isPdf = f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
+      setPhoto(isPdf ? await fileToDataUrl(f) : await fileToResizedDataUrl(f));
+      setPhotoMime(isPdf ? 'application/pdf' : 'image/jpeg');
+      setPhotoName(f.name);
+    } catch { toast(t('createPurchase.photoError'), 'error'); }
     finally { setPhotoBusy(false); }
   };
 
@@ -115,8 +123,10 @@ export function CreatePurchaseModal({ open, onClose }: { open: boolean; onClose:
   const photoBtn = (icon: React.ReactNode, label: string, capture: boolean) => (
     <label className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-zinc-300 px-3 py-2.5 text-sm font-medium text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700">
       {icon} {label}
+      {/* Gallery/file button allows PDFs + images so Android opens the DOCUMENT picker
+          (browse Downloads / SMB shares), not just the photo picker. Camera stays image-only. */}
       <input
-        type="file" accept="image/*" className="hidden" onChange={onPhoto}
+        type="file" accept={capture ? 'image/*' : '.pdf,image/*'} className="hidden" onChange={onPhoto}
         {...(capture ? { capture: 'environment' as const } : {})}
       />
     </label>
@@ -167,7 +177,14 @@ export function CreatePurchaseModal({ open, onClose }: { open: boolean; onClose:
         <div>
           <Label>{t('createPurchase.photo')}</Label>
           {photo ? (
-            <img src={photo} alt="" className="max-h-44 rounded-lg border border-zinc-200 dark:border-zinc-800" />
+            photoMime === 'application/pdf' ? (
+              <div className="flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2.5 text-sm dark:border-zinc-800">
+                <FileText size={18} className="shrink-0 text-rose-500" />
+                <span className="min-w-0 truncate">{photoName || 'PDF'}</span>
+              </div>
+            ) : (
+              <img src={photo} alt="" className="max-h-44 rounded-lg border border-zinc-200 dark:border-zinc-800" />
+            )
           ) : (
             <div className="flex gap-2">
               {photoBtn(<Camera size={16} />, t('createPurchase.photoCamera'), true)}

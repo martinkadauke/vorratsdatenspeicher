@@ -49,6 +49,17 @@ export async function fileToResizedDataUrl(file: File, maxDim = 1600, quality = 
   return canvas.toDataURL('image/jpeg', quality);
 }
 
+/** Read a file to a data URL as-is (no image decode/resize) — for PDFs and other
+ *  non-image files that must be uploaded unchanged. */
+export function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result as string);
+    r.onerror = () => rej(new Error('read failed'));
+    r.readAsDataURL(file);
+  });
+}
+
 /** Human-readable byte size (e.g. 12.3 MB). */
 export function fmtBytes(bytes: number): string {
   if (!bytes) return '0 B';
