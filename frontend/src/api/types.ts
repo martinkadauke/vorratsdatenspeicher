@@ -61,8 +61,10 @@ export interface Artikel {
 
 export interface ReceiptDetail extends Receipt {
   artikel: Artikel[];
-  /** Matched comdirect bank transaction, if any. */
+  /** Matched comdirect bank transaction — the PRIMARY, if any (back-compat). */
   bank?: { id: number; booking_date: string; amount: number; counterparty: string | null } | null;
+  /** ALL matched bank bookings (primary + split siblings, e.g. an Amazon order paid per shipment). */
+  banks?: { id: number; booking_date: string; amount: number; counterparty: string | null }[];
   /** Household member who scanned/uploaded this receipt (family_member id). */
   snapped_by_member_id?: number | null;
 }

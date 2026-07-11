@@ -164,6 +164,7 @@ export function ReceiptDetailPage() {
   // Celebrate the moment the item sum first matches the receipt total.
   const wasMatched = useRef(false);
   const [matchFlash, setMatchFlash] = useState(false);
+  const [banksOpen, setBanksOpen] = useState(false); // multi-link: list all matched bank bookings
   useEffect(() => {
     if (!data) return;
     const sum = data.artikel.reduce((acc, a) => {
@@ -330,13 +331,26 @@ export function ReceiptDetailPage() {
               </label>
             );
           })()}
-          {data.bank && (
-            <Link to={`/finanzen?tab=bank&bm=${data.bank.booking_date.slice(0, 7)}&bhl=${data.bank.id}`}
-              title={t('receiptDetail.bankMatch')}
-              className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-700 hover:bg-sky-200 dark:bg-sky-950/50 dark:text-sky-300 dark:hover:bg-sky-900/50">
-              <Landmark size={11} /> {data.bank.counterparty ?? t('receiptDetail.bankMatch')} · {eur(data.bank.amount)}
-            </Link>
-          )}
+          {(() => {
+            const banks = data.banks ?? (data.bank ? [data.bank] : []);
+            const cls = 'inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-700 hover:bg-sky-200 dark:bg-sky-950/50 dark:text-sky-300 dark:hover:bg-sky-900/50';
+            if (!banks.length) return null;
+            if (banks.length === 1) {
+              const b = banks[0];
+              return (
+                <Link to={`/finanzen?tab=bank&bm=${b.booking_date.slice(0, 7)}&bhl=${b.id}`} title={t('receiptDetail.bankMatch')} className={cls}>
+                  <Landmark size={11} /> {b.counterparty ?? t('receiptDetail.bankMatch')} · {eur(b.amount)}
+                </Link>
+              );
+            }
+            // Split payment (e.g. an Amazon order billed per shipment) → one badge → popup.
+            const sum = banks.reduce((s, b) => s + Math.abs(b.amount), 0);
+            return (
+              <button type="button" onClick={() => setBanksOpen(true)} title={t('receiptDetail.bankMatches', { n: banks.length })} className={cls}>
+                <Landmark size={11} /> {t('receiptDetail.bankMatches', { n: banks.length })} · {eur(sum)}
+              </button>
+            );
+          })()}
           {/* Private toggle — only you can see a private receipt (case-by-case hide). */}
           {data.private ? (
             <button
@@ -631,6 +645,23 @@ export function ReceiptDetailPage() {
         onClose={() => setEditing(null)}
         invalidateKeys={[['receipt', id], ['receipts']]}
       />
+      {banksOpen && data && (
+        <Modal open onClose={() => setBanksOpen(false)} title={t('receiptDetail.bankMatchesTitle')}>
+          <div className="flex flex-col gap-1.5">
+            {(data.banks ?? []).map(b => (
+              <Link key={b.id} to={`/finanzen?tab=bank&bm=${b.booking_date.slice(0, 7)}&bhl=${b.id}`} onClick={() => setBanksOpen(false)}
+                className="flex items-center gap-3 rounded-xl border border-zinc-200 p-3 text-left hover:border-sky-400 hover:bg-sky-50/50 dark:border-zinc-800 dark:hover:bg-sky-950/20">
+                <Landmark size={16} className="shrink-0 text-sky-500" />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm">{b.counterparty ?? t('receiptDetail.bankMatch')}</div>
+                  <div className="text-[10px] text-zinc-400">{b.booking_date.slice(8, 10)}.{b.booking_date.slice(5, 7)}.{b.booking_date.slice(0, 4)}</div>
+                </div>
+                <span className="shrink-0 text-sm font-semibold">{eur(b.amount)}</span>
+              </Link>
+            ))}
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

@@ -355,6 +355,8 @@
     "printedLabel": "· receipt:",
     "itemsTotal": "Items total",
     "bankMatch": "Bank transaction",
+    "bankMatches": "{{n}} bank statements",
+    "bankMatchesTitle": "Linked bank statements",
     "snappedBy": "Scanned by",
     "snappedByUnset": "— who?",
     "reocr": "Re-run OCR",

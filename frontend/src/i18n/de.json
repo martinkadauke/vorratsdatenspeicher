@@ -355,6 +355,8 @@
     "printedLabel": "· Bon:",
     "itemsTotal": "Summe der Artikel",
     "bankMatch": "Kontobewegung",
+    "bankMatches": "{{n}} Bankauszüge",
+    "bankMatchesTitle": "Verknüpfte Bankauszüge",
     "snappedBy": "Aufgenommen von",
     "snappedByUnset": "— wer?",
     "reocr": "OCR erneut ausführen",

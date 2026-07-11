@@ -627,10 +627,20 @@ export function receiptRoutes(app: FastifyInstance): void {
     }
 
     const r0 = receipts[0];
+    // ALL bank bookings this receipt is matched to — the primary (einkauf.bank_tx_id)
+    // AND split siblings (bank_tx.einkauf_id = this receipt, e.g. an Amazon order paid
+    // per shipment). Both link directions; ordered by date.
+    const bankRows = await sql`
+      SELECT bt.id, bt.booking_date::text AS booking_date, bt.amount::float8 AS amount, bt.counterparty
+      FROM bank_tx bt
+      WHERE bt.einkauf_id = ${id} OR bt.id = ${(r0.bank_tx_id as number | null) ?? -1}
+      ORDER BY bt.booking_date, bt.id`;
+    const banks = bankRows.map(b => ({ id: b.id as number, booking_date: b.booking_date as string, amount: b.amount as number, counterparty: b.counterparty as string | null }));
     return {
       ...r0,
-      // The bank transaction this receipt is matched to (comdirect import), if any.
-      bank: r0.bank_tx_id ? { id: r0.bank_tx_id, booking_date: r0.bank_booking, amount: r0.bank_amount, counterparty: r0.bank_counterparty } : null,
+      // All matched bank bookings; `bank` stays the primary for existing callers.
+      banks,
+      bank: banks.find(b => b.id === r0.bank_tx_id) ?? banks[0] ?? null,
       artikel: artikel.map(a => {
         const override = byArtikel.get(a.id as number);
         const canonical = a.canonical_name ? byCanonical.get(a.canonical_name as string) : undefined;
