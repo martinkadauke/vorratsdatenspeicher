@@ -1594,11 +1594,15 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
       const rows = await sql`
         SELECT e.id, e.roh_ladenname AS label, e.gesamt_betrag::float8 AS betrag, e.datum::text AS datum
         FROM einkauf e
-        WHERE e.bank_tx_id IS NULL AND e.gesamt_betrag IS NOT NULL
-          AND ABS(e.gesamt_betrag - ${target}) <= ${tol}
+        WHERE e.gesamt_betrag IS NOT NULL
+          -- Match this statement to the receipt's REMAINING uncovered value (total minus the
+          -- statements already attached, either link direction), NOT the full total. So a
+          -- split shipment's next debit is suggested, and a fully-covered receipt drops out —
+          -- go by exact remaining value, not "has ≥1 statement".
+          AND ABS((e.gesamt_betrag - COALESCE((SELECT SUM(ABS(bt2.amount)) FROM bank_tx bt2 WHERE bt2.einkauf_id = e.id OR bt2.id = e.bank_tx_id), 0)) - ${target}) <= ${tol}
           AND e.datum BETWEEN ${lo} AND ${hi}
           ${kontoScope(req.user, sql`e`)}
-        ORDER BY ABS(e.gesamt_betrag - ${target}), e.datum DESC
+        ORDER BY ABS((e.gesamt_betrag - COALESCE((SELECT SUM(ABS(bt2.amount)) FROM bank_tx bt2 WHERE bt2.einkauf_id = e.id OR bt2.id = e.bank_tx_id), 0)) - ${target}), e.datum DESC
         LIMIT 40`;
       return { kind: 'receipt', candidates: rows };
     }
@@ -1652,6 +1656,11 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
       -- ones already tied to THIS booking (nothing to add). Order unlinked-first.
       WHERE e.gesamt_betrag IS NOT NULL
         AND e.bank_tx_id IS DISTINCT FROM ${id} AND e.id IS DISTINCT FROM ${bt.einkauf_id ?? null}
+        -- Hide receipts already FULLY covered: the statements attached to them (either link
+        -- direction) already sum to the receipt total. A partially-covered split (e.g. an
+        -- Amazon order paid per shipment) still shows — it needs more. Go by exact value,
+        -- not "has ≥1 statement", so multi-statement receipts aren't wrongly hidden.
+        AND COALESCE((SELECT SUM(ABS(bt2.amount)) FROM bank_tx bt2 WHERE bt2.einkauf_id = e.id OR bt2.id = e.bank_tx_id), 0) < e.gesamt_betrag - 0.005
         AND (e.roh_ladenname ILIKE ${like}
              ${amtNum != null ? sql`OR ABS(e.gesamt_betrag - ${amtNum}) <= 0.01` : sql``}
              OR e.datum::text ILIKE ${like}
