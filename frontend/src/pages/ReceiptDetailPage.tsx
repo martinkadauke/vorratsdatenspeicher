@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
@@ -876,6 +876,24 @@ function ReceiptEditModal({ receipt, open, onClose }: { receipt: ReceiptDetail; 
     enabled: open,
   });
 
+  // Existing store/shop names for the store-field autocomplete — a bank-generated
+  // receipt usually has the wrong store name, and typing the real one should
+  // suggest names already in use (same source the CreatePurchaseModal uses).
+  const { data: stores } = useQuery({
+    queryKey: ['stores'],
+    queryFn: () => api<{ display: string; raw?: string[]; filialen?: { name: string }[] }[]>('/api/stores'),
+    enabled: open,
+  });
+  const storeNames = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of stores ?? []) {
+      (s.filialen ?? []).forEach(f => f.name && set.add(f.name));
+      s.raw?.forEach(r => r && set.add(r));
+      if (s.display) set.add(s.display);
+    }
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [stores]);
+
   useEffect(() => {
     if (open) {
       setDatum((receipt.datum ?? '').slice(0, 10));
@@ -909,7 +927,10 @@ function ReceiptEditModal({ receipt, open, onClose }: { receipt: ReceiptDetail; 
         </div>
         <div>
           <Label>{t('receiptEdit.store')}</Label>
-          <Input value={laden} onChange={e => setLaden(e.target.value)} />
+          <Input value={laden} list="receipt-edit-store-suggestions" onChange={e => setLaden(e.target.value)} />
+          <datalist id="receipt-edit-store-suggestions">
+            {storeNames.map(n => <option key={n} value={n} />)}
+          </datalist>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>

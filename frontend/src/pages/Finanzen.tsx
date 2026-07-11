@@ -1742,6 +1742,22 @@ function BankGenerateModal({ tx, t, onClose, onDone }: {
   const [isTransfer, setIsTransfer] = useState(credit);
   const [oneMonth, setOneMonth] = useState(true);
 
+  // The bank counterparty prefilled into `laden` is usually the wrong store name;
+  // offer existing store/shop names as autocomplete when the user corrects it.
+  const { data: stores } = useQuery({
+    queryKey: ['stores'],
+    queryFn: () => api<{ display: string; raw?: string[]; filialen?: { name: string }[] }[]>('/api/stores'),
+  });
+  const storeNames = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of stores ?? []) {
+      (s.filialen ?? []).forEach(f => f.name && set.add(f.name));
+      s.raw?.forEach(r => r && set.add(r));
+      if (s.display) set.add(s.display);
+    }
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [stores]);
+
   const genReceipt = useMutation({
     mutationFn: () => api<{ ok: boolean; einkauf_id: number }>(`/api/finances/bank/${tx.id}/generate-receipt`, { method: 'POST', body: { laden: laden.trim() } }),
     // Jump straight into the freshly generated receipt so the user can review/fix it
@@ -1773,7 +1789,10 @@ function BankGenerateModal({ tx, t, onClose, onDone }: {
           <>
             <div>
               <Label>{t('finances.bank.gen.laden')}</Label>
-              <Input value={laden} onChange={e => setLaden(e.target.value)} placeholder={tx.counterparty ?? ''} />
+              <Input value={laden} list="bank-gen-store-suggestions" onChange={e => setLaden(e.target.value)} placeholder={tx.counterparty ?? ''} />
+              <datalist id="bank-gen-store-suggestions">
+                {storeNames.map(n => <option key={n} value={n} />)}
+              </datalist>
             </div>
             <p className="text-xs text-zinc-400">{t('finances.bank.gen.receiptHint', { v: eur(Math.abs(tx.amount)) })}</p>
             <div className="flex justify-end gap-2">
