@@ -121,6 +121,10 @@ export function ReceiptDetailPage() {
   // When the user taps a between-items divider we open the add-item modal targeted
   // at that position (so Cancel leaves nothing behind). null = append (the + button).
   const [insertAfterId, setInsertAfterId] = useState<number | null>(null);
+  // Prefill for the add-item modal: the receipt's remaining difference (signed) and,
+  // for a negative difference (items already exceed the total), the "Rabatt" name +
+  // "Meta/Rabatt" category (so the rebate is excluded from spending totals like any rebate).
+  const [addPrefill, setAddPrefill] = useState<{ preis: number | null; name: string; category: string | null }>({ preis: null, name: '', category: null });
 
   const mountedAt = useRef(Date.now());
   const { data, isLoading } = useQuery({
@@ -249,6 +253,21 @@ export function ReceiptDetailPage() {
   const totalKnown = Number.isFinite(printedTotal);
   const diff = totalKnown ? itemSum - printedTotal : 0;
   const mismatch = totalKnown && Math.abs(diff) > 0.01;
+
+  // Opening the add-item modal prefills the new position with the remaining difference
+  // (printedTotal − itemSum, signed). A negative value means the items already exceed the
+  // printed total → it's a rebate, so preset the "Rabatt" canonical name too.
+  const openAdd = (afterId: number | null): void => {
+    setInsertAfterId(afterId);
+    if (mismatch) {
+      const missing = Number((printedTotal - itemSum).toFixed(2));
+      const rebate = missing < 0;
+      setAddPrefill({ preis: missing, name: rebate ? 'Rabatt' : '', category: rebate ? 'Meta/Rabatt' : null });
+    } else {
+      setAddPrefill({ preis: null, name: '', category: null });
+    }
+    setAdding(true);
+  };
 
   // Single verification control (header icon): locked === geprueft. To edit a
   // locked receipt you unlock it (clears geprueft); re-lock when done. Read-only
@@ -614,7 +633,7 @@ export function ReceiptDetailPage() {
             keyboardNav={editable && !editing && !adding && !editReceipt}
             readOnly={!editable}
             onDuplicate={editable ? (aid) => dupArticle.mutate(aid) : undefined}
-            onInsertAfter={editable ? (aid) => { setInsertAfterId(aid); setAdding(true); } : undefined}
+            onInsertAfter={editable ? (aid) => openAdd(aid) : undefined}
           />
           {/* Running sum of the line items, at the very bottom. Shows a green
               check when it matches the printed Bon total, or the signed gap. */}
@@ -642,7 +661,7 @@ export function ReceiptDetailPage() {
           {editable && (
             <button
               type="button"
-              onClick={() => { setInsertAfterId(null); setAdding(true); }}
+              onClick={() => openAdd(null)}
               className="mt-1 flex items-center justify-center gap-2 rounded-xl border border-dashed border-zinc-300 px-3 py-2.5 text-sm font-medium text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700"
             >
               <Plus size={16} /> {t('receiptDetail.addPosition')}
@@ -655,6 +674,9 @@ export function ReceiptDetailPage() {
         einkaufId={data.id}
         open={adding}
         afterArtikelId={insertAfterId}
+        prefillPreis={addPrefill.preis}
+        prefillName={addPrefill.name}
+        prefillCategory={addPrefill.category}
         onClose={() => { setAdding(false); setInsertAfterId(null); }}
         invalidateKeys={[['receipt', id], ['receipts']]}
       />

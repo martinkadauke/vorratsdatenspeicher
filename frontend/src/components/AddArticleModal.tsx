@@ -16,13 +16,19 @@ const fmt = (n: number): string => n.toFixed(2).replace('.', ',');
 /** Lightweight modal for adding a new artikel to an existing einkauf.
  *  Reuses the unit-price / total-price auto-calc UX from ArticleEditModal
  *  but skips the cascade-apply / consumers complexity. */
-export function AddArticleModal({ einkaufId, open, onClose, invalidateKeys, afterArtikelId }: {
+export function AddArticleModal({ einkaufId, open, onClose, invalidateKeys, afterArtikelId, prefillPreis, prefillName, prefillCategory }: {
   einkaufId: number;
   open: boolean;
   onClose: () => void;
   invalidateKeys: unknown[][];
   /** When set, the new item is inserted directly under this artikel (else appended). */
   afterArtikelId?: number | null;
+  /** Total-price to prefill (signed): the receipt's remaining difference. Negative = rebate. */
+  prefillPreis?: number | null;
+  /** Canonical name to prefill (e.g. "Rabatt" when the difference is negative). */
+  prefillName?: string | null;
+  /** Category to prefill (e.g. "Meta/Rabatt" so the rebate is excluded from spending totals). */
+  prefillCategory?: string | null;
 }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
@@ -45,17 +51,19 @@ export function AddArticleModal({ einkaufId, open, onClose, invalidateKeys, afte
 
   useEffect(() => {
     if (!open) return;
-    setCanonical('');
-    setCategory(null);
+    // menge defaults to 1, so unit-price == total-price; prefill both from the difference.
+    const pAmount = (prefillPreis != null && Number.isFinite(prefillPreis)) ? fmt(prefillPreis) : '';
+    setCanonical(prefillName ?? '');
+    setCategory(prefillCategory ?? null);
     setMenge('1');
     setEinheit('stk');
-    setEinzelPreis('');
-    setPreis('');
+    setEinzelPreis(pAmount);
+    setPreis(pAmount);
     api<NameOption[]>('/api/names').then(rows => {
       setNameOptions(rows.map(r => r.canonical_name));
       setNameCategory(new Map(rows.map(r => [r.canonical_name, r.category_path])));
     }).catch(() => {});
-  }, [open]);
+  }, [open, prefillName, prefillPreis, prefillCategory]);
 
   const onMengeChange = (v: string) => {
     setMenge(v);
