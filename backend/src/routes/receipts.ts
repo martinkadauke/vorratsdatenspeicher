@@ -123,10 +123,10 @@ export async function storeOcrResult(id: number, parsed: OcrResult): Promise<{ i
 /** Run vision OCR on a receipt's stored image/PDF and replace its line items.
  *  Throws on unusable OCR. Shared by re-OCR, the in-app create-with-photo flow,
  *  and the e-mail importer (the same Claude-vision path n8n uses). */
-export async function ocrAndStore(id: number, bildPfad: string): Promise<{ items: number; confidence: number }> {
+export async function ocrAndStore(id: number, bildPfad: string, hint?: string | null): Promise<{ items: number; confidence: number }> {
   const filename = bildPfad.split('/').pop();
   const source = filename ? path.join(RECEIPTS_LOCAL_PATH, filename) : bildPfad;
-  const parsed = await ocrFromImage(source);
+  const parsed = await ocrFromImage(source, hint);
   return storeOcrResult(id, parsed);
 }
 
@@ -511,8 +511,11 @@ export function receiptRoutes(app: FastifyInstance): void {
     const bildPfad = rows[0].bild_pfad as string | null;
     if (!bildPfad) return reply.code(400).send({ error: 'receipt has no image' });
 
+    // Optional user hint fed into the OCR prompt ("you're missing the VAT", "amounts are
+    // gross not net", …) so a re-run can fix what the first pass got wrong.
+    const hint = ((req.body ?? {}) as { hint?: string }).hint?.toString().trim() || null;
     try {
-      const { items, confidence } = await ocrAndStore(id, bildPfad);
+      const { items, confidence } = await ocrAndStore(id, bildPfad, hint);
       return { ok: true, items, confidence };
     } catch (e) {
       req.log.error(`reocr failed: ${(e as Error).message}`);

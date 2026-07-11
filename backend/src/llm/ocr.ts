@@ -72,7 +72,7 @@ export interface OcrResult {
  *  (preferred — fastest, no roundtrip) or an absolute URL. The provider
  *  and model are taken from the `ai.ocr.*` config — currently only
  *  Anthropic Vision is implemented. */
-export async function ocrFromImage(source: string): Promise<OcrResult> {
+export async function ocrFromImage(source: string, hint?: string | null): Promise<OcrResult> {
   const provider = await getConfig('ai.ocr.provider');
   const model = await getConfig('ai.ocr.model');
   if (provider !== 'anthropic') {
@@ -122,7 +122,7 @@ export async function ocrFromImage(source: string): Promise<OcrResult> {
         role: 'user',
         content: [
           docBlock,
-          { type: 'text', text: 'Extrahiere die Bon-Daten als JSON.' },
+          { type: 'text', text: 'Extrahiere die Bon-Daten als JSON.' + (hint && hint.trim() ? `\n\nWICHTIGER HINWEIS DES NUTZERS zu diesem Beleg — bitte unbedingt berücksichtigen: ${hint.trim().slice(0, 500)}` : '') },
         ],
       }],
     }),

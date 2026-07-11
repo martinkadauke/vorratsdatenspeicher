@@ -72,10 +72,11 @@ export function ReceiptDetailPage() {
   });
 
   const reocr = useMutation({
-    mutationFn: () => api<{ items: number; confidence: number }>(`/api/receipts/${id}/reocr`, { method: 'POST' }),
+    mutationFn: (hint?: string) => api<{ items: number; confidence: number }>(`/api/receipts/${id}/reocr`, { method: 'POST', body: hint?.trim() ? { hint: hint.trim() } : {} }),
     onSuccess: (res) => {
       void qc.invalidateQueries({ queryKey: ['receipt', id] });
       void qc.invalidateQueries({ queryKey: ['receipts'] });
+      setReocrOpen(false);
       toast(t('receiptDetail.reocrDone', { count: res.items, confidence: Math.round(res.confidence * 100) }), 'success');
     },
     onError: (err: Error) => toast(`${t('receiptDetail.reocrFailed')}: ${err.message}`, 'error'),
@@ -166,6 +167,8 @@ export function ReceiptDetailPage() {
   const [matchFlash, setMatchFlash] = useState(false);
   const [banksOpen, setBanksOpen] = useState(false); // multi-link: list all matched bank bookings
   const [bankPickerOpen, setBankPickerOpen] = useState(false); // receipt-side "Bankauszug finden" picker
+  const [reocrOpen, setReocrOpen] = useState(false);           // re-OCR-with-a-hint dialog
+  const [reocrHint, setReocrHint] = useState('');
   useEffect(() => {
     if (!data) return;
     const sum = data.artikel.reduce((acc, a) => {
@@ -431,7 +434,7 @@ export function ReceiptDetailPage() {
                 <RotateCw size={18} className={rotate.isPending ? 'animate-spin' : ''} />
               </button>
               <button
-                onClick={async () => { if (await confirm({ title: t('receiptDetail.reocr'), message: t('receiptDetail.reocrConfirm'), confirmLabel: t('receiptDetail.reocr'), cancelLabel: t('common.cancel') })) reocr.mutate(); }}
+                onClick={() => { setReocrHint(''); setReocrOpen(true); }}
                 disabled={reocr.isPending || !data.bild_pfad}
                 className="shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-100 disabled:opacity-30 dark:hover:bg-zinc-800"
                 title={t('receiptDetail.reocr')}
@@ -687,6 +690,25 @@ export function ReceiptDetailPage() {
           onClose={() => setBankPickerOpen(false)}
           onLinked={() => { setBankPickerOpen(false); void qc.invalidateQueries({ queryKey: ['receipt', id] }); void qc.invalidateQueries({ queryKey: ['receipts'] }); }}
         />
+      )}
+      {reocrOpen && (
+        <Modal open onClose={() => setReocrOpen(false)} title={t('receiptDetail.reocr')}>
+          <div className="flex flex-col gap-3">
+            <p className="text-xs text-zinc-400">{t('receiptDetail.reocrHintIntro')}</p>
+            <textarea
+              autoFocus rows={3} value={reocrHint} onChange={e => setReocrHint(e.target.value)}
+              placeholder={t('receiptDetail.reocrHintPlaceholder')}
+              className="w-full resize-y rounded-xl border border-zinc-200 bg-transparent px-3 py-2 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700"
+            />
+            <div className="flex items-center justify-end gap-2">
+              <Button variant="ghost" onClick={() => setReocrOpen(false)} disabled={reocr.isPending}>{t('common.cancel')}</Button>
+              <Button onClick={() => reocr.mutate(reocrHint)} disabled={reocr.isPending}>
+                <ScanLine size={14} className={cn('mr-1 inline', reocr.isPending && 'animate-pulse')} />
+                {reocr.isPending ? t('receiptDetail.reocrRunning') : t('receiptDetail.reocr')}
+              </Button>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );
