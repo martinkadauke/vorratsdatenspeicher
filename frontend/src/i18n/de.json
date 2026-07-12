@@ -120,6 +120,7 @@
     "fixedIncomeTitle": "Feste Einnahmen",
     "fixedCostsTitle": "Fixkosten",
     "incomeGroupLabel": "Einnahmen",
+    "importLabel": "Importieren:",
     "addIncomeTitle": "Zahlungseingänge erfassen",
     "expenditureGroupLabel": "Ausgaben",
     "otherScope": "Sonstige",

@@ -2226,8 +2226,8 @@ function ManageTab() {
   const qc = useQueryClient();
   const [modal, setModal] = useState<Draft | null>(null);
   const [showInfo, setShowInfo] = useState(false); // Fixkosten info text collapsed behind the (i)
-  const [bankInOpen, setBankInOpen] = useState(false); // CSV + pay-slip upload popup (Zahlungseingaenge +)
-  const [bankOpen, setBankOpen] = useState(false); // bank-CSV upload popup (Zahlungen +)
+  const [csvOpen, setCsvOpen] = useState(false); // bank-statement CSV upload popup
+  const [pdfOpen, setPdfOpen] = useState(false); // salary pay-slip PDF upload popup
 
   const { data: costs, isLoading } = useQuery({ queryKey: ['fixed-costs'], queryFn: () => api<FixedCost[]>('/api/fixed-costs') });
   const { data: konten } = useKonten();
@@ -2236,12 +2236,6 @@ function ManageTab() {
   // Scope options: every non-cash account. Shared = household (rent, loan…),
   // the rest = per person/account. Cash accounts don't carry standing costs.
   const scopeKonten = useMemo(() => (konten ?? []).filter(k => !k.is_cash), [konten]);
-  // Normalised usernames of the household's own account holders — a bank booking whose
-  // counterparty matches one is an internal transfer (nets out, not real income/spend).
-  const ownerKeys = useMemo(
-    () => [...new Set((konten ?? []).map(k => k.owner).filter((o): o is string => !!o).map(o => o.toLowerCase().replace(/[^a-z0-9]/g, '')))],
-    [konten],
-  );
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ['fixed-costs'] });
     void qc.invalidateQueries({ queryKey: ['fin-month'] });
@@ -2349,27 +2343,28 @@ function ManageTab() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-2">
-        <div className="px-1 text-[11px] font-medium text-zinc-400">{t('finances.incomeGroupLabel')}</div>
-        <BankMovements direction="in" ownerKeys={ownerKeys} onUpload={() => setBankInOpen(true)} />
-        <CollapseCard
-          icon={<TrendingUp size={17} className="text-emerald-600 dark:text-emerald-500" />}
-          title={t('finances.fixedIncomeTitle')}
-          badge={fixedIncomes.length}
-          right={<span className="text-sm font-medium text-emerald-600 dark:text-emerald-500">+{eur(fixedIncomeTotal)}<span className="text-[11px] font-normal text-zinc-400">{t('finances.perMonth')}</span></span>}
-          onAdd={() => setModal(emptyDraft(scopeKonten[0]?.id, 'income'))}
-          addTitle={t('finances.add')}
-        >
-          {fixedIncomes.length === 0
-            ? <Card className="p-3 text-xs text-zinc-400">{t('finances.noIncomePlans')}</Card>
-            : fixedIncomes.map(c => <FixRow key={c.id} c={c} t={t} onEdit={fc => setModal(draftFromCost(fc))} onDelete={fc => remove.mutate(fc)} />)}
-        </CollapseCard>
+      {/* Import: bank statements (CSV) + salary pay slips (PDF) — the page's main job. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="mr-1 text-[11px] font-medium text-zinc-400">{t('finances.importLabel')}</span>
+        <Button variant="secondary" onClick={() => setCsvOpen(true)}><Upload size={15} /> {t('finances.bank.heading')}</Button>
+        <Button variant="secondary" onClick={() => setPdfOpen(true)}><FileText size={15} /> {t('finances.income.heading')}</Button>
       </div>
 
+      <CollapseCard
+        icon={<TrendingUp size={17} className="text-emerald-600 dark:text-emerald-500" />}
+        title={t('finances.fixedIncomeTitle')}
+        badge={fixedIncomes.length}
+        right={<span className="text-sm font-medium text-emerald-600 dark:text-emerald-500">+{eur(fixedIncomeTotal)}<span className="text-[11px] font-normal text-zinc-400">{t('finances.perMonth')}</span></span>}
+        onAdd={() => setModal(emptyDraft(scopeKonten[0]?.id, 'income'))}
+        addTitle={t('finances.add')}
+      >
+        {fixedIncomes.length === 0
+          ? <Card className="p-3 text-xs text-zinc-400">{t('finances.noIncomePlans')}</Card>
+          : fixedIncomes.map(c => <FixRow key={c.id} c={c} t={t} onEdit={fc => setModal(draftFromCost(fc))} onDelete={fc => remove.mutate(fc)} />)}
+      </CollapseCard>
+
       <div className="flex flex-col gap-2">
-        <div className="px-1 text-[11px] font-medium text-zinc-400">{t('finances.expenditureGroupLabel')}</div>
-        <BankMovements direction="out" ownerKeys={ownerKeys} onUpload={() => setBankOpen(true)} />
-        <div className="flex items-center gap-1.5 px-1 pt-1">
+        <div className="flex items-center gap-1.5 px-1">
           <span className="text-[11px] font-medium text-zinc-400">{t('finances.fixedCostsTitle')}</span>
           <span className="text-[11px] text-zinc-400">· {eur(monthlyTotal)}{t('finances.perMonth')}</span>
           <button onClick={() => setShowInfo(s => !s)} className="rounded p-0.5 text-zinc-400 hover:text-sky-500" title={t('finances.hint')} aria-label="info">
@@ -2422,23 +2417,14 @@ function ManageTab() {
         </CollapseCard>
       )}
 
-      {bankInOpen && (
-        <Modal open onClose={() => setBankInOpen(false)} title={t('finances.addIncomeTitle')}>
-          <div className="flex flex-col gap-5">
-            <BankUpload scopeKonten={scopeKonten} embedded />
-            <div className="border-t border-zinc-100 pt-4 dark:border-zinc-800">
-              <div className="mb-2 flex items-center gap-2">
-                <Upload size={16} className="text-emerald-600 dark:text-emerald-500" />
-                <h3 className="text-sm font-semibold">{t('finances.income.heading')}</h3>
-              </div>
-              <PayslipUpload scopeKonten={scopeKonten} embedded />
-            </div>
-          </div>
+      {csvOpen && (
+        <Modal open onClose={() => setCsvOpen(false)} title={t('finances.bank.heading')}>
+          <BankUpload scopeKonten={scopeKonten} embedded />
         </Modal>
       )}
-      {bankOpen && (
-        <Modal open onClose={() => setBankOpen(false)} title={t('finances.bank.heading')}>
-          <BankUpload scopeKonten={scopeKonten} embedded />
+      {pdfOpen && (
+        <Modal open onClose={() => setPdfOpen(false)} title={t('finances.income.heading')}>
+          <PayslipUpload scopeKonten={scopeKonten} embedded />
         </Modal>
       )}
 
