@@ -118,6 +118,8 @@
     "oneOffTitle": "One-off entries",
     "oneOffBadge": "one-off",
     "fixedIncomeTitle": "Fixed income",
+    "fixedCostsTitle": "Fixed costs",
+    "inactiveTitle": "Inactive fixed costs",
     "varIncomeTitle": "Variable income",
     "noVarIncome": "No one-off income",
     "netTitle": "Net (in − out)",
@@ -239,6 +241,8 @@
       "openPdf": "Open PDF",
       "downloadPdf": "Download",
       "listEmpty": "No income recorded yet – upload pay slips above.",
+      "allYears": "All years",
+      "allMembers": "All members",
       "entryFallback": "Income",
       "src": {
         "salary": "Salary",

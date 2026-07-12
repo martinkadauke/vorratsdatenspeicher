@@ -6,6 +6,7 @@ import {
   Wallet, Plus, Pencil, Trash2, Home, User as UserIcon, Info,
   ChevronLeft, ChevronRight, ChevronDown, CheckCircle2, Circle, CircleDot, AlertCircle, Search, X, Upload, Layers, Lock,
   Link2, Link2Off, RefreshCw, Landmark, SlidersHorizontal, Flag, FilePlus2, Receipt, FileText, Paperclip, Sparkles, Calendar, ExternalLink,
+  TrendingUp, Archive,
 } from 'lucide-react';
 import { api, getToken } from '../api/client';
 import { Card, Spinner, Button, Input, Label, Select, Switch, Modal, EmptyState, Badge } from '../components/ui';
@@ -1183,6 +1184,11 @@ const emptyDraft = (kontoId?: number, kind: 'expense' | 'income' = 'expense'): D
   label: '', monthly_eur: '', kind, frequency: 'monthly', is_transfer: false, konto_id: kontoId ? String(kontoId) : '', category_path: null,
   start_date: today(), end_date: '', active: true, expect_receipt: true, match_merchant: '', counterpart_id: null,
 });
+const draftFromCost = (c: FixedCost): Draft => ({
+  id: c.id, label: c.label, monthly_eur: String(c.monthly_eur).replace('.', ','), kind: c.kind, frequency: c.frequency,
+  is_transfer: c.is_transfer, konto_id: String(c.konto_id ?? ''), category_path: c.category_path, start_date: c.start_date,
+  end_date: c.end_date ?? '', active: c.active, expect_receipt: c.expect_receipt, match_merchant: c.match_merchant ?? '', counterpart_id: c.counterpart_id,
+});
 
 /** Upload one or more pay slips (DATEV etc.) → each is OCR'd and filed as an
  *  income row for the chosen account. Files upload sequentially with a per-file
@@ -1342,6 +1348,9 @@ function IncomeList() {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [viewFile, setViewFile] = useState<{ id: number; name: string } | null>(null);
+  const [open, setOpen] = useState(false);
+  const [year, setYear] = useState(String(new Date().getFullYear())); // default: current year
+  const [member, setMember] = useState(''); // '' = all members
   const { data, isLoading } = useQuery({
     queryKey: ['fin-income'],
     queryFn: () => api<{ income: IncomeEntry[] }>('/api/finances/income'),
@@ -1364,19 +1373,49 @@ function IncomeList() {
   });
   const srcLabel = (s: string) => t(`finances.income.src.${s}`, { defaultValue: s });
 
-  const rows = data?.income ?? [];
+  // Member = owner (personal) or the account (shared) the income was booked to. The
+  // dropdown only lists members who actually have recorded income (data-driven, never
+  // hardcoded to a specific household). Year comes straight off each entry's date.
+  const allRows = data?.income ?? [];
+  const memberKey = (r: { owner: string | null; konto_id: number | null }) => r.owner ?? (r.konto_id != null ? `k${r.konto_id}` : '');
+  const years = useMemo(() => {
+    const s = new Set<string>([String(new Date().getFullYear())]);
+    for (const r of allRows) s.add(r.datum.slice(0, 4));
+    return [...s].sort((a, b) => b.localeCompare(a));
+  }, [allRows]);
+  const members = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const r of allRows) { const k = memberKey(r); if (k) m.set(k, scopeLabelOf(t, r)); }
+    return [...m.entries()].map(([key, label]) => ({ key, label })).sort((a, b) => a.label.localeCompare(b.label));
+  }, [allRows, t]);
+  const rows = useMemo(() => allRows.filter(r =>
+    (!year || r.datum.slice(0, 4) === year) && (!member || memberKey(r) === member),
+  ), [allRows, year, member]);
   const total = rows.reduce((s, r) => s + r.amount, 0);
+  // If the selected filter value disappears from the data (e.g. the last income for that
+  // member/year was deleted), fall back to "all" so the dropdown and the list can't desync.
+  useEffect(() => { if (member && !members.some(m => m.key === member)) setMember(''); }, [members, member]);
+  useEffect(() => { if (year && !years.includes(year)) setYear(''); }, [years, year]);
 
   return (
     <Card className="flex flex-col gap-3 p-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Wallet size={16} className="text-emerald-600 dark:text-emerald-500" />
-          <h2 className="text-base font-semibold">{t('finances.income.listHeading')}</h2>
-        </div>
-        {rows.length > 0 && (
-          <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-500">+{eur(total)}</span>
-        )}
+      <button onClick={() => setOpen(o => !o)} className="flex items-center gap-2 text-left">
+        <Wallet size={16} className="shrink-0 text-emerald-600 dark:text-emerald-500" />
+        <h2 className="text-base font-semibold">{t('finances.income.listHeading')}</h2>
+        <span className="ml-auto text-sm font-semibold text-emerald-600 dark:text-emerald-500">+{eur(total)}</span>
+        <ChevronDown size={16} className={cn('shrink-0 text-zinc-400 transition-transform', !open && '-rotate-90')} />
+      </button>
+      {open && (
+      <>
+      <div className="flex gap-2">
+        <Select value={year} onChange={e => setYear(e.target.value)}>
+          <option value="">{t('finances.income.allYears')}</option>
+          {years.map(y => <option key={y} value={y}>{y}</option>)}
+        </Select>
+        <Select value={member} onChange={e => setMember(e.target.value)}>
+          <option value="">{t('finances.income.allMembers')}</option>
+          {members.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
+        </Select>
       </div>
       {isLoading ? (
         <Spinner />
@@ -1426,6 +1465,8 @@ function IncomeList() {
             </li>
           ))}
         </ul>
+      )}
+      </>
       )}
       {viewFile && <PayslipViewer id={viewFile.id} name={viewFile.name} t={t} onClose={() => setViewFile(null)} />}
     </Card>
@@ -2015,10 +2056,68 @@ function BankTab() {
 // start month is no longer mis-classified as a settled one-off.
 const isOneOff = (c: FixedCost): boolean => c.one_off === true;
 
+/** Collapsible card with a uniform header (icon · title · badge · right meta · +add · chevron).
+ *  Shared by the fixed-income, per-account fixed-cost, and inactive sections so the whole
+ *  Verwaltung page reads coherently. */
+function CollapseCard({ icon, title, badge, right, onAdd, addTitle, defaultOpen = false, dashed = false, children }: {
+  icon: ReactNode; title: ReactNode; badge?: number; right?: ReactNode; onAdd?: () => void; addTitle?: string; defaultOpen?: boolean; dashed?: boolean; children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className={cn('overflow-hidden rounded-xl border', dashed ? 'border-dashed border-zinc-300 dark:border-zinc-700' : 'border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900')}>
+      <div className="flex items-center gap-2 p-3">
+        <button onClick={() => setOpen(o => !o)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+          <span className="shrink-0">{icon}</span>
+          <span className="truncate text-sm font-medium">{title}</span>
+          {badge != null && <span className="shrink-0 rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">{badge}</span>}
+          {right != null && <span className="ml-auto shrink-0 pl-2">{right}</span>}
+        </button>
+        {onAdd && (
+          <button onClick={onAdd} title={addTitle} className="shrink-0 rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 hover:text-emerald-600 dark:hover:bg-zinc-800">
+            <Plus size={16} />
+          </button>
+        )}
+        <button onClick={() => setOpen(o => !o)} className="shrink-0 rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800" aria-label="toggle">
+          <ChevronDown size={16} className={cn('transition-transform', !open && '-rotate-90')} />
+        </button>
+      </div>
+      {open && <div className={cn('flex flex-col gap-2 px-3 pb-3', !dashed && 'border-t border-zinc-100 pt-3 dark:border-zinc-800')}>{children}</div>}
+    </div>
+  );
+}
+
+/** One recurring fixed-cost / fixed-income row (used in every Verwaltung list). */
+function FixRow({ c, t, onEdit, onDelete }: {
+  c: FixedCost; t: (k: string, o?: Record<string, unknown>) => string; onEdit: (c: FixedCost) => void; onDelete: (c: FixedCost) => void;
+}) {
+  return (
+    <Card className={cn('flex items-center gap-3 p-3', !c.active && 'opacity-60')}>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium">{c.label}</div>
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-zinc-500 dark:text-zinc-400">
+          {c.kind === 'income' && <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">{t('finances.incomeTitle')}</span>}
+          {c.is_transfer && <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">{t('finances.transferBadge')}</span>}
+          {c.counterpart_label && <span className="truncate text-violet-600 dark:text-violet-400" title={c.counterpart_konto ?? undefined}>↔ {c.counterpart_label}</span>}
+          {c.frequency !== 'monthly' && <span className="rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">{t(`finances.freq.${c.frequency}`)} · {eur(c.monthly_eur)}</span>}
+          {c.category_path && <span className="truncate">{c.category_path.split('/').pop()}</span>}
+          {!c.expect_receipt && <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] dark:bg-zinc-800">{t('finances.noReceiptBadge')}</span>}
+          {!c.active && <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] dark:bg-zinc-800">{t('finances.inactive')}</span>}
+          {c.start_date && c.start_date > today() && <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">{t('finances.from')} {ddmmyyyy(c.start_date)}</span>}
+          {c.end_date && <span>{t('finances.until')} {ddmmyyyy(c.end_date)}</span>}
+        </div>
+      </div>
+      <span className={cn('shrink-0 text-sm font-semibold', c.kind === 'income' && 'text-emerald-600 dark:text-emerald-500')}>{c.kind === 'income' ? '+' : ''}{eur(amortized(c.monthly_eur, c.frequency))}<span className="text-xs font-normal text-zinc-400">{t('finances.perMonth')}</span></span>
+      <button onClick={() => onEdit(c)} className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800" title={t('common.edit')}><Pencil size={15} /></button>
+      <button onClick={() => onDelete(c)} className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30" title={t('common.delete')}><Trash2 size={15} /></button>
+    </Card>
+  );
+}
+
 function ManageTab() {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [modal, setModal] = useState<Draft | null>(null);
+  const [showInfo, setShowInfo] = useState(false); // Fixkosten info text collapsed behind the (i)
 
   const { data: costs, isLoading } = useQuery({ queryKey: ['fixed-costs'], queryFn: () => api<FixedCost[]>('/api/fixed-costs') });
   const { data: konten } = useKonten();
@@ -2077,14 +2176,20 @@ function ManageTab() {
   });
 
   // Single-month one-offs live in their month (Monat view) + a collapsed section below,
-  // newest first — so the manage lists show only recurring fix costs + income plans.
+  // newest first — kept separate from the recurring plans (their own future epic).
   const oneOffs = useMemo(() => (costs ?? []).filter(isOneOff).sort((a, b) => b.start_date.localeCompare(a.start_date)), [costs]);
 
-  // Group RECURRING costs by konto: household (shared) first, then each person.
+  // Recurring plans split three ways: active income (own section), active expense
+  // (grouped by account), and everything inactive (collapsed archive) — kept in the DB.
+  const recurring = useMemo(() => (costs ?? []).filter(c => !isOneOff(c)), [costs]);
+  const fixedIncomes = useMemo(() => recurring.filter(c => c.active && c.kind === 'income').sort((a, b) => a.label.localeCompare(b.label)), [recurring]);
+  const inactive = useMemo(() => recurring.filter(c => !c.active).sort((a, b) => a.label.localeCompare(b.label)), [recurring]);
+
+  // Group ACTIVE recurring EXPENSES by konto: household (shared) first, then each person.
   const groups = useMemo(() => {
     const byKonto = new Map<number, { konto: KontoLite | undefined; items: FixedCost[] }>();
     for (const k of scopeKonten) byKonto.set(k.id, { konto: k, items: [] });
-    for (const c of (costs ?? []).filter(c => !isOneOff(c))) {
+    for (const c of recurring.filter(c => c.active && c.kind !== 'income')) {
       if (c.konto_id == null) continue;
       if (!byKonto.has(c.konto_id)) byKonto.set(c.konto_id, { konto: konten?.find(k => k.id === c.konto_id), items: [] });
       byKonto.get(c.konto_id)!.items.push(c);
@@ -2092,11 +2197,11 @@ function ManageTab() {
     return [...byKonto.values()].sort((a, b) =>
       (b.konto?.is_shared ? 1 : 0) - (a.konto?.is_shared ? 1 : 0) ||
       (a.konto?.owner ?? '').localeCompare(b.konto?.owner ?? ''));
-  }, [costs, konten, scopeKonten]);
+  }, [recurring, konten, scopeKonten]);
 
-  // Household-wide recurring total: excludes income, internal transfers (Umbuchung —
-  // not real spend) AND one-offs (not a recurring monthly commitment).
-  const monthlyTotal = (costs ?? []).filter(c => c.active && c.kind !== 'income' && !c.is_transfer && !isOneOff(c)).reduce((s, c) => s + amortized(c.monthly_eur, c.frequency), 0);
+  // Household-wide recurring total: active expenses only, excludes internal transfers.
+  const monthlyTotal = recurring.filter(c => c.active && c.kind !== 'income' && !c.is_transfer).reduce((s, c) => s + amortized(c.monthly_eur, c.frequency), 0);
+  const fixedIncomeTotal = fixedIncomes.filter(c => !c.is_transfer).reduce((s, c) => s + amortized(c.monthly_eur, c.frequency), 0);
 
   if (isLoading || !konten) return <Spinner />;
 
@@ -2106,76 +2211,63 @@ function ManageTab() {
       <BankUpload scopeKonten={scopeKonten} />
       <IncomeList />
 
-      <div className="flex justify-end">
-        <Button onClick={() => setModal(emptyDraft(scopeKonten[0]?.id))}>
-          <Plus size={16} /> {t('finances.add')}
-        </Button>
+      <CollapseCard
+        icon={<TrendingUp size={17} className="text-emerald-600 dark:text-emerald-500" />}
+        title={t('finances.fixedIncomeTitle')}
+        badge={fixedIncomes.length}
+        right={<span className="text-sm font-semibold text-emerald-600 dark:text-emerald-500">+{eur(fixedIncomeTotal)}<span className="text-xs font-normal text-zinc-400">{t('finances.perMonth')}</span></span>}
+        onAdd={() => setModal(emptyDraft(scopeKonten[0]?.id, 'income'))}
+        addTitle={t('finances.add')}
+      >
+        {fixedIncomes.length === 0
+          ? <Card className="p-3 text-xs text-zinc-400">{t('finances.noIncomePlans')}</Card>
+          : fixedIncomes.map(c => <FixRow key={c.id} c={c} t={t} onEdit={fc => setModal(draftFromCost(fc))} onDelete={fc => remove.mutate(fc)} />)}
+      </CollapseCard>
+
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-2 px-1">
+          <Receipt size={16} className="text-zinc-500 dark:text-zinc-400" />
+          <span className="text-sm font-semibold">{t('finances.fixedCostsTitle')}</span>
+          <button onClick={() => setShowInfo(s => !s)} className="rounded-lg p-0.5 text-zinc-400 hover:text-sky-500" title={t('finances.hint')} aria-label="info">
+            <Info size={15} />
+          </button>
+          <span className="ml-auto text-base font-bold text-emerald-600 dark:text-emerald-500">{eur(monthlyTotal)}<span className="text-xs font-normal text-zinc-400">{t('finances.perMonth')}</span></span>
+        </div>
+        {showInfo && (
+          <Card className="flex items-start gap-3 p-3 text-xs text-zinc-500 dark:text-zinc-400">
+            <Info size={16} className="mt-0.5 shrink-0 text-sky-500" />
+            <span>{t('finances.hint')}</span>
+          </Card>
+        )}
+        {groups.filter(g => g.items.length > 0 || g.konto).map(g => {
+          // Subtotal excludes internal transfers so per-account sums add up to the household total.
+          const sum = g.items.filter(c => !c.is_transfer).reduce((s, c) => s + amortized(c.monthly_eur, c.frequency), 0);
+          const isHome = !!g.konto?.is_shared;
+          return (
+            <CollapseCard key={g.konto?.id ?? 'none'}
+              icon={isHome ? <Home size={16} className="text-violet-500" /> : <UserIcon size={16} className="text-emerald-500" />}
+              title={scopeLabelOf(t, g.konto)}
+              right={<span className="text-xs text-zinc-500 dark:text-zinc-400">{eur(sum)}{t('finances.perMonth')}</span>}
+              onAdd={() => setModal(emptyDraft(g.konto?.id))}
+              addTitle={t('finances.add')}
+            >
+              {g.items.length === 0
+                ? <Card className="p-3 text-xs text-zinc-400">{t('finances.emptyScope')}</Card>
+                : g.items.map(c => <FixRow key={c.id} c={c} t={t} onEdit={fc => setModal(draftFromCost(fc))} onDelete={fc => remove.mutate(fc)} />)}
+            </CollapseCard>
+          );
+        })}
+        {inactive.length > 0 && (
+          <CollapseCard dashed
+            icon={<Archive size={16} className="text-zinc-400" />}
+            title={<span className="text-zinc-500 dark:text-zinc-400">{t('finances.inactiveTitle')}</span>}
+            badge={inactive.length}
+          >
+            {inactive.map(c => <FixRow key={c.id} c={c} t={t} onEdit={fc => setModal(draftFromCost(fc))} onDelete={fc => remove.mutate(fc)} />)}
+          </CollapseCard>
+        )}
       </div>
-
-      <Card className="flex items-center justify-between p-4">
-        <span className="text-sm text-zinc-500 dark:text-zinc-400">{t('finances.monthlyTotal')}</span>
-        <span className="text-lg font-bold text-emerald-600 dark:text-emerald-500">{eur(monthlyTotal)}<span className="text-sm font-normal text-zinc-400">{t('finances.perMonth')}</span></span>
-      </Card>
-
-      <Card className="flex items-start gap-3 p-3 text-xs text-zinc-500 dark:text-zinc-400">
-        <Info size={16} className="mt-0.5 shrink-0 text-sky-500" />
-        <span>{t('finances.hint')}</span>
-      </Card>
-
-      {groups.filter(g => g.items.length > 0 || g.konto).map(g => {
-        // Match the household total (excludes internal transfers) so the per-account
-        // subtotals actually sum to it, instead of presenting Umbuchungen as spend.
-        const sum = g.items.filter(c => c.active && c.kind !== 'income' && !c.is_transfer).reduce((s, c) => s + amortized(c.monthly_eur, c.frequency), 0);
-        const isHome = !!g.konto?.is_shared;
-        return (
-          <div key={g.konto?.id ?? 'none'} className="flex flex-col gap-2">
-            <div className="flex items-center justify-between px-1">
-              <div className="flex items-center gap-1.5 text-sm font-semibold">
-                {isHome ? <Home size={15} className="text-violet-500" /> : <UserIcon size={15} className="text-emerald-500" />}
-                {scopeLabelOf(t, g.konto)}
-                <span className="font-normal text-zinc-400">· {eur(sum)}{t('finances.perMonth')}</span>
-              </div>
-              <button
-                onClick={() => setModal(emptyDraft(g.konto?.id))}
-                className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 hover:text-emerald-600 dark:hover:bg-zinc-800"
-                title={t('finances.add')}
-              >
-                <Plus size={16} />
-              </button>
-            </div>
-            {g.items.length === 0
-              ? <Card className="p-3 text-xs text-zinc-400">{t('finances.emptyScope')}</Card>
-              : g.items.map(c => (
-                <Card key={c.id} className={cn('flex items-center gap-3 p-3', !c.active && 'opacity-50')}>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium">{c.label}</div>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-zinc-500 dark:text-zinc-400">
-                      {c.kind === 'income' && <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">{t('finances.incomeTitle')}</span>}
-                      {c.is_transfer && <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">{t('finances.transferBadge')}</span>}
-                      {c.counterpart_label && <span className="truncate text-violet-600 dark:text-violet-400" title={c.counterpart_konto ?? undefined}>↔ {c.counterpart_label}</span>}
-                      {c.frequency !== 'monthly' && <span className="rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">{t(`finances.freq.${c.frequency}`)} · {eur(c.monthly_eur)}</span>}
-                      {c.category_path && <span className="truncate">{c.category_path.split('/').pop()}</span>}
-                      {!c.expect_receipt && <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] dark:bg-zinc-800">{t('finances.noReceiptBadge')}</span>}
-                      {!c.active && <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] dark:bg-zinc-800">{t('finances.inactive')}</span>}
-                      {c.start_date && c.start_date > today() && <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">{t('finances.from')} {ddmmyyyy(c.start_date)}</span>}
-                      {c.end_date && <span>{t('finances.until')} {ddmmyyyy(c.end_date)}</span>}
-                    </div>
-                  </div>
-                  <span className={cn('shrink-0 text-sm font-semibold', c.kind === 'income' && 'text-emerald-600 dark:text-emerald-500')}>{c.kind === 'income' ? '+' : ''}{eur(amortized(c.monthly_eur, c.frequency))}<span className="text-xs font-normal text-zinc-400">{t('finances.perMonth')}</span></span>
-                  <button onClick={() => setModal({ id: c.id, label: c.label, monthly_eur: String(c.monthly_eur).replace('.', ','), kind: c.kind, frequency: c.frequency, is_transfer: c.is_transfer, konto_id: String(c.konto_id ?? ''), category_path: c.category_path, start_date: c.start_date, end_date: c.end_date ?? '', active: c.active, expect_receipt: c.expect_receipt, match_merchant: c.match_merchant ?? '', counterpart_id: c.counterpart_id })}
-                    className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800" title={t('common.edit')}>
-                    <Pencil size={15} />
-                  </button>
-                  <button onClick={() => remove.mutate(c)}
-                    className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30" title={t('common.delete')}>
-                    <Trash2 size={15} />
-                  </button>
-                </Card>
-              ))}
-          </div>
-        );
-      })}
-      {!groups.some(g => g.items.length) && !oneOffs.length && <EmptyState>{t('finances.empty')}</EmptyState>}
+      {!groups.some(g => g.items.length) && !fixedIncomes.length && !inactive.length && !oneOffs.length && <EmptyState>{t('finances.empty')}</EmptyState>}
 
       {oneOffs.length > 0 && (
         <Section title={t('finances.oneOffTitle')} count={oneOffs.length} defaultOpen={false}>

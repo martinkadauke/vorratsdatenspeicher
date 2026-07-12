@@ -118,6 +118,8 @@
     "oneOffTitle": "Einmalige Buchungen",
     "oneOffBadge": "einmalig",
     "fixedIncomeTitle": "Feste Einnahmen",
+    "fixedCostsTitle": "Fixkosten",
+    "inactiveTitle": "Inaktive Fixkosten",
     "varIncomeTitle": "Variable Einnahmen",
     "noVarIncome": "Keine einmaligen Einnahmen",
     "netTitle": "Netto (Ein − Aus)",
@@ -239,6 +241,8 @@
       "openPdf": "PDF öffnen",
       "downloadPdf": "Herunterladen",
       "listEmpty": "Noch keine Einnahmen erfasst – lade oben Gehaltszettel hoch.",
+      "allYears": "Alle Jahre",
+      "allMembers": "Alle Mitglieder",
       "entryFallback": "Einnahme",
       "src": {
         "salary": "Gehalt",
