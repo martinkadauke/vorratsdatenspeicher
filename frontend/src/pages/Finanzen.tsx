@@ -6,7 +6,7 @@ import {
   Wallet, Plus, Pencil, Trash2, Home, User as UserIcon, Info,
   ChevronLeft, ChevronRight, ChevronDown, CheckCircle2, Circle, CircleDot, AlertCircle, Search, X, Upload, Layers, Lock,
   Link2, Link2Off, RefreshCw, Landmark, SlidersHorizontal, Flag, FilePlus2, Receipt, FileText, Paperclip, Sparkles, Calendar, ExternalLink,
-  TrendingUp, Archive, Zap,
+  TrendingUp, Archive, Zap, ArrowDownLeft, ArrowUpRight,
 } from 'lucide-react';
 import { api, getToken } from '../api/client';
 import { Card, Spinner, Button, Input, Label, Select, Switch, Modal, EmptyState, Badge } from '../components/ui';
@@ -1193,7 +1193,7 @@ const draftFromCost = (c: FixedCost): Draft => ({
 /** Upload one or more pay slips (DATEV etc.) → each is OCR'd and filed as an
  *  income row for the chosen account. Files upload sequentially with a per-file
  *  result line. Bank-statement CSV import is a separate (upcoming) evidence path. */
-function PayslipUpload({ scopeKonten }: { scopeKonten: KontoLite[] }) {
+function PayslipUpload({ scopeKonten, embedded }: { scopeKonten: KontoLite[]; embedded?: boolean }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [kontoId, setKontoId] = useState('');
@@ -1239,12 +1239,14 @@ function PayslipUpload({ scopeKonten }: { scopeKonten: KontoLite[] }) {
     if (n) toast(t('finances.income.importedToast', { n }), 'success');
   }
 
-  return (
-    <Card className="flex flex-col gap-3 p-4">
-      <div className="flex items-center gap-2">
-        <Upload size={16} className="text-emerald-600 dark:text-emerald-500" />
-        <h2 className="text-base font-semibold">{t('finances.income.heading')}</h2>
-      </div>
+  const body = (
+    <>
+      {!embedded && (
+        <div className="flex items-center gap-2">
+          <Upload size={16} className="text-emerald-600 dark:text-emerald-500" />
+          <h2 className="text-base font-semibold">{t('finances.income.heading')}</h2>
+        </div>
+      )}
       <p className="text-xs text-zinc-500">{t('finances.income.intro')}</p>
       <div className="flex flex-wrap items-end gap-2">
         <div className="min-w-[9rem] flex-1">
@@ -1275,9 +1277,9 @@ function PayslipUpload({ scopeKonten }: { scopeKonten: KontoLite[] }) {
           ))}
         </ul>
       )}
-      <p className="text-[11px] text-zinc-400">{t('finances.income.hint')}</p>
-    </Card>
+    </>
   );
+  return embedded ? <div className="flex flex-col gap-3">{body}</div> : <Card className="flex flex-col gap-3 p-4">{body}</Card>;
 }
 
 // ── Erfasste Einnahmen (actual income rows: pay slips / CSV credits) ──────────
@@ -1344,7 +1346,7 @@ function PayslipViewer({ id, name, t, onClose }: {
   );
 }
 
-function IncomeList() {
+function IncomeList({ onUpload }: { onUpload: () => void }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [viewFile, setViewFile] = useState<{ id: number; name: string } | null>(null);
@@ -1402,6 +1404,8 @@ function IncomeList() {
         icon={<Wallet size={17} className="text-emerald-600 dark:text-emerald-500" />}
         title={t('finances.income.listHeading')}
         right={<span className="text-sm font-medium text-emerald-600 dark:text-emerald-500">+{eur(total)}</span>}
+        onAdd={onUpload}
+        addTitle={t('finances.income.heading')}
       >
       <div className="flex gap-2">
         <Select value={year} onChange={e => setYear(e.target.value)}>
@@ -1483,7 +1487,7 @@ interface BankTx {
 
 /** Upload one or more comdirect "Umsätze Girokonto" CSVs into a chosen account.
  *  One CSV = one account (picked here). Re-import is idempotent (dedup by Ref.). */
-function BankUpload({ scopeKonten }: { scopeKonten: KontoLite[] }) {
+function BankUpload({ scopeKonten, embedded }: { scopeKonten: KontoLite[]; embedded?: boolean }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [kontoId, setKontoId] = useState('');
@@ -1519,12 +1523,14 @@ function BankUpload({ scopeKonten }: { scopeKonten: KontoLite[] }) {
     const n = out.filter(o => o.ok).length;
     if (n) toast(t('finances.bank.importedToast', { n }), 'success');
   }
-  return (
-    <Card className="flex flex-col gap-3 p-4">
-      <div className="flex items-center gap-2">
-        <Upload size={16} className="text-emerald-600 dark:text-emerald-500" />
-        <h2 className="text-base font-semibold">{t('finances.bank.heading')}</h2>
-      </div>
+  const body = (
+    <>
+      {!embedded && (
+        <div className="flex items-center gap-2">
+          <Upload size={16} className="text-emerald-600 dark:text-emerald-500" />
+          <h2 className="text-base font-semibold">{t('finances.bank.heading')}</h2>
+        </div>
+      )}
       <p className="text-xs text-zinc-500">{t('finances.bank.intro')}</p>
       <div className="flex flex-wrap items-end gap-2">
         <div className="min-w-[9rem] flex-1">
@@ -1551,8 +1557,9 @@ function BankUpload({ scopeKonten }: { scopeKonten: KontoLite[] }) {
         </ul>
       )}
       <p className="text-[11px] text-zinc-400">{t('finances.bank.hint')}</p>
-    </Card>
+    </>
   );
+  return embedded ? <div className="flex flex-col gap-3">{body}</div> : <Card className="flex flex-col gap-3 p-4">{body}</Card>;
 }
 
 function BankRow({ tx, t, highlight, onOpen, onOpenFixed, onLink, onUnlink, onFlag, onGenerate, onApprove, onDismiss }: {
@@ -2108,14 +2115,110 @@ function FixRow({ c, t, onEdit, onDelete }: {
   );
 }
 
+/** Bank-statement bookings from CSV imports, one direction (in = credits, out = debits),
+ *  filterable by the account they belong to. The `+` opens the bank-CSV upload popup.
+ *  Shares the ['bank-tx'] cache so a CSV upload refreshes it automatically. */
+function BankMovements({ direction, onUpload }: { direction: 'in' | 'out'; onUpload: () => void }) {
+  const { t } = useTranslation();
+  const [konto, setKonto] = useState('');
+  const { data } = useQuery({ queryKey: ['bank-tx', 'all'], queryFn: () => api<{ items: BankTx[] }>('/api/finances/bank') });
+  const dir = useMemo(() => (data?.items ?? []).filter(x => direction === 'in' ? x.amount > 0 : x.amount < 0), [data, direction]);
+  // Accounts that actually have a booking of this direction (cash accounts never appear —
+  // bank_tx only exist for CSV-imported bank accounts).
+  const accounts = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const x of dir) if (x.konto_id != null) m.set(x.konto_id, x.konto_name ?? String(x.konto_id));
+    return [...m.entries()].map(([id, name]) => ({ id: String(id), name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [dir]);
+  const rows = useMemo(() => dir.filter(x => !konto || String(x.konto_id) === konto), [dir, konto]);
+  useEffect(() => { if (konto && !accounts.some(a => a.id === konto)) setKonto(''); }, [accounts, konto]);
+  const absTotal = Math.abs(rows.reduce((s, x) => s + x.amount, 0));
+
+  return (
+    <CollapseCard
+      icon={direction === 'in'
+        ? <ArrowDownLeft size={17} className="text-emerald-600 dark:text-emerald-500" />
+        : <ArrowUpRight size={17} className="text-emerald-600 dark:text-emerald-500" />}
+      title={t(direction === 'in' ? 'finances.incomeActualTitle' : 'finances.bankOutTitle')}
+      right={<span className={cn('text-sm font-medium', direction === 'in' && 'text-emerald-600 dark:text-emerald-500')}>{direction === 'in' ? '+' : '−'}{eur(absTotal)}</span>}
+      onAdd={onUpload}
+      addTitle={t('finances.bank.heading')}
+    >
+      <div className="flex gap-2">
+        <Select value={konto} onChange={e => setKonto(e.target.value)}>
+          <option value="">{t('finances.allAccounts')}</option>
+          {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </Select>
+      </div>
+      {rows.length === 0
+        ? <p className="text-xs text-zinc-400">{t('finances.bankMovesEmpty')}</p>
+        : (
+          <ul className="flex flex-col divide-y divide-zinc-100 dark:divide-zinc-800">
+            {rows.slice(0, 100).map(x => (
+              <li key={x.id} className="flex items-center gap-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm">{x.counterparty || x.description || '—'}</div>
+                  <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{ddmmyyyy(x.booking_date)}{x.konto_name ? ` · ${x.konto_name}` : ''}</div>
+                </div>
+                <span className={cn('shrink-0 text-sm font-medium', x.amount > 0 && 'text-emerald-600 dark:text-emerald-500')}>{x.amount > 0 ? '+' : '−'}{eur(Math.abs(x.amount))}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      {rows.length > 100 && <p className="pt-1 text-[11px] text-zinc-400">{t('finances.bankShowingFirst', { total: rows.length })}</p>}
+    </CollapseCard>
+  );
+}
+
+/** One member's (or the household's) recurring fixed costs, with a per-account chip
+ *  filter when the member has more than one CSV bank account. */
+function MemberFixGroup({ label, isHome, konten, items, t, onAdd, onEdit, onDelete }: {
+  label: string; isHome: boolean; konten: KontoLite[]; items: FixedCost[];
+  t: (k: string, o?: Record<string, unknown>) => string;
+  onAdd: (kontoId?: number) => void; onEdit: (c: FixedCost) => void; onDelete: (c: FixedCost) => void;
+}) {
+  const [konto, setKonto] = useState<number | 'all'>('all');
+  const eff: number | 'all' = konto !== 'all' && konten.some(k => k.id === konto) ? konto : 'all';
+  const shown = eff === 'all' ? items : items.filter(c => c.konto_id === eff);
+  const sum = shown.filter(c => !c.is_transfer).reduce((s, c) => s + amortized(c.monthly_eur, c.frequency), 0);
+  const chip = (active: boolean, onClick: () => void, text: string) => (
+    <button type="button" onClick={onClick} className={cn(
+      'shrink-0 rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors',
+      active ? 'border-transparent bg-emerald-600 text-white' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700 dark:text-zinc-400',
+    )}>{text}</button>
+  );
+  return (
+    <CollapseCard
+      icon={isHome ? <Home size={17} className="text-emerald-600 dark:text-emerald-500" /> : <UserIcon size={17} className="text-emerald-600 dark:text-emerald-500" />}
+      title={label}
+      right={<span className="text-sm font-medium">{eur(sum)}<span className="text-[11px] font-normal text-zinc-400">{t('finances.perMonth')}</span></span>}
+      onAdd={() => onAdd(eff === 'all' ? konten[0]?.id : eff)}
+      addTitle={t('finances.add')}
+    >
+      {konten.length > 1 && (
+        <div className="flex flex-wrap gap-1.5">
+          {chip(eff === 'all', () => setKonto('all'), t('finances.allAccounts'))}
+          {konten.map(k => chip(eff === k.id, () => setKonto(k.id), k.name))}
+        </div>
+      )}
+      {shown.length === 0
+        ? <Card className="p-3 text-xs text-zinc-400">{t('finances.emptyScope')}</Card>
+        : shown.map(c => <FixRow key={c.id} c={c} t={t} onEdit={onEdit} onDelete={onDelete} />)}
+    </CollapseCard>
+  );
+}
+
 function ManageTab() {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [modal, setModal] = useState<Draft | null>(null);
   const [showInfo, setShowInfo] = useState(false); // Fixkosten info text collapsed behind the (i)
+  const [payslipOpen, setPayslipOpen] = useState(false); // pay-slip upload popup (Einnahmen +)
+  const [bankOpen, setBankOpen] = useState(false); // bank-CSV upload popup (Zahlungen +)
 
   const { data: costs, isLoading } = useQuery({ queryKey: ['fixed-costs'], queryFn: () => api<FixedCost[]>('/api/fixed-costs') });
   const { data: konten } = useKonten();
+  const { data: bankData } = useQuery({ queryKey: ['bank-tx', 'all'], queryFn: () => api<{ items: BankTx[] }>('/api/finances/bank') });
 
   // Scope options: every non-cash account. Shared = household (rent, loan…),
   // the rest = per person/account. Cash accounts don't carry standing costs.
@@ -2180,19 +2283,44 @@ function ManageTab() {
   const fixedIncomes = useMemo(() => recurring.filter(c => c.active && c.kind === 'income').sort((a, b) => a.label.localeCompare(b.label)), [recurring]);
   const inactive = useMemo(() => recurring.filter(c => !c.active).sort((a, b) => a.label.localeCompare(b.label)), [recurring]);
 
-  // Group ACTIVE recurring EXPENSES by konto: household (shared) first, then each person.
-  const groups = useMemo(() => {
-    const byKonto = new Map<number, { konto: KontoLite | undefined; items: FixedCost[] }>();
-    for (const k of scopeKonten) byKonto.set(k.id, { konto: k, items: [] });
-    for (const c of recurring.filter(c => c.active && c.kind !== 'income')) {
-      if (c.konto_id == null) continue;
-      if (!byKonto.has(c.konto_id)) byKonto.set(c.konto_id, { konto: konten?.find(k => k.id === c.konto_id), items: [] });
-      byKonto.get(c.konto_id)!.items.push(c);
+  // Accounts that have ever seen a CSV bank booking — used to decide which members appear
+  // under Fixkosten ("who has ever incurred a booking"), never hardcoded to a household.
+  const bookedKontoIds = useMemo(
+    () => new Set((bankData?.items ?? []).map(x => x.konto_id).filter((v): v is number => v != null)),
+    [bankData],
+  );
+
+  // Group ACTIVE recurring EXPENSES by MEMBER: household (shared) first, then each person
+  // who has a fixed cost or a bank booking. A member's accounts become a per-account chip
+  // filter inside their group (each has one in our case, but it scales to several).
+  const memberKeyOf = (k: KontoLite) => k.is_shared ? 'home' : (k.user_id != null ? `u${k.user_id}` : `o:${k.owner ?? k.name}`);
+  const memberGroups = useMemo(() => {
+    type MG = { key: string; label: string; isHome: boolean; sortOwner: string; konten: KontoLite[]; items: FixedCost[] };
+    const byMember = new Map<string, MG>();
+    for (const k of scopeKonten) {
+      const key = memberKeyOf(k);
+      if (!byMember.has(key)) byMember.set(key, { key, label: scopeLabelOf(t, k), isHome: !!k.is_shared, sortOwner: k.is_shared ? '' : (k.owner ?? ''), konten: [], items: [] });
+      byMember.get(key)!.konten.push(k);
     }
-    return [...byKonto.values()].sort((a, b) =>
-      (b.konto?.is_shared ? 1 : 0) - (a.konto?.is_shared ? 1 : 0) ||
-      (a.konto?.owner ?? '').localeCompare(b.konto?.owner ?? ''));
-  }, [recurring, konten, scopeKonten]);
+    const kontoToMember = new Map<number, string>();
+    for (const k of scopeKonten) kontoToMember.set(k.id, memberKeyOf(k));
+    // Fallback bucket so a cost whose account isn't in scope (e.g. a giro account later
+    // re-flagged as cash, or a null konto) stays visible + editable AND the header total
+    // keeps reconciling with the sum of the shown subtotals.
+    const ensureOther = () => {
+      const KEY = '__other__';
+      if (!byMember.has(KEY)) byMember.set(KEY, { key: KEY, label: t('finances.otherScope'), isHome: false, sortOwner: '￿', konten: [], items: [] });
+      return byMember.get(KEY)!;
+    };
+    for (const c of recurring.filter(c => c.active && c.kind !== 'income')) {
+      const key = c.konto_id != null ? kontoToMember.get(c.konto_id) : undefined;
+      if (key && byMember.has(key)) byMember.get(key)!.items.push(c);
+      else ensureOther().items.push(c);
+    }
+    return [...byMember.values()]
+      .filter(m => m.items.length > 0 || m.konten.some(k => bookedKontoIds.has(k.id)))
+      .sort((a, b) => (b.isHome ? 1 : 0) - (a.isHome ? 1 : 0) || a.sortOwner.localeCompare(b.sortOwner));
+  }, [recurring, scopeKonten, bookedKontoIds, t]);
 
   // Household-wide recurring total: active expenses only, excludes internal transfers.
   const monthlyTotal = recurring.filter(c => c.active && c.kind !== 'income' && !c.is_transfer).reduce((s, c) => s + amortized(c.monthly_eur, c.frequency), 0);
@@ -2202,12 +2330,10 @@ function ManageTab() {
 
   return (
     <div className="flex flex-col gap-4">
-      <PayslipUpload scopeKonten={scopeKonten} />
-      <BankUpload scopeKonten={scopeKonten} />
-
       <div className="flex flex-col gap-2">
         <div className="px-1 text-[11px] font-medium text-zinc-400">{t('finances.incomeGroupLabel')}</div>
-        <IncomeList />
+        <IncomeList onUpload={() => setPayslipOpen(true)} />
+        <BankMovements direction="in" onUpload={() => setBankOpen(true)} />
         <CollapseCard
           icon={<TrendingUp size={17} className="text-emerald-600 dark:text-emerald-500" />}
           title={t('finances.fixedIncomeTitle')}
@@ -2223,7 +2349,9 @@ function ManageTab() {
       </div>
 
       <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-1.5 px-1">
+        <div className="px-1 text-[11px] font-medium text-zinc-400">{t('finances.expenditureGroupLabel')}</div>
+        <BankMovements direction="out" onUpload={() => setBankOpen(true)} />
+        <div className="flex items-center gap-1.5 px-1 pt-1">
           <span className="text-[11px] font-medium text-zinc-400">{t('finances.fixedCostsTitle')}</span>
           <span className="text-[11px] text-zinc-400">· {eur(monthlyTotal)}{t('finances.perMonth')}</span>
           <button onClick={() => setShowInfo(s => !s)} className="rounded p-0.5 text-zinc-400 hover:text-sky-500" title={t('finances.hint')} aria-label="info">
@@ -2236,26 +2364,12 @@ function ManageTab() {
             <span>{t('finances.hint')}</span>
           </Card>
         )}
-        {groups.filter(g => g.items.length > 0 || g.konto).map(g => {
-          // Subtotal excludes internal transfers so per-account sums add up to the household total.
-          const sum = g.items.filter(c => !c.is_transfer).reduce((s, c) => s + amortized(c.monthly_eur, c.frequency), 0);
-          const isHome = !!g.konto?.is_shared;
-          return (
-            <CollapseCard key={g.konto?.id ?? 'none'}
-              icon={isHome
-                ? <Home size={17} className="text-emerald-600 dark:text-emerald-500" />
-                : <UserIcon size={17} className="text-emerald-600 dark:text-emerald-500" />}
-              title={scopeLabelOf(t, g.konto)}
-              right={<span className="text-sm font-medium">{eur(sum)}<span className="text-[11px] font-normal text-zinc-400">{t('finances.perMonth')}</span></span>}
-              onAdd={() => setModal(emptyDraft(g.konto?.id))}
-              addTitle={t('finances.add')}
-            >
-              {g.items.length === 0
-                ? <Card className="p-3 text-xs text-zinc-400">{t('finances.emptyScope')}</Card>
-                : g.items.map(c => <FixRow key={c.id} c={c} t={t} onEdit={fc => setModal(draftFromCost(fc))} onDelete={fc => remove.mutate(fc)} />)}
-            </CollapseCard>
-          );
-        })}
+        {memberGroups.map(m => (
+          <MemberFixGroup key={m.key} label={m.label} isHome={m.isHome} konten={m.konten} items={m.items} t={t}
+            onAdd={kid => setModal(emptyDraft(kid, 'expense'))}
+            onEdit={fc => setModal(draftFromCost(fc))}
+            onDelete={fc => remove.mutate(fc)} />
+        ))}
         {inactive.length > 0 && (
           <CollapseCard dashed
             icon={<Archive size={17} className="text-emerald-600 dark:text-emerald-500" />}
@@ -2266,7 +2380,7 @@ function ManageTab() {
           </CollapseCard>
         )}
       </div>
-      {!groups.some(g => g.items.length) && !fixedIncomes.length && !inactive.length && !oneOffs.length && <EmptyState>{t('finances.empty')}</EmptyState>}
+      {!memberGroups.some(m => m.items.length) && !fixedIncomes.length && !inactive.length && !oneOffs.length && <EmptyState>{t('finances.empty')}</EmptyState>}
 
       {oneOffs.length > 0 && (
         <CollapseCard icon={<Zap size={17} className="text-emerald-600 dark:text-emerald-500" />} title={t('finances.oneOffTitle')} badge={oneOffs.length}>
@@ -2288,6 +2402,17 @@ function ManageTab() {
             </Card>
           ))}
         </CollapseCard>
+      )}
+
+      {payslipOpen && (
+        <Modal open onClose={() => setPayslipOpen(false)} title={t('finances.income.heading')}>
+          <PayslipUpload scopeKonten={scopeKonten} embedded />
+        </Modal>
+      )}
+      {bankOpen && (
+        <Modal open onClose={() => setBankOpen(false)} title={t('finances.bank.heading')}>
+          <BankUpload scopeKonten={scopeKonten} embedded />
+        </Modal>
       )}
 
       {modal && (
