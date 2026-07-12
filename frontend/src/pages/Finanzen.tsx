@@ -2118,11 +2118,18 @@ function FixRow({ c, t, onEdit, onDelete }: {
 /** Bank-statement bookings from CSV imports, one direction (in = credits, out = debits),
  *  filterable by the account they belong to. The `+` opens the bank-CSV upload popup.
  *  Shares the ['bank-tx'] cache so a CSV upload refreshes it automatically. */
-function BankMovements({ direction, onUpload }: { direction: 'in' | 'out'; onUpload: () => void }) {
+function BankMovements({ direction, ownerKeys, onUpload }: { direction: 'in' | 'out'; ownerKeys: string[]; onUpload: () => void }) {
   const { t } = useTranslation();
   const [konto, setKonto] = useState('');
   const { data } = useQuery({ queryKey: ['bank-tx', 'all'], queryFn: () => api<{ items: BankTx[] }>('/api/finances/bank') });
   const dir = useMemo(() => (data?.items ?? []).filter(x => direction === 'in' ? x.amount > 0 : x.amount < 0), [data, direction]);
+  // A booking whose counterparty is one of the household's OWN account holders is an
+  // internal transfer (e.g. Martin → Haushaltskonto): shown greyed but NOT counted, so both
+  // legs net out and the total isn't inflated. Detection is data-driven from the konto owners.
+  const isTransfer = (x: BankTx) => {
+    const c = (x.counterparty ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    return !!c && ownerKeys.some(k => k && c.includes(k));
+  };
   // Accounts that actually have a booking of this direction (cash accounts never appear —
   // bank_tx only exist for CSV-imported bank accounts).
   const accounts = useMemo(() => {
@@ -2132,7 +2139,7 @@ function BankMovements({ direction, onUpload }: { direction: 'in' | 'out'; onUpl
   }, [dir]);
   const rows = useMemo(() => dir.filter(x => !konto || String(x.konto_id) === konto), [dir, konto]);
   useEffect(() => { if (konto && !accounts.some(a => a.id === konto)) setKonto(''); }, [accounts, konto]);
-  const absTotal = Math.abs(rows.reduce((s, x) => s + x.amount, 0));
+  const absTotal = Math.abs(rows.filter(x => !isTransfer(x)).reduce((s, x) => s + x.amount, 0));
 
   return (
     <CollapseCard
@@ -2154,15 +2161,21 @@ function BankMovements({ direction, onUpload }: { direction: 'in' | 'out'; onUpl
         ? <p className="text-xs text-zinc-400">{t('finances.bankMovesEmpty')}</p>
         : (
           <ul className="flex flex-col divide-y divide-zinc-100 dark:divide-zinc-800">
-            {rows.slice(0, 100).map(x => (
-              <li key={x.id} className="flex items-center gap-3 py-2">
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm">{x.counterparty || x.description || '—'}</div>
-                  <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{ddmmyyyy(x.booking_date)}{x.konto_name ? ` · ${x.konto_name}` : ''}</div>
-                </div>
-                <span className={cn('shrink-0 text-sm font-medium', x.amount > 0 && 'text-emerald-600 dark:text-emerald-500')}>{x.amount > 0 ? '+' : '−'}{eur(Math.abs(x.amount))}</span>
-              </li>
-            ))}
+            {rows.slice(0, 100).map(x => {
+              const tr = isTransfer(x);
+              return (
+                <li key={x.id} className={cn('flex items-center gap-3 py-2', tr && 'opacity-50')}>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="truncate text-sm">{x.counterparty || x.description || '—'}</span>
+                      {tr && <span className="shrink-0 rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">{t('finances.transferBadge')}</span>}
+                    </div>
+                    <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{ddmmyyyy(x.booking_date)}{x.konto_name ? ` · ${x.konto_name}` : ''}</div>
+                  </div>
+                  <span className={cn('shrink-0 text-sm font-medium', !tr && x.amount > 0 && 'text-emerald-600 dark:text-emerald-500')}>{x.amount > 0 ? '+' : '−'}{eur(Math.abs(x.amount))}</span>
+                </li>
+              );
+            })}
           </ul>
         )}
       {rows.length > 100 && <p className="pt-1 text-[11px] text-zinc-400">{t('finances.bankShowingFirst', { total: rows.length })}</p>}
@@ -2213,7 +2226,7 @@ function ManageTab() {
   const qc = useQueryClient();
   const [modal, setModal] = useState<Draft | null>(null);
   const [showInfo, setShowInfo] = useState(false); // Fixkosten info text collapsed behind the (i)
-  const [payslipOpen, setPayslipOpen] = useState(false); // pay-slip upload popup (Einnahmen +)
+  const [bankInOpen, setBankInOpen] = useState(false); // CSV + pay-slip upload popup (Zahlungseingaenge +)
   const [bankOpen, setBankOpen] = useState(false); // bank-CSV upload popup (Zahlungen +)
 
   const { data: costs, isLoading } = useQuery({ queryKey: ['fixed-costs'], queryFn: () => api<FixedCost[]>('/api/fixed-costs') });
@@ -2223,6 +2236,12 @@ function ManageTab() {
   // Scope options: every non-cash account. Shared = household (rent, loan…),
   // the rest = per person/account. Cash accounts don't carry standing costs.
   const scopeKonten = useMemo(() => (konten ?? []).filter(k => !k.is_cash), [konten]);
+  // Normalised usernames of the household's own account holders — a bank booking whose
+  // counterparty matches one is an internal transfer (nets out, not real income/spend).
+  const ownerKeys = useMemo(
+    () => [...new Set((konten ?? []).map(k => k.owner).filter((o): o is string => !!o).map(o => o.toLowerCase().replace(/[^a-z0-9]/g, '')))],
+    [konten],
+  );
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ['fixed-costs'] });
     void qc.invalidateQueries({ queryKey: ['fin-month'] });
@@ -2332,8 +2351,7 @@ function ManageTab() {
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-2">
         <div className="px-1 text-[11px] font-medium text-zinc-400">{t('finances.incomeGroupLabel')}</div>
-        <IncomeList onUpload={() => setPayslipOpen(true)} />
-        <BankMovements direction="in" onUpload={() => setBankOpen(true)} />
+        <BankMovements direction="in" ownerKeys={ownerKeys} onUpload={() => setBankInOpen(true)} />
         <CollapseCard
           icon={<TrendingUp size={17} className="text-emerald-600 dark:text-emerald-500" />}
           title={t('finances.fixedIncomeTitle')}
@@ -2350,7 +2368,7 @@ function ManageTab() {
 
       <div className="flex flex-col gap-2">
         <div className="px-1 text-[11px] font-medium text-zinc-400">{t('finances.expenditureGroupLabel')}</div>
-        <BankMovements direction="out" onUpload={() => setBankOpen(true)} />
+        <BankMovements direction="out" ownerKeys={ownerKeys} onUpload={() => setBankOpen(true)} />
         <div className="flex items-center gap-1.5 px-1 pt-1">
           <span className="text-[11px] font-medium text-zinc-400">{t('finances.fixedCostsTitle')}</span>
           <span className="text-[11px] text-zinc-400">· {eur(monthlyTotal)}{t('finances.perMonth')}</span>
@@ -2404,9 +2422,18 @@ function ManageTab() {
         </CollapseCard>
       )}
 
-      {payslipOpen && (
-        <Modal open onClose={() => setPayslipOpen(false)} title={t('finances.income.heading')}>
-          <PayslipUpload scopeKonten={scopeKonten} embedded />
+      {bankInOpen && (
+        <Modal open onClose={() => setBankInOpen(false)} title={t('finances.addIncomeTitle')}>
+          <div className="flex flex-col gap-5">
+            <BankUpload scopeKonten={scopeKonten} embedded />
+            <div className="border-t border-zinc-100 pt-4 dark:border-zinc-800">
+              <div className="mb-2 flex items-center gap-2">
+                <Upload size={16} className="text-emerald-600 dark:text-emerald-500" />
+                <h3 className="text-sm font-semibold">{t('finances.income.heading')}</h3>
+              </div>
+              <PayslipUpload scopeKonten={scopeKonten} embedded />
+            </div>
+          </div>
         </Modal>
       )}
       {bankOpen && (

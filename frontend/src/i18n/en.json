@@ -120,6 +120,7 @@
     "fixedIncomeTitle": "Fixed income",
     "fixedCostsTitle": "Fixed costs",
     "incomeGroupLabel": "Income",
+    "addIncomeTitle": "Add incoming payments",
     "expenditureGroupLabel": "Expenditures",
     "otherScope": "Other",
     "bankOutTitle": "Recorded payments",
