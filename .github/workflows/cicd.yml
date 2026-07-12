@@ -104,14 +104,33 @@ jobs:
           # to a named volume (vds-receipts) so deploys never break.
           RECEIPTS_VOLUME: ${{ vars.RECEIPTS_VOLUME }}
         run: docker stack deploy --with-registry-auth --detach=false -c deploy/stack.yml "$STACK"
-      - name: Verify
+      # Gate the build on the running SHA, NOT just on "docker stack deploy exited 0".
+      # A boot/migration crash or a node out of disk makes Swarm silently roll back to
+      # the previous image (service stays 2/2 on the OLD sha) while CI stays green — the
+      # long-standing "green CI ≠ deployed" trap. Poll /api/version (routing mesh →
+      # localhost:PORT) until the new sha serves for 3 consecutive reads (both replicas
+      # converged + stable); fail the job with diagnostics if it never does.
+      - name: Verify rollout converged to the new SHA
         env:
           STACK: ${{ needs.meta.outputs.stack }}
+          PORT: ${{ needs.meta.outputs.port }}
+          SHA: ${{ github.sha }}
         run: |
-          sleep 5
+          echo "Waiting for ${STACK} to converge to ${SHA:0:12} on :${PORT} ..."
+          streak=0
+          for i in $(seq 1 40); do
+            cur=$(curl -s -m 5 "http://localhost:${PORT}/api/version" | grep -oE '"sha":"[a-f0-9]+"' | cut -d'"' -f4)
+            if [ "$cur" = "$SHA" ]; then streak=$((streak+1)); else streak=0; fi
+            echo "  [$i] serving=${cur:0:12} streak=${streak}"
+            if [ "$streak" -ge 3 ]; then echo "✅ converged to ${SHA:0:12}"; exit 0; fi
+            sleep 3
+          done
+          echo "::error::${STACK} did NOT converge to ${SHA:0:12} within ~120s — boot crash + Swarm rollback, or a node out of disk."
+          echo "===== service state ====="
           docker service ls --filter name="${STACK}"
-          docker service ps "${STACK}_app" --no-trunc | head -5
-          echo "===== FAILED task startup logs (crash diagnostics) ====="
-          FAILED=$(docker service ps "${STACK}_app" --no-trunc --format '{{.ID}} {{.CurrentState}}' | grep -i 'Failed' | head -1 | awk '{print $1}')
+          docker service ps "${STACK}_app" --no-trunc | head -8
+          echo "===== failed/rejected task startup logs (crash diagnostics) ====="
+          FAILED=$(docker service ps "${STACK}_app" --no-trunc --format '{{.ID}} {{.CurrentState}}' | grep -iE 'Failed|Rejected' | head -1 | awk '{print $1}')
           echo "failed task: ${FAILED:-<none>}"
-          if [ -n "$FAILED" ]; then docker service logs --raw "$FAILED" 2>&1 | tail -60 || true; fi
+          if [ -n "$FAILED" ]; then docker service logs --raw "$FAILED" 2>&1 | tail -80 || true; fi
+          exit 1
