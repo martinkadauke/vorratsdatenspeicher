@@ -119,6 +119,7 @@
     "oneOffBadge": "einmalig",
     "fixedIncomeTitle": "Feste Einnahmen",
     "fixedCostsTitle": "Fixkosten",
+    "incomeGroupLabel": "Einnahmen",
     "inactiveTitle": "Inaktive Fixkosten",
     "varIncomeTitle": "Variable Einnahmen",
     "noVarIncome": "Keine einmaligen Einnahmen",

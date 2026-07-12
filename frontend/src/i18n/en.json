@@ -119,6 +119,7 @@
     "oneOffBadge": "one-off",
     "fixedIncomeTitle": "Fixed income",
     "fixedCostsTitle": "Fixed costs",
+    "incomeGroupLabel": "Income",
     "inactiveTitle": "Inactive fixed costs",
     "varIncomeTitle": "Variable income",
     "noVarIncome": "No one-off income",

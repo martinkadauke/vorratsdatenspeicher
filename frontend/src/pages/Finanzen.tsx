@@ -6,7 +6,7 @@ import {
   Wallet, Plus, Pencil, Trash2, Home, User as UserIcon, Info,
   ChevronLeft, ChevronRight, ChevronDown, CheckCircle2, Circle, CircleDot, AlertCircle, Search, X, Upload, Layers, Lock,
   Link2, Link2Off, RefreshCw, Landmark, SlidersHorizontal, Flag, FilePlus2, Receipt, FileText, Paperclip, Sparkles, Calendar, ExternalLink,
-  TrendingUp, Archive,
+  TrendingUp, Archive, Zap,
 } from 'lucide-react';
 import { api, getToken } from '../api/client';
 import { Card, Spinner, Button, Input, Label, Select, Switch, Modal, EmptyState, Badge } from '../components/ui';
@@ -1348,7 +1348,6 @@ function IncomeList() {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [viewFile, setViewFile] = useState<{ id: number; name: string } | null>(null);
-  const [open, setOpen] = useState(false);
   const [year, setYear] = useState(String(new Date().getFullYear())); // default: current year
   const [member, setMember] = useState(''); // '' = all members
   const { data, isLoading } = useQuery({
@@ -1398,15 +1397,12 @@ function IncomeList() {
   useEffect(() => { if (year && !years.includes(year)) setYear(''); }, [years, year]);
 
   return (
-    <Card className="flex flex-col gap-3 p-4">
-      <button onClick={() => setOpen(o => !o)} className="flex items-center gap-2 text-left">
-        <Wallet size={16} className="shrink-0 text-emerald-600 dark:text-emerald-500" />
-        <h2 className="text-base font-semibold">{t('finances.income.listHeading')}</h2>
-        <span className="ml-auto text-sm font-semibold text-emerald-600 dark:text-emerald-500">+{eur(total)}</span>
-        <ChevronDown size={16} className={cn('shrink-0 text-zinc-400 transition-transform', !open && '-rotate-90')} />
-      </button>
-      {open && (
-      <>
+    <>
+      <CollapseCard
+        icon={<Wallet size={17} className="text-emerald-600 dark:text-emerald-500" />}
+        title={t('finances.income.listHeading')}
+        right={<span className="text-sm font-medium text-emerald-600 dark:text-emerald-500">+{eur(total)}</span>}
+      >
       <div className="flex gap-2">
         <Select value={year} onChange={e => setYear(e.target.value)}>
           <option value="">{t('finances.income.allYears')}</option>
@@ -1466,10 +1462,9 @@ function IncomeList() {
           ))}
         </ul>
       )}
-      </>
-      )}
+      </CollapseCard>
       {viewFile && <PayslipViewer id={viewFile.id} name={viewFile.name} t={t} onClose={() => setViewFile(null)} />}
-    </Card>
+    </>
   );
 }
 
@@ -2209,29 +2204,31 @@ function ManageTab() {
     <div className="flex flex-col gap-4">
       <PayslipUpload scopeKonten={scopeKonten} />
       <BankUpload scopeKonten={scopeKonten} />
-      <IncomeList />
-
-      <CollapseCard
-        icon={<TrendingUp size={17} className="text-emerald-600 dark:text-emerald-500" />}
-        title={t('finances.fixedIncomeTitle')}
-        badge={fixedIncomes.length}
-        right={<span className="text-sm font-semibold text-emerald-600 dark:text-emerald-500">+{eur(fixedIncomeTotal)}<span className="text-xs font-normal text-zinc-400">{t('finances.perMonth')}</span></span>}
-        onAdd={() => setModal(emptyDraft(scopeKonten[0]?.id, 'income'))}
-        addTitle={t('finances.add')}
-      >
-        {fixedIncomes.length === 0
-          ? <Card className="p-3 text-xs text-zinc-400">{t('finances.noIncomePlans')}</Card>
-          : fixedIncomes.map(c => <FixRow key={c.id} c={c} t={t} onEdit={fc => setModal(draftFromCost(fc))} onDelete={fc => remove.mutate(fc)} />)}
-      </CollapseCard>
 
       <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-2 px-1">
-          <Receipt size={16} className="text-zinc-500 dark:text-zinc-400" />
-          <span className="text-sm font-semibold">{t('finances.fixedCostsTitle')}</span>
-          <button onClick={() => setShowInfo(s => !s)} className="rounded-lg p-0.5 text-zinc-400 hover:text-sky-500" title={t('finances.hint')} aria-label="info">
-            <Info size={15} />
+        <div className="px-1 text-[11px] font-medium text-zinc-400">{t('finances.incomeGroupLabel')}</div>
+        <IncomeList />
+        <CollapseCard
+          icon={<TrendingUp size={17} className="text-emerald-600 dark:text-emerald-500" />}
+          title={t('finances.fixedIncomeTitle')}
+          badge={fixedIncomes.length}
+          right={<span className="text-sm font-medium text-emerald-600 dark:text-emerald-500">+{eur(fixedIncomeTotal)}<span className="text-[11px] font-normal text-zinc-400">{t('finances.perMonth')}</span></span>}
+          onAdd={() => setModal(emptyDraft(scopeKonten[0]?.id, 'income'))}
+          addTitle={t('finances.add')}
+        >
+          {fixedIncomes.length === 0
+            ? <Card className="p-3 text-xs text-zinc-400">{t('finances.noIncomePlans')}</Card>
+            : fixedIncomes.map(c => <FixRow key={c.id} c={c} t={t} onEdit={fc => setModal(draftFromCost(fc))} onDelete={fc => remove.mutate(fc)} />)}
+        </CollapseCard>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-1.5 px-1">
+          <span className="text-[11px] font-medium text-zinc-400">{t('finances.fixedCostsTitle')}</span>
+          <span className="text-[11px] text-zinc-400">· {eur(monthlyTotal)}{t('finances.perMonth')}</span>
+          <button onClick={() => setShowInfo(s => !s)} className="rounded p-0.5 text-zinc-400 hover:text-sky-500" title={t('finances.hint')} aria-label="info">
+            <Info size={13} />
           </button>
-          <span className="ml-auto text-base font-bold text-emerald-600 dark:text-emerald-500">{eur(monthlyTotal)}<span className="text-xs font-normal text-zinc-400">{t('finances.perMonth')}</span></span>
         </div>
         {showInfo && (
           <Card className="flex items-start gap-3 p-3 text-xs text-zinc-500 dark:text-zinc-400">
@@ -2245,9 +2242,11 @@ function ManageTab() {
           const isHome = !!g.konto?.is_shared;
           return (
             <CollapseCard key={g.konto?.id ?? 'none'}
-              icon={isHome ? <Home size={16} className="text-violet-500" /> : <UserIcon size={16} className="text-emerald-500" />}
+              icon={isHome
+                ? <Home size={17} className="text-emerald-600 dark:text-emerald-500" />
+                : <UserIcon size={17} className="text-emerald-600 dark:text-emerald-500" />}
               title={scopeLabelOf(t, g.konto)}
-              right={<span className="text-xs text-zinc-500 dark:text-zinc-400">{eur(sum)}{t('finances.perMonth')}</span>}
+              right={<span className="text-sm font-medium">{eur(sum)}<span className="text-[11px] font-normal text-zinc-400">{t('finances.perMonth')}</span></span>}
               onAdd={() => setModal(emptyDraft(g.konto?.id))}
               addTitle={t('finances.add')}
             >
@@ -2259,7 +2258,7 @@ function ManageTab() {
         })}
         {inactive.length > 0 && (
           <CollapseCard dashed
-            icon={<Archive size={16} className="text-zinc-400" />}
+            icon={<Archive size={17} className="text-emerald-600 dark:text-emerald-500" />}
             title={<span className="text-zinc-500 dark:text-zinc-400">{t('finances.inactiveTitle')}</span>}
             badge={inactive.length}
           >
@@ -2270,7 +2269,7 @@ function ManageTab() {
       {!groups.some(g => g.items.length) && !fixedIncomes.length && !inactive.length && !oneOffs.length && <EmptyState>{t('finances.empty')}</EmptyState>}
 
       {oneOffs.length > 0 && (
-        <Section title={t('finances.oneOffTitle')} count={oneOffs.length} defaultOpen={false}>
+        <CollapseCard icon={<Zap size={17} className="text-emerald-600 dark:text-emerald-500" />} title={t('finances.oneOffTitle')} badge={oneOffs.length}>
           {oneOffs.map(c => (
             <Card key={c.id} className={cn('flex items-center gap-3 p-3', !c.active && 'opacity-50')}>
               <div className="min-w-0 flex-1">
@@ -2288,7 +2287,7 @@ function ManageTab() {
               <button onClick={() => remove.mutate(c)} className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30" title={t('common.delete')}><Trash2 size={15} /></button>
             </Card>
           ))}
-        </Section>
+        </CollapseCard>
       )}
 
       {modal && (
