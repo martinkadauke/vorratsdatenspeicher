@@ -191,7 +191,7 @@ export function spendingRoutes(app: FastifyInstance): void {
         ${kFrag}
     `) as unknown as ArtikelRow[];
 
-    const pathIsMeta = path.startsWith('Meta');
+    const pathIsMeta = path === 'Meta' || path.startsWith('Meta/');
     const share = await buildShareResolver(member);
     const byYm = new Map<string, number>();
     for (const a of artikel) {

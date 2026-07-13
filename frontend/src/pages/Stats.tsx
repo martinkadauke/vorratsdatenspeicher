@@ -356,13 +356,33 @@ export function Stats() {
       )}
 
       {/* Drilldown */}
-      <DrilldownModal node={drill} onClose={() => setDrill(null)} year={year} month={month} from={from} to={to} kParam={kParam} />
+      <DrilldownModal
+        node={drill}
+        onClose={() => setDrill(null)}
+        year={year}
+        month={month}
+        from={from}
+        to={to}
+        kParam={kParam}
+        onPickMonth={(ym) => {
+          const [y, m] = ym.split('-').map(Number);
+          if (!y || !m) return;
+          // Jump the whole view to the clicked month: clears any active date range so
+          // the carousel, totals and tree all reflect that month, and the open drilldown
+          // re-queries its items for it.
+          setFrom('');
+          setTo('');
+          setYear(y);
+          setMonth(m);
+        }}
+      />
     </div>
   );
 }
 
-function DrilldownModal({ node, onClose, year, month, from, to, kParam }: {
+function DrilldownModal({ node, onClose, year, month, from, to, kParam, onPickMonth }: {
   node: SpendingNode | null; onClose: () => void; year: number; month: number; from: string; to: string; kParam: string;
+  onPickMonth: (ym: string) => void;
 }) {
   const { t, i18n } = useTranslation();
   const rangeMode = !!(from && to);
@@ -390,15 +410,21 @@ function DrilldownModal({ node, onClose, year, month, from, to, kParam }: {
           <h3 className="mb-2 text-sm font-medium text-zinc-500">{t('stats.history')}</h3>
           <div className="h-44">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={history ?? []} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+              <LineChart
+                data={history ?? []}
+                margin={{ top: 4, right: 8, bottom: 0, left: 0 }}
+                onClick={(e: { activeLabel?: string }) => { if (e?.activeLabel) onPickMonth(e.activeLabel); }}
+                className="cursor-pointer"
+              >
                 <CartesianGrid strokeDasharray="3 3" stroke="currentColor" className="text-zinc-200 dark:text-zinc-800" />
                 <XAxis dataKey="ym" tick={{ fontSize: 10 }} tickFormatter={(ym: string) => ym.slice(5)} />
                 <YAxis tick={{ fontSize: 10 }} width={45} tickFormatter={(v: number) => `${v}€`} />
                 <Tooltip formatter={(v: number | string) => eur(Number(v))} labelFormatter={(l) => String(l)} />
-                <Line type="monotone" dataKey="spend" stroke="#10b981" strokeWidth={2} dot={{ r: 2.5 }} />
+                <Line type="monotone" dataKey="spend" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>
+          <p className="mt-1 text-center text-xs text-zinc-400">{t('stats.tapMonthHint')}</p>
         </div>
 
         <div>

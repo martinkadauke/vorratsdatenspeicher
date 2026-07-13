@@ -451,6 +451,7 @@
     "day": "day",
     "history": "History",
     "items": "Items",
+    "tapMonthHint": "Tap a month to jump to it",
     "searchPlaceholder": "Search or ask…",
     "categories": "Categories",
     "articles": "Articles",
