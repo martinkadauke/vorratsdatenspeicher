@@ -173,8 +173,9 @@ export function spendingRoutes(app: FastifyInstance): void {
   });
 
   app.get('/api/spending/history', async (req) => {
-    const q = req.query as { path?: string; months?: string; member?: string; konten?: string };
+    const q = req.query as { path?: string; months?: string; member?: string; konten?: string; canonical?: string };
     const path = q.path ?? '';
+    const canonical = (q.canonical ?? '').trim();
     const months = Math.min(parseInt(q.months ?? '12', 10) || 12, 36);
     const member = q.member ? parseInt(q.member, 10) : null;
     const kIds = (q.konten ?? '').split(',').map(s => parseInt(s, 10)).filter(Number.isFinite);
@@ -196,9 +197,14 @@ export function spendingRoutes(app: FastifyInstance): void {
     const share = await buildShareResolver(member);
     const byYm = new Map<string, number>();
     for (const a of artikel) {
-      const p = a.category_path ?? UNCAT;
-      if (!pathIsMeta && (p === 'Meta' || p.startsWith('Meta/'))) continue;
-      if (path && p !== path && !p.startsWith(path + '/')) continue;
+      if (canonical) {
+        // Article scope: exactly this canonical, ignore category/meta filtering.
+        if (a.canonical_name !== canonical) continue;
+      } else {
+        const p = a.category_path ?? UNCAT;
+        if (!pathIsMeta && (p === 'Meta' || p.startsWith('Meta/'))) continue;
+        if (path && p !== path && !p.startsWith(path + '/')) continue;
+      }
       const eur = share(a);
       if (!eur) continue;
       const ym = ymOf(a.datum);
@@ -215,11 +221,12 @@ export function spendingRoutes(app: FastifyInstance): void {
   });
 
   app.get('/api/spending/items', async (req) => {
-    const q = req.query as { path?: string; year?: string; month?: string; member?: string; konten?: string; from?: string; to?: string };
+    const q = req.query as { path?: string; year?: string; month?: string; member?: string; konten?: string; from?: string; to?: string; canonical?: string };
     const now = new Date();
     const year = parseInt(q.year ?? '', 10) || now.getFullYear();
     const month = parseInt(q.month ?? '', 10) || now.getMonth() + 1;
     const path = q.path ?? '';
+    const canonical = (q.canonical ?? '').trim();
     const member = q.member ? parseInt(q.member, 10) : null;
     const kIds = (q.konten ?? '').split(',').map(s => parseInt(s, 10)).filter(Number.isFinite);
     const kFrag = kIds.length ? sql`AND e.konto_id = ANY(${kIds})` : sql``;
@@ -237,13 +244,21 @@ export function spendingRoutes(app: FastifyInstance): void {
       rangeEnd = `${ymKey(next.year, next.month)}-01`;
     }
 
+    // canonical (article) scope wins over the category path: show exactly that
+    // article's purchases, regardless of which category it sits in (e.g. an
+    // uncategorised "Diesel" → only diesel, not the whole Uncategorised bucket).
+    const scopeFrag = canonical
+      ? sql`AND a.canonical_name = ${canonical}`
+      : sql`
+        ${(path === 'Meta' || path.startsWith('Meta/')) ? sql`` : sql`AND (a.category_path IS NULL OR a.category_path NOT LIKE 'Meta/%')`}
+        ${path ? sql`AND (a.category_path = ${path} OR a.category_path LIKE ${path + '/%'})` : sql``}`;
+
     const rows = await sql`
       SELECT a.id, a.name, a.canonical_name, a.category_path, a.preis, a.menge, a.einheit,
              e.id AS einkauf_id, e.datum::text AS datum, e.roh_ladenname
       FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
       WHERE e.datum >= ${rangeStart} AND e.datum < ${rangeEnd}
-        ${(path === 'Meta' || path.startsWith('Meta/')) ? sql`` : sql`AND (a.category_path IS NULL OR a.category_path NOT LIKE 'Meta/%')`}
-        ${path ? sql`AND (a.category_path = ${path} OR a.category_path LIKE ${path + '/%'})` : sql``}
+        ${scopeFrag}
         ${kontoScope(req.user, sql`e`)}
         ${kFrag}
       ORDER BY a.preis DESC NULLS LAST

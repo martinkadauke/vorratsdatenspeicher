@@ -88,13 +88,20 @@ interface AiAnswer {
   clarify: string | null;
 }
 
+// A drilldown targets either a whole category (by path) or a single article (by
+// canonical name). An article drills to only its own purchases, not its category —
+// e.g. an uncategorised "Diesel" shows just diesel, not the whole Uncategorised bucket.
+type DrillTarget =
+  | { kind: 'category'; node: SpendingNode }
+  | { kind: 'article'; canonical: string; label: string };
+
 export function Stats() {
   const { t, i18n } = useTranslation();
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [drill, setDrill] = useState<SpendingNode | null>(null);
+  const [drill, setDrill] = useState<DrillTarget | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -197,14 +204,14 @@ export function Stats() {
           style={{ paddingLeft: `${(n.level - 1) * 14 + 6}px` }}
         >
           <button
-            onClick={() => children.length ? toggle(n.path) : setDrill(n)}
+            onClick={() => children.length ? toggle(n.path) : setDrill({ kind: 'category', node: n })}
             className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
           >
             {children.length > 0 && (
               <ChevronDown size={14} className={cn('shrink-0 text-zinc-400 transition-transform', !isOpen && '-rotate-90')} />
             )}
             {n.emoji && <span>{n.emoji}</span>}
-            <span className="truncate hover:underline" onClick={e => { e.stopPropagation(); setDrill(n); }}>{n.label}</span>
+            <span className="truncate hover:underline" onClick={e => { e.stopPropagation(); setDrill({ kind: 'category', node: n }); }}>{n.label}</span>
           </button>
           <span className={cn('tabular shrink-0 text-sm', over && 'text-red-500')}>{eur(n.mtd)}</span>
           {!rangeMode && <span className="tabular hidden shrink-0 text-xs text-zinc-400 sm:inline">→ {eur(n.projection)}</span>}
@@ -346,7 +353,7 @@ export function Stats() {
             const node = nodeByPath.get(aiAnswer.category_path!);
             if (!node) return null;
             return (
-              <button onClick={() => setDrill(node)}
+              <button onClick={() => setDrill({ kind: 'category', node })}
                 className="mt-1 flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-left ring-1 ring-emerald-200 hover:bg-emerald-50 dark:bg-zinc-900 dark:ring-emerald-900 dark:hover:bg-zinc-800">
                 {node.emoji && <span>{node.emoji}</span>}
                 <span className="min-w-0 flex-1 truncate font-medium">{node.label}</span>
@@ -393,14 +400,15 @@ export function Stats() {
         </Card>
       )}
 
-      {/* Search results: matching categories + articles (an article jumps to its category) */}
+      {/* Search results: matching categories + articles. A category drills the whole
+          category; an article drills only its own purchases (its category is shown as context). */}
       {tree && searchLc && (
         <Card className="flex flex-col p-2">
           {searchHits.length > 0 && (
             <>
               <div className="px-2 pb-1 pt-1 text-[11px] font-medium text-zinc-400">{t('stats.categories')}</div>
               {searchHits.map(n => (
-                <button key={n.path} onClick={() => setDrill(n)}
+                <button key={n.path} onClick={() => setDrill({ kind: 'category', node: n })}
                   className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-900">
                   {n.emoji && <span>{n.emoji}</span>}
                   <span className="min-w-0 flex-1 truncate">{n.label}</span>
@@ -413,11 +421,10 @@ export function Stats() {
             <>
               <div className="px-2 pb-1 pt-2 text-[11px] font-medium text-zinc-400">{t('stats.articles')}</div>
               {articleHits.map(a => (
-                <button key={a.name} onClick={() => setDrill(a.node)}
+                <button key={a.name} onClick={() => setDrill({ kind: 'article', canonical: a.name, label: a.name })}
                   className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-900">
                   <span className="min-w-0 flex-1 truncate text-sm">{a.name}</span>
                   <span className="flex min-w-0 shrink items-center gap-1 text-xs text-zinc-400">
-                    <ChevronRight size={12} className="shrink-0" />
                     {a.node.emoji && <span>{a.node.emoji}</span>}
                     <span className="truncate">{a.node.label}</span>
                   </span>
@@ -437,7 +444,7 @@ export function Stats() {
 
       {/* Drilldown */}
       <DrilldownModal
-        node={drill}
+        target={drill}
         onClose={() => setDrill(null)}
         year={year}
         month={month}
@@ -460,8 +467,8 @@ export function Stats() {
   );
 }
 
-function DrilldownModal({ node, onClose, year, month, from, to, kParam, onPickMonth }: {
-  node: SpendingNode | null; onClose: () => void; year: number; month: number; from: string; to: string; kParam: string;
+function DrilldownModal({ target, onClose, year, month, from, to, kParam, onPickMonth }: {
+  target: DrillTarget | null; onClose: () => void; year: number; month: number; from: string; to: string; kParam: string;
   onPickMonth: (ym: string) => void;
 }) {
   const { t, i18n } = useTranslation();
@@ -469,23 +476,37 @@ function DrilldownModal({ node, onClose, year, month, from, to, kParam, onPickMo
   const rangeParam = rangeMode ? `&from=${from}&to=${to}` : '';
   const periodLabel = rangeMode ? `${fmtDate(from, i18n.language)} – ${fmtDate(to, i18n.language)}` : monthLabel(year, month, i18n.language);
 
+  // Scope: an article filters by canonical name (only its own purchases); a category by path.
+  const scope = target?.kind === 'article'
+    ? `canonical=${encodeURIComponent(target.canonical)}`
+    : `path=${encodeURIComponent(target?.node.path ?? '')}`;
+  const scopeKey = target?.kind === 'article' ? `a:${target.canonical}` : `c:${target?.node.path}`;
+  const title = target?.kind === 'article' ? target.label : `${target?.node.emoji ?? ''} ${target?.node.label ?? ''}`;
+
   const { data: history } = useQuery({
-    queryKey: ['spending-history', node?.path, kParam],
-    queryFn: () => api<HistoryPoint[]>(`/api/spending/history?path=${encodeURIComponent(node!.path)}&months=12${kParam}`),
-    enabled: !!node,
+    queryKey: ['spending-history', scopeKey, kParam],
+    queryFn: () => api<HistoryPoint[]>(`/api/spending/history?${scope}&months=12${kParam}`),
+    enabled: !!target,
   });
 
   const { data: items } = useQuery({
-    queryKey: ['spending-items', node?.path, year, month, rangeParam, kParam],
-    queryFn: () => api<SpendItem[]>(`/api/spending/items?path=${encodeURIComponent(node!.path)}&year=${year}&month=${month}${rangeParam}${kParam}`),
-    enabled: !!node,
+    queryKey: ['spending-items', scopeKey, year, month, rangeParam, kParam],
+    queryFn: () => api<SpendItem[]>(`/api/spending/items?${scope}&year=${year}&month=${month}${rangeParam}${kParam}`),
+    enabled: !!target,
   });
 
-  if (!node) return null;
+  if (!target) return null;
+
+  const total = (items ?? []).reduce((sum, it) => sum + Number(it.member_share ?? it.preis ?? 0), 0);
 
   return (
-    <Modal open={!!node} onClose={onClose} title={`${node.emoji ?? ''} ${node.label}`} wide>
+    <Modal open={!!target} onClose={onClose} title={title} wide>
       <div className="flex flex-col gap-5">
+        {/* Sum for the selected timeframe — the answer to "how much on X". */}
+        <div className="flex items-baseline justify-between border-b border-zinc-100 pb-3 dark:border-zinc-800">
+          <span className="text-sm text-zinc-500">{periodLabel}</span>
+          <span className="tabular text-2xl font-bold">{eur(total)}</span>
+        </div>
         <div>
           <h3 className="mb-2 text-sm font-medium text-zinc-500">{t('stats.history')}</h3>
           <div className="h-44">
