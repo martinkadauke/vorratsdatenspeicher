@@ -7,8 +7,6 @@ import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import type { SpendingNode, SpendingTree } from '../api/types';
 import { Card, Spinner, Modal, Input, Button, EmptyState } from '../components/ui';
-import { useFamily } from '../components/ConsumerChips';
-import { TrendBar } from '../components/TrendBar';
 import { cn, eur, monthLabel, fmtDate } from '../lib/utils';
 
 interface HistoryPoint { ym: string; spend: number }
@@ -85,10 +83,8 @@ export function Stats() {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
-  const [member, setMember] = useState<number | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [drill, setDrill] = useState<SpendingNode | null>(null);
-  const { data: family = [] } = useFamily();
 
   const shift = (delta: number) => {
     const total = year * 12 + (month - 1) + delta;
@@ -96,10 +92,9 @@ export function Stats() {
     setMonth((total % 12 + 12) % 12 + 1);
   };
 
-  const memberParam = member !== null ? `&member=${member}` : '';
   const { data: tree, isLoading } = useQuery({
-    queryKey: ['spending-tree', year, month, member],
-    queryFn: () => api<SpendingTree>(`/api/spending/tree?year=${year}&month=${month}${memberParam}`),
+    queryKey: ['spending-tree', year, month],
+    queryFn: () => api<SpendingTree>(`/api/spending/tree?year=${year}&month=${month}`),
   });
 
   const childrenOf = useMemo(() => {
@@ -168,34 +163,6 @@ export function Stats() {
         <button onClick={() => shift(1)} className="rounded-xl p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800"><ChevronRight size={20} /></button>
       </div>
 
-      {/* Member filter */}
-      <div className="scrollbar-none flex gap-1.5 overflow-x-auto">
-        <button
-          onClick={() => setMember(null)}
-          className={cn(
-            'shrink-0 rounded-full border px-3 py-1 text-sm font-medium',
-            member === null ? 'border-transparent bg-emerald-600 text-white' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700',
-          )}
-        >
-          {t('stats.all')}
-        </button>
-        {family.map(m => (
-          <button
-            key={m.id}
-            onClick={() => setMember(member === m.id ? null : m.id)}
-            className={cn(
-              'shrink-0 rounded-full border px-3 py-1 text-sm font-medium',
-              member === m.id ? 'border-transparent text-white' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700',
-            )}
-            style={member === m.id ? { backgroundColor: m.color ?? '#10b981' } : undefined}
-          >
-            {m.emoji ? `${m.emoji} ` : ''}{m.name}
-          </button>
-        ))}
-      </div>
-
-      <TrendBar member={member} />
-
       {isLoading && <Spinner />}
 
       {total && (
@@ -237,26 +204,25 @@ export function Stats() {
       )}
 
       {/* Drilldown */}
-      <DrilldownModal node={drill} onClose={() => setDrill(null)} year={year} month={month} member={member} />
+      <DrilldownModal node={drill} onClose={() => setDrill(null)} year={year} month={month} />
     </div>
   );
 }
 
-function DrilldownModal({ node, onClose, year, month, member }: {
-  node: SpendingNode | null; onClose: () => void; year: number; month: number; member: number | null;
+function DrilldownModal({ node, onClose, year, month }: {
+  node: SpendingNode | null; onClose: () => void; year: number; month: number;
 }) {
   const { t, i18n } = useTranslation();
-  const memberParam = member !== null ? `&member=${member}` : '';
 
   const { data: history } = useQuery({
-    queryKey: ['spending-history', node?.path, member],
-    queryFn: () => api<HistoryPoint[]>(`/api/spending/history?path=${encodeURIComponent(node!.path)}&months=12${memberParam}`),
+    queryKey: ['spending-history', node?.path],
+    queryFn: () => api<HistoryPoint[]>(`/api/spending/history?path=${encodeURIComponent(node!.path)}&months=12`),
     enabled: !!node,
   });
 
   const { data: items } = useQuery({
-    queryKey: ['spending-items', node?.path, year, month, member],
-    queryFn: () => api<SpendItem[]>(`/api/spending/items?path=${encodeURIComponent(node!.path)}&year=${year}&month=${month}${memberParam}`),
+    queryKey: ['spending-items', node?.path, year, month],
+    queryFn: () => api<SpendItem[]>(`/api/spending/items?path=${encodeURIComponent(node!.path)}&year=${year}&month=${month}`),
     enabled: !!node,
   });
 
