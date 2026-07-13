@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { ChevronLeft, ChevronRight, ChevronDown, Pencil, Check, X, Search, SlidersHorizontal } from 'lucide-react';
@@ -90,6 +90,10 @@ export function Stats() {
   const [to, setTo] = useState('');
   const [konten, setKonten] = useState<Set<number>>(new Set());
   const [search, setSearch] = useState('');
+
+  // Land at the top when opening Statistik (window scroll persists across client-side nav,
+  // and refresh restoration is disabled globally) so the month carousel is always visible.
+  useEffect(() => { window.scrollTo(0, 0); }, []);
 
   const shift = (delta: number) => {
     const total = year * 12 + (month - 1) + delta;

@@ -10,6 +10,11 @@ import { AuthProvider } from './context/auth';
 const storedDark = localStorage.getItem('vds_dark');
 document.documentElement.classList.toggle('dark', storedDark !== 'false');
 
+// Load pages at the top. The browser's default scroll restoration re-applied a mid-page
+// scroll on refresh (once async content grew the page back to that height), hiding the top
+// of the page — e.g. the Statistik month carousel. Must be set before first paint.
+if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+
 // Register the service worker (Web Push). Best-effort; failures are non-fatal.
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
