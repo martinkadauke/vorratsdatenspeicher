@@ -81,11 +81,14 @@ export async function askStats(question: string, user: User | undefined, lang = 
   const catList = cats.map(c => `  - ${c.path}  (${labelOf.get(c.path as string)})`).join('\n');
   const kontoList = konten.map(k => `  - ${k.id}: ${k.name}`).join('\n') || '  —';
 
-  const provider = await providerForTask('nlanalytics');
   const userMsg = `${lang === 'en' ? 'Today' : 'Heute'}: ${today}. ${lang === 'en' ? 'Data range' : 'Datenbereich'}: ${range?.lo ?? '—'} … ${range?.hi ?? '—'}.\n${lang === 'en' ? 'Question' : 'Frage'}: "${question}"`;
 
+  // Provider construction can throw (e.g. a task configured for Anthropic/DeepSeek
+  // whose API key is unset) — keep it inside the guard so an outage becomes a
+  // graceful "unavailable" clarify, never a 500.
   let raw: string;
   try {
+    const provider = await providerForTask('nlanalytics');
     raw = await provider.chat({ system: systemPrompt(lang, catList, kontoList), user: userMsg, json: true });
   } catch {
     return empty(lang === 'en' ? 'The assistant is unavailable right now.' : 'Der Assistent ist gerade nicht erreichbar.');
@@ -95,6 +98,11 @@ export async function askStats(question: string, user: User | undefined, lang = 
   try {
     spec = parseLlmJson<RawSpec>(raw);
   } catch {
+    return empty(lang === 'en' ? "I couldn't interpret that. Try e.g. \"fruit from May to July\"." : 'Das konnte ich nicht deuten. Versuch z. B. „Obst von Mai bis Juli".');
+  }
+  // parseLlmJson("null")/("42")/("[]") return valid JSON that is not an object;
+  // property access below would throw, so bail out gracefully.
+  if (!spec || typeof spec !== 'object' || Array.isArray(spec)) {
     return empty(lang === 'en' ? "I couldn't interpret that. Try e.g. \"fruit from May to July\"." : 'Das konnte ich nicht deuten. Versuch z. B. „Obst von Mai bis Juli".');
   }
 
@@ -108,7 +116,14 @@ export async function askStats(question: string, user: User | undefined, lang = 
   const konto_ids = Array.isArray(spec.konto_ids)
     ? [...new Set(spec.konto_ids.map(Number).filter(n => validKonten.has(n)))]
     : [];
-  const answer = typeof spec.answer === 'string' && spec.answer.trim() ? spec.answer.trim() : null;
+  // The assistant must never state a figure — the UI computes every number. If the
+  // model slips a currency amount into its restatement anyway, drop the sentence
+  // and fall back to the generic "filters applied" label. Small ordinals inside
+  // relative periods ("3 Monate", "6 Wochen") are fine, so only amounts are caught:
+  // a currency symbol/word, a decimal amount, or a run of 3+ digits.
+  const rawAnswer = typeof spec.answer === 'string' && spec.answer.trim() ? spec.answer.trim() : null;
+  const looksLikeAmount = rawAnswer !== null && /[€$]|\beur\b|\d[.,]\d{2}\b|\d{3,}/i.test(rawAnswer);
+  const answer = rawAnswer && !looksLikeAmount ? rawAnswer : null;
 
   return {
     category_path,
