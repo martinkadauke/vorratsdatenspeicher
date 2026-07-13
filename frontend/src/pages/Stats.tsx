@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { ChevronLeft, ChevronRight, ChevronDown, Pencil, Check, X, Search, SlidersHorizontal } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, Pencil, Check, X, Search, SlidersHorizontal, Sparkles, Loader2 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
@@ -78,6 +78,16 @@ function ProgressBar({ spent, goal, projection }: { spent: number; goal: number 
   );
 }
 
+interface AiAnswer {
+  category_path: string | null;
+  category_label: string | null;
+  from: string | null;
+  to: string | null;
+  konto_ids: number[];
+  answer: string | null;
+  clarify: string | null;
+}
+
 export function Stats() {
   const { t, i18n } = useTranslation();
   const now = new Date();
@@ -90,6 +100,8 @@ export function Stats() {
   const [to, setTo] = useState('');
   const [konten, setKonten] = useState<Set<number>>(new Set());
   const [search, setSearch] = useState('');
+  const [asking, setAsking] = useState(false);
+  const [aiAnswer, setAiAnswer] = useState<AiAnswer | null>(null);
 
   // Land at the top when opening Statistik (window scroll persists across client-side nav,
   // and refresh restoration is disabled globally) so the month carousel is always visible.
@@ -115,6 +127,26 @@ export function Stats() {
   const acctOptions = useMemo(() => accounts.filter(a => a.receipts > 0), [accounts]);
   const toggleKonto = (id: number) => setKonten(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const chipCls = (active: boolean) => cn('shrink-0 rounded-full border px-3 py-1 text-sm font-medium', active ? 'border-transparent bg-emerald-600 text-white' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700');
+
+  // Enter (or the ✨ button) sends the question to the assistant, which returns the
+  // page's own filters (category + range + accounts). We apply them and clear the box —
+  // every number then comes from the deterministic /api/spending endpoints below.
+  const askAI = async () => {
+    const q = search.trim();
+    if (!q || asking) return;
+    setAsking(true);
+    try {
+      const res = await api<AiAnswer>('/api/spending/ask', { method: 'POST', body: { q, lang: i18n.language } });
+      if (res.from && res.to) { setFrom(res.from); setTo(res.to); }
+      setKonten(new Set(res.konto_ids ?? []));
+      setAiAnswer(res);
+      setSearch('');
+    } catch {
+      setAiAnswer({ category_path: null, category_label: null, from: null, to: null, konto_ids: [], answer: null, clarify: t('stats.aiError') });
+    } finally {
+      setAsking(false);
+    }
+  };
 
   const { data: tree, isLoading } = useQuery({
     queryKey: ['spending-tree', year, month, from, to, kParam],
@@ -244,8 +276,20 @@ export function Stats() {
       <div className="flex gap-2">
         <div className="relative min-w-0 flex-1">
           <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
-          <Input className="pl-9 pr-9" placeholder={t('stats.searchPlaceholder')} value={search} onChange={e => setSearch(e.target.value)} />
-          {search && <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600"><X size={16} /></button>}
+          <Input
+            className="pl-9 pr-16"
+            placeholder={t('stats.searchPlaceholder')}
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); askAI(); } }}
+          />
+          <div className="absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
+            {search && !asking && <button onClick={() => setSearch('')} title={t('common.clear')} className="p-1 text-zinc-400 hover:text-zinc-600"><X size={16} /></button>}
+            <button onClick={askAI} disabled={!search.trim() || asking} title={t('stats.askAi')}
+              className="p-1 text-emerald-600 hover:text-emerald-700 disabled:text-zinc-300 dark:text-emerald-500 dark:disabled:text-zinc-700">
+              {asking ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+            </button>
+          </div>
         </div>
         <button type="button" onClick={() => setFiltersOpen(o => !o)} aria-pressed={filtersOpen} title={t('stats.filters')}
           className={cn('relative flex shrink-0 items-center rounded-xl border px-2.5 transition',
@@ -275,6 +319,42 @@ export function Stats() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* AI answer: the assistant restated the question and set the filters below.
+          The category figure is read straight from the (deterministic) tree. */}
+      {aiAnswer && (
+        <Card className="flex flex-col gap-2 border-emerald-200 bg-emerald-50/60 p-3 dark:border-emerald-900 dark:bg-emerald-950/20">
+          <div className="flex items-start gap-2">
+            <Sparkles size={16} className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+            <p className="min-w-0 flex-1 text-sm text-zinc-700 dark:text-zinc-200">
+              {aiAnswer.clarify ?? aiAnswer.answer ?? t('stats.aiApplied')}
+            </p>
+            <button onClick={() => setAiAnswer(null)} title={t('common.close')} className="shrink-0 text-zinc-400 hover:text-zinc-600"><X size={16} /></button>
+          </div>
+          {(aiAnswer.category_label || (aiAnswer.from && aiAnswer.to) || aiAnswer.konto_ids.length > 0) && (
+            <div className="flex flex-wrap gap-1.5 pl-6">
+              {aiAnswer.category_label && <span className="rounded-full bg-white px-2 py-0.5 text-xs text-zinc-600 ring-1 ring-emerald-200 dark:bg-zinc-900 dark:text-zinc-300 dark:ring-emerald-900">{aiAnswer.category_label}</span>}
+              {aiAnswer.from && aiAnswer.to && <span className="rounded-full bg-white px-2 py-0.5 text-xs text-zinc-600 ring-1 ring-emerald-200 dark:bg-zinc-900 dark:text-zinc-300 dark:ring-emerald-900">{fmtDate(aiAnswer.from, i18n.language)} – {fmtDate(aiAnswer.to, i18n.language)}</span>}
+              {aiAnswer.konto_ids.map(id => {
+                const a = accounts.find(x => x.id === id);
+                return a ? <span key={id} className="rounded-full bg-white px-2 py-0.5 text-xs text-zinc-600 ring-1 ring-emerald-200 dark:bg-zinc-900 dark:text-zinc-300 dark:ring-emerald-900">{a.name}</span> : null;
+              })}
+            </div>
+          )}
+          {aiAnswer.category_path && (() => {
+            const node = nodeByPath.get(aiAnswer.category_path!);
+            if (!node) return null;
+            return (
+              <button onClick={() => setDrill(node)}
+                className="mt-1 flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-left ring-1 ring-emerald-200 hover:bg-emerald-50 dark:bg-zinc-900 dark:ring-emerald-900 dark:hover:bg-zinc-800">
+                {node.emoji && <span>{node.emoji}</span>}
+                <span className="min-w-0 flex-1 truncate font-medium">{node.label}</span>
+                <span className="tabular shrink-0 text-lg font-bold">{eur(node.mtd)}</span>
+              </button>
+            );
+          })()}
+        </Card>
       )}
 
       {isLoading && <Spinner />}

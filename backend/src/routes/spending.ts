@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import sql from '../db.js';
 import { kontoScope } from '../auth/konto.js';
+import { askStats } from '../analytics/statsAsk.js';
 
 interface ArtikelRow {
   id: number;
@@ -253,6 +254,17 @@ export function spendingRoutes(app: FastifyInstance): void {
     return rows
       .map(r => ({ ...r, member_share: round2(share(r as unknown as ArtikelRow)) }))
       .filter(r => r.member_share > 0);
+  });
+
+  // NL assistant: turns a question into the page's own filters (category + range +
+  // accounts). It never returns a figure — the frontend applies these and the
+  // deterministic endpoints above compute the numbers.
+  app.post('/api/spending/ask', async (req, reply) => {
+    const body = (req.body ?? {}) as { q?: string; lang?: string };
+    const q = (body.q ?? '').trim();
+    if (!q) return reply.code(400).send({ error: 'empty_question' });
+    const lang = body.lang ?? req.user?.preferred_lang ?? 'de';
+    return askStats(q.slice(0, 500), req.user, lang);
   });
 }
 

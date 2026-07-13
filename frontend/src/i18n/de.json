@@ -452,6 +452,9 @@
     "history": "Verlauf",
     "items": "Artikel",
     "tapMonthHint": "Auf einen Monat tippen, um dorthin zu springen",
+    "askAi": "Mit KI fragen (Enter)",
+    "aiApplied": "Filter angewendet.",
+    "aiError": "Der Assistent ist gerade nicht erreichbar.",
     "searchPlaceholder": "Suchen oder fragen…",
     "categories": "Kategorien",
     "articles": "Artikel",
@@ -1250,6 +1253,7 @@
     "error": "Fehler",
     "confirm": "Wirklich?",
     "clear": "Löschen",
+    "close": "Schließen",
     "scrollLeft": "Nach links",
     "scrollRight": "Nach rechts"
   }

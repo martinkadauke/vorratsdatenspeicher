@@ -452,6 +452,9 @@
     "history": "History",
     "items": "Items",
     "tapMonthHint": "Tap a month to jump to it",
+    "askAi": "Ask AI (Enter)",
+    "aiApplied": "Filters applied.",
+    "aiError": "The assistant is unavailable right now.",
     "searchPlaceholder": "Search or ask…",
     "categories": "Categories",
     "articles": "Articles",
@@ -1248,6 +1251,7 @@
     "error": "Error",
     "confirm": "Are you sure?",
     "clear": "Clear",
+    "close": "Close",
     "scrollLeft": "Scroll left",
     "scrollRight": "Scroll right"
   }
