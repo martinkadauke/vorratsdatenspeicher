@@ -609,7 +609,8 @@
   "warenstamm": {
     "artikel": "Articles",
     "positionen": "Line items",
-    "vorrat": "Pantry"
+    "vorrat": "Pantry",
+    "pruefen": "Review"
   },
   "names": {
     "title": "Canonical names",

@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, ReceiptText, ShoppingCart, BadgePercent, Boxes, Store,
-  ListChecks, ChartPie, Settings, UserCircle, Wallet, type LucideIcon,
+  ChartPie, Settings, UserCircle, Wallet, type LucideIcon,
 } from 'lucide-react';
 
 export interface NavItem { to: string; icon: LucideIcon; key: string }
@@ -11,9 +11,8 @@ export const NAV: NavItem[] = [
   { to: '/receipts', icon: ReceiptText, key: 'nav.receipts' },       // belege (Startseite)
   { to: '/shopping', icon: ShoppingCart, key: 'nav.shopping' },      // liste
   { to: '/offers', icon: BadgePercent, key: 'nav.offers' },          // angebote
-  { to: '/warenstamm', icon: Boxes, key: 'nav.warenstamm' },         // warenstamm (artikel/positionen/vorrat)
+  { to: '/warenstamm', icon: Boxes, key: 'nav.warenstamm' },         // warenstamm (artikel/positionen/vorrat/prüfen)
   { to: '/stores', icon: Store, key: 'nav.stores' },                 // läden
-  { to: '/queue', icon: ListChecks, key: 'nav.queue' },              // prüfung
   { to: '/stats', icon: ChartPie, key: 'nav.stats' },                // statistik
   { to: '/finanzen', icon: Wallet, key: 'nav.finanzen' },            // fixkosten / einkommen / budgets
   { to: '/analytics', icon: LayoutDashboard, key: 'nav.analytics' }, // analytics (ganz hinten)

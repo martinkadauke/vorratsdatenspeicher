@@ -119,7 +119,7 @@ export function Layout() {
       <div className="mx-auto flex max-w-6xl">
         {/* Desktop sidebar */}
         <aside className="sticky top-[53px] hidden h-[calc(100dvh-53px)] w-52 shrink-0 flex-col gap-1 overflow-y-auto p-3 md:flex">
-          {NAV.map(n => navItem(n.to, n.icon, t(n.key), false, n.to === '/queue' ? pruefenCount : 0))}
+          {NAV.map(n => navItem(n.to, n.icon, t(n.key), false, n.to === '/warenstamm' ? pruefenCount : 0))}
           {navExtras(!!user?.is_admin).map(n => navItem(n.to, n.icon, t(n.key)))}
           <div className="mt-auto">
             <button
@@ -146,7 +146,7 @@ export function Layout() {
 
       {/* Mobile bottom nav */}
       <nav className="fixed inset-x-0 bottom-0 z-30 flex border-t border-zinc-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/95 md:hidden">
-        {NAV.slice(0, MOBILE_PRIMARY).map(n => navItem(n.to, n.icon, t(n.key), true))}
+        {NAV.slice(0, MOBILE_PRIMARY).map(n => navItem(n.to, n.icon, t(n.key), true, n.to === '/warenstamm' ? pruefenCount : 0))}
         {navItem('/more', MoreHorizontal, t('nav.more'), true)}
       </nav>
 

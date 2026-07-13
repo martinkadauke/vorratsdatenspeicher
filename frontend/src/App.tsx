@@ -57,23 +57,24 @@ export function App() {
           <Route path="/receipts/:id" element={<ReceiptDetailPage />} />
           <Route path="/stats" element={<Stats />} />
           <Route path="/shopping" element={<Shopping />} />
-          {/* Warenstamm = master-data hub with Artikel / Positionen / Vorrat tabs */}
+          {/* Warenstamm = master-data hub with Artikel / Positionen / Vorrat / Prüfen tabs */}
           <Route path="/warenstamm" element={<Warenstamm />}>
             <Route index element={<Navigate to="artikel" replace />} />
             <Route path="artikel" element={<Artikel />} />
             <Route path="positionen" element={<Positionen />} />
             <Route path="vorrat" element={<Pantry />} />
+            <Route path="pruefen" element={<Queue />} />
           </Route>
           {/* Legacy paths → new tabs (query string preserved for saved filters) */}
           <Route path="/names" element={<Redirect to="/warenstamm/artikel" />} />
           <Route path="/positionen" element={<Redirect to="/warenstamm/positionen" />} />
           <Route path="/pantry" element={<Redirect to="/warenstamm/vorrat" />} />
+          <Route path="/queue" element={<Redirect to="/warenstamm/pruefen" />} />
           <Route path="/stores" element={<Stores />} />
           <Route path="/filialen/:id" element={<FilialProfil />} />
           <Route path="/offers" element={<Offers />} />
           <Route path="/ziele" element={<Ziele />} />
           <Route path="/finanzen" element={<Finanzen />} />
-          <Route path="/queue" element={<Queue />} />
           <Route path="/admin" element={<AdminOnly><Admin /></AdminOnly>} />
           <Route path="/admin/categories" element={<AdminOnly><CategoriesAdmin /></AdminOnly>} />
           <Route path="/profile" element={<Profile />} />

@@ -609,7 +609,8 @@
   "warenstamm": {
     "artikel": "Artikel",
     "positionen": "Positionen",
-    "vorrat": "Vorrat"
+    "vorrat": "Vorrat",
+    "pruefen": "Prüfen"
   },
   "names": {
     "title": "Kanonische Namen",

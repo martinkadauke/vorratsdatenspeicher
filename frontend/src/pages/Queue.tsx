@@ -54,7 +54,6 @@ export function Queue() {
 
   return (
     <div className="flex flex-col gap-3 pb-20">
-      <h1 className="text-lg font-bold">{t('queue.title')}</h1>
       <FirstVisitHint id="queue1" titleKey="hint.queue.title" bodyKey="hint.queue.body" />
 
       <div className="flex gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-zinc-800">

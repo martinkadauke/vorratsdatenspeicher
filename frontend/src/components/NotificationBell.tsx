@@ -27,7 +27,7 @@ function notificationText(n: Notification, t: (k: string, o?: Record<string, unk
 
 function targetFor(n: Notification): string {
   switch (n.type) {
-    case 'churner.queued': return '/queue';
+    case 'churner.queued': return '/warenstamm/pruefen';
     case 'churner.auto_applied': return '/warenstamm/artikel';
     case 'shopping.shared': return '/shopping';
     default: return '/admin';
