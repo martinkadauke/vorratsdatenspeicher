@@ -891,6 +891,8 @@
     "taskModelReviewDesc": "Bewertet alle 2 Wochen, ob es bessere Modelle gibt. Kann selbst ein lokales Modell sein.",
     "taskBankmatch": "Bank-Zuordnung (KI)",
     "taskBankmatchDesc": "Kreativer Zweitversuch beim „Neu abgleichen“: ordnet offene Bankbuchungen Belegen/Einnahmen/Fixkosten zu, die der deterministische Abgleich nicht findet. Nur Vorschläge (⭐), die du bestätigst. Braucht ein starkes Reasoning-Modell.",
+    "taskStatsask": "Statistik-Assistent (KI)",
+    "taskStatsaskDesc": "Übersetzt eine Frage in der Statistik (z. B. „wie viel für Kraftstoff in 2026“) in Filter — Kategorie oder Artikel(gruppe) + Zeitraum + Konten. Die KI nennt nie eine Zahl; die App rechnet alles deterministisch aus. Kleine, strukturierte Aufgabe → ein günstiges Modell reicht.",
     "reviewTitle": "Modell-Review",
     "reviewHint": "Alle 2 Wochen schlägt das Reviewer-Modell pro KI-Aufgabe je ein API/Cloud- UND ein Open-Weight-Modell vor (preis/leistungs-bewusst). Du bekommst per Email die Wahl: alle API oder alle Open-Weight übernehmen – oder ablehnen. Nichts wird automatisch umgestellt.",
     "reviewRunBtn": "Review jetzt ausführen",

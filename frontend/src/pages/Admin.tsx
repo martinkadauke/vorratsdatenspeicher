@@ -274,6 +274,7 @@ const AI_TASKS = [
   { key: 'categories_chat',  i18n: 'admin.taskCategoriesChat', descI18n: 'admin.taskCategoriesChatDesc' },
   { key: 'model_review',     i18n: 'admin.taskModelReview',    descI18n: 'admin.taskModelReviewDesc' },
   { key: 'bankmatch',        i18n: 'admin.taskBankmatch',      descI18n: 'admin.taskBankmatchDesc' },
+  { key: 'statsask',         i18n: 'admin.taskStatsask',       descI18n: 'admin.taskStatsaskDesc' },
 ] as const;
 
 interface AiTaskLogRow {

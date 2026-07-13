@@ -175,7 +175,7 @@ export function spendingRoutes(app: FastifyInstance): void {
   app.get('/api/spending/history', async (req) => {
     const q = req.query as { path?: string; months?: string; member?: string; konten?: string; canonical?: string };
     const path = q.path ?? '';
-    const canonical = (q.canonical ?? '').trim();
+    const canonSet = new Set((q.canonical ?? '').split(',').map(s => s.trim()).filter(Boolean));
     const months = Math.min(parseInt(q.months ?? '12', 10) || 12, 36);
     const member = q.member ? parseInt(q.member, 10) : null;
     const kIds = (q.konten ?? '').split(',').map(s => parseInt(s, 10)).filter(Number.isFinite);
@@ -197,9 +197,9 @@ export function spendingRoutes(app: FastifyInstance): void {
     const share = await buildShareResolver(member);
     const byYm = new Map<string, number>();
     for (const a of artikel) {
-      if (canonical) {
-        // Article scope: exactly this canonical, ignore category/meta filtering.
-        if (a.canonical_name !== canonical) continue;
+      if (canonSet.size) {
+        // Article scope: exactly these canonicals, ignore category/meta filtering.
+        if (!canonSet.has(a.canonical_name ?? '')) continue;
       } else {
         const p = a.category_path ?? UNCAT;
         if (!pathIsMeta && (p === 'Meta' || p.startsWith('Meta/'))) continue;
@@ -226,7 +226,7 @@ export function spendingRoutes(app: FastifyInstance): void {
     const year = parseInt(q.year ?? '', 10) || now.getFullYear();
     const month = parseInt(q.month ?? '', 10) || now.getMonth() + 1;
     const path = q.path ?? '';
-    const canonical = (q.canonical ?? '').trim();
+    const canonicals = (q.canonical ?? '').split(',').map(s => s.trim()).filter(Boolean);
     const member = q.member ? parseInt(q.member, 10) : null;
     const kIds = (q.konten ?? '').split(',').map(s => parseInt(s, 10)).filter(Number.isFinite);
     const kFrag = kIds.length ? sql`AND e.konto_id = ANY(${kIds})` : sql``;
@@ -244,11 +244,12 @@ export function spendingRoutes(app: FastifyInstance): void {
       rangeEnd = `${ymKey(next.year, next.month)}-01`;
     }
 
-    // canonical (article) scope wins over the category path: show exactly that
-    // article's purchases, regardless of which category it sits in (e.g. an
-    // uncategorised "Diesel" → only diesel, not the whole Uncategorised bucket).
-    const scopeFrag = canonical
-      ? sql`AND a.canonical_name = ${canonical}`
+    // canonical (article) scope wins over the category path: show exactly those
+    // articles' purchases, regardless of which category they sit in (e.g. an
+    // uncategorised "Diesel", or a "fuel" group = Diesel + Benzin — not the whole
+    // Uncategorised bucket).
+    const scopeFrag = canonicals.length
+      ? sql`AND a.canonical_name = ANY(${canonicals})`
       : sql`
         ${(path === 'Meta' || path.startsWith('Meta/')) ? sql`` : sql`AND (a.category_path IS NULL OR a.category_path NOT LIKE 'Meta/%')`}
         ${path ? sql`AND (a.category_path = ${path} OR a.category_path LIKE ${path + '/%'})` : sql``}`;

@@ -889,6 +889,8 @@
     "taskModelReviewDesc": "Every 2 weeks judges whether better models exist. Can itself be a local model.",
     "taskBankmatch": "Bank matching (AI)",
     "taskBankmatchDesc": "Creative second pass on \"Re-match\": links open bank bookings to receipts/income/fixed costs the deterministic matcher misses. Suggestions only (⭐), approved by you. Needs a strong reasoning model.",
+    "taskStatsask": "Statistics assistant (AI)",
+    "taskStatsaskDesc": "Turns a question in Statistik (e.g. \"how much for fuel in 2026\") into filters — a category or article group + date range + accounts. The AI never states a number; the app computes everything deterministically. Small, structured task → a cheap model is plenty.",
     "reviewTitle": "Model review",
     "reviewHint": "Every 2 weeks the reviewer model proposes, per AI task, both an API/cloud and an open-weight model (price/performance aware). The email lets you apply all-API or all-open-weight — or reject. Nothing is switched automatically.",
     "reviewRunBtn": "Run review now",

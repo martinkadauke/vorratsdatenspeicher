@@ -81,6 +81,8 @@ function ProgressBar({ spent, goal, projection }: { spent: number; goal: number 
 interface AiAnswer {
   category_path: string | null;
   category_label: string | null;
+  canonicals: string[];
+  group_label: string | null;
   from: string | null;
   to: string | null;
   konto_ids: number[];
@@ -88,12 +90,13 @@ interface AiAnswer {
   clarify: string | null;
 }
 
-// A drilldown targets either a whole category (by path) or a single article (by
-// canonical name). An article drills to only its own purchases, not its category —
-// e.g. an uncategorised "Diesel" shows just diesel, not the whole Uncategorised bucket.
+// A drilldown targets either a whole category (by path) or a set of articles (by
+// canonical name). An article target drills to only those articles' purchases, not
+// their category — e.g. uncategorised "Diesel", or a "fuel" group (Diesel + Benzin),
+// shows just those, not the whole Uncategorised bucket.
 type DrillTarget =
   | { kind: 'category'; node: SpendingNode }
-  | { kind: 'article'; canonical: string; label: string };
+  | { kind: 'article'; canonicals: string[]; label: string };
 
 export function Stats() {
   const { t, i18n } = useTranslation();
@@ -149,7 +152,7 @@ export function Stats() {
       setAiAnswer(res);
       setSearch('');
     } catch {
-      setAiAnswer({ category_path: null, category_label: null, from: null, to: null, konto_ids: [], answer: null, clarify: t('stats.aiError') });
+      setAiAnswer({ category_path: null, category_label: null, canonicals: [], group_label: null, from: null, to: null, konto_ids: [], answer: null, clarify: t('stats.aiError') });
     } finally {
       setAsking(false);
     }
@@ -339,9 +342,11 @@ export function Stats() {
             </p>
             <button onClick={() => setAiAnswer(null)} title={t('common.close')} className="shrink-0 text-zinc-400 hover:text-zinc-600"><X size={16} /></button>
           </div>
-          {(aiAnswer.category_label || (aiAnswer.from && aiAnswer.to) || aiAnswer.konto_ids.length > 0) && (
+          {(aiAnswer.category_label || aiAnswer.canonicals.length > 0 || (aiAnswer.from && aiAnswer.to) || aiAnswer.konto_ids.length > 0) && (
             <div className="flex flex-wrap gap-1.5 pl-6">
               {aiAnswer.category_label && <span className="rounded-full bg-white px-2 py-0.5 text-xs text-zinc-600 ring-1 ring-emerald-200 dark:bg-zinc-900 dark:text-zinc-300 dark:ring-emerald-900">{aiAnswer.category_label}</span>}
+              {/* One chip per article so it's transparent which articles were grouped. */}
+              {aiAnswer.canonicals.map(c => <span key={c} className="rounded-full bg-white px-2 py-0.5 text-xs text-zinc-600 ring-1 ring-emerald-200 dark:bg-zinc-900 dark:text-zinc-300 dark:ring-emerald-900">{c}</span>)}
               {aiAnswer.from && aiAnswer.to && <span className="rounded-full bg-white px-2 py-0.5 text-xs text-zinc-600 ring-1 ring-emerald-200 dark:bg-zinc-900 dark:text-zinc-300 dark:ring-emerald-900">{fmtDate(aiAnswer.from, i18n.language)} – {fmtDate(aiAnswer.to, i18n.language)}</span>}
               {aiAnswer.konto_ids.map(id => {
                 const a = accounts.find(x => x.id === id);
@@ -359,6 +364,17 @@ export function Stats() {
                 <span className="min-w-0 flex-1 truncate font-medium">{node.label}</span>
                 <span className="tabular shrink-0 text-lg font-bold">{eur(node.mtd)}</span>
               </button>
+            );
+          })()}
+          {aiAnswer.canonicals.length > 0 && (() => {
+            const label = aiAnswer.group_label ?? aiAnswer.canonicals.join(', ');
+            return (
+              <AiArticleCard
+                canonicals={aiAnswer.canonicals}
+                label={label}
+                year={year} month={month} from={from} to={to} kParam={kParam}
+                onOpen={() => setDrill({ kind: 'article', canonicals: aiAnswer.canonicals, label })}
+              />
             );
           })()}
         </Card>
@@ -421,7 +437,7 @@ export function Stats() {
             <>
               <div className="px-2 pb-1 pt-2 text-[11px] font-medium text-zinc-400">{t('stats.articles')}</div>
               {articleHits.map(a => (
-                <button key={a.name} onClick={() => setDrill({ kind: 'article', canonical: a.name, label: a.name })}
+                <button key={a.name} onClick={() => setDrill({ kind: 'article', canonicals: [a.name], label: a.name })}
                   className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-900">
                   <span className="min-w-0 flex-1 truncate text-sm">{a.name}</span>
                   <span className="flex min-w-0 shrink items-center gap-1 text-xs text-zinc-400">
@@ -467,6 +483,31 @@ export function Stats() {
   );
 }
 
+// The AI banner's answer card for an article group: shows the group's sum for the
+// current period (computed from the deterministic items endpoint, never the model)
+// and opens the article drilldown on click.
+function AiArticleCard({ canonicals, label, year, month, from, to, kParam, onOpen }: {
+  canonicals: string[]; label: string; year: number; month: number; from: string; to: string; kParam: string; onOpen: () => void;
+}) {
+  const rangeMode = !!(from && to);
+  const rangeParam = rangeMode ? `&from=${from}&to=${to}` : '';
+  const scopeKey = `a:${canonicals.join(',')}`;
+  const { data: items } = useQuery({
+    // Same key shape as the drilldown's items query → opening it is an instant cache hit.
+    queryKey: ['spending-items', scopeKey, year, month, rangeParam, kParam],
+    queryFn: () => api<SpendItem[]>(`/api/spending/items?canonical=${encodeURIComponent(canonicals.join(','))}&year=${year}&month=${month}${rangeParam}${kParam}`),
+    enabled: canonicals.length > 0,
+  });
+  const total = (items ?? []).reduce((s, it) => s + Number(it.member_share ?? it.preis ?? 0), 0);
+  return (
+    <button onClick={onOpen}
+      className="mt-1 flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-left ring-1 ring-emerald-200 hover:bg-emerald-50 dark:bg-zinc-900 dark:ring-emerald-900 dark:hover:bg-zinc-800">
+      <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
+      <span className="tabular shrink-0 text-lg font-bold">{eur(total)}</span>
+    </button>
+  );
+}
+
 function DrilldownModal({ target, onClose, year, month, from, to, kParam, onPickMonth }: {
   target: DrillTarget | null; onClose: () => void; year: number; month: number; from: string; to: string; kParam: string;
   onPickMonth: (ym: string) => void;
@@ -476,11 +517,11 @@ function DrilldownModal({ target, onClose, year, month, from, to, kParam, onPick
   const rangeParam = rangeMode ? `&from=${from}&to=${to}` : '';
   const periodLabel = rangeMode ? `${fmtDate(from, i18n.language)} – ${fmtDate(to, i18n.language)}` : monthLabel(year, month, i18n.language);
 
-  // Scope: an article filters by canonical name (only its own purchases); a category by path.
+  // Scope: an article target filters by canonical name(s) (only those purchases); a category by path.
   const scope = target?.kind === 'article'
-    ? `canonical=${encodeURIComponent(target.canonical)}`
+    ? `canonical=${encodeURIComponent(target.canonicals.join(','))}`
     : `path=${encodeURIComponent(target?.node.path ?? '')}`;
-  const scopeKey = target?.kind === 'article' ? `a:${target.canonical}` : `c:${target?.node.path}`;
+  const scopeKey = target?.kind === 'article' ? `a:${target.canonicals.join(',')}` : `c:${target?.node.path}`;
   const title = target?.kind === 'article' ? target.label : `${target?.node.emoji ?? ''} ${target?.node.label ?? ''}`;
 
   const { data: history } = useQuery({

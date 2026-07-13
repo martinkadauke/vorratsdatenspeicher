@@ -27,6 +27,8 @@ export interface AppConfig {
   'ai.nlanalytics.model': string;
   'ai.bankmatch.provider': string;
   'ai.bankmatch.model': string;
+  'ai.statsask.provider': string;
+  'ai.statsask.model': string;
   'churner.enabled': boolean;
   'churner.cron': string;
   // Run a churn pass right after any receipt is OCR'd (debounced), so imports get
@@ -118,6 +120,10 @@ const DEFAULTS: AppConfig = {
   // + restraint matter (must NOT force matches) → defaults to Claude.
   'ai.bankmatch.provider': 'anthropic',
   'ai.bankmatch.model': 'claude-sonnet-5',
+  // Statistik NL assistant: only maps a question to filters (category/articles +
+  // range + accounts) — a small, structured extraction → cheap DeepSeek is plenty.
+  'ai.statsask.provider': 'deepseek',
+  'ai.statsask.model': 'deepseek-v4-flash',
   'churner.enabled': true,
   'churner.cron': '0 3 * * *',
   'churner.run_after_ocr': true,
