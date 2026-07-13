@@ -191,11 +191,12 @@ export function spendingRoutes(app: FastifyInstance): void {
         ${kFrag}
     `) as unknown as ArtikelRow[];
 
+    const pathIsMeta = path.startsWith('Meta');
     const share = await buildShareResolver(member);
     const byYm = new Map<string, number>();
     for (const a of artikel) {
       const p = a.category_path ?? UNCAT;
-      if (p === 'Meta' || p.startsWith('Meta/')) continue;
+      if (!pathIsMeta && (p === 'Meta' || p.startsWith('Meta/'))) continue;
       if (path && p !== path && !p.startsWith(path + '/')) continue;
       const eur = share(a);
       if (!eur) continue;
@@ -240,7 +241,7 @@ export function spendingRoutes(app: FastifyInstance): void {
              e.id AS einkauf_id, e.datum::text AS datum, e.roh_ladenname
       FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
       WHERE e.datum >= ${rangeStart} AND e.datum < ${rangeEnd}
-        AND (a.category_path IS NULL OR a.category_path NOT LIKE 'Meta/%')
+        ${(path === 'Meta' || path.startsWith('Meta/')) ? sql`` : sql`AND (a.category_path IS NULL OR a.category_path NOT LIKE 'Meta/%')`}
         ${path ? sql`AND (a.category_path = ${path} OR a.category_path LIKE ${path + '/%'})` : sql``}
         ${kontoScope(req.user, sql`e`)}
         ${kFrag}

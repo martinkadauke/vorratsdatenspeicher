@@ -121,6 +121,13 @@ export function Stats() {
     queryFn: () => api<SpendingTree>(`/api/spending/tree?year=${year}&month=${month}${rangeParam}${kParam}`),
   });
 
+  // Article names → their category, for the search (an article jumps to its category).
+  const { data: names = [] } = useQuery({
+    queryKey: ['names'],
+    queryFn: () => api<{ canonical_name: string; category_path: string | null }[]>('/api/names'),
+  });
+  const nodeByPath = useMemo(() => new Map((tree?.nodes ?? []).map(n => [n.path, n])), [tree]);
+
   const childrenOf = useMemo(() => {
     const map = new Map<string | null, SpendingNode[]>();
     for (const n of tree?.nodes ?? []) {
@@ -178,8 +185,40 @@ export function Stats() {
 
   const total = tree?.total;
   const searchLc = search.trim().toLowerCase();
+  // Categories whose label matches (any category, not only those with spend this period),
+  // most-spent first.
   const searchHits = searchLc
-    ? (tree?.nodes ?? []).filter(n => n.mtd > 0 && n.label.toLowerCase().includes(searchLc)).sort((a, b) => b.mtd - a.mtd)
+    ? (tree?.nodes ?? []).filter(n => n.label.toLowerCase().includes(searchLc)).sort((a, b) => b.mtd - a.mtd)
+    : [];
+  const articleHits = searchLc
+    ? (() => {
+        const seen = new Set<string>();
+        const out: { name: string; node: SpendingNode }[] = [];
+        for (const nm of names) {
+          const cn = (nm.canonical_name ?? '').trim();
+          const key = cn.toLowerCase();
+          if (!cn || seen.has(key) || !key.includes(searchLc)) continue;
+          const cp = nm.category_path;
+          if (!cp) continue; // article has no category — nowhere to jump
+          // Prefer the real spending node; for meta categories (Pfand, Rabatt) — which the
+          // spending tree excludes — synthesize a node so the article still jumps to it.
+          const node: SpendingNode = nodeByPath.get(cp) ?? {
+            path: cp,
+            parent_path: cp.includes('/') ? cp.slice(0, cp.lastIndexOf('/')) : null,
+            label: cp.split('/').pop() ?? cp,
+            emoji: null,
+            level: cp.split('/').length,
+            mtd: 0,
+            projection: 0,
+            avg3: 0,
+            goal: null,
+          };
+          seen.add(key);
+          out.push({ name: cn, node });
+          if (out.length >= 40) break;
+        }
+        return out.sort((a, b) => a.name.localeCompare(b.name));
+      })()
     : [];
 
   return (
@@ -274,18 +313,39 @@ export function Stats() {
         </Card>
       )}
 
-      {/* Search results (flat, matching categories) OR the category tree */}
+      {/* Search results: matching categories + articles (an article jumps to its category) */}
       {tree && searchLc && (
-        <Card className="p-2">
-          {searchHits.map(n => (
-            <button key={n.path} onClick={() => setDrill(n)}
-              className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-900">
-              {n.emoji && <span>{n.emoji}</span>}
-              <span className="min-w-0 flex-1 truncate">{n.label}</span>
-              <span className="tabular shrink-0 text-sm">{eur(n.mtd)}</span>
-            </button>
-          ))}
-          {!searchHits.length && <EmptyState>{t('stats.noData')}</EmptyState>}
+        <Card className="flex flex-col p-2">
+          {searchHits.length > 0 && (
+            <>
+              <div className="px-2 pb-1 pt-1 text-[11px] font-medium text-zinc-400">{t('stats.categories')}</div>
+              {searchHits.map(n => (
+                <button key={n.path} onClick={() => setDrill(n)}
+                  className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-900">
+                  {n.emoji && <span>{n.emoji}</span>}
+                  <span className="min-w-0 flex-1 truncate">{n.label}</span>
+                  <span className="tabular shrink-0 text-sm">{eur(n.mtd)}</span>
+                </button>
+              ))}
+            </>
+          )}
+          {articleHits.length > 0 && (
+            <>
+              <div className="px-2 pb-1 pt-2 text-[11px] font-medium text-zinc-400">{t('stats.articles')}</div>
+              {articleHits.map(a => (
+                <button key={a.name} onClick={() => setDrill(a.node)}
+                  className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-900">
+                  <span className="min-w-0 flex-1 truncate text-sm">{a.name}</span>
+                  <span className="flex min-w-0 shrink items-center gap-1 text-xs text-zinc-400">
+                    <ChevronRight size={12} className="shrink-0" />
+                    {a.node.emoji && <span>{a.node.emoji}</span>}
+                    <span className="truncate">{a.node.label}</span>
+                  </span>
+                </button>
+              ))}
+            </>
+          )}
+          {!searchHits.length && !articleHits.length && <EmptyState>{t('stats.noData')}</EmptyState>}
         </Card>
       )}
       {tree && !searchLc && (
