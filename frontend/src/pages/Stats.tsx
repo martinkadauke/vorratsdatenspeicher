@@ -180,6 +180,23 @@ export function Stats() {
 
   return (
     <div className="flex flex-col gap-4">
+      {/* Month carousel — or the active date range */}
+      <div className="flex items-center justify-between">
+        {rangeMode ? (
+          <>
+            <span className="w-9 shrink-0" />
+            <h1 className="text-lg font-bold">{fmtDate(from, i18n.language)} – {fmtDate(to, i18n.language)}</h1>
+            <button onClick={() => { setFrom(''); setTo(''); }} className="rounded-xl px-2 py-1 text-xs font-medium text-emerald-600 dark:text-emerald-500" title={t('stats.monthReset')}>{t('stats.monthReset')}</button>
+          </>
+        ) : (
+          <>
+            <button onClick={() => shift(-1)} className="rounded-xl p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800"><ChevronLeft size={20} /></button>
+            <h1 className="text-lg font-bold">{monthLabel(year, month, i18n.language)}</h1>
+            <button onClick={() => shift(1)} className="rounded-xl p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800"><ChevronRight size={20} /></button>
+          </>
+        )}
+      </div>
+
       {/* Search + filter bar (Receipts style) */}
       <div className="flex gap-2">
         <div className="relative min-w-0 flex-1">
@@ -216,23 +233,6 @@ export function Stats() {
           </div>
         </div>
       )}
-
-      {/* Month carousel — or the active date range */}
-      <div className="flex items-center justify-between">
-        {rangeMode ? (
-          <>
-            <span className="w-9 shrink-0" />
-            <h1 className="text-lg font-bold">{fmtDate(from, i18n.language)} – {fmtDate(to, i18n.language)}</h1>
-            <button onClick={() => { setFrom(''); setTo(''); }} className="rounded-xl px-2 py-1 text-xs font-medium text-emerald-600 dark:text-emerald-500" title={t('stats.monthReset')}>{t('stats.monthReset')}</button>
-          </>
-        ) : (
-          <>
-            <button onClick={() => shift(-1)} className="rounded-xl p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800"><ChevronLeft size={20} /></button>
-            <h1 className="text-lg font-bold">{monthLabel(year, month, i18n.language)}</h1>
-            <button onClick={() => shift(1)} className="rounded-xl p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800"><ChevronRight size={20} /></button>
-          </>
-        )}
-      </div>
 
       {isLoading && <Spinner />}
 
