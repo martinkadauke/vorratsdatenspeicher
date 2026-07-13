@@ -63,18 +63,34 @@ function pathChain(path: string): string[] {
 
 export function spendingRoutes(app: FastifyInstance): void {
   app.get('/api/spending/tree', async (req) => {
-    const q = req.query as { year?: string; month?: string; member?: string; lang?: string };
+    const q = req.query as { year?: string; month?: string; member?: string; lang?: string; konten?: string; from?: string; to?: string };
     const now = new Date();
     const year = parseInt(q.year ?? '', 10) || now.getFullYear();
     const month = parseInt(q.month ?? '', 10) || now.getMonth() + 1;
     const member = q.member ? parseInt(q.member, 10) : null;
     const lang = q.lang ?? req.user?.preferred_lang ?? 'de';
+    // Explicit account filter (comma-separated ids) on top of the per-receipt privacy scope.
+    const kIds = (q.konten ?? '').split(',').map(s => parseInt(s, 10)).filter(Number.isFinite);
+    const kFrag = kIds.length ? sql`AND e.konto_id = ANY(${kIds})` : sql``;
 
-    const selectedYm = ymKey(year, month);
-    const avgStart = addMonths(year, month, -3);
-    const rangeStart = `${ymKey(avgStart.year, avgStart.month)}-01`;
-    const next = addMonths(year, month, 1);
-    const rangeEnd = `${ymKey(next.year, next.month)}-01`;
+    // Two modes: an explicit from/to DATE RANGE (single bucket, no projection/avg/goal —
+    // those are month-only) OR a single calendar month with the 3-month-avg window.
+    const isoRe = /^\d{4}-\d{2}-\d{2}$/;
+    const rangeMode = isoRe.test(q.from ?? '') && isoRe.test(q.to ?? '');
+    const RANGE = 'RANGE';
+    let rangeStart: string, rangeEnd: string, selectedYm: string;
+    if (rangeMode) {
+      rangeStart = q.from!;
+      const d = new Date(`${q.to!}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + 1); // inclusive `to`
+      rangeEnd = d.toISOString().slice(0, 10);
+      selectedYm = RANGE;
+    } else {
+      selectedYm = ymKey(year, month);
+      const avgStart = addMonths(year, month, -3);
+      rangeStart = `${ymKey(avgStart.year, avgStart.month)}-01`;
+      const next = addMonths(year, month, 1);
+      rangeEnd = `${ymKey(next.year, next.month)}-01`;
+    }
 
     const categories = await sql`
       SELECT path, parent_path, display, display_en, level, sort_order, emoji, is_meta
@@ -87,6 +103,7 @@ export function spendingRoutes(app: FastifyInstance): void {
       FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
       WHERE e.datum >= ${rangeStart} AND e.datum < ${rangeEnd}
         ${kontoScope(req.user, sql`e`)}
+        ${kFrag}
     `) as unknown as ArtikelRow[];
 
     const share = await buildShareResolver(member);
@@ -98,7 +115,7 @@ export function spendingRoutes(app: FastifyInstance): void {
       if (metaPaths.has(path) || path.startsWith('Meta/') || path === 'Meta') continue;
       const eur = share(a);
       if (!eur) continue;
-      const ym = ymOf(a.datum);
+      const ym = rangeMode ? RANGE : ymOf(a.datum);
       for (const p of pathChain(path)) {
         let perYm = sums.get(p);
         if (!perYm) { perYm = new Map(); sums.set(p, perYm); }
@@ -106,17 +123,18 @@ export function spendingRoutes(app: FastifyInstance): void {
       }
     }
 
-    const goals = await sql`
+    // Goals + projection + 3-month average are all MONTH concepts — omitted in range mode.
+    const goals = rangeMode ? [] : await sql`
       SELECT category_path, goal_eur FROM spending_goal WHERE year = ${year} AND month = ${month}
     `;
     const goalMap = new Map(goals.map(g => [g.category_path as string, Number(g.goal_eur)]));
 
-    const isCurrentMonth = year === now.getFullYear() && month === now.getMonth() + 1;
+    const isCurrentMonth = !rangeMode && year === now.getFullYear() && month === now.getMonth() + 1;
     const daysElapsed = isCurrentMonth ? now.getDate() : 1;
     const daysTotal = new Date(year, month, 0).getDate();
     const projFactor = isCurrentMonth ? daysTotal / Math.max(daysElapsed, 1) : 1;
 
-    const prevYms = [-1, -2, -3].map(d => {
+    const prevYms = rangeMode ? [] : [-1, -2, -3].map(d => {
       const p = addMonths(year, month, d);
       return ymKey(p.year, p.month);
     });
@@ -154,10 +172,12 @@ export function spendingRoutes(app: FastifyInstance): void {
   });
 
   app.get('/api/spending/history', async (req) => {
-    const q = req.query as { path?: string; months?: string; member?: string };
+    const q = req.query as { path?: string; months?: string; member?: string; konten?: string };
     const path = q.path ?? '';
     const months = Math.min(parseInt(q.months ?? '12', 10) || 12, 36);
     const member = q.member ? parseInt(q.member, 10) : null;
+    const kIds = (q.konten ?? '').split(',').map(s => parseInt(s, 10)).filter(Number.isFinite);
+    const kFrag = kIds.length ? sql`AND e.konto_id = ANY(${kIds})` : sql``;
 
     const now = new Date();
     const start = addMonths(now.getFullYear(), now.getMonth() + 1, -(months - 1));
@@ -168,6 +188,7 @@ export function spendingRoutes(app: FastifyInstance): void {
       FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
       WHERE e.datum >= ${rangeStart}
         ${kontoScope(req.user, sql`e`)}
+        ${kFrag}
     `) as unknown as ArtikelRow[];
 
     const share = await buildShareResolver(member);
@@ -192,16 +213,27 @@ export function spendingRoutes(app: FastifyInstance): void {
   });
 
   app.get('/api/spending/items', async (req) => {
-    const q = req.query as { path?: string; year?: string; month?: string; member?: string };
+    const q = req.query as { path?: string; year?: string; month?: string; member?: string; konten?: string; from?: string; to?: string };
     const now = new Date();
     const year = parseInt(q.year ?? '', 10) || now.getFullYear();
     const month = parseInt(q.month ?? '', 10) || now.getMonth() + 1;
     const path = q.path ?? '';
     const member = q.member ? parseInt(q.member, 10) : null;
+    const kIds = (q.konten ?? '').split(',').map(s => parseInt(s, 10)).filter(Number.isFinite);
+    const kFrag = kIds.length ? sql`AND e.konto_id = ANY(${kIds})` : sql``;
 
-    const rangeStart = `${ymKey(year, month)}-01`;
-    const next = addMonths(year, month, 1);
-    const rangeEnd = `${ymKey(next.year, next.month)}-01`;
+    // Same from/to date-range mode as the tree (inclusive `to`), else the calendar month.
+    const isoRe = /^\d{4}-\d{2}-\d{2}$/;
+    let rangeStart: string, rangeEnd: string;
+    if (isoRe.test(q.from ?? '') && isoRe.test(q.to ?? '')) {
+      rangeStart = q.from!;
+      const d = new Date(`${q.to!}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + 1);
+      rangeEnd = d.toISOString().slice(0, 10);
+    } else {
+      rangeStart = `${ymKey(year, month)}-01`;
+      const next = addMonths(year, month, 1);
+      rangeEnd = `${ymKey(next.year, next.month)}-01`;
+    }
 
     const rows = await sql`
       SELECT a.id, a.name, a.canonical_name, a.category_path, a.preis, a.menge, a.einheit,
@@ -211,6 +243,7 @@ export function spendingRoutes(app: FastifyInstance): void {
         AND (a.category_path IS NULL OR a.category_path NOT LIKE 'Meta/%')
         ${path ? sql`AND (a.category_path = ${path} OR a.category_path LIKE ${path + '/%'})` : sql``}
         ${kontoScope(req.user, sql`e`)}
+        ${kFrag}
       ORDER BY a.preis DESC NULLS LAST
     `;
 

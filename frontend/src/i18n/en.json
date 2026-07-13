@@ -451,6 +451,12 @@
     "day": "day",
     "history": "History",
     "items": "Items",
+    "searchPlaceholder": "Search or ask…",
+    "filters": "Filters",
+    "dateRange": "Date range",
+    "accounts": "Accounts",
+    "allAccounts": "All accounts",
+    "monthReset": "Month",
     "noData": "No data for this month",
     "setGoal": "Set goal",
     "removeGoal": "Remove goal"

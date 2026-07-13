@@ -451,6 +451,12 @@
     "day": "Tag",
     "history": "Verlauf",
     "items": "Artikel",
+    "searchPlaceholder": "Suchen oder fragen…",
+    "filters": "Filter",
+    "dateRange": "Datumsbereich",
+    "accounts": "Konten",
+    "allAccounts": "Alle Konten",
+    "monthReset": "Monat",
     "noData": "Keine Daten für diesen Monat",
     "setGoal": "Ziel setzen",
     "removeGoal": "Ziel entfernen"
