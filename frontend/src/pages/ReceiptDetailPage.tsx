@@ -943,6 +943,7 @@ function ReceiptEditModal({ receipt, open, onClose }: { receipt: ReceiptDetail; 
               <option value="zettel">{t('quelle.zettel')}</option>
               <option value="bar">{t('quelle.bar')}</option>
               <option value="email">{t('quelle.email')}</option>
+              <option value="upload">{t('quelle.upload')}</option>
             </Select>
           </div>
         </div>

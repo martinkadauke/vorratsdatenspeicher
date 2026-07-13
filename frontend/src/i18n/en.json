@@ -1158,7 +1158,8 @@
   "quelle": {
     "zettel": "Receipt",
     "email": "Email",
-    "bar": "Cash"
+    "bar": "Cash",
+    "upload": "Invoice"
   },
   "artikel": {
     "search": "Search (name, OCR text, AI guess…)",

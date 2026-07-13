@@ -1160,7 +1160,8 @@
   "quelle": {
     "zettel": "Kassenbon",
     "email": "E-Mail",
-    "bar": "Bar"
+    "bar": "Bar",
+    "upload": "Rechnung"
   },
   "artikel": {
     "search": "Suchen (Name, OCR-Text, KI-Vorschlag…)",
