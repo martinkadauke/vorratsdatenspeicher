@@ -173,9 +173,9 @@ export function spendingRoutes(app: FastifyInstance): void {
   });
 
   app.get('/api/spending/history', async (req) => {
-    const q = req.query as { path?: string; months?: string; member?: string; konten?: string; canonical?: string };
+    const q = req.query as { path?: string; months?: string; member?: string; konten?: string; canonical?: string | string[] };
     const path = q.path ?? '';
-    const canonSet = new Set((q.canonical ?? '').split(',').map(s => s.trim()).filter(Boolean));
+    const canonSet = new Set(toList(q.canonical));
     const months = Math.min(parseInt(q.months ?? '12', 10) || 12, 36);
     const member = q.member ? parseInt(q.member, 10) : null;
     const kIds = (q.konten ?? '').split(',').map(s => parseInt(s, 10)).filter(Number.isFinite);
@@ -221,12 +221,12 @@ export function spendingRoutes(app: FastifyInstance): void {
   });
 
   app.get('/api/spending/items', async (req) => {
-    const q = req.query as { path?: string; year?: string; month?: string; member?: string; konten?: string; from?: string; to?: string; canonical?: string };
+    const q = req.query as { path?: string; year?: string; month?: string; member?: string; konten?: string; from?: string; to?: string; canonical?: string | string[] };
     const now = new Date();
     const year = parseInt(q.year ?? '', 10) || now.getFullYear();
     const month = parseInt(q.month ?? '', 10) || now.getMonth() + 1;
     const path = q.path ?? '';
-    const canonicals = (q.canonical ?? '').split(',').map(s => s.trim()).filter(Boolean);
+    const canonicals = toList(q.canonical);
     const member = q.member ? parseInt(q.member, 10) : null;
     const kIds = (q.konten ?? '').split(',').map(s => parseInt(s, 10)).filter(Number.isFinite);
     const kFrag = kIds.length ? sql`AND e.konto_id = ANY(${kIds})` : sql``;
@@ -286,4 +286,11 @@ export function spendingRoutes(app: FastifyInstance): void {
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+/** Parse a repeated query param (?canonical=a&canonical=b) — or a single one — into a
+ *  trimmed string list. Repeated params (not a delimiter) so article names may contain
+ *  commas ("H-Milch 3,5%") without being torn apart. */
+function toList(v: string | string[] | undefined): string[] {
+  return (Array.isArray(v) ? v : v ? [v] : []).map(s => String(s).trim()).filter(Boolean);
 }

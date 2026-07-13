@@ -491,11 +491,13 @@ function AiArticleCard({ canonicals, label, year, month, from, to, kParam, onOpe
 }) {
   const rangeMode = !!(from && to);
   const rangeParam = rangeMode ? `&from=${from}&to=${to}` : '';
-  const scopeKey = `a:${canonicals.join(',')}`;
+  // Repeated canonical= params (names may contain commas); newline-joined cache key
+  // matches the drilldown's key exactly → opening it is an instant cache hit.
+  const scopeKey = `a:${canonicals.join('\n')}`;
+  const scope = canonicals.map(c => `canonical=${encodeURIComponent(c)}`).join('&');
   const { data: items } = useQuery({
-    // Same key shape as the drilldown's items query → opening it is an instant cache hit.
     queryKey: ['spending-items', scopeKey, year, month, rangeParam, kParam],
-    queryFn: () => api<SpendItem[]>(`/api/spending/items?canonical=${encodeURIComponent(canonicals.join(','))}&year=${year}&month=${month}${rangeParam}${kParam}`),
+    queryFn: () => api<SpendItem[]>(`/api/spending/items?${scope}&year=${year}&month=${month}${rangeParam}${kParam}`),
     enabled: canonicals.length > 0,
   });
   const total = (items ?? []).reduce((s, it) => s + Number(it.member_share ?? it.preis ?? 0), 0);
@@ -518,10 +520,11 @@ function DrilldownModal({ target, onClose, year, month, from, to, kParam, onPick
   const periodLabel = rangeMode ? `${fmtDate(from, i18n.language)} – ${fmtDate(to, i18n.language)}` : monthLabel(year, month, i18n.language);
 
   // Scope: an article target filters by canonical name(s) (only those purchases); a category by path.
+  // Repeated canonical= params (not a comma list) so names containing commas survive.
   const scope = target?.kind === 'article'
-    ? `canonical=${encodeURIComponent(target.canonicals.join(','))}`
+    ? target.canonicals.map(c => `canonical=${encodeURIComponent(c)}`).join('&')
     : `path=${encodeURIComponent(target?.node.path ?? '')}`;
-  const scopeKey = target?.kind === 'article' ? `a:${target.canonicals.join(',')}` : `c:${target?.node.path}`;
+  const scopeKey = target?.kind === 'article' ? `a:${target.canonicals.join('\n')}` : `c:${target?.node.path}`;
   const title = target?.kind === 'article' ? target.label : `${target?.node.emoji ?? ''} ${target?.node.label ?? ''}`;
 
   const { data: history } = useQuery({

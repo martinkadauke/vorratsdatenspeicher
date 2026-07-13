@@ -80,10 +80,13 @@ export async function askStats(question: string, user: User | undefined, lang = 
     ORDER BY sort_order, path`;
   // The article vocabulary = canonical names actually purchased (so the model can map
   // a concept like "fuel" onto the real "Diesel"/"Benzin" articles that exist).
+  // MUST be konto-scoped: names from receipts private to another user must not leak
+  // into the grounding (and thence into answer chips shown to this user).
   const arts = await sql`
-    SELECT DISTINCT canonical_name FROM artikel
-    WHERE canonical_name IS NOT NULL AND canonical_name <> ''
-    ORDER BY canonical_name`;
+    SELECT DISTINCT a.canonical_name FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
+    WHERE a.canonical_name IS NOT NULL AND a.canonical_name <> ''
+      ${kontoScope(user, sql`e`)}
+    ORDER BY a.canonical_name`;
   const konten = await sql`SELECT id, name FROM konto ORDER BY sort_order, id`;
   const ks = kontoScope(user, sql`t`);
   const [range] = await sql`
@@ -145,11 +148,11 @@ export async function askStats(question: string, user: User | undefined, lang = 
     : [];
   // The assistant must never state a figure — the UI computes every number. If the
   // model slips a currency amount into its restatement anyway, drop the sentence
-  // and fall back to the generic "filters applied" label. Small ordinals inside
-  // relative periods ("3 Monate", "6 Wochen") are fine, so only amounts are caught:
-  // a currency symbol/word, a decimal amount, or a run of 3+ digits.
+  // and fall back to the generic "filters applied" label. Only AMOUNTS are caught —
+  // a currency symbol/word or a 2-decimal number — so plain years ("2026") and small
+  // ordinals ("3 Monate") in the restatement survive.
   const rawAnswer = typeof spec.answer === 'string' && spec.answer.trim() ? spec.answer.trim() : null;
-  const looksLikeAmount = rawAnswer !== null && /[€$]|\beur\b|\d[.,]\d{2}\b|\d{3,}/i.test(rawAnswer);
+  const looksLikeAmount = rawAnswer !== null && /[€$]|\beur\b|\d[.,]\d{2}\b/i.test(rawAnswer);
   const answer = rawAnswer && !looksLikeAmount ? rawAnswer : null;
 
   return {
