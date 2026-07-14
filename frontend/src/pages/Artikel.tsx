@@ -106,7 +106,7 @@ export function Artikel() {
   const subscribed = useMemo(() => new Set(subsData?.artikel ?? []), [subsData]);
   const { data: konten } = useQuery({
     queryKey: ['konten'],
-    queryFn: () => api<{ id: number; name: string }[]>('/api/konten'),
+    queryFn: () => api<{ id: number; name: string; is_shared: boolean }[]>('/api/konten'),
     staleTime: 60_000,
   });
   const isSubscribed = (g: ArtikelGroup) => subscribed.has(g.canonical_name ?? g.display);
@@ -118,12 +118,12 @@ export function Artikel() {
   const [showHidden, setShowHidden] = useState(false);
   const hasNeedsWeight = useMemo(() => (data ?? []).some(g => g.needs_weight), [data]);
 
-  // Default account scope: the household's main account ("GKK"), so the page opens
-  // scoped to GKK rather than everyone. A ?konto param or any explicit choice wins.
+  // Default account scope: the household's shared account, so the page opens scoped
+  // to it rather than everyone. A ?konto param or any explicit choice wins.
   const kontoInit = useRef(false);
   const defaultKontoId = useMemo(() => {
-    const gkk = (konten ?? []).find(k => k.name.trim().toLowerCase() === 'gkk');
-    return gkk ? String(gkk.id) : null;
+    const shared = (konten ?? []).find(k => k.is_shared);
+    return shared ? String(shared.id) : null;
   }, [konten]);
   const updateKontoFilter = (id: string | null) => { kontoInit.current = true; setKontoFilter(id); };
   useEffect(() => {

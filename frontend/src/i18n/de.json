@@ -24,7 +24,7 @@
     "editTitle": "Fixkosten bearbeiten",
     "monthlyTotal": "Fixkosten gesamt",
     "perMonth": "/Mon.",
-    "hint": "Wiederkehrende Kosten pro Monat – am Haushalt (Miete, Kredit …) oder an einer Person (z. B. „Anthropic“ für Martin). Später werden sie mit echten Belegen gegengeprüft; Einkommen & Budgetziele kommen ebenfalls hierher.",
+    "hint": "Wiederkehrende Kosten pro Monat – am Haushalt (Miete, Kredit …) oder an einer Person (z. B. ein Abo für ein Familienmitglied). Später werden sie mit echten Belegen gegengeprüft; Einkommen & Budgetziele kommen ebenfalls hierher.",
     "household": "Haushalt",
     "label": "Bezeichnung",
     "labelPlaceholder": "z. B. Miete, Netflix, Anthropic …",
@@ -1142,7 +1142,7 @@
     },
     "family": {
       "title": "Familie & Zugänge",
-      "body": "Im Admin legst du Familienmitglieder an und taggst sie an Artikel („nur Martin isst Thunfisch“) — in der Statistik dann nach Person filterbar. Außerdem lädst du dort per E-Mail weitere Nutzer ein und vergibst Schreibrechte: ohne Häkchen bekommt jemand einen Nur-Lese-Zugang und kann nichts ändern oder löschen."
+      "body": "Im Admin legst du Familienmitglieder an und taggst sie an Artikel („nur eine Person isst Thunfisch“) — in der Statistik dann nach Person filterbar. Außerdem lädst du dort per E-Mail weitere Nutzer ein und vergibst Schreibrechte: ohne Häkchen bekommt jemand einen Nur-Lese-Zugang und kann nichts ändern oder löschen."
     },
     "done": {
       "title": "Du bist startklar 🎉",

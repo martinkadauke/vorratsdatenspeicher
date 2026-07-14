@@ -1163,7 +1163,7 @@ function KontenSection() {
         <form onSubmit={e => { e.preventDefault(); if (newName.trim()) create.mutate(); }} className="mt-1 flex flex-wrap items-end gap-2">
           <div className="min-w-0 flex-1 basis-full sm:basis-auto">
             <Label>{t('admin.kontoName')}</Label>
-            <Input value={newName} onChange={e => setNewName(e.target.value)} placeholder="z.B. Lena" />
+            <Input value={newName} onChange={e => setNewName(e.target.value)} placeholder="z. B. Girokonto" />
           </div>
           <div>
             <Label>{t('admin.kontoOwner')}</Label>

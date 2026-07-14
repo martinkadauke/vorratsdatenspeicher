@@ -93,36 +93,38 @@ export async function ensureCashKonten(): Promise<void> {
 }
 
 /** Seed/repair the admin user.
- *  - Creates "martin" if no admin user exists yet.
- *  - ADMIN_RESET=true forces a password reset for "martin" (recovery switch).
- *  - ADMIN_PASSWORD overrides the default initial password. */
+ *  - Creates the admin (ADMIN_USERNAME, default "admin") if no admin user exists yet.
+ *  - ADMIN_RESET=true forces a password reset for that admin (recovery switch).
+ *  - ADMIN_PASSWORD overrides the default initial password.
+ *  Existing installs are never touched: if ANY admin already exists it seeds nothing. */
 export async function ensureAdmin(): Promise<void> {
+  const username = process.env.ADMIN_USERNAME ?? 'admin';
   const password = process.env.ADMIN_PASSWORD ?? 'vorrat-start-2026';
   const force = process.env.ADMIN_RESET === 'true';
 
-  const martin = await sql`SELECT id, is_admin FROM users WHERE username = 'martin'`;
+  const existing = await sql`SELECT id, is_admin FROM users WHERE username = ${username}`;
 
-  if (martin.length) {
+  if (existing.length) {
     if (force) {
       const hash = await bcrypt.hash(password, 12);
       // Recovery switch: reset the password only. Do NOT touch sees_all_konten here —
       // an admin may have deliberately demoted themselves, and a password reset must
       // not silently re-escalate super-admin visibility.
-      await sql`UPDATE users SET password_hash = ${hash}, is_admin = TRUE WHERE username = 'martin'`;
-      console.log('[seed] ADMIN_RESET: password for "martin" has been reset');
+      await sql`UPDATE users SET password_hash = ${hash}, is_admin = TRUE WHERE username = ${username}`;
+      console.log(`[seed] ADMIN_RESET: password for "${username}" has been reset`);
     } else {
-      console.log('[seed] admin user "martin" exists');
+      console.log(`[seed] admin user "${username}" exists`);
     }
     return;
   }
 
   const [{ count }] = await sql`SELECT COUNT(*)::int AS count FROM users WHERE is_admin = TRUE`;
   if (count > 0 && !force) {
-    console.log(`[seed] ${count} admin user(s) exist, not seeding "martin"`);
+    console.log(`[seed] ${count} admin user(s) exist, not seeding "${username}"`);
     return;
   }
 
   const hash = await bcrypt.hash(password, 12);
-  await sql`INSERT INTO users (username, password_hash, is_admin, sees_all_konten) VALUES ('martin', ${hash}, TRUE, TRUE)`;
-  console.log('[seed] created admin user "martin"');
+  await sql`INSERT INTO users (username, password_hash, is_admin, sees_all_konten) VALUES (${username}, ${hash}, TRUE, TRUE)`;
+  console.log(`[seed] created admin user "${username}"`);
 }

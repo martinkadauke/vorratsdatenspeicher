@@ -58,20 +58,20 @@ export function Receipts() {
 
   const { data: kontenRaw } = useQuery({
     queryKey: ['konten'],
-    queryFn: () => api<{ id: number; name: string; receipts: number; is_cash: boolean }[]>('/api/konten'),
+    queryFn: () => api<{ id: number; name: string; receipts: number; is_cash: boolean; is_shared: boolean }[]>('/api/konten'),
     staleTime: 60_000,
   });
   // Only offer accounts that actually have receipts visible to this user.
   const konten = useMemo(() => (kontenRaw ?? []).filter(k => k.receipts > 0), [kontenRaw]);
-  // Default account scope: the household's main account ("GKK" in our setup) so the
-  // page opens to GKK's till receipts, not everyone's. Falls back to the busiest
-  // non-cash account → no hard-coded GKK, still sensible for other households.
+  // Default account scope: the household's shared account so the page opens to its
+  // till receipts, not everyone's. Falls back to the busiest non-cash account →
+  // no hard-coded account name, sensible for any household.
   const defaultKontoId = useMemo(() => {
     const pool = konten.filter(k => !k.is_cash);
     if (!pool.length) return null;
-    const gkk = pool.find(k => k.name.trim().toLowerCase() === 'gkk');
+    const shared = pool.find(k => k.is_shared);
     const busiest = pool.reduce((a, b) => (b.receipts > a.receipts ? b : a));
-    return String((gkk ?? busiest).id);
+    return String((shared ?? busiest).id);
   }, [konten]);
   const kontoInit = useRef(false); // have we applied the default account scope yet?
 

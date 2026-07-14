@@ -24,7 +24,7 @@
     "editTitle": "Edit fixed cost",
     "monthlyTotal": "Fixed costs total",
     "perMonth": "/mo",
-    "hint": "Recurring monthly costs – for the household (rent, loan …) or a person (e.g. \"Anthropic\" for Martin). Later cross-checked against real receipts; income & budget goals will live here too.",
+    "hint": "Recurring monthly costs – for the household (rent, loan …) or a person (e.g. a subscription for one family member). Later cross-checked against real receipts; income & budget goals will live here too.",
     "household": "Household",
     "label": "Label",
     "labelPlaceholder": "e.g. Rent, Netflix, Anthropic …",
@@ -1140,7 +1140,7 @@
     },
     "family": {
       "title": "Family & access",
-      "body": "In Admin you add family members and tag them to items (\"only Martin eats tuna\") — then filter Statistics per person. You also invite more users by email there and grant write access: leave it off and someone gets read-only access and can't change or delete anything."
+      "body": "In Admin you add family members and tag them to items (\"only one person eats tuna\") — then filter Statistics per person. You also invite more users by email there and grant write access: leave it off and someone gets read-only access and can't change or delete anything."
     },
     "done": {
       "title": "You're all set 🎉",

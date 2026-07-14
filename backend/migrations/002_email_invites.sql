@@ -20,5 +20,5 @@ INSERT INTO app_config (key, value) VALUES
   ('smtp.user',    '""'),
   ('smtp.pass',    '""'),
   ('smtp.from',    '"Vorratsdatenspeicher <vds@localhost>"'),
-  ('app.base_url', '"http://192.168.1.238:8766"')
+  ('app.base_url', '""')
 ON CONFLICT (key) DO NOTHING;

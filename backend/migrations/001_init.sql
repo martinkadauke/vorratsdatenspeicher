@@ -172,28 +172,24 @@ CREATE TABLE IF NOT EXISTS maintenance_event (
 
 -- ── seed: app config defaults ────────────────────────────────────────────
 INSERT INTO app_config (key, value) VALUES
-  ('ollama.url',         '"http://192.168.1.238:11434"'),
+  ('ollama.url',         '""'),
   ('ollama.model',       '"qwen2.5:14b"'),
   ('churner.enabled',    'true'),
   ('churner.cron',       '"0 3 * * *"'),
   ('churner.confidence', '0.85'),
   ('churner.batch_size', '30'),
-  ('searxng.url',        '"http://192.168.1.238:8089"'),
+  ('searxng.url',        '""'),
   ('app.default_lang',   '"de"')
 ON CONFLICT (key) DO NOTHING;
 
 -- ── seed: family members ─────────────────────────────────────────────────
+-- Generic placeholders — the onboarding wizard renames these to the real household.
 INSERT INTO family_member (name, color, emoji, sort_order) VALUES
-  ('Martin',     '#10b981', '👨', 1),
+  ('Mitglied 1', '#10b981', '👨', 1),
   ('Mitglied 2', '#3b82f6', '👩', 2),
   ('Mitglied 3', '#f59e0b', '🧒', 3),
   ('Mitglied 4', '#ec4899', '👶', 4)
 ON CONFLICT (name) DO NOTHING;
-
--- Auto-tag: "Martin Eier" belongs exclusively to Martin
-INSERT INTO canonical_consumer (canonical_name, family_member_id, is_exclusive)
-SELECT 'Martin Eier', id, TRUE FROM family_member WHERE name = 'Martin'
-ON CONFLICT DO NOTHING;
 
 -- ── seed: category tree ──────────────────────────────────────────────────
 INSERT INTO category (path, parent_path, display, display_en, level, sort_order, emoji, is_meta) VALUES
