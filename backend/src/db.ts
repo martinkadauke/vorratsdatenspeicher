@@ -1,35 +1,122 @@
 import postgres from 'postgres';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import bcrypt from 'bcryptjs';
 
+/**
+ * DEMO_MODE splits this file into two worlds:
+ *  - OFF (dev / prod / the public container): a single plain pool, no RLS, no household
+ *    scoping — byte-for-byte the original single-household app.
+ *  - ON (demo.vorratsdatenspeicher.com): the multi-tenant layer — a non-owner runtime role
+ *    (vds_app) whose every query is RLS-scoped to app.current_household, plus an owner
+ *    (adminSql) lane for migrations + cross-household platform ops.
+ * Everything demo-only below is defined unconditionally but only ever CALLED from
+ * DEMO_MODE-gated code (index.ts boot, the auth plugin), so it's inert when the flag is off.
+ */
+export const DEMO_MODE = process.env.DEMO_MODE === 'true';
+
 const DATABASE_URL = process.env.DATABASE_URL ?? 'postgres://postgres:postgres@localhost:5432/vorratsdatenspeicher';
+// Owner/admin connection (demo: migrations + cross-household ops; single-URL → same conn).
+const ADMIN_DATABASE_URL = process.env.ADMIN_DATABASE_URL ?? DATABASE_URL;
+const PG_OPTS = { onnotice: () => {}, transform: { undefined: null } } as const;
 
-const sql = postgres(DATABASE_URL, {
-  onnotice: () => {},
-  transform: { undefined: null },
-});
+const pool = postgres(DATABASE_URL, { ...PG_OPTS, max: Number(process.env.DB_POOL_MAX ?? 20) });
+export type TenantConn = typeof pool;
+type Sql = TenantConn;
 
+// Owner lane. Demo: a separate owner connection (bypasses RLS). Non-demo: just the pool.
+export const adminSql: Sql = DEMO_MODE
+  ? postgres(ADMIN_DATABASE_URL, { ...PG_OPTS, max: Number(process.env.DB_ADMIN_POOL_MAX ?? 4) })
+  : pool;
+
+// Per-request household connection (demo only), threaded via AsyncLocalStorage.
+export const tenantContext = new AsyncLocalStorage<{ conn: Sql }>();
+const active = (): Sql => tenantContext.getStore()?.conn ?? pool;
+
+// Demo default handle: a Proxy that routes every query to the request's household-scoped
+// connection (fail-closed RLS). Non-demo uses the plain pool — identical to the original app.
+const demoSql: Sql = new Proxy(pool, {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  apply(_t, _this, args: any[]) { return (active() as any)(...args); },
+  get(_t, prop) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const c = active() as any;
+    // postgres.js reserved connections don't expose `.begin` at runtime (the ReservedSql
+    // type lies) → synthesize a manual tx pinned to the same reserved conn so it keeps the
+    // household's session GUC. With no tenant context c === pool (has begin) → falls through.
+    if (prop === 'begin' && typeof c.begin !== 'function') {
+      return async (arg: unknown, maybeFn?: unknown) => {
+        const fn = (typeof arg === 'function' ? arg : maybeFn) as (tx: Sql) => Promise<unknown>;
+        await c`BEGIN`;
+        try {
+          const result = await fn(c as Sql);
+          await c`COMMIT`;
+          return result;
+        } catch (e) {
+          try { await c`ROLLBACK`; } catch { /* connection may already be gone */ }
+          throw e;
+        }
+      };
+    }
+    const v = c[prop];
+    return typeof v === 'function' ? v.bind(c) : v;
+  },
+}) as Sql;
+
+const sql: Sql = DEMO_MODE ? demoSql : pool;
 export default sql;
 
+// ── Demo-only tenant helpers (inert when DEMO_MODE is off; never called then) ──────────
+/** Reserve a pooled connection and pin it to `householdId` (session GUC). Caller MUST
+ *  pass it to `closeHousehold` to reset + release. */
+export async function openHousehold(householdId: number): Promise<Sql> {
+  const conn = (await pool.reserve()) as unknown as Sql;
+  await conn`SELECT set_config('app.current_household', ${String(householdId)}, false)`;
+  return conn;
+}
+export async function closeHousehold(conn: Sql): Promise<void> {
+  try { await conn`SELECT set_config('app.current_household', '', false)`; } catch { /* gone */ }
+  (conn as unknown as { release: () => void }).release();
+}
+export async function withHousehold<T>(householdId: number, fn: () => Promise<T>): Promise<T> {
+  const conn = await openHousehold(householdId);
+  try { return await tenantContext.run({ conn }, fn); }
+  finally { await closeHousehold(conn); }
+}
+export async function forEachHousehold(fn: (householdId: number) => Promise<void>): Promise<void> {
+  const households = await adminSql`SELECT id FROM household ORDER BY id`;
+  for (const { id } of households) await withHousehold(id as number, () => fn(id as number));
+}
+/** Set the vds_app role's password (created without one by migration 089). Demo only. */
+export async function ensureAppRole(): Promise<void> {
+  const pw = process.env.VDS_APP_PASSWORD;
+  if (!pw) return;
+  await adminSql.unsafe(`ALTER ROLE vds_app WITH LOGIN PASSWORD '${pw.replace(/'/g, "''")}'`);
+  console.log('[boot] vds_app runtime role password set');
+}
+/** Boot invariant (demo): refuse to start if any household_id table lacks RLS + policy. */
+export async function assertRlsCoverage(): Promise<void> {
+  const missing = await adminSql`
+    SELECT c.relname
+    FROM information_schema.columns col
+    JOIN pg_class c ON c.relname = col.table_name AND c.relkind = 'r'
+    JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'public'
+    WHERE col.table_schema = 'public' AND col.column_name = 'household_id'
+      AND (NOT c.relrowsecurity
+           OR NOT EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid AND p.polname = 'tenant_isolation'))
+    ORDER BY c.relname`;
+  if (missing.length) {
+    throw new Error(`[RLS invariant] tenant tables missing RLS/policy: ${missing.map(r => r.relname as string).join(', ')} — refusing to start`);
+  }
+  console.log('[RLS invariant] all household_id tables have RLS + tenant_isolation policy ✓');
+}
+
 /**
- * Run a SELECT for the Analytics agent under least privilege.
- *
- * Every analytics query executes inside a transaction that (1) assumes the
- * SELECT-only `analytics` role, (2) is marked transaction_read_only, and
- * (3) has a hard statement/lock timeout. This is the enforcement that makes the
- * agent's "never write/delete" guarantee physical, not prompt-based: even if a
- * query were malformed or adversarial, the role cannot mutate and the
- * transaction rejects writes.
- *
- * `text` MUST be assembled only from the curated metrics catalog (whitelisted
- * identifiers). Every user-supplied value MUST be passed in `params` as a bound
- * placeholder ($1, $2, …) — never string-interpolated into `text`.
+ * Analytics agent SELECT under least privilege: SELECT-only read-only `analytics` role with
+ * hard timeouts. `text` must come from the curated catalog; user values go in `params`.
  */
-export async function analyticsRead<T = postgres.Row>(
-  text: string,
-  params: readonly unknown[] = [],
-): Promise<T[]> {
+export async function analyticsRead<T = postgres.Row>(text: string, params: readonly unknown[] = []): Promise<T[]> {
   const rows = await sql.begin(async tx => {
     await tx`SET LOCAL ROLE analytics`;
     await tx`SET LOCAL transaction_read_only = on`;
@@ -41,9 +128,10 @@ export async function analyticsRead<T = postgres.Row>(
   return rows as unknown as T[];
 }
 
-/** Apply backend/migrations/*.sql in filename order, tracked in schema_migrations. */
+/** Apply migrations/*.sql (always) + migrations/demo/*.sql (DEMO_MODE only), filename order,
+ *  tracked in schema_migrations. Runs on the owner connection (adminSql). */
 export async function migrate(): Promise<void> {
-  await sql`CREATE TABLE IF NOT EXISTS schema_migrations (
+  await adminSql`CREATE TABLE IF NOT EXISTS schema_migrations (
     filename TEXT PRIMARY KEY,
     applied_at TIMESTAMP DEFAULT NOW()
   )`;
@@ -52,39 +140,42 @@ export async function migrate(): Promise<void> {
     console.warn(`[migrate] no migrations directory at ${dir}, skipping`);
     return;
   }
-  const files = readdirSync(dir).filter(f => f.endsWith('.sql')).sort();
-  const applied = new Set((await sql`SELECT filename FROM schema_migrations`).map(r => r.filename as string));
-  for (const file of files) {
+  // Core migrations run everywhere. Multi-tenant migrations (migrations/demo/) run ONLY in
+  // DEMO_MODE — enabling RLS on dev/prod would starve the non-owner analytics/n8n roles.
+  const core = readdirSync(dir).filter(f => f.endsWith('.sql')).map(f => ({ file: f, full: path.join(dir, f) }));
+  const demoDir = path.join(dir, 'demo');
+  const demo = DEMO_MODE && existsSync(demoDir)
+    ? readdirSync(demoDir).filter(f => f.endsWith('.sql')).map(f => ({ file: `demo/${f}`, full: path.join(demoDir, f) }))
+    : [];
+  const files = [...core, ...demo].sort((a, b) => a.file.replace('demo/', '').localeCompare(b.file.replace('demo/', '')));
+  const applied = new Set((await adminSql`SELECT filename FROM schema_migrations`).map(r => r.filename as string));
+  for (const { file, full } of files) {
     if (applied.has(file)) continue;
-    const content = readFileSync(path.join(dir, file), 'utf8');
+    const content = readFileSync(full, 'utf8');
     console.log(`[migrate] applying ${file}`);
-    await sql.begin(async tx => {
+    await adminSql.begin(async tx => {
       await tx.unsafe(content);
       await tx`INSERT INTO schema_migrations (filename) VALUES (${file})`;
     });
   }
 }
 
-/** Ensure a cash ("Bargeld") account exists for every user-linked personal account,
- *  so cash payments can be attributed per person — separately from their card/bank
- *  account. Idempotent and crash-safe (must never abort boot). Name is derived by
- *  swapping "Konto"→"Bargeld" (e.g. "Martins Konto" → "Martins Bargeld"); rename in
- *  Admin → Konten if you prefer. */
+/** Ensure a cash ("Bargeld") account exists for every user-linked personal account. */
 export async function ensureCashKonten(): Promise<void> {
   try {
-    const personal = await sql`
-      SELECT id, name, user_id FROM konto
-      WHERE user_id IS NOT NULL AND is_shared = FALSE AND is_cash = FALSE
-    `;
+    const personal = DEMO_MODE
+      ? await adminSql`SELECT id, name, user_id, household_id FROM konto WHERE user_id IS NOT NULL AND is_shared = FALSE AND is_cash = FALSE`
+      : await adminSql`SELECT id, name, user_id FROM konto WHERE user_id IS NOT NULL AND is_shared = FALSE AND is_cash = FALSE`;
     for (const k of personal) {
-      const [{ has }] = await sql`SELECT EXISTS(SELECT 1 FROM konto WHERE user_id = ${k.user_id} AND is_cash = TRUE) AS has`;
+      const [{ has }] = await adminSql`SELECT EXISTS(SELECT 1 FROM konto WHERE user_id = ${k.user_id} AND is_cash = TRUE) AS has`;
       if (has) continue;
       const swapped = (k.name as string).replace(/Konto/i, 'Bargeld').trim();
       const name = swapped && swapped !== (k.name as string) ? swapped : `${k.name} Bargeld`;
-      // account_type 'bargeld' keeps it in lockstep with is_cash (a cash account has no
-      // bank statement) — else it would default to 'giro' and mislabel + wrongly trip the
-      // receipt-completeness gate for a brand-new cash account.
-      await sql`INSERT INTO konto (name, is_shared, is_cash, user_id, account_type) VALUES (${name}, FALSE, TRUE, ${k.user_id}, 'bargeld')`;
+      if (DEMO_MODE) {
+        await adminSql`INSERT INTO konto (name, is_shared, is_cash, user_id, account_type, household_id) VALUES (${name}, FALSE, TRUE, ${k.user_id}, 'bargeld', ${k.household_id})`;
+      } else {
+        await adminSql`INSERT INTO konto (name, is_shared, is_cash, user_id, account_type) VALUES (${name}, FALSE, TRUE, ${k.user_id}, 'bargeld')`;
+      }
       console.log(`[seed] created cash account "${name}" for user ${k.user_id}`);
     }
   } catch (err) {
@@ -92,24 +183,38 @@ export async function ensureCashKonten(): Promise<void> {
   }
 }
 
-/** Seed/repair the admin user.
- *  - Creates the admin (ADMIN_USERNAME, default "admin") if no admin user exists yet.
- *  - ADMIN_RESET=true forces a password reset for that admin (recovery switch).
- *  - ADMIN_PASSWORD overrides the default initial password.
- *  Existing installs are never touched: if ANY admin already exists it seeds nothing. */
+/** Seed/repair the admin user. Demo: the household-less platform super-admin (is_super_admin).
+ *  Non-demo: the single-household admin (original behaviour). */
 export async function ensureAdmin(): Promise<void> {
   const username = process.env.ADMIN_USERNAME ?? 'admin';
   const password = process.env.ADMIN_PASSWORD ?? 'vorrat-start-2026';
   const force = process.env.ADMIN_RESET === 'true';
 
-  const existing = await sql`SELECT id, is_admin FROM users WHERE username = ${username}`;
+  if (DEMO_MODE) {
+    const email = process.env.ADMIN_EMAIL ?? null;
+    const existing = await adminSql`SELECT id FROM users WHERE is_super_admin = TRUE`;
+    if (existing.length) {
+      if (force) {
+        const hash = await bcrypt.hash(password, 12);
+        await adminSql`UPDATE users SET password_hash = ${hash} WHERE username = ${username}`;
+        console.log(`[seed] ADMIN_RESET: password for "${username}" reset`);
+      } else {
+        console.log('[seed] platform super-admin exists');
+      }
+      return;
+    }
+    const hash = await bcrypt.hash(password, 12);
+    await adminSql`INSERT INTO users (username, email, password_hash, is_admin, sees_all_konten, is_super_admin, household_id)
+                   VALUES (${username}, ${email}, ${hash}, TRUE, TRUE, TRUE, 1)`;
+    console.log(`[seed] created platform super-admin "${username}"`);
+    return;
+  }
 
+  // Non-demo (original single-household behaviour)
+  const existing = await sql`SELECT id, is_admin FROM users WHERE username = ${username}`;
   if (existing.length) {
     if (force) {
       const hash = await bcrypt.hash(password, 12);
-      // Recovery switch: reset the password only. Do NOT touch sees_all_konten here —
-      // an admin may have deliberately demoted themselves, and a password reset must
-      // not silently re-escalate super-admin visibility.
       await sql`UPDATE users SET password_hash = ${hash}, is_admin = TRUE WHERE username = ${username}`;
       console.log(`[seed] ADMIN_RESET: password for "${username}" has been reset`);
     } else {
@@ -117,13 +222,11 @@ export async function ensureAdmin(): Promise<void> {
     }
     return;
   }
-
   const [{ count }] = await sql`SELECT COUNT(*)::int AS count FROM users WHERE is_admin = TRUE`;
   if (count > 0 && !force) {
     console.log(`[seed] ${count} admin user(s) exist, not seeding "${username}"`);
     return;
   }
-
   const hash = await bcrypt.hash(password, 12);
   await sql`INSERT INTO users (username, password_hash, is_admin, sees_all_konten) VALUES (${username}, ${hash}, TRUE, TRUE)`;
   console.log(`[seed] created admin user "${username}"`);
