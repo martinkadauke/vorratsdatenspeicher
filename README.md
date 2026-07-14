@@ -1,94 +1,103 @@
-# Vorratsdatenspeicher (VDS)
+<div align="center">
 
-Self-hosted household pantry, receipts & spending tracker — and, increasingly, a whole-household finance hub. One Docker image: a React PWA + a Fastify API over Postgres. Receipts are read by AI vision OCR (supermarket till receipts **and** PDF / e-mail invoices); the rest is line-item bookkeeping, pantry tracking, offers and analytics for your household.
+# 🗄️ Vorratsdatenspeicher
 
-Built for a real family: multi-user, multiple accounts (shared / personal / cash), privacy-scoped data, German & English UI.
+**The mobile-first, self-hosted household app.**
+Snap a receipt at the checkout — AI reads every line item, sorts it, and shows you where your money goes.
+All on **your** server. Not in someone's cloud.
 
-## Features
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
+![Self-hosted](https://img.shields.io/badge/self--hosted-one%20container-059669)
+![PWA](https://img.shields.io/badge/PWA-installable-059669)
 
-**Belege (receipts)**
-- AI **vision OCR** (Anthropic) for till receipts and PDF/image invoices — store, date, total and every line item, all editable; category changes cascade to all purchases of the same canonical name.
-- **E-mail import** — each person connects their own IMAP mailbox under *Profile*; forwarded/incoming invoices are filed as receipts automatically. Invoice-aware: skips AGB/legal-boilerplate attachments, falls back to the e-mail body, and anchors the date on the mail header.
-- Manual entry & photo upload, review-progress bar, month scrubber, card-size zoom, collapsible source/account/store filters.
+**[Live demo](https://demo.vorratsdatenspeicher.com)** · **[Website](https://vorratsdatenspeicher.com)** · `ghcr.io/martinkadauke/vorratsdatenspeicher`
 
-**Warenstamm (master data)** — one tabbed hub:
-- *Artikel* — canonical products (cascading rename, base unit / Grundpreis, expected price, consumers).
-- *Positionen* — every individual line item, searchable & filterable.
-- *Vorrat* — live pantry estimate per tracked product from purchase history (quantity-weighted consumption rate, unit-reconciled), with **manual stock & weekly-consumption overrides** and iron-reserve batches with expiry.
+</div>
 
-**Einkaufsliste** — low-stock suggestions from the same consumption model; by-store price comparison; share with the household (e-mail and/or push).
+---
 
-**Angebote (offers)** — Marktguru leaflet offers for subscribed products (no API key needed); daily digest by e-mail and/or push.
+The name is a joke — it's the German term for state-mandated "data retention." The twist: **you** are the only one storing your data. No account with us, no tracking, no cloud. VDS runs as a single Docker container on your server, NAS, or Raspberry Pi.
 
-**Läden · Statistik · Analytics**
-- Store & chain profiles.
-- Monthly spending per category (3-level drilldown), editable goals, MTD + end-of-month projection, per-family-member filter (Recharts).
-- **Analytics** — "ask your data" in natural language: a hallucination-proof agent emits a dashboard spec, and the backend computes every number against a read-only metrics layer.
+It started as a receipt scanner for one family and grew into a whole household finance & pantry hub: multi-user, shared and private accounts, per-person spend split, German & English UI.
 
-**Prüfung & Churner** — review queue for AI-proposed canonical names; a scheduled in-app job (configurable model + SearXNG web grounding) cleans up weak names and never auto-writes below the confidence threshold; results surface in the notification bell.
+## What it does
 
-**Household** — accounts (shared / personal / cash), family members ("only Martin eats tuna") with spend split, privacy-scoped receipts.
+- 📸 **Receipts by AI vision** — photograph a supermarket till receipt (or import a PDF / e-mail invoice) and the AI reads the store, date, total, and *every* line item — all editable. No typing.
+- 🗂️ **Auto-categorised** — each item lands in the right category (fruit → fruit, diesel → fuel). Rename a product once and it cascades to every past purchase.
+- 📊 **Ask your stats** — natural-language questions ("How much on fuel in 2026?"). A hallucination-proof agent turns the question into a dashboard spec; the **backend** computes every number against a read-only metrics layer. Traceable, never guessed.
+- 🛒 **Shopping lists** — low-stock suggestions from a consumption model, sorted per store, shared with the whole household by e-mail/push, with current offers folded in.
+- 🥫 **Pantry & offers** — a live estimate of what's at home and what's running low, plus leaflet deals from your local stores.
+- 👨‍👩‍👧‍👦 **Household & family** — shared / personal / cash accounts, spending per person, privacy-scoped receipts. Multi-household ready.
+- 💶 **Finances** — fixed costs, income, budgets and bank-statement matching — the household's money in one place.
+- 🔔 **Notifications** — branded transactional e-mail + Web Push (VAPID). Installs as a PWA with its own home-screen icon.
 
-**Notifications** — branded transactional e-mails (with logo) and **Web Push** (installable PWA, VAPID); per-type & per-channel kill-switches in Admin.
+## Quick start
 
-**Admin** — pluggable AI providers (Anthropic / DeepSeek / Ollama) with **per-task** model selection, bi-weekly model-review suggestions, token usage, categories, accounts, family, SMTP, notifications, household/offers.
+You need [Docker](https://docs.docker.com/get-docker/). Save this as `docker-compose.yml`, **change the two secrets**, and run `docker compose up -d`:
 
-## Stack
+```yaml
+services:
+  vds:
+    image: ghcr.io/martinkadauke/vorratsdatenspeicher:latest
+    ports: ["8766:80"]
+    environment:
+      DATABASE_URL: postgres://vds:vds@db:5432/vds
+      JWT_SECRET: change-me-to-something-secret        # ← change
+      INTERNAL_SECRET: change-me-to-something-else     # ← change
+    volumes: ["vds-receipts:/receipts"]
+    depends_on: [db]
+    restart: unless-stopped
+  db:
+    image: postgres:16
+    environment: { POSTGRES_USER: vds, POSTGRES_PASSWORD: vds, POSTGRES_DB: vds }
+    volumes: ["vds-db:/var/lib/postgresql/data"]
+    restart: unless-stopped
+volumes:
+  vds-receipts: {}
+  vds-db: {}
+```
 
-| | |
+Then open **http://localhost:8766** — the first-run setup wizard walks you through the rest (AI provider, categories, household). First login is `admin` / `vorrat-start-2026` (override with `ADMIN_PASSWORD`, reset with `ADMIN_RESET=true`).
+
+> **Install it as an app (PWA):** iPhone → Safari → Share → *Add to Home Screen*. Android → Chrome → *Install app*. PWA install needs HTTPS in the cloud (`http://localhost` is fine locally) — put a reverse proxy like Caddy in front.
+
+Prefer to build from source instead of pulling the image? Replace the `image:` line with `build: .` and run `docker compose up -d --build`.
+
+## Bring your own AI
+
+VDS uses AI to read receipts, categorise, and answer stats questions. You pick a provider **per task** and mix them freely:
+
+| Provider | Good for | Cost |
+|---|---|---|
+| **Anthropic** (Claude) | Reading receipt photos (vision), reasoning | ~1–2 ct / receipt |
+| **DeepSeek** | Cheap text categorisation | fractions of a cent |
+| **Ollama** | Fully local, zero cloud | free (your GPU) |
+
+Drop your API key(s) in during setup — or run categorisation entirely on a local Ollama and keep even the AI on-prem.
+
+## How it's built
+
+| Layer | Tech |
 |---|---|
-| Frontend | React + Vite + TypeScript, Tailwind, TanStack Query, react-i18next, Recharts, dnd-kit, pdf.js |
-| Backend | Node 20 + Fastify 5, postgres.js (plain SQL, **no ORM**), node-cron, JWT (HS256) + bcrypt, web-push, imapflow + mailparser, nodemailer, jimp |
-| AI | Anthropic vision/text OCR by default; provider abstraction (DeepSeek, Ollama) with per-task models; SearXNG for web grounding |
-| Data | PostgreSQL; numbered SQL migrations applied on boot (tracked in `schema_migrations`) |
-| Infra | Single Docker image serving SPA + API + `/receipts/*`; config lives in the DB (`app_config`), so most settings change with no redeploy |
+| Frontend | React 18 + Vite + TypeScript, Tailwind, React Query, i18next (DE/EN), a PWA |
+| Backend | Fastify 5 + TypeScript, `postgres.js` (plain SQL, no ORM), JWT auth |
+| AI | Pluggable — Anthropic / DeepSeek / Ollama, per-task model choice |
+| Data | PostgreSQL. SQL migrations run automatically on boot |
+| Infra | **One** Docker image serves the SPA + API + receipt files |
 
-## Architecture notes
-- **Monorepo** (`/frontend`, `/backend`); the backend serves the built SPA statically and the API under `/api/*`.
-- **Config in the database** — AI keys/models, SMTP, schedules and toggles are all editable at runtime in *Admin*; only bootstrap secrets come from env.
-- **Migrations on boot**, tracked in `schema_migrations`. `GET /api/version` returns the build SHA, so a deploy can be verified end-to-end.
+Most configuration lives in the database (`app_config`) and is editable at runtime in **Admin** — most settings change with no redeploy. `GET /api/version` returns the build SHA for deploy verification.
 
 ## Development
 
 ```bash
-# backend (terminal 1)
-cd backend && npm install
-DATABASE_URL=postgres://user:pw@HOST:5432/db JWT_SECRET=dev INTERNAL_SECRET=dev npm run dev
-
-# frontend (terminal 2) — proxies /api to localhost:3000
+# backend  (http://localhost:8080)
+cd backend && npm install && npm run dev
+# frontend (http://localhost:5173, proxies /api → backend)
 cd frontend && npm install && npm run dev
 ```
 
-Migrations run automatically at backend start. Then set the **Anthropic API key** (and anything else) in *Admin* — nothing AI-related is hard-coded.
+A local Postgres is all you need; migrations apply on the backend's first boot.
 
-## Deployment
+## License
 
-The image serves the SPA, API and `/receipts/*` itself — just point a reverse proxy at it, no extra `/api` routing needed.
-
-```bash
-# docker compose: create a .env with DATABASE_URL, JWT_SECRET, INTERNAL_SECRET
-docker compose up -d --build
-```
-
-or plain Docker:
-
-```bash
-docker run -d --name vds --restart unless-stopped -p 8766:80 \
-  -e DATABASE_URL='postgres://USER:PW@HOST:5432/DB' \
-  -e JWT_SECRET="$(openssl rand -hex 32)" \
-  -e INTERNAL_SECRET="$(openssl rand -hex 16)" \
-  -v /path/to/receipts:/app/public/receipts:ro \
-  vorratsdatenspeicher
-```
-
-CI/CD (GitHub Actions in this repo) builds a **SHA-tagged image**, deploys it with a rolling update + automatic rollback, and **verifies the live `/api/version` SHA** before the run goes green — so a boot/migration crash that silently keeps the old version fails the pipeline.
-
-**First login:** `martin` / `vorrat-start-2026` (override the initial password with `ADMIN_PASSWORD`; recover with `ADMIN_RESET=true`). Change it immediately in *Profile*.
-
-## E-mail & offers
-
-- **Inbound** (invoice import): per-user IMAP mailbox under *Profile → E-Mail-Postfach*, polled every ~15 min.
-- **Outbound** (notifications): SMTP under *Admin → SMTP*.
-- **Offers**: Marktguru — address & product categories under *Admin → Haushalt*.
-
-> A guarded `POST /api/internal/recategorize-one` (header `X-Internal-Secret`) remains for external automation, but the old n8n / Telegram ingestion path is **deprecated** — OCR and e-mail import are now fully in-app.
+[GNU AGPL-3.0](LICENSE). Self-host it, modify it, share it — if you run a modified version as a network service, you share your changes.
