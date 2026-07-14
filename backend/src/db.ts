@@ -144,10 +144,12 @@ export async function migrate(): Promise<void> {
   // DEMO_MODE — enabling RLS on dev/prod would starve the non-owner analytics/n8n roles.
   const core = readdirSync(dir).filter(f => f.endsWith('.sql')).map(f => ({ file: f, full: path.join(dir, f) }));
   const demoDir = path.join(dir, 'demo');
+  // Demo migrations tracked by BASENAME (e.g. "086_household.sql") — matches how the existing
+  // demo DB already recorded them, so a cutover to this code doesn't try to re-apply them.
   const demo = DEMO_MODE && existsSync(demoDir)
-    ? readdirSync(demoDir).filter(f => f.endsWith('.sql')).map(f => ({ file: `demo/${f}`, full: path.join(demoDir, f) }))
+    ? readdirSync(demoDir).filter(f => f.endsWith('.sql')).map(f => ({ file: f, full: path.join(demoDir, f) }))
     : [];
-  const files = [...core, ...demo].sort((a, b) => a.file.replace('demo/', '').localeCompare(b.file.replace('demo/', '')));
+  const files = [...core, ...demo].sort((a, b) => a.file.localeCompare(b.file));
   const applied = new Set((await adminSql`SELECT filename FROM schema_migrations`).map(r => r.filename as string));
   for (const { file, full } of files) {
     if (applied.has(file)) continue;
