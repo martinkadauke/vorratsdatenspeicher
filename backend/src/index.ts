@@ -29,6 +29,7 @@ import { meRoutes } from './routes/me.js';
 import { maintenanceRoutes } from './routes/maintenance.js';
 import { i18nRoutes } from './routes/i18n.js';
 import { exportRoutes } from './routes/exports.js';
+import { backupRoutes } from './routes/backup.js';
 import { storeRoutes } from './routes/stores.js';
 import { trendsRoutes } from './routes/trends.js';
 import { iconRoutes } from './routes/icons.js';
@@ -110,6 +111,7 @@ async function main(): Promise<void> {
   maintenanceRoutes(app);
   i18nRoutes(app);
   exportRoutes(app);
+  backupRoutes(app);
   storeRoutes(app);
   trendsRoutes(app);
   iconRoutes(app);

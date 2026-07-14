@@ -18,6 +18,8 @@ RUN npm run build
 FROM node:20-alpine
 WORKDIR /app
 ENV NODE_ENV=production
+# pg_dump (super-admin backup) + GNU tar for the backup archive stream
+RUN apk add --no-cache postgresql-client tar
 ARG GIT_SHA=unknown
 ARG GIT_REF=unknown
 ENV GIT_SHA=${GIT_SHA}

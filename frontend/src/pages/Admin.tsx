@@ -76,6 +76,7 @@ export function Admin() {
     { id: 'churner', title: t('admin.maintenance'), keywords: 'wartung maintenance churner namen kanonisch canonical bilder icons bereinigung cleanup hintergrund background batch', el: <ChurnerSection /> },
     { id: 'categories', title: t('categoriesAdmin.title'), keywords: 'kategorien categories artikelkategorien warengruppen baum tree', el: <CategoriesLinkSection /> },
     { id: 'data', title: t('admin.data'), keywords: 'daten data export import backup loeschen delete zuruecksetzen reset csv download', el: <DataManagementSection />, show: !!user?.sees_all_konten },
+    { id: 'backup', title: t('admin.backup'), keywords: 'backup sicherung archiv download datenbank dump belege fotos wiederherstellung restore tar gz alles everything', el: <BackupSection />, show: !!user?.sees_all_konten },
     { id: 'maintenance-log', title: t('admin.maintenance'), keywords: 'wartung maintenance protokoll log verlauf history ereignisse events lauf run nightly', el: <MaintenanceSection /> },
     { id: 'konten', title: t('admin.konten'), keywords: 'konten accounts konto gkk haushalt budget sichtbarkeit', el: <KontenSection /> },
     { id: 'offers', title: t('admin.offersTitle'), keywords: 'angebote offers prospekt deals umkreis radius adresse abonnement subscription haushalt marktguru', el: <OffersSection /> },
@@ -89,7 +90,7 @@ export function Admin() {
 
   const groups: { id: string; title: string; members: string[] }[] = [
     { id: 'ai', title: t('admin.groupAi'), members: ['ai-providers', 'ai-tasks', 'model-review', 'token-usage'] },
-    { id: 'data', title: t('admin.groupData'), members: ['churner', 'categories', 'data', 'maintenance-log'] },
+    { id: 'data', title: t('admin.groupData'), members: ['churner', 'categories', 'data', 'backup', 'maintenance-log'] },
     { id: 'household', title: t('admin.groupHousehold'), members: ['konten', 'offers', 'family'] },
     { id: 'access', title: t('admin.groupAccess'), members: ['users'] },
     { id: 'system', title: t('admin.groupSystem'), members: ['smtp'] },
@@ -1225,6 +1226,37 @@ function DataManagementSection() {
               <Download size={14} /> Monatlich CSV
             </Button>
           </div>
+        </div>
+      </div>
+    </Section>
+  );
+}
+
+// ── Full backup (super-admin): a .tar.gz with a DB dump + all receipt files ──
+function BackupSection() {
+  const { t } = useTranslation();
+  const [busy, setBusy] = useState(false);
+  const run = async () => {
+    setBusy(true);
+    try {
+      // A short-lived signed URL, so the browser streams the (possibly large) archive
+      // straight to disk — no auth header, no in-memory blob.
+      const { url } = await api<{ url: string }>('/api/backup/prepare');
+      window.location.href = url;
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setTimeout(() => setBusy(false), 2500);
+    }
+  };
+  return (
+    <Section title={t('admin.backup')}>
+      <div className="flex flex-col gap-3">
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('admin.backupHint')}</p>
+        <div>
+          <Button onClick={run} disabled={busy}>
+            <Download size={14} /> {busy ? t('admin.backupBusy') : t('admin.backupBtn')}
+          </Button>
         </div>
       </div>
     </Section>
