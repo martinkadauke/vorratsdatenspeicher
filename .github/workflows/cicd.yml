@@ -65,9 +65,12 @@ jobs:
         with:
           context: .
           push: true
+          # dev is the always-current channel (demo tracks it, prod runs nowhere), so the dev
+          # build ALSO publishes :latest — that's what self-hosters pull per the README.
           tags: |
             ghcr.io/${{ github.repository }}:${{ needs.meta.outputs.tag }}
             ghcr.io/${{ github.repository }}:${{ github.sha }}
+            ${{ github.ref_name == 'dev' && format('ghcr.io/{0}:latest', github.repository) || '' }}
           build-args: |
             GIT_SHA=${{ github.sha }}
             GIT_REF=${{ github.ref_name }}
