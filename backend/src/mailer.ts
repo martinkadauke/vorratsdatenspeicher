@@ -6,7 +6,7 @@ export async function smtpConfigured(): Promise<boolean> {
   return !!host;
 }
 
-export async function sendMail(to: string, subject: string, text: string, html?: string): Promise<void> {
+export async function sendMail(to: string, subject: string, text: string, html?: string, replyTo?: string): Promise<void> {
   const host = await getConfig('smtp.host');
   if (!host) throw new Error('SMTP ist nicht konfiguriert (Admin → SMTP)');
   const port = await getConfig('smtp.port');
@@ -22,5 +22,5 @@ export async function sendMail(to: string, subject: string, text: string, html?:
     auth: user ? { user, pass } : undefined,
   });
 
-  await transporter.sendMail({ from, to, subject, text, ...(html ? { html } : {}) });
+  await transporter.sendMail({ from, to, subject, text, ...(html ? { html } : {}), ...(replyTo ? { replyTo } : {}) });
 }

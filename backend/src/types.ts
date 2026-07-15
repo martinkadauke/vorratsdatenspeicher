@@ -4,6 +4,8 @@ export interface User {
   email: string | null;
   is_admin: boolean;
   sees_all_konten: boolean;
+  is_super_admin?: boolean;   // demo only (multi-tenant); undefined on single-household
+  household_id?: number;      // demo only
   can_write: boolean;
   prefers_dark: boolean;
   preferred_lang: string;

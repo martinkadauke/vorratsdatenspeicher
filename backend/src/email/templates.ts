@@ -277,6 +277,49 @@ export function noticeEmail(opts: { subject: string; heading: string; body: stri
   return { subject: opts.subject, text: opts.body, html: layout({ preheader: opts.body, heading: opts.subject, inner }) };
 }
 
+/** Ops notice → webmaster: a new demo household was created (demo only). */
+export function newHouseholdEmail(opts: { householdName: string; adminEmail: string; total: number }): { subject: string; text: string; html: string } {
+  const subject = `Neuer Haushalt angelegt: ${opts.householdName}`;
+  const text =
+    `Auf der Demo wurde ein neuer Haushalt angelegt.\n\n` +
+    `Name: ${opts.householdName}\nAdmin-E-Mail: ${opts.adminEmail}\nHaushalte gesamt: ${opts.total}\n`;
+  const inner = `
+    <h1 style="margin:0 0 12px;font-size:22px;line-height:1.3;font-weight:700;color:${C.heading};letter-spacing:-0.01em;">
+      Neuer Demo-Haushalt 🏠
+    </h1>
+    <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:${C.body};">
+      Auf der Demo hat sich gerade jemand einen eigenen Haushalt angelegt.
+    </p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+           style="background:${C.accentBg};border:1px solid ${C.accentBorder};border-radius:12px;">
+      <tr><td style="padding:14px 16px;font-size:13px;line-height:1.7;color:${C.brandDark};">
+        Haushalt<br><strong style="font-size:16px;color:${C.heading};">${esc(opts.householdName)}</strong><br>
+        <span style="color:${C.muted};">Admin: ${esc(opts.adminEmail)} &middot; Haushalte gesamt: ${opts.total}</span>
+      </td></tr>
+    </table>`;
+  return { subject, text, html: layout({ preheader: `${opts.householdName} · ${opts.adminEmail}`, heading: subject, inner }) };
+}
+
+/** A user pressed the Feedback button → forward the message to the webmaster (demo only). */
+export function feedbackEmail(opts: { message: string; page: string; from: string; householdId: number | null }): { subject: string; text: string; html: string } {
+  const subject = 'Neues Feedback: ' + opts.message.replace(/\s+/g, ' ').trim().slice(0, 50);
+  const text =
+    `Neues Feedback über den Feedback-Button.\n\n` +
+    `Von: ${opts.from}\nSeite: ${opts.page || '—'}\nHaushalt: ${opts.householdId ?? '—'}\n\nNachricht:\n${opts.message}\n`;
+  const inner = `
+    <h1 style="margin:0 0 12px;font-size:22px;line-height:1.3;font-weight:700;color:${C.heading};letter-spacing:-0.01em;">
+      Neues Feedback 💬
+    </h1>
+    <p style="margin:0 0 16px;font-size:14px;line-height:1.6;color:${C.muted};">
+      Von <strong style="color:${C.body};">${esc(opts.from)}</strong> &middot; Seite <code>${esc(opts.page || '—')}</code> &middot; Haushalt ${opts.householdId ?? '—'}
+    </p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+           style="background:${C.accentBg};border:1px solid ${C.accentBorder};border-radius:12px;">
+      <tr><td style="padding:16px;font-size:15px;line-height:1.6;color:${C.heading};white-space:pre-wrap;">${esc(opts.message)}</td></tr>
+    </table>`;
+  return { subject, text, html: layout({ preheader: opts.message.slice(0, 90), heading: subject, inner }) };
+}
+
 /** Shared shopping list — branded, with the item list + an "open list" button. */
 export function shoppingListEmail(opts: { by: string; items: { title: string; menge: number | null }[]; appUrl: string }): { subject: string; text: string; html: string } {
   const n = opts.items.length;

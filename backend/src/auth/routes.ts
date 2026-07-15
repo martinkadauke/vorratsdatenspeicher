@@ -94,7 +94,7 @@ export function authRoutes(app: FastifyInstance): void {
   // without a config GET. Demo: per-household (household.onboarding_done). Non-demo: global config.
   app.get('/api/auth/me', async (req) => {
     if (DEMO_MODE) {
-      const [hh] = await adminSql`SELECT onboarding_done FROM household WHERE id = ${req.user!.household_id}`;
+      const [hh] = await adminSql`SELECT onboarding_done FROM household WHERE id = ${req.user!.household_id ?? 1}`;
       return { user: { ...req.user, onboarding_done: hh?.onboarding_done ?? false } };
     }
     return { user: { ...req.user, onboarding_done: await getConfig('onboarding.done') } };

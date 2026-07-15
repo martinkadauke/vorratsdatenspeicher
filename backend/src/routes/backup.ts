@@ -5,7 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { requireSuperAdmin } from '../auth/plugin.js';
+import { requirePlatformAdmin } from '../auth/plugin.js';
 import { INTERNAL_SECRET } from '../config.js';
 
 const RECEIPTS_LOCAL_PATH = process.env.RECEIPTS_LOCAL_PATH ?? '/receipts';
@@ -29,7 +29,7 @@ function valid(e?: string, s?: string): boolean {
  *  disk: prepare (authed) mints a short-lived signed URL; download (single request →
  *  stays on one replica) does the pg_dump + tar and streams it. */
 export function backupRoutes(app: FastifyInstance): void {
-  app.get('/api/backup/prepare', { preHandler: requireSuperAdmin }, async () => {
+  app.get('/api/backup/prepare', { preHandler: requirePlatformAdmin }, async () => {
     const exp = Date.now() + TTL_MS;
     return { url: `/api/backup/download?e=${exp}&s=${sign(exp)}` };
   });

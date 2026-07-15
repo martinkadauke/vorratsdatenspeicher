@@ -4,7 +4,7 @@ import path from 'node:path';
 import { existsSync } from 'node:fs';
 import sql from '../db.js';
 import { kontoScope } from '../auth/konto.js';
-import { requireSuperAdmin } from '../auth/plugin.js';
+import { requirePlatformAdmin } from '../auth/plugin.js';
 
 const RECEIPTS_LOCAL_PATH = process.env.RECEIPTS_LOCAL_PATH ?? '/receipts';
 
@@ -21,7 +21,7 @@ function csvRow(values: unknown[]): string {
 export function exportRoutes(app: FastifyInstance): void {
   /** Data-management stats for the super-admin: counts + receipt-photo disk
    *  usage. Spans ALL accounts (super-admin sees everything). */
-  app.get('/api/admin/data-stats', { preHandler: requireSuperAdmin }, async () => {
+  app.get('/api/admin/data-stats', { preHandler: requirePlatformAdmin }, async () => {
     const [{ receipts }] = await sql`SELECT COUNT(*)::int AS receipts FROM einkauf`;
     const [{ artikel }] = await sql`SELECT COUNT(*)::int AS artikel FROM artikel`;
     const [{ konten }] = await sql`SELECT COUNT(*)::int AS konten FROM konto`;
@@ -43,7 +43,7 @@ export function exportRoutes(app: FastifyInstance): void {
 
   /** All artikel as CSV, joined with receipt metadata. Optional date range.
    *  Super-admin only — exporting the whole dataset is a privileged action. */
-  app.get('/api/exports/artikel.csv', { preHandler: requireSuperAdmin }, async (req, reply) => {
+  app.get('/api/exports/artikel.csv', { preHandler: requirePlatformAdmin }, async (req, reply) => {
     const q = req.query as { from?: string; to?: string };
 
     const rows = await sql`
@@ -83,7 +83,7 @@ export function exportRoutes(app: FastifyInstance): void {
   });
 
   /** Receipts (one row per receipt) as CSV. Super-admin only. */
-  app.get('/api/exports/receipts.csv', { preHandler: requireSuperAdmin }, async (req, reply) => {
+  app.get('/api/exports/receipts.csv', { preHandler: requirePlatformAdmin }, async (req, reply) => {
     const q = req.query as { from?: string; to?: string };
     const rows = await sql`
       SELECT e.id, e.datum::text AS datum, e.roh_ladenname AS laden, e.gesamt_betrag,
@@ -110,7 +110,7 @@ export function exportRoutes(app: FastifyInstance): void {
   });
 
   /** Monthly category spend as CSV — pivot-ready for Excel. Super-admin only. */
-  app.get('/api/exports/monthly.csv', { preHandler: requireSuperAdmin }, async (req, reply) => {
+  app.get('/api/exports/monthly.csv', { preHandler: requirePlatformAdmin }, async (req, reply) => {
     const rows = await sql`
       SELECT
         to_char(e.datum, 'YYYY-MM') AS ym,

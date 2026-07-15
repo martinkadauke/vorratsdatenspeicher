@@ -1,15 +1,22 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import jwt from 'jsonwebtoken';
-import sql from '../db.js';
+import sql, { adminSql, DEMO_MODE, openHousehold, closeHousehold, tenantContext, type TenantConn } from '../db.js';
 import { JWT_SECRET, INTERNAL_SECRET } from '../config.js';
 import type { User } from '../types.js';
 
-/** Global auth gate: every /api/* route except login and internal requires a valid JWT. */
+declare module 'fastify' {
+  interface FastifyRequest {
+    reserved?: TenantConn; // demo: the household-scoped connection reserved for this request
+  }
+}
+
+/** Global auth gate: every /api/* route except login and internal requires a valid JWT.
+ *  In DEMO_MODE it also reserves a household-scoped connection per request (RLS). */
 export function registerAuth(app: FastifyInstance): void {
   app.addHook('onRequest', async (req, reply) => {
     const url = req.url.split('?')[0];
     if (!url.startsWith('/api/')) return;
-    if (['/api/health', '/api/ready', '/api/version', '/api/auth/login', '/api/auth/forgot', '/api/auth/reset', '/api/auth/token-info'].includes(url)) return;
+    if (['/api/health', '/api/ready', '/api/version', '/api/auth/login', '/api/auth/signup', '/api/auth/forgot', '/api/auth/reset', '/api/auth/token-info'].includes(url)) return;
     // public, token-protected email link (model-review approve/reject from the mail)
     if (req.method === 'GET' && /^\/api\/model-review\/\d+\/decide$/.test(url)) return;
     // signed one-time backup download link (authorised by the ?s= HMAC, not a JWT)
@@ -26,35 +33,56 @@ export function registerAuth(app: FastifyInstance): void {
     if (!token) return reply.code(401).send({ error: 'unauthorized' });
     try {
       const payload = jwt.verify(token, JWT_SECRET) as unknown as { sub: number };
-      const rows = await sql`
-        SELECT u.id, u.username, u.email, u.is_admin, u.sees_all_konten, u.can_write, u.prefers_dark, u.preferred_lang, u.has_seen_tour, u.pinned_chains, u.emoji,
-               (SELECT emoji FROM family_member WHERE user_id = u.id AND emoji IS NOT NULL ORDER BY sort_order LIMIT 1) AS member_emoji
-        FROM users u WHERE u.id = ${payload.sub}
-      `;
+      // Demo: load the user on the OWNER connection (bypasses RLS to bootstrap the request)
+      // and pull the household/super-admin fields. Non-demo: the original single-household load.
+      const rows = DEMO_MODE
+        ? await adminSql`
+            SELECT u.id, u.username, u.email, u.is_admin, u.sees_all_konten, u.is_super_admin, u.household_id, u.can_write, u.prefers_dark, u.preferred_lang, u.has_seen_tour, u.pinned_chains, u.emoji,
+                   (SELECT emoji FROM family_member WHERE user_id = u.id AND emoji IS NOT NULL ORDER BY sort_order LIMIT 1) AS member_emoji
+            FROM users u WHERE u.id = ${payload.sub}`
+        : await sql`
+            SELECT u.id, u.username, u.email, u.is_admin, u.sees_all_konten, u.can_write, u.prefers_dark, u.preferred_lang, u.has_seen_tour, u.pinned_chains, u.emoji,
+                   (SELECT emoji FROM family_member WHERE user_id = u.id AND emoji IS NOT NULL ORDER BY sort_order LIMIT 1) AS member_emoji
+            FROM users u WHERE u.id = ${payload.sub}`;
       if (!rows.length) return reply.code(401).send({ error: 'unauthorized' });
       const row = rows[0];
       const user = rows[0] as unknown as User;
       user.emoji = resolvedEmoji(row.emoji as string | null, row.member_emoji as string | null, user.is_admin);
 
       // Read-only accounts (can_write = false, non-admin) may not mutate data.
-      // Self-service prefs/own-password (PATCH /api/me) stay allowed.
       if (!user.is_admin && user.can_write === false
           && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)
           && url !== '/api/me'
-          && !url.startsWith('/api/analytics/')   // analytics endpoints are reads (POST carries the query body)
-          && !url.startsWith('/api/spending/ask')) {   // NL assistant is a read (POST carries the question)
+          && !url.startsWith('/api/analytics/')
+          && !url.startsWith('/api/spending/ask')) {
         return reply.code(403).send({ error: 'read_only', message: 'Nur-Lese-Zugang – Änderungen sind für dieses Konto deaktiviert.' });
       }
+
+      // Demo: reserve this request's household-scoped connection (RLS); konto scoping happens
+      // via RLS, so account filtering runs on that connection.
+      const scoped: TenantConn = DEMO_MODE ? await openHousehold(user.household_id ?? 1) : sql;
+      if (DEMO_MODE) req.reserved = scoped;
+
       // Accounts this user may see: shared (GKK) + their own personal accounts.
-      // Super-admins (sees_all_konten) skip filtering entirely.
       if (!user.sees_all_konten) {
-        const ks = await sql`SELECT id FROM konto WHERE is_shared = TRUE OR user_id = ${user.id}`;
+        const ks = await scoped`SELECT id FROM konto WHERE is_shared = TRUE OR user_id = ${user.id}`;
         user.konto_ids = ks.map(r => r.id as number);
       }
       req.user = user;
     } catch {
       return reply.code(401).send({ error: 'unauthorized' });
     }
+  });
+
+  // Demo: propagate the reserved household connection to handlers via AsyncLocalStorage. The
+  // callback form is REQUIRED — an enterWith in the async hook above does NOT reach handlers.
+  app.addHook('onRequest', (req, _reply, done) => {
+    if (req.reserved) tenantContext.run({ conn: req.reserved }, done);
+    else done();
+  });
+  // Demo: release the reserved connection (resets the GUC).
+  app.addHook('onResponse', async (req) => {
+    if (req.reserved) { await closeHousehold(req.reserved); req.reserved = undefined; }
   });
 }
 
@@ -64,11 +92,18 @@ export async function requireAdmin(req: FastifyRequest, reply: FastifyReply): Pr
   }
 }
 
-/** Super-admin = sees every account. Gates the data-management area. */
+/** Super-admin = sees every account (gates data-management / backup). */
 export async function requireSuperAdmin(req: FastifyRequest, reply: FastifyReply): Promise<void> {
   if (!req.user?.sees_all_konten) {
     return reply.code(403).send({ error: 'forbidden' });
   }
+}
+
+/** Platform super-admin. Demo: the household-less operator (is_super_admin). Non-demo: the
+ *  single-household operator (sees_all_konten) — so the same guard fits both worlds. */
+export async function requirePlatformAdmin(req: FastifyRequest, reply: FastifyReply): Promise<void> {
+  const ok = DEMO_MODE ? req.user?.is_super_admin : req.user?.sees_all_konten;
+  if (!ok) return reply.code(403).send({ error: 'forbidden' });
 }
 
 export function signToken(userId: number): string {

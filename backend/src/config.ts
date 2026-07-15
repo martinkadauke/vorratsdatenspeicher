@@ -64,6 +64,8 @@ export interface AppConfig {
   // bi-weekly AI model review (reviewer model is itself configurable → can be fully local)
   'model_review.enabled': boolean;
   'model_review.cron': string;
+  'demo_sweep.enabled': boolean;
+  'demo_sweep.cron': string;
   // automatic e-mail receipt import (Path B): polls each user's configured IMAP
   // mailbox. The real gate is per-user (user_mailbox.enabled); this is the global
   // kill-switch + schedule. Inert when no mailbox is configured.
@@ -149,6 +151,8 @@ const DEFAULTS: AppConfig = {
   'supermarket.cron': '0 4 * * *',
   'model_review.enabled': true,
   'model_review.cron': '0 5 1,15 * *', // ~bi-weekly: 1st & 15th, 05:00
+  'demo_sweep.enabled': true,
+  'demo_sweep.cron': '0 0 * * *', // demo only: wipe ephemeral demo households at midnight
   'mailimport.enabled': true,
   'mailimport.cron': '*/15 * * * *', // every 15 min — snappy "I forwarded it → it appears"
   'dropfolder.enabled': true,
@@ -184,4 +188,22 @@ export async function setConfig(key: string, value: unknown, userId?: number): P
     VALUES (${key}, ${sql.json(value as never)}, NOW(), ${userId ?? null})
     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW(), updated_by = EXCLUDED.updated_by
   `;
+}
+
+// ── Platform-secret protection (multi-tenant demo) ──────────────────────────
+// In the demo, app_config is platform-wide: these are the operator's secrets — never shown
+// to or writable by household admins; only the platform super-admin sees/sets them.
+export const SECRET_CONFIG_KEYS = ['anthropic.api_key', 'deepseek.api_key', 'smtp.pass', 'push.vapid_private'];
+
+/** Keys only the platform super-admin may write: API keys + AI/provider + infra config. */
+export function isProtectedConfigKey(key: string): boolean {
+  return /(_key|\.pass|vapid_private)$/.test(key)
+    || /^(ai|anthropic|deepseek|ollama|searxng|smtp|churner|model_review|demo_sweep|supermarket|mailimport|dropfolder|push)\./.test(key);
+}
+
+/** Mask secret values for non-super-admin readers. */
+export function redactConfig(cfg: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...cfg };
+  for (const k of SECRET_CONFIG_KEYS) if (out[k]) out[k] = '***';
+  return out;
 }

@@ -31,7 +31,7 @@ export function demoRoutes(app: FastifyInstance): void {
   // ── Onboarding: per-household completion + slim-wizard profile ───────────
   /** Mark THIS household's first-run wizard done (per-household, not global config). */
   app.post('/api/onboarding/complete', { preHandler: requireAdmin }, async (req) => {
-    await adminSql`UPDATE household SET onboarding_done = TRUE WHERE id = ${req.user!.household_id}`;
+    await adminSql`UPDATE household SET onboarding_done = TRUE WHERE id = ${req.user!.household_id ?? 1}`;
     return { ok: true };
   });
 
@@ -39,7 +39,7 @@ export function demoRoutes(app: FastifyInstance): void {
    *  row (address + category granularity) — never the global operator config. */
   app.put('/api/onboarding/profile', { preHandler: requireAdmin }, async (req) => {
     const { address, categories_detail } = (req.body ?? {}) as { address?: string; categories_detail?: string };
-    const hid = req.user!.household_id;
+    const hid = req.user!.household_id ?? 1;
     if (typeof address === 'string') await adminSql`UPDATE household SET address = ${address.slice(0, 200)} WHERE id = ${hid}`;
     if (typeof categories_detail === 'string') await adminSql`UPDATE household SET categories_detail = ${categories_detail.slice(0, 20)} WHERE id = ${hid}`;
     return { ok: true };

@@ -1,12 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
-import sql from '../db.js';
+import sql, { DEMO_MODE } from '../db.js';
 import { requireAdmin } from '../auth/plugin.js';
-import { getAllConfig, setConfig, getConfig } from '../config.js';
+import { getAllConfig, setConfig, getConfig, isProtectedConfigKey, redactConfig } from '../config.js';
 import { rescheduleChurner } from '../churner/scheduler.js';
 import { rescheduleSupermarket } from '../supermarket/scheduler.js';
 import { rescheduleModelReview } from '../maintenance/modelReview.js';
+import { rescheduleDemoSweep } from '../maintenance/demoSweep.js';
 import { rescheduleMailImport } from '../mail/scheduler.js';
 import { rescheduleDropfolder } from '../dropfolder/scheduler.js';
 import { runDropfolderImport, isDropfolderRunning } from '../dropfolder/importer.js';
@@ -45,12 +46,18 @@ const VALID_TASKS: AiTask[] = ['recategorize', 'churner_stage1', 'churner_stage2
 
 export function adminRoutes(app: FastifyInstance): void {
   // ── app config ──────────────────────────────────────────────────────────
-  app.get('/api/config', { preHandler: requireAdmin }, async () => getAllConfig());
+  app.get('/api/config', { preHandler: requireAdmin }, async (req) => {
+    const cfg = await getAllConfig();
+    // Demo: mask the operator's secrets from non-super-admin household admins.
+    return DEMO_MODE && !req.user?.is_super_admin ? redactConfig(cfg) : cfg;
+  });
 
   app.put('/api/config/:key', { preHandler: requireAdmin }, async (req, reply) => {
     const key = (req.params as { key: string }).key;
     const { value } = (req.body ?? {}) as { value?: unknown };
     if (value === undefined) return reply.code(400).send({ error: 'value required' });
+    // Demo: API keys + AI/provider + infra config are platform-only (household admins can't set them).
+    if (DEMO_MODE && isProtectedConfigKey(key) && !req.user?.is_super_admin) return reply.code(403).send({ error: 'forbidden' });
     await setConfig(key, value, req.user!.id);
     if (key === 'app.base_url') setEmailBaseUrl(value as string);
     if (key.startsWith('churner.')) await rescheduleChurner();
@@ -58,6 +65,7 @@ export function adminRoutes(app: FastifyInstance): void {
     if (key.startsWith('model_review.')) await rescheduleModelReview();
     if (key.startsWith('mailimport.')) await rescheduleMailImport();
     if (key.startsWith('dropfolder.')) await rescheduleDropfolder();
+    if (key.startsWith('demo_sweep.')) await rescheduleDemoSweep();
     return { ok: true };
   });
 

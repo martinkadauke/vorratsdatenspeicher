@@ -4,7 +4,7 @@ import fastifyStatic from '@fastify/static';
 import path from 'node:path';
 import { existsSync, statSync } from 'node:fs';
 import './types.js';
-import sql, { migrate, ensureAdmin, ensureCashKonten } from './db.js';
+import sql, { adminSql, DEMO_MODE, migrate, ensureAdmin, ensureCashKonten, ensureAppRole, assertRlsCoverage } from './db.js';
 import { initSearch } from './lib/search.js';
 import { backfillAliases, backfillArtikelOcrKey } from './lib/canonicalAlias.js';
 import { PORT, getConfig } from './config.js';
@@ -46,9 +46,12 @@ import { rescheduleDropfolder } from './dropfolder/scheduler.js';
 import { modelReviewRoutes } from './routes/modelReview.js';
 import { analyticsRoutes } from './routes/analytics.js';
 import { mailboxRoutes } from './routes/mailbox.js';
+import { demoRoutes } from './routes/demo.js';
+import { rescheduleDemoSweep } from './maintenance/demoSweep.js';
 
 async function main(): Promise<void> {
   await migrate();
+  if (DEMO_MODE) { await ensureAppRole(); await assertRlsCoverage(); }
   await ensureAdmin();
   await ensureCashKonten();
   await initSearch();
@@ -58,19 +61,16 @@ async function main(): Promise<void> {
   // Sweep any maintenance events left "running" by a previous container that
   // died mid-loop. Without this they'd block new runs forever (running flag
   // resets on restart but the row stays unfinished).
-  await sql`
+  // Boot cleanups run on the owner connection (adminSql) so they cross all households in
+  // the demo; non-demo, adminSql === the pool, so this is the original behaviour.
+  await adminSql`
     UPDATE maintenance_event
     SET status = 'interrupted', ended_at = NOW(),
-        summary = COALESCE(summary, '{}'::jsonb) || ${sql.json({ interrupted_by: 'container_restart' })}
+        summary = COALESCE(summary, '{}'::jsonb) || ${adminSql.json({ interrupted_by: 'container_restart' })}
     WHERE status = 'running'
   `;
-  // Any receipt left "analysing" by a container that died mid-OCR will never
-  // finish — clear the flag so the UI doesn't show a perpetual spinner.
-  await sql`UPDATE einkauf SET ocr_pending = FALSE WHERE ocr_pending = TRUE`;
-  // Drop e-mail-import claims left "processing" by a container that died between
-  // claiming a message and finishing it, so that message can be re-claimed and
-  // retried on the next poll (the unique (user_id, message_id) still prevents dupes).
-  await sql`DELETE FROM imported_email WHERE status = 'processing' AND created_at < NOW() - INTERVAL '1 hour'`;
+  await adminSql`UPDATE einkauf SET ocr_pending = FALSE WHERE ocr_pending = TRUE`;
+  await adminSql`DELETE FROM imported_email WHERE status = 'processing' AND created_at < NOW() - INTERVAL '1 hour'`;
 
   const app = Fastify({ logger: { level: 'info' } });
 
@@ -89,6 +89,7 @@ async function main(): Promise<void> {
     // Runtime env (prod/stage/dev), injected at deploy time — reliable even when
     // several branches share a commit SHA (and thus the same baked image/GIT_REF).
     env: process.env.VDS_ENV ?? null,
+    demo: DEMO_MODE,
     node: process.version,
     started_at: new Date(Date.now() - process.uptime() * 1000).toISOString(),
   }));
@@ -124,6 +125,7 @@ async function main(): Promise<void> {
   analyticsRoutes(app);
   mailboxRoutes(app);
   pushRoutes(app);
+  if (DEMO_MODE) demoRoutes(app);
 
   const receiptsDir = process.env.RECEIPTS_LOCAL_PATH ?? '/receipts';
 
@@ -184,6 +186,7 @@ async function main(): Promise<void> {
   setEmailBaseUrl(await getConfig('app.base_url')); // hosted logo URL for emails
   await rescheduleMailImport();
   await rescheduleDropfolder();
+  if (DEMO_MODE) await rescheduleDemoSweep();
 
   await app.listen({ port: PORT, host: '0.0.0.0' });
   app.log.info(`Vorratsdatenspeicher listening on :${PORT}`);

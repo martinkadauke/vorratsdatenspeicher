@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import sql from '../db.js';
-import { requireAdmin } from '../auth/plugin.js';
+import { requireAdmin, requirePlatformAdmin } from '../auth/plugin.js';
 import { runChurn, isChurnRunning, requestChurnStop, runIconFetch } from '../churner/index.js';
 import { runRecategorize, isRecategorizeRunning, recategorizeOne } from '../maintenance/recategorize.js';
 import { runSeedBaseUnits, isSeedUnitsRunning } from '../maintenance/seedUnits.js';
@@ -9,7 +9,7 @@ import { getConfig } from '../config.js';
 import { PROGRESS_FRESH_MS, type JobProgress } from '../maintenance/progress.js';
 
 export function maintenanceRoutes(app: FastifyInstance): void {
-  app.post('/api/maintenance/churn', { preHandler: requireAdmin }, async (_req, reply) => {
+  app.post('/api/maintenance/churn', { preHandler: requirePlatformAdmin }, async (_req, reply) => {
     try {
       const eventId = await runChurn('manual');
       return { ok: true, event_id: eventId };
@@ -19,14 +19,14 @@ export function maintenanceRoutes(app: FastifyInstance): void {
   });
 
   /** Cooperatively stop the running churn (cross-replica via DB flag). */
-  app.post('/api/maintenance/churn/stop', { preHandler: requireAdmin }, async () => {
+  app.post('/api/maintenance/churn/stop', { preHandler: requirePlatformAdmin }, async () => {
     const stopped = await requestChurnStop();
     return { ok: true, stopping: stopped };
   });
 
   /** Fetch missing store logos + canonical product images (SearXNG image
    *  search, no LLM). Runs standalone, decoupled from the nightly churn. */
-  app.post('/api/maintenance/icons', { preHandler: requireAdmin }, async (_req, reply) => {
+  app.post('/api/maintenance/icons', { preHandler: requirePlatformAdmin }, async (_req, reply) => {
     try {
       const eventId = await runIconFetch();
       return { ok: true, event_id: eventId };
@@ -35,7 +35,7 @@ export function maintenanceRoutes(app: FastifyInstance): void {
     }
   });
 
-  app.post('/api/maintenance/recategorize', { preHandler: requireAdmin }, async (req, reply) => {
+  app.post('/api/maintenance/recategorize', { preHandler: requirePlatformAdmin }, async (req, reply) => {
     const { only_missing } = (req.body ?? {}) as { only_missing?: boolean };
     try {
       const eventId = await runRecategorize(only_missing ?? false);
@@ -65,7 +65,7 @@ export function maintenanceRoutes(app: FastifyInstance): void {
     return { ok: true, started: true };
   });
 
-  app.get('/api/maintenance/events', { preHandler: requireAdmin }, async (req) => {
+  app.get('/api/maintenance/events', { preHandler: requirePlatformAdmin }, async (req) => {
     const limit = Math.min(parseInt((req.query as { limit?: string }).limit ?? '100', 10) || 100, 500);
     return sql`
       SELECT id, kind, started_at, ended_at, status, summary
@@ -73,7 +73,7 @@ export function maintenanceRoutes(app: FastifyInstance): void {
     `;
   });
 
-  app.get('/api/maintenance/status', { preHandler: requireAdmin }, async () => {
+  app.get('/api/maintenance/status', { preHandler: requirePlatformAdmin }, async () => {
     const now = Date.now();
     const staleBefore = now - PROGRESS_FRESH_MS;
 
