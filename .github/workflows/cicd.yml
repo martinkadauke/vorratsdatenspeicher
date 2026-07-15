@@ -156,27 +156,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p ~/.ssh && printf '%s\n' "$SSH_KEY" > ~/.ssh/demo_key && chmod 600 ~/.ssh/demo_key
-          ssh -i ~/.ssh/demo_key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 \
-            root@"$HOST" "IMAGE='$IMAGE' SHA='$SHA' ACTOR='$ACTOR' GH_TOKEN='$GH_TOKEN' bash -s" <<'REMOTE'
-          set -e
-          echo "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
-          cd /opt/vds
-          # Pin the demo app to the exact SHA the compose reads via ${APP_IMAGE}.
-          if grep -q '^APP_IMAGE=' .env; then sed -i "s#^APP_IMAGE=.*#APP_IMAGE=$IMAGE#" .env; else echo "APP_IMAGE=$IMAGE" >> .env; fi
-          docker compose pull app
-          docker compose up -d app
-          docker logout ghcr.io >/dev/null 2>&1 || true
-          # Verify from INSIDE the app container (bypasses Caddy host-routing): the new
-          # SHA must serve AND report demo:true (proves DEMO_MODE + the boot guard passed).
-          for i in $(seq 1 30); do
-            out=$(docker compose exec -T app node -e "require('http').get('http://127.0.0.1:80/api/version',r=>{let d='';r.on('data',c=>d+=c).on('end',()=>process.stdout.write(d))}).on('error',()=>process.exit(0))" 2>/dev/null || true)
-            echo "  [$i] ${out:0:120}"
-            if echo "$out" | grep -q "\"sha\":\"$SHA\"" && echo "$out" | grep -q '"demo":true'; then
-              echo "✅ demo converged to ${SHA:0:12} (demo:true)"; exit 0
-            fi
-            sleep 3
-          done
-          echo "::error::demo did NOT converge to ${SHA:0:12} (or demo:true missing / boot guard rejected)."
-          docker compose logs --tail=80 app || true
-          exit 1
-          REMOTE
+          # The key on the box is pinned to command="/opt/vds/deploy.sh" (forced command), so
+          # this can ONLY run the deploy script. Args go via the SSH command (IMAGE SHA ACTOR);
+          # the ephemeral GHCR token goes over stdin so it never appears in a process list.
+          # deploy.sh streams progress and its exit code propagates → this step fails if the
+          # demo doesn't converge to <sha> + demo:true.
+          printf '%s\n' "$GH_TOKEN" | ssh -i ~/.ssh/demo_key \
+            -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 \
+            root@"$HOST" "$IMAGE $SHA $ACTOR"
