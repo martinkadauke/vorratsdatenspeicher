@@ -21,7 +21,9 @@ const DATABASE_URL = process.env.DATABASE_URL ?? 'postgres://postgres:postgres@l
 const ADMIN_DATABASE_URL = process.env.ADMIN_DATABASE_URL ?? DATABASE_URL;
 const PG_OPTS = { onnotice: () => {}, transform: { undefined: null } } as const;
 
-const pool = postgres(DATABASE_URL, { ...PG_OPTS, max: Number(process.env.DB_POOL_MAX ?? 20) });
+// Off-demo defaults to postgres.js's original max (10) — byte-equivalent to the pre-demo app.
+// Demo runs larger: openHousehold() reserves a connection per in-flight request.
+const pool = postgres(DATABASE_URL, { ...PG_OPTS, max: Number(process.env.DB_POOL_MAX ?? (DEMO_MODE ? 20 : 10)) });
 export type TenantConn = typeof pool;
 type Sql = TenantConn;
 
