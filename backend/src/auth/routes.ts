@@ -81,7 +81,7 @@ export function authRoutes(app: FastifyInstance): void {
         preferred_lang: u.preferred_lang,
         email: u.email,
         has_seen_tour: u.has_seen_tour,
-        emoji: resolvedEmoji(u.emoji, u.member_emoji, u.is_admin),
+        emoji: resolvedEmoji(u.emoji, u.member_emoji),
         pinned_chains: u.pinned_chains,
         ...(DEMO_MODE
           ? { is_super_admin: u.is_super_admin, household_id: u.household_id, onboarding_done: u.onboarding_done ?? false }

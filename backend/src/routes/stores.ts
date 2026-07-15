@@ -148,11 +148,13 @@ export function storeRoutes(app: FastifyInstance): void {
       e.filialen.push({ name: r.roh_ladenname as string, receipts: r.receipts, total: Number(r.total ?? 0), branch_id: (r.branch_id as number | null) ?? null });
       grouped.set(key, e);
     }
-    // Surface household store_branch rows that have NO receipts yet (manually added or
-    // OSM-discovered) so they appear on the Läden list too — otherwise a brand-new household's
-    // discovered stores would be invisible. RLS-scoped to the household on demo.
+    // Surface household store_branch rows that have NO receipts yet, so a brand-new household's
+    // OSM-discovered / manually-added stores appear on the Läden list. REQUIRE coordinates:
+    // every discovered/added store is geocoded (lat/lon set), whereas receipt-orphans and stray
+    // test fixtures (ZZTEST, dropfolder refs, deleted-receipt branches) have none — so this
+    // shows only real, intentionally-added stores and never that junk. RLS-scoped on demo.
     const seenNames = new Set(rows.map(r => r.roh_ladenname as string));
-    const branches = await sql`SELECT id, name FROM store_branch WHERE kind = 'filiale'`;
+    const branches = await sql`SELECT id, name FROM store_branch WHERE kind = 'filiale' AND lat IS NOT NULL`;
     for (const b of branches) {
       const name = b.name as string;
       if (seenNames.has(name)) continue;

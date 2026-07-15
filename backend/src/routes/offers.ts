@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import sql from '../db.js';
+import sql, { DEMO_MODE, withHousehold } from '../db.js';
 import { requireAdmin } from '../auth/plugin.js';
 import { kontoScope } from '../auth/konto.js';
 import { runOfferSearch, sendOfferDigests, isOfferSearchRunning, debugOfferSearch } from '../offers/index.js';
@@ -253,7 +253,16 @@ export function offerRoutes(app: FastifyInstance): void {
       SELECT ref FROM offer_subscription WHERE user_id = ${req.user!.id} AND kind IN ('artikel', 'watch')
     `).map(r => r.ref as string);
     if (refs.length) await sql`DELETE FROM offer WHERE canonical_name IN ${sql(refs)}`;
-    void runOfferSearch().catch(err => req.log.error(`offer refresh failed: ${err.message}`));
+    // The search runs in the BACKGROUND, so on demo it must hold its OWN household-scoped
+    // connection — the request's reserved connection is released when this response is sent,
+    // and a fire-and-forget job on it would run unscoped (RLS → sees no subscriptions, can't
+    // insert offers). withHousehold opens+pins a fresh scoped connection for the whole run.
+    if (DEMO_MODE) {
+      const hid = req.user!.household_id ?? 1;
+      void withHousehold(hid, () => runOfferSearch()).catch(err => req.log.error(`offer refresh failed: ${err.message}`));
+    } else {
+      void runOfferSearch().catch(err => req.log.error(`offer refresh failed: ${err.message}`));
+    }
     return { ok: true, started: true };
   });
 

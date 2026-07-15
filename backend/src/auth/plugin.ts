@@ -47,7 +47,7 @@ export function registerAuth(app: FastifyInstance): void {
       if (!rows.length) return reply.code(401).send({ error: 'unauthorized' });
       const row = rows[0];
       const user = rows[0] as unknown as User;
-      user.emoji = resolvedEmoji(row.emoji as string | null, row.member_emoji as string | null, user.is_admin);
+      user.emoji = resolvedEmoji(row.emoji as string | null, row.member_emoji as string | null);
 
       // Read-only accounts (can_write = false, non-admin) may not mutate data.
       if (!user.is_admin && user.can_write === false
@@ -121,7 +121,9 @@ export function signToken(userId: number): string {
   return jwt.sign({ sub: userId }, JWT_SECRET, { expiresIn: '7d' });
 }
 
-/** Avatar emoji shown in the header: own emoji → linked family member's → 🤖 for admins. */
-export function resolvedEmoji(userEmoji: string | null, memberEmoji: string | null, isAdmin: boolean): string | null {
-  return userEmoji ?? memberEmoji ?? (isAdmin ? '🤖' : null);
+/** Avatar emoji shown in the header: the user's own chosen emoji, else a linked family
+ *  member's, else none (the UI falls back to an icon/initial). Admins are NOT forced to a
+ *  robot — they show whatever emoji they picked, like everyone else. */
+export function resolvedEmoji(userEmoji: string | null, memberEmoji: string | null): string | null {
+  return userEmoji ?? memberEmoji;
 }

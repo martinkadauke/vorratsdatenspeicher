@@ -318,8 +318,15 @@ function ShopsView({ search, setSearch }: { search: string; setSearch: (v: strin
                 {s.receipts} {t('stores.receipts')}{s.last_visit ? ` · ${new Date(s.last_visit).toLocaleDateString(i18n.language === 'en' ? 'en-GB' : 'de-DE')}` : ''}
               </div>
             </button>
-            <span className="tabular shrink-0 text-sm font-semibold text-emerald-600 dark:text-emerald-500">{eur(s.total)}</span>
-            <ChevronRight size={16} className="shrink-0 text-zinc-300" />
+            <button
+              type="button"
+              onClick={() => navigate(`/receipts?store=${encodeURIComponent(s.name)}`)}
+              title={t('stores.viewReceipts')}
+              className="group flex shrink-0 items-center gap-1 self-stretch rounded-lg px-1 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+            >
+              <span className="tabular text-sm font-semibold text-emerald-600 dark:text-emerald-500">{eur(s.total)}</span>
+              <ChevronRight size={16} className="text-zinc-300 group-hover:text-emerald-500" />
+            </button>
           </Card>
         ))}
       </div>
