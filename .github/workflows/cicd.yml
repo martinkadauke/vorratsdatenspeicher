@@ -135,3 +135,48 @@ jobs:
           echo "failed task: ${FAILED:-<none>}"
           if [ -n "$FAILED" ]; then docker service logs --raw "$FAILED" 2>&1 | tail -80 || true; fi
           exit 1
+
+  # ── Public demo (demo.vorratsdatenspeicher.com) ──────────────────────────────
+  # The SAME image as vds-dev, but run with DEMO_MODE=true against the multi-tenant
+  # demo DB on the Hetzner box. Only `dev` publishes to the demo, and only AFTER the
+  # vds-dev rollout converged (so the public demo never runs an image dev rejected).
+  # Deploys over ONE SSH connection (the box rate-limits per source IP).
+  deploy-demo:
+    needs: [meta, build, deploy]
+    if: github.ref_name == 'dev'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy unified image to Hetzner demo (DEMO_MODE=true, single SSH)
+        env:
+          SSH_KEY: ${{ secrets.HETZNER_SSH_KEY }}
+          HOST: ${{ secrets.HETZNER_HOST }}
+          IMAGE: ghcr.io/${{ github.repository }}:${{ github.sha }}
+          SHA: ${{ github.sha }}
+          ACTOR: ${{ github.actor }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p ~/.ssh && printf '%s\n' "$SSH_KEY" > ~/.ssh/demo_key && chmod 600 ~/.ssh/demo_key
+          ssh -i ~/.ssh/demo_key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 \
+            root@"$HOST" "IMAGE='$IMAGE' SHA='$SHA' ACTOR='$ACTOR' GH_TOKEN='$GH_TOKEN' bash -s" <<'REMOTE'
+          set -e
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+          cd /opt/vds
+          # Pin the demo app to the exact SHA the compose reads via ${APP_IMAGE}.
+          if grep -q '^APP_IMAGE=' .env; then sed -i "s#^APP_IMAGE=.*#APP_IMAGE=$IMAGE#" .env; else echo "APP_IMAGE=$IMAGE" >> .env; fi
+          docker compose pull app
+          docker compose up -d app
+          docker logout ghcr.io >/dev/null 2>&1 || true
+          # Verify from INSIDE the app container (bypasses Caddy host-routing): the new
+          # SHA must serve AND report demo:true (proves DEMO_MODE + the boot guard passed).
+          for i in $(seq 1 30); do
+            out=$(docker compose exec -T app node -e "require('http').get('http://127.0.0.1:80/api/version',r=>{let d='';r.on('data',c=>d+=c).on('end',()=>process.stdout.write(d))}).on('error',()=>process.exit(0))" 2>/dev/null || true)
+            echo "  [$i] ${out:0:120}"
+            if echo "$out" | grep -q "\"sha\":\"$SHA\"" && echo "$out" | grep -q '"demo":true'; then
+              echo "✅ demo converged to ${SHA:0:12} (demo:true)"; exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::demo did NOT converge to ${SHA:0:12} (or demo:true missing / boot guard rejected)."
+          docker compose logs --tail=80 app || true
+          exit 1
+          REMOTE
