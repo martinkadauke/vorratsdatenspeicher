@@ -39,18 +39,24 @@ You need [Docker](https://docs.docker.com/get-docker/). Save this as `docker-com
 services:
   vds:
     image: ghcr.io/martinkadauke/vorratsdatenspeicher:latest
-    ports: ["8766:80"]
+    ports: ["8766:80"]                                 # open http://localhost:8766
     environment:
       DATABASE_URL: postgres://vds:vds@db:5432/vds
       JWT_SECRET: change-me-to-something-secret        # ← change
       INTERNAL_SECRET: change-me-to-something-else     # ← change
     volumes: ["vds-receipts:/receipts"]
-    depends_on: [db]
+    depends_on:
+      db: { condition: service_healthy }               # wait for Postgres before first boot
     restart: unless-stopped
   db:
     image: postgres:16
     environment: { POSTGRES_USER: vds, POSTGRES_PASSWORD: vds, POSTGRES_DB: vds }
     volumes: ["vds-db:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vds -d vds"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
     restart: unless-stopped
 volumes:
   vds-receipts: {}

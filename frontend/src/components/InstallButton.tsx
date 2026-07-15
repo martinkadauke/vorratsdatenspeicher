@@ -11,11 +11,19 @@ const COMPOSE = `services:
       JWT_SECRET: geheim-eins          # ändern!
       INTERNAL_SECRET: geheim-zwei     # ändern!
     volumes: [vds-belege:/receipts]
-    depends_on: [db]
+    depends_on:
+      db: { condition: service_healthy }
+    restart: unless-stopped
   db:
     image: postgres:16
     environment: { POSTGRES_USER: vds, POSTGRES_PASSWORD: vds, POSTGRES_DB: vds }
     volumes: [vds-daten:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vds -d vds"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
 volumes: { vds-belege: {}, vds-daten: {} }`;
 
 const REPO = 'https://github.com/martinkadauke/vorratsdatenspeicher';
