@@ -49,7 +49,38 @@ import { mailboxRoutes } from './routes/mailbox.js';
 import { demoRoutes } from './routes/demo.js';
 import { rescheduleDemoSweep } from './maintenance/demoSweep.js';
 
+/** Wait for Postgres to accept connections before the first query. The app container often
+ *  starts faster than its database — and on a fresh volume the official postgres image briefly
+ *  passes `pg_isready` DURING initdb, then restarts, so even `depends_on: service_healthy` can
+ *  hand us a socket that's about to drop (→ "connection refused" crash-loop). Retrying here makes
+ *  boot robust regardless of compose wiring. Bounded by DB_WAIT_MS (default 90s) so a genuine
+ *  misconfiguration still fails loudly instead of hanging forever. */
+async function waitForDb(): Promise<void> {
+  const maxMs = Number(process.env.DB_WAIT_MS ?? 90000);
+  const started = Date.now();
+  let attempt = 0;
+  for (;;) {
+    try {
+      await adminSql`SELECT 1`;
+      if (attempt > 0) console.log(`[boot] database ready after ${attempt} retr${attempt === 1 ? 'y' : 'ies'}`);
+      return;
+    } catch (err) {
+      attempt++;
+      if (Date.now() - started > maxMs) {
+        console.error(`[boot] database unreachable after ${Math.round((Date.now() - started) / 1000)}s — giving up`);
+        throw err;
+      }
+      const wait = Math.min(2000, 250 * attempt);
+      console.warn(`[boot] waiting for database (attempt ${attempt}): ${(err as Error).message} — retry in ${wait}ms`);
+      await new Promise(r => setTimeout(r, wait));
+    }
+  }
+}
+
 async function main(): Promise<void> {
+  // The DB container may still be starting (or mid-initdb) — wait before the first query so a
+  // slow Postgres doesn't crash-loop the app with "connection refused".
+  await waitForDb();
   // Demo boot interlock runs BEFORE migrate() so demo migrations/RLS can never touch a
   // mis-targeted (single-role dev/prod) database.
   if (DEMO_MODE) assertDemoDb();
@@ -93,6 +124,10 @@ async function main(): Promise<void> {
     // several branches share a commit SHA (and thus the same baked image/GIT_REF).
     env: process.env.VDS_ENV ?? null,
     demo: DEMO_MODE,
+    // Off-demo only: true until the first-run wizard is completed. The login page reads this
+    // to show a fresh self-hoster the default-credentials hint so they can get in and reach
+    // the setup wizard (which then flips onboarding.done → this goes false, hint disappears).
+    needs_setup: DEMO_MODE ? false : !(await getConfig('onboarding.done')),
     node: process.version,
     started_at: new Date(Date.now() - process.uptime() * 1000).toISOString(),
   }));

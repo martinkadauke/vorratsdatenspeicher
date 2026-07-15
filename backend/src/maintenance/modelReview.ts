@@ -18,7 +18,7 @@ let running = false;
 export function isModelReviewRunning(): boolean { return running; }
 
 const REVIEW_TASKS: AiTask[] = ['recategorize', 'churner_stage1', 'churner_stage2', 'ocr', 'categories_chat'];
-const CLOUD_PROVIDERS: ProviderName[] = ['anthropic', 'deepseek'];
+const CLOUD_PROVIDERS: ProviderName[] = ['anthropic', 'deepseek', 'openai'];
 
 export interface Candidate { provider: string; model: string; reason: string }
 export interface Proposal {

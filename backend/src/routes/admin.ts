@@ -19,12 +19,13 @@ import { createAuthToken } from '../auth/routes.js';
 import { listModelsForProvider, listVisionModelsForProvider, healthForProvider, setTaskAi, type ProviderName, type AiTask } from '../llm/provider.js';
 import { matchExistingCanonical } from '../lib/canonicalMatch.js';
 
-const VALID_PROVIDERS: ProviderName[] = ['ollama', 'deepseek', 'anthropic'];
+const VALID_PROVIDERS: ProviderName[] = ['ollama', 'deepseek', 'anthropic', 'openai'];
 
 /** Where to top up credit per provider (Ollama is local → none). */
 const TOP_UP_URL: Record<string, string> = {
   anthropic: 'https://console.anthropic.com/settings/billing',
   deepseek: 'https://platform.deepseek.com/top_up',
+  openai: 'https://platform.openai.com/settings/organization/billing/overview',
 };
 
 /** Rough public list prices in USD per 1M tokens [input, output], matched by
@@ -36,6 +37,11 @@ const PRICES: { match: RegExp; in: number; out: number }[] = [
   { match: /haiku/i, in: 0.8, out: 4 },
   { match: /deepseek-(reasoner|r1)/i, in: 0.55, out: 2.19 },
   { match: /deepseek/i, in: 0.27, out: 1.1 },
+  { match: /gpt-4o-mini/i, in: 0.15, out: 0.6 },
+  { match: /gpt-4o|chatgpt-4o/i, in: 2.5, out: 10 },
+  { match: /gpt-4\.1-mini/i, in: 0.4, out: 1.6 },
+  { match: /gpt-4\.1/i, in: 2, out: 8 },
+  { match: /o4-mini|o3-mini/i, in: 1.1, out: 4.4 },
 ];
 function estCostUsd(model: string, inTok: number, outTok: number): number {
   const p = PRICES.find(x => x.match.test(model));

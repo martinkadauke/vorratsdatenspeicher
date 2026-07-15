@@ -5,7 +5,7 @@ import { useAuth } from '../context/auth';
 import { api, ApiError } from '../api/client';
 import { Button, Input, Label, Card, Spinner } from '../components/ui';
 
-interface VersionInfo { sha: string; ref: string; demo?: boolean }
+interface VersionInfo { sha: string; ref: string; demo?: boolean; needs_setup?: boolean }
 
 export function Login() {
   const { login, signup } = useAuth();
@@ -32,7 +32,12 @@ export function Login() {
 
   useEffect(() => {
     api<VersionInfo>('/api/version')
-      .then(v => { setVersion(v); if (v.demo) setMode('signup'); })
+      .then(v => {
+        setVersion(v);
+        if (v.demo) setMode('signup');
+        // Fresh self-host: prefill the seeded admin username so first login is one step.
+        else if (v.needs_setup) setUsername(prev => prev || 'admin');
+      })
       .catch(() => setVersion({ sha: 'unknown', ref: 'unknown' }));
   }, []);
 
@@ -178,6 +183,21 @@ export function Login() {
           <div className="text-4xl">🗄️</div>
           <h1 className="mt-2 text-xl font-bold tracking-tight">{t('login.title')}</h1>
         </div>
+
+        {version.needs_setup && !forgotMode && (
+          <div className="mb-5 rounded-xl border border-emerald-300 bg-emerald-50 px-3.5 py-3 text-[13px] leading-snug text-emerald-900 dark:border-emerald-800/70 dark:bg-emerald-950/40 dark:text-emerald-200">
+            <p className="font-semibold">{de ? '👋 Erste Einrichtung' : '👋 First run'}</p>
+            <p className="mt-1">
+              {de
+                ? 'Melde dich mit den Standard-Zugangsdaten an — danach startet der Einrichtungs-Assistent automatisch:'
+                : 'Sign in with the default credentials — the setup wizard then starts automatically:'}
+            </p>
+            <p className="mt-2 font-mono text-[12px] font-semibold">admin&nbsp;/&nbsp;vorrat-start-2026</p>
+            <p className="mt-1.5 text-[11px] opacity-80">
+              {de ? 'Ändere das Passwort danach im Profil.' : 'Change the password afterwards in your Profile.'}
+            </p>
+          </div>
+        )}
 
         {forgotMode ? (
           forgotSent ? (

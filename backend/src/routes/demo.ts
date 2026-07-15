@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import sql, { adminSql } from '../db.js';
+import sql, { adminSql, DEMO_MODE } from '../db.js';
 import { requireAdmin, requirePlatformAdmin } from '../auth/plugin.js';
 import { runDemoSweep } from '../maintenance/demoSweep.js';
 import { sendMail } from '../mailer.js';
@@ -7,6 +7,13 @@ import { feedbackEmail } from '../email/templates.js';
 
 /** Demo-only routes: user bug reports + platform super-admin household management. */
 export function demoRoutes(app: FastifyInstance): void {
+  // Defense-in-depth: this module registers DESTRUCTIVE household-management routes
+  // (POST /api/households/wipe-all and DELETE /api/households/:id). They must never exist
+  // outside DEMO_MODE. index.ts already gates the mount with `if (DEMO_MODE)`, but assert
+  // here too so a future refactor that mounts this unconditionally registers NOTHING off-demo
+  // rather than silently exposing a data-delete route.
+  if (!DEMO_MODE) { console.error('[demo] demoRoutes() invoked with DEMO_MODE off — refusing to register demo routes'); return; }
+
   // ── Bug report — any authenticated user ─────────────────────────────────
   app.post('/api/bug-reports', async (req, reply) => {
     const { message, page } = (req.body ?? {}) as { message?: string; page?: string };

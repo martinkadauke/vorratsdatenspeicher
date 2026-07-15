@@ -15,7 +15,7 @@ import { cn } from '../lib/utils';
 interface Konto { id: number; name: string; is_shared: boolean; account_type: string }
 const KONTO_TYPES = ['giro', 'kreditkarte', 'paypal', 'bargeld', 'krypto', 'depot'];
 const DETAILS = ['grob', 'mittel', 'fein'];
-const PROVIDERS = ['ollama', 'deepseek', 'anthropic'];
+const PROVIDERS = ['ollama', 'deepseek', 'anthropic', 'openai'];
 const AI_TASKS: [string, string][] = [
   ['ocr', 'admin.taskOcr'],
   ['categories_chat', 'admin.taskCategoriesChat'],
@@ -70,7 +70,7 @@ export function Onboarding() {
     mutationFn: (b: { key: string; value: unknown }) => api(`/api/config/${b.key}`, { method: 'PUT', body: { value: b.value } }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['config'] });
-      for (const p of ['ollama', 'deepseek', 'anthropic', 'searxng']) void qc.invalidateQueries({ queryKey: [`${p}-health`] });
+      for (const p of ['ollama', 'deepseek', 'anthropic', 'openai', 'searxng']) void qc.invalidateQueries({ queryKey: [`${p}-health`] });
       void qc.invalidateQueries({ queryKey: ['ai-models'] });
     },
     onError: (e: Error) => toast(e.message, 'error'),
@@ -208,6 +208,7 @@ export function Onboarding() {
             <div className="flex flex-col gap-3">
               <ProviderRow provider="anthropic" cfgKey="anthropic.api_key" label="Anthropic — API-Key" password placeholder="sk-ant-…" config={config} setCfg={setCfg} t={t} />
               <ProviderRow provider="deepseek" cfgKey="deepseek.api_key" label="DeepSeek — API-Key" password placeholder="sk-…" config={config} setCfg={setCfg} t={t} />
+              <ProviderRow provider="openai" cfgKey="openai.api_key" label="OpenAI — API-Key" password placeholder="sk-…" config={config} setCfg={setCfg} t={t} />
               <ProviderRow provider="ollama" cfgKey="ollama.url" label="Ollama — URL" placeholder="http://…:11434" config={config} setCfg={setCfg} t={t} />
               <ProviderRow provider="searxng" cfgKey="searxng.url" label="SearXNG — URL" placeholder="http://…:8089" config={config} setCfg={setCfg} t={t} />
             </div>

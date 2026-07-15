@@ -58,6 +58,7 @@ export async function searxngImageSearch(query: string): Promise<{ src: string; 
 export async function searxngHealth(): Promise<{ ok: boolean; error?: string }> {
   try {
     const base = await getConfig('searxng.url');
+    if (!base) return { ok: false, error: 'nicht konfiguriert' };
     const res = await fetch(`${base}/search?q=test&format=json`, { signal: AbortSignal.timeout(8_000) });
     if (!res.ok) return { ok: false, error: `HTTP ${res.status} — ist format=json in settings.yml erlaubt?` };
     return { ok: true };

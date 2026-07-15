@@ -948,6 +948,8 @@
     "deepseekApiKey": "DeepSeek API key",
     "anthropicUrl": "Anthropic URL",
     "anthropicApiKey": "Anthropic API key",
+    "openaiUrl": "OpenAI URL",
+    "openaiApiKey": "OpenAI API key",
     "ollamaUrl": "Ollama URL",
     "ollamaModel": "Model",
     "cron": "Schedule (cron syntax)",

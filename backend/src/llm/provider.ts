@@ -1,7 +1,7 @@
 import sql from '../db.js';
 import { getConfig, setConfig } from '../config.js';
 
-export type ProviderName = 'ollama' | 'deepseek' | 'anthropic';
+export type ProviderName = 'ollama' | 'deepseek' | 'anthropic' | 'openai';
 export type AiTask = 'recategorize' | 'churner_stage1' | 'churner_stage2' | 'ocr' | 'categories_chat' | 'model_review' | 'nlanalytics' | 'bankmatch' | 'statsask';
 
 export interface LlmChatOptions {
@@ -67,6 +67,7 @@ class OllamaProvider implements LlmProvider {
 
 export async function listOllamaModels(): Promise<string[]> {
   const url = await getConfig('ollama.url');
+  if (!url) throw new Error('Ollama-URL fehlt');
   const res = await fetch(`${url}/api/tags`, { signal: AbortSignal.timeout(10_000) });
   if (!res.ok) throw new Error(`Ollama HTTP ${res.status}`);
   const data = (await res.json()) as { models?: { name: string }[] };
@@ -76,6 +77,7 @@ export async function listOllamaModels(): Promise<string[]> {
 export async function ollamaHealth(): Promise<HealthInfo> {
   try {
     const url = await getConfig('ollama.url');
+    if (!url) return { ok: false, error: 'nicht konfiguriert' };
     const res = await fetch(`${url}/api/version`, { signal: AbortSignal.timeout(5_000) });
     if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
     const data = (await res.json()) as { version?: string };
@@ -138,6 +140,70 @@ export async function deepseekHealth(): Promise<HealthInfo> {
     const apiKey = await getConfig('deepseek.api_key');
     if (!apiKey) return { ok: false, error: 'API-Key fehlt' };
     await listDeepSeekModels();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+// ── OpenAI (Chat Completions API — OpenAI-compatible) ───────────────────
+class OpenAIProvider implements LlmProvider {
+  readonly name: ProviderName = 'openai';
+  constructor(private url: string, private apiKey: string, private model: string, private task: AiTask = 'recategorize') {
+    if (!apiKey) throw new Error('OpenAI API-Key fehlt — in Admin → AI Settings setzen');
+  }
+
+  async chat(opts: LlmChatOptions): Promise<string> {
+    const res = await fetch(`${this.url}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: this.model,
+        temperature: 0.1,
+        response_format: opts.json ? { type: 'json_object' } : undefined,
+        messages: [
+          { role: 'system', content: opts.system },
+          { role: 'user', content: opts.user },
+        ],
+      }),
+      signal: AbortSignal.timeout(180_000),
+    });
+    if (!res.ok) throw new Error(`OpenAI HTTP ${res.status}: ${await safeBody(res)}`);
+    const data = (await res.json()) as {
+      choices?: { message?: { content?: string } }[];
+      usage?: { prompt_tokens?: number; completion_tokens?: number };
+    };
+    await recordUsage(this.task, this.name, this.model, data.usage?.prompt_tokens ?? 0, data.usage?.completion_tokens ?? 0);
+    return data.choices?.[0]?.message?.content ?? '';
+  }
+}
+
+export async function listOpenAIModels(): Promise<string[]> {
+  const url = await getConfig('openai.url');
+  const apiKey = await getConfig('openai.api_key');
+  if (!apiKey) throw new Error('OpenAI API-Key fehlt');
+  const res = await fetch(`${url}/v1/models`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) throw new Error(`OpenAI HTTP ${res.status}: ${await safeBody(res)}`);
+  const data = (await res.json()) as { data?: { id: string }[] };
+  // Keep the picker to chat-capable GPT/o-series models — the /models list also
+  // returns embeddings, tts, whisper, dall-e, moderation etc. which can't chat.
+  return (data.data ?? [])
+    .map(m => m.id)
+    .filter(id => /^(gpt-|o[0-9]|chatgpt-)/.test(id))
+    .sort();
+}
+
+export async function openaiHealth(): Promise<HealthInfo> {
+  try {
+    const apiKey = await getConfig('openai.api_key');
+    if (!apiKey) return { ok: false, error: 'API-Key fehlt' };
+    await listOpenAIModels();
     return { ok: true };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
@@ -218,6 +284,11 @@ export async function providerForTask(task: AiTask): Promise<LlmProvider> {
     const apiKey = await getConfig('anthropic.api_key');
     return new AnthropicProvider(apiKey, model, task);
   }
+  if (provider === 'openai') {
+    const url = await getConfig('openai.url');
+    const apiKey = await getConfig('openai.api_key');
+    return new OpenAIProvider(url, apiKey, model, task);
+  }
   // default: ollama
   const url = await getConfig('ollama.url');
   return new OllamaProvider(url, model, task);
@@ -227,6 +298,7 @@ export async function providerForTask(task: AiTask): Promise<LlmProvider> {
 export async function listModelsForProvider(provider: ProviderName): Promise<string[]> {
   if (provider === 'deepseek') return listDeepSeekModels();
   if (provider === 'anthropic') return listAnthropicModels();
+  if (provider === 'openai') return listOpenAIModels();
   return listOllamaModels();
 }
 
@@ -238,6 +310,10 @@ export function isVisionModel(provider: ProviderName, model: string): boolean {
   if (provider === 'anthropic') {
     // Every Claude 3+ model (sonnet/opus/haiku, incl. 4.x and 5) is multimodal.
     return /claude/.test(m);
+  }
+  if (provider === 'openai') {
+    // Modern GPT-4o / GPT-4.1 / GPT-5 / o-series and gpt-4-turbo are multimodal.
+    return /(gpt-4o|gpt-4\.1|gpt-4-turbo|gpt-5|chatgpt-4o|o1|o3|o4|vision)/.test(m);
   }
   if (provider === 'ollama') {
     return /(llava|bakllava|moondream|minicpm-?v|llama-?3\.2-vision|qwen2\.?5?-?vl|[-_]vl\b|vision|pixtral|granite.*vision|gemma3)/.test(m);
@@ -256,6 +332,7 @@ export async function listVisionModelsForProvider(provider: ProviderName): Promi
 export async function healthForProvider(provider: ProviderName): Promise<HealthInfo> {
   if (provider === 'deepseek') return deepseekHealth();
   if (provider === 'anthropic') return anthropicHealth();
+  if (provider === 'openai') return openaiHealth();
   return ollamaHealth();
 }
 

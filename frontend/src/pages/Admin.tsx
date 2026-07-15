@@ -157,7 +157,7 @@ export function Admin() {
 }
 
 // ── AI Providers (Ollama + DeepSeek connection settings) ─────────────────
-type Provider = 'ollama' | 'deepseek' | 'anthropic';
+type Provider = 'ollama' | 'deepseek' | 'anthropic' | 'openai';
 
 function HealthBadge({ provider, label }: { provider: Provider | 'searxng'; label: string }) {
   const { t } = useTranslation();
@@ -202,6 +202,7 @@ function AiProvidersSection() {
       void qc.invalidateQueries({ queryKey: ['ollama-health'] });
       void qc.invalidateQueries({ queryKey: ['deepseek-health'] });
       void qc.invalidateQueries({ queryKey: ['anthropic-health'] });
+      void qc.invalidateQueries({ queryKey: ['openai-health'] });
       void qc.invalidateQueries({ queryKey: ['ai-models'] });
     },
   });
@@ -215,6 +216,7 @@ function AiProvidersSection() {
           <HealthBadge provider="ollama" label="Ollama" />
           <HealthBadge provider="deepseek" label="DeepSeek" />
           <HealthBadge provider="anthropic" label="Anthropic" />
+          <HealthBadge provider="openai" label="OpenAI" />
           <HealthBadge provider="searxng" label="SearXNG" />
         </div>
 
@@ -265,6 +267,23 @@ function AiProvidersSection() {
               defaultValue={config['anthropic.api_key'] as string}
               placeholder={(config['anthropic.api_key'] as string) ? '••••••••' : 'sk-ant-…'}
               onBlur={e => e.target.value && e.target.value !== config['anthropic.api_key'] && setCfg.mutate({ key: 'anthropic.api_key', value: e.target.value })}
+            />
+          </div>
+          <div>
+            <Label>{t('admin.openaiUrl')}</Label>
+            <Input
+              defaultValue={config['openai.url'] as string}
+              onBlur={e => e.target.value !== config['openai.url'] && setCfg.mutate({ key: 'openai.url', value: e.target.value })}
+            />
+          </div>
+          <div>
+            <Label>{t('admin.openaiApiKey')}</Label>
+            <Input
+              type="password"
+              autoComplete="off"
+              defaultValue={config['openai.api_key'] as string}
+              placeholder={(config['openai.api_key'] as string) ? '••••••••' : 'sk-…'}
+              onBlur={e => e.target.value && e.target.value !== config['openai.api_key'] && setCfg.mutate({ key: 'openai.api_key', value: e.target.value })}
             />
           </div>
         </div>
@@ -377,6 +396,7 @@ function TaskRow({ task, taskLabel, taskDesc, config }: {
               <option value="ollama">Ollama</option>
               <option value="deepseek">DeepSeek</option>
               <option value="anthropic">Anthropic</option>
+              <option value="openai">OpenAI</option>
             </>
           )}
         </Select>

@@ -9,7 +9,7 @@
 import cron from 'node-cron';
 import { unlink } from 'node:fs/promises';
 import path from 'node:path';
-import { adminSql } from '../db.js';
+import { adminSql, DEMO_MODE } from '../db.js';
 import { getConfig } from '../config.js';
 
 const RECEIPTS_LOCAL_PATH = process.env.RECEIPTS_LOCAL_PATH ?? '/receipts';
@@ -23,6 +23,11 @@ export interface SweepResult { households: number; files: number }
 
 /** Delete all ephemeral demo households + their data + their files. */
 export async function runDemoSweep(): Promise<SweepResult> {
+  // HARD SAFETY GATE. This function DELETES households, all their rows, and their files.
+  // It must be physically impossible to run outside DEMO_MODE — independent of call-site
+  // gating, the demo_sweep.enabled config default (true), route registration, or DB schema.
+  // If it is ever reached with the flag off, that is a bug: log loudly and touch nothing.
+  if (!DEMO_MODE) { console.error('[demo-sweep] REFUSED: runDemoSweep() called with DEMO_MODE off — no data touched'); return { households: 0, files: 0 }; }
   if (running) return { households: 0, files: 0 };
   running = true;
   try {
@@ -68,6 +73,10 @@ export async function runDemoSweep(): Promise<SweepResult> {
 }
 
 export async function rescheduleDemoSweep(): Promise<void> {
+  // HARD SAFETY GATE: never arm the nightly wipe cron outside DEMO_MODE, regardless of
+  // who calls this or what demo_sweep.enabled says. Belt-and-suspenders with the two
+  // DEMO_MODE-gated call-sites (index.ts boot, admin.ts config change).
+  if (!DEMO_MODE) { console.log('[demo-sweep] not scheduled — DEMO_MODE off'); return; }
   if (task) { task.stop(); task = null; }
   const enabled = await getConfig('demo_sweep.enabled');
   const schedule = await getConfig('demo_sweep.cron');

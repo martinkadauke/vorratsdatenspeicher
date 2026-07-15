@@ -11,6 +11,8 @@ export interface AppConfig {
   'deepseek.api_key': string;
   'anthropic.url': string;
   'anthropic.api_key': string;
+  'openai.url': string;
+  'openai.api_key': string;
   'ai.ocr.provider': string;
   'ai.ocr.model': string;
   'ai.categories_chat.provider': string;
@@ -103,6 +105,8 @@ const DEFAULTS: AppConfig = {
   'deepseek.api_key': '',
   'anthropic.url': 'https://api.anthropic.com',
   'anthropic.api_key': '',
+  'openai.url': 'https://api.openai.com',
+  'openai.api_key': '',
   'ai.ocr.provider': 'anthropic',
   'ai.ocr.model': 'claude-sonnet-5',
   'ai.categories_chat.provider': 'anthropic',
@@ -193,12 +197,12 @@ export async function setConfig(key: string, value: unknown, userId?: number): P
 // ── Platform-secret protection (multi-tenant demo) ──────────────────────────
 // In the demo, app_config is platform-wide: these are the operator's secrets — never shown
 // to or writable by household admins; only the platform super-admin sees/sets them.
-export const SECRET_CONFIG_KEYS = ['anthropic.api_key', 'deepseek.api_key', 'smtp.pass', 'push.vapid_private'];
+export const SECRET_CONFIG_KEYS = ['anthropic.api_key', 'deepseek.api_key', 'openai.api_key', 'smtp.pass', 'push.vapid_private'];
 
 /** Keys only the platform super-admin may write: API keys + AI/provider + infra config. */
 export function isProtectedConfigKey(key: string): boolean {
   return /(_key|\.pass|vapid_private)$/.test(key)
-    || /^(ai|anthropic|deepseek|ollama|searxng|smtp|churner|model_review|demo_sweep|supermarket|mailimport|dropfolder|push)\./.test(key);
+    || /^(ai|anthropic|openai|deepseek|ollama|searxng|smtp|churner|model_review|demo_sweep|supermarket|mailimport|dropfolder|push)\./.test(key);
 }
 
 /** Mask secret values for non-super-admin readers. */
