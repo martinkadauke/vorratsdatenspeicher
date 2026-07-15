@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, MapPin, Clock, FileText, GripVertical, ExternalLink, Image as ImageIcon } from 'lucide-react';
+import { ArrowLeft, MapPin, Clock, FileText, GripVertical, ExternalLink, Image as ImageIcon, Globe, Phone, Sparkles } from 'lucide-react';
 import {
   DndContext, closestCenter, PointerSensor, KeyboardSensor, useSensor, useSensors, type DragEndEvent,
 } from '@dnd-kit/core';
@@ -20,6 +20,8 @@ import { toast } from '../components/Toast';
 interface Branch {
   id: number; chain_key: string; name: string; kind: string;
   address: string | null;
+  website: string | null;
+  phone: string | null;
   opening_hours: { text?: string } | null;
   prospectus_url: string | null;
   warengruppen: string[][] | null;
@@ -73,6 +75,14 @@ export function FilialProfil() {
       void qc.invalidateQueries({ queryKey: ['filiale', id] });
       void qc.invalidateQueries({ queryKey: ['stores'] });
     },
+    onError: (e) => toast((e as Error).message, 'error'),
+  });
+
+  // Enrichment runner: auto-fills address/website/phone for ALL of the household's stores at
+  // once (OSM + web-search). Runs in the background; the profile refreshes when the user returns.
+  const enrich = useMutation({
+    mutationFn: () => api<{ ok: boolean; started?: boolean }>('/api/stores/enrich', { method: 'POST' }),
+    onSuccess: () => toast(t('filiale.enrichStarted'), 'info'),
     onError: (e) => toast((e as Error).message, 'error'),
   });
 
@@ -136,6 +146,33 @@ export function FilialProfil() {
           placeholder={t('filiale.addressPlaceholder')}
           onChange={e => mark(setAddress)(e.target.value)}
         />
+      </Card>
+
+      {/* Contact — auto-filled by the enrichment runner (OSM address/website/phone +
+          web-search fallback). The button runs it for ALL of the household's stores at once. */}
+      <Card className="flex flex-col gap-2 p-4">
+        <div className="flex items-center justify-between gap-2">
+          <Label className="mb-0 flex items-center gap-1.5"><Globe size={14} /> {t('filiale.contact')}</Label>
+          <Button variant="secondary" className="shrink-0" disabled={enrich.isPending} onClick={() => enrich.mutate()}>
+            <Sparkles size={14} /> {enrich.isPending ? t('filiale.enriching') : t('filiale.enrichNow')}
+          </Button>
+        </div>
+        {branch.website || branch.phone ? (
+          <div className="flex flex-col gap-1.5 text-sm">
+            {branch.website && (
+              <a href={branch.website} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-emerald-600 hover:underline dark:text-emerald-400">
+                <Globe size={13} className="shrink-0" /><span className="truncate">{branch.website.replace(/^https?:\/\//, '')}</span><ExternalLink size={11} className="shrink-0" />
+              </a>
+            )}
+            {branch.phone && (
+              <a href={`tel:${branch.phone}`} className="inline-flex items-center gap-1.5 text-zinc-600 dark:text-zinc-300">
+                <Phone size={13} className="shrink-0" />{branch.phone}
+              </a>
+            )}
+          </div>
+        ) : (
+          <p className="text-xs text-zinc-400">{t('filiale.enrichHint')}</p>
+        )}
       </Card>
 
       {/* warengruppen tier editor */}

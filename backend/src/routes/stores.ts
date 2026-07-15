@@ -1,8 +1,9 @@
 import type { FastifyInstance } from 'fastify';
-import sql from '../db.js';
+import sql, { DEMO_MODE, withHousehold } from '../db.js';
 import { kontoScope } from '../auth/konto.js';
 import { loadUnits, comparisonGroups, type PriceLine } from '../lib/units.js';
 import { discoverStoresForHousehold, addStoreByName } from '../stores/discover.js';
+import { enrichStores } from '../stores/enrich.js';
 
 /** Normalize free-text store name into a stable key for grouping.
  *  "LIDL", "Lidl", "Lidl GmbH" → "lidl". */
@@ -61,7 +62,7 @@ export function storeRoutes(app: FastifyInstance): void {
     if (!id) return reply.code(400).send({ error: 'invalid id' });
     const [row] = await sql`
       SELECT
-        f.id, f.chain_key, f.name, f.kind, f.address, f.lat, f.lon,
+        f.id, f.chain_key, f.name, f.kind, f.address, f.lat, f.lon, f.website, f.phone,
         f.opening_hours, f.prospectus_url, f.warengruppen, f.subscribed,
         COUNT(e.id)::int                                 AS receipts,
         COALESCE(SUM(e.gesamt_betrag), 0)::numeric(10,2)  AS total,
@@ -190,6 +191,20 @@ export function storeRoutes(app: FastifyInstance): void {
   app.post('/api/stores/discover', async (req, reply) => {
     if (req.user?.can_write === false) return reply.code(403).send({ error: 'forbidden' });
     return discoverStoresForHousehold();
+  });
+
+  /** Enrichment runner: auto-fill address/website/phone for ALL of the household's stores +
+   *  shops (OSM for physical branches, web-search for websites). Runs in the BACKGROUND, so on
+   *  demo it holds its own household-scoped connection (like the offer search). */
+  app.post('/api/stores/enrich', async (req, reply) => {
+    if (req.user?.can_write === false) return reply.code(403).send({ error: 'forbidden' });
+    if (DEMO_MODE) {
+      const hid = req.user!.household_id ?? 1;
+      void withHousehold(hid, () => enrichStores()).catch(err => req.log.error(`store enrich failed: ${err.message}`));
+    } else {
+      void enrichStores().catch(err => req.log.error(`store enrich failed: ${err.message}`));
+    }
+    return { ok: true, started: true };
   });
 
   /** Add a single named store near the household address (OSM lookup: "<name>" near home). */
