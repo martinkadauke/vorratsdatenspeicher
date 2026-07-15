@@ -10,6 +10,14 @@ import { haversineKm } from '../lib/geo.js';
 const UA = 'Vorratsdatenspeicher/1.0 (self-hosted household app)';
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
+// The main public Overpass instance rate-limits / overloads often (returns an HTML error
+// page). Fall through to mirrors so store discovery isn't silently empty on the busy demo.
+const OVERPASS_ENDPOINTS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+];
+
 async function geocode(address: string): Promise<{ lat: number; lon: number } | null> {
   const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(address)}`;
   const res = await fetch(url, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(15_000) });
@@ -26,7 +34,7 @@ interface OsmShop { name: string; lat: number; lon: number; address: string | nu
 async function overpassShops(
   lat: number, lon: number, radiusM: number,
   opts: { typeRe?: string; nameFilter?: string; limit?: number },
-): Promise<OsmShop[]> {
+): Promise<OsmShop[] | null> {
   const clean = (s: string) => s.replace(/[^\p{L}\p{N} ]/gu, '').trim();
   const shopSel = opts.nameFilter
     ? `["shop"]["name"~"${clean(opts.nameFilter)}",i]`
@@ -35,33 +43,40 @@ async function overpassShops(
     + `node${shopSel}(around:${radiusM},${lat},${lon});`
     + `way${shopSel}(around:${radiusM},${lat},${lon});`
     + `);out center ${opts.limit ?? 50};`;
-  const res = await fetch('https://overpass-api.de/api/interpreter', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': UA },
-    body: 'data=' + encodeURIComponent(q),
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!res.ok) return [];
-  const data = (await res.json()) as {
-    elements?: { lat?: number; lon?: number; center?: { lat: number; lon: number }; tags?: Record<string, string> }[];
-  };
-  const seen = new Set<string>();
-  const out: OsmShop[] = [];
-  for (const el of data.elements ?? []) {
-    const name = el.tags?.name?.trim();
-    if (!name) continue;
-    const elLat = el.lat ?? el.center?.lat;
-    const elLon = el.lon ?? el.center?.lon;
-    if (elLat == null || elLon == null) continue;
-    const k = name.toLowerCase();
-    if (seen.has(k)) continue; // one entry per distinct store name
-    seen.add(k);
-    const street = [el.tags?.['addr:street'], el.tags?.['addr:housenumber']].filter(Boolean).join(' ');
-    const city = [el.tags?.['addr:postcode'], el.tags?.['addr:city']].filter(Boolean).join(' ');
-    const address = [street, city].filter(Boolean).join(', ') || null;
-    out.push({ name, lat: elLat, lon: elLon, address, distKm: haversineKm(lat, lon, elLat, elLon) });
+  for (const endpoint of OVERPASS_ENDPOINTS) {
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': UA },
+        body: 'data=' + encodeURIComponent(q),
+        signal: AbortSignal.timeout(30_000),
+      });
+      // Rate-limited / overloaded instances return an HTML error page (not JSON) → try the
+      // next mirror rather than reporting "no stores found".
+      if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) continue;
+      const data = (await res.json()) as {
+        elements?: { lat?: number; lon?: number; center?: { lat: number; lon: number }; tags?: Record<string, string> }[];
+      };
+      const seen = new Set<string>();
+      const out: OsmShop[] = [];
+      for (const el of data.elements ?? []) {
+        const name = el.tags?.name?.trim();
+        if (!name) continue;
+        const elLat = el.lat ?? el.center?.lat;
+        const elLon = el.lon ?? el.center?.lon;
+        if (elLat == null || elLon == null) continue;
+        const k = name.toLowerCase();
+        if (seen.has(k)) continue; // one entry per distinct store name
+        seen.add(k);
+        const street = [el.tags?.['addr:street'], el.tags?.['addr:housenumber']].filter(Boolean).join(' ');
+        const city = [el.tags?.['addr:postcode'], el.tags?.['addr:city']].filter(Boolean).join(' ');
+        const address = [street, city].filter(Boolean).join(', ') || null;
+        out.push({ name, lat: elLat, lon: elLon, address, distKm: haversineKm(lat, lon, elLat, elLon) });
+      }
+      return out.sort((a, b) => a.distKm - b.distKm);
+    } catch { /* network/timeout → try next mirror */ }
   }
-  return out.sort((a, b) => a.distKm - b.distKm);
+  return null; // every mirror failed
 }
 
 /** Insert one shop as a store_branch for the ACTIVE household, if not already present.
@@ -96,7 +111,7 @@ async function ensureCoords(): Promise<{ lat: number; lon: number } | null> {
   return loc;
 }
 
-export type DiscoverReason = 'ok' | 'no_address' | 'geocode_failed' | 'not_found' | 'exists';
+export type DiscoverReason = 'ok' | 'no_address' | 'geocode_failed' | 'search_failed' | 'not_found' | 'exists';
 
 /** Discover supermarkets/drugstores near the household address and add them. Best-effort. */
 export async function discoverStoresForHousehold(radiusKm = 6): Promise<{ added: number; found: number; reason: DiscoverReason }> {
@@ -106,6 +121,7 @@ export async function discoverStoresForHousehold(radiusKm = 6): Promise<{ added:
     return { added: 0, found: 0, reason: geo.address ? 'geocode_failed' : 'no_address' };
   }
   const shops = await overpassShops(coords.lat, coords.lon, Math.round(radiusKm * 1000), { limit: 60 });
+  if (shops === null) return { added: 0, found: 0, reason: 'search_failed' };
   let added = 0;
   for (const s of shops) added += await insertBranch(s);
   return { added, found: shops.length, reason: 'ok' };
@@ -122,6 +138,7 @@ export async function addStoreByName(rawName: string): Promise<{ added: boolean;
   }
   // A specific chain may sit a few towns over → search a wide radius by name.
   const hits = await overpassShops(coords.lat, coords.lon, 30_000, { nameFilter: name, limit: 12 });
+  if (hits === null) return { added: false, reason: 'search_failed' };
   if (!hits.length) return { added: false, reason: 'not_found' };
   const nearest = hits[0];
   const inserted = await insertBranch(nearest);

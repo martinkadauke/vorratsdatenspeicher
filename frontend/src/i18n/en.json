@@ -589,6 +589,7 @@
     "addExists": "“{{name}}” already exists.",
     "needAddress": "No household address set — add it in the setup wizard.",
     "geocodeFailed": "Couldn't locate your address — please check it.",
+    "searchFailed": "Store lookup is busy right now — please try again in a moment.",
     "tab_shops": "Shops",
     "searchShops": "Search shop…",
     "shopsEmpty": "No online shops yet. Shops (e.g. Amazon, eBay) are created from email receipts."

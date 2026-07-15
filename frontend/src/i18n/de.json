@@ -589,6 +589,7 @@
     "addExists": "„{{name}}“ gibt es bereits.",
     "needAddress": "Keine Haushaltsadresse hinterlegt — trag sie im Einrichtungs-Assistenten ein.",
     "geocodeFailed": "Adresse konnte nicht verortet werden — bitte prüfen.",
+    "searchFailed": "Ladensuche gerade nicht verfügbar — bitte gleich nochmal versuchen.",
     "tab_shops": "Shops",
     "searchShops": "Shop suchen…",
     "shopsEmpty": "Noch keine Online-Shops. Shops (z.B. Amazon, eBay) entstehen aus Email-Rechnungen."

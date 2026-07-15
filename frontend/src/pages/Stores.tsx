@@ -72,6 +72,7 @@ export function Stores() {
     onSuccess: (r) => {
       if (r.reason === 'no_address') toast(t('stores.needAddress'), 'info');
       else if (r.reason === 'geocode_failed') toast(t('stores.geocodeFailed'), 'error');
+      else if (r.reason === 'search_failed') toast(t('stores.searchFailed'), 'error');
       else toast(r.added > 0 ? t('stores.discovered', { count: r.added }) : t('stores.discoveredNone'), r.added > 0 ? 'success' : 'info');
       void qc.invalidateQueries({ queryKey: ['stores'] });
     },
@@ -84,6 +85,7 @@ export function Stores() {
       else if (r.reason === 'not_found') toast(t('stores.addNotFound'), 'info');
       else if (r.reason === 'exists') toast(t('stores.addExists', { name: r.name ?? addName }), 'info');
       else if (r.reason === 'geocode_failed') toast(t('stores.geocodeFailed'), 'error');
+      else if (r.reason === 'search_failed') toast(t('stores.searchFailed'), 'error');
       else { toast(t('stores.added', { name: r.name }), 'success'); setAddOpen(false); setAddName(''); }
       void qc.invalidateQueries({ queryKey: ['stores'] });
     },
