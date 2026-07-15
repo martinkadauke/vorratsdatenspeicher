@@ -90,6 +90,33 @@ export async function forEachHousehold(fn: (householdId: number) => Promise<void
   const households = await adminSql`SELECT id FROM household ORDER BY id`;
   for (const { id } of households) await withHousehold(id as number, () => fn(id as number));
 }
+/**
+ * Boot interlock (demo only): refuse to start unless the database is a genuine multi-tenant
+ * DEMO database. A real demo uses a TWO-ROLE topology — migrations/RLS run as a distinct owner
+ * (ADMIN_DATABASE_URL) while the runtime connects as the RLS-scoped non-owner role `vds_app`
+ * (DATABASE_URL). A single-role dev/prod database has neither, so this catches the one
+ * catastrophic misconfiguration (DEMO_MODE=true pointed at DATABASE_URL_DEV/prod, which would
+ * apply the demo migrations and silently RLS-poison the shared DB, starving analytics/n8n).
+ * Called before migrate() so nothing is applied when the target looks wrong.
+ */
+export function assertDemoDb(): void {
+  const parseUser = (u: string): string => { try { return decodeURIComponent(new URL(u).username); } catch { return ''; } };
+  if (ADMIN_DATABASE_URL === DATABASE_URL || !process.env.ADMIN_DATABASE_URL) {
+    throw new Error(
+      '[demo guard] DEMO_MODE=true requires a distinct owner ADMIN_DATABASE_URL (for migrations + RLS) '
+      + 'separate from the non-owner runtime DATABASE_URL. This DB looks single-role (dev/prod) — refusing to start '
+      + 'so the demo migrations never enable RLS on it.',
+    );
+  }
+  const runtimeUser = parseUser(DATABASE_URL);
+  if (runtimeUser !== 'vds_app') {
+    throw new Error(
+      `[demo guard] DEMO_MODE=true requires the runtime DATABASE_URL to connect as the RLS-scoped non-owner `
+      + `role 'vds_app' (got '${runtimeUser || 'unknown'}'). Refusing to start against a non-demo database.`,
+    );
+  }
+}
+
 /** Set the vds_app role's password (created without one by migration 089). Demo only. */
 export async function ensureAppRole(): Promise<void> {
   const pw = process.env.VDS_APP_PASSWORD;

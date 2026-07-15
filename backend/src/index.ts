@@ -4,7 +4,7 @@ import fastifyStatic from '@fastify/static';
 import path from 'node:path';
 import { existsSync, statSync } from 'node:fs';
 import './types.js';
-import sql, { adminSql, DEMO_MODE, migrate, ensureAdmin, ensureCashKonten, ensureAppRole, assertRlsCoverage } from './db.js';
+import sql, { adminSql, DEMO_MODE, migrate, ensureAdmin, ensureCashKonten, ensureAppRole, assertRlsCoverage, assertDemoDb } from './db.js';
 import { initSearch } from './lib/search.js';
 import { backfillAliases, backfillArtikelOcrKey } from './lib/canonicalAlias.js';
 import { PORT, getConfig } from './config.js';
@@ -50,6 +50,9 @@ import { demoRoutes } from './routes/demo.js';
 import { rescheduleDemoSweep } from './maintenance/demoSweep.js';
 
 async function main(): Promise<void> {
+  // Demo boot interlock runs BEFORE migrate() so demo migrations/RLS can never touch a
+  // mis-targeted (single-role dev/prod) database.
+  if (DEMO_MODE) assertDemoDb();
   await migrate();
   if (DEMO_MODE) { await ensureAppRole(); await assertRlsCoverage(); }
   await ensureAdmin();

@@ -99,10 +99,21 @@ export async function requireSuperAdmin(req: FastifyRequest, reply: FastifyReply
   }
 }
 
-/** Platform super-admin. Demo: the household-less operator (is_super_admin). Non-demo: the
- *  single-household operator (sees_all_konten) — so the same guard fits both worlds. */
+/** Platform super-admin — gates data-management / backup / CSV export (originally
+ *  requireSuperAdmin = sees_all_konten). Demo: the household-less operator (is_super_admin);
+ *  non-demo: the single-household operator (sees_all_konten). Byte-for-byte off-demo. */
 export async function requirePlatformAdmin(req: FastifyRequest, reply: FastifyReply): Promise<void> {
   const ok = DEMO_MODE ? req.user?.is_super_admin : req.user?.sees_all_konten;
+  if (!ok) return reply.code(403).send({ error: 'forbidden' });
+}
+
+/** Operator-only areas that ANY admin ran in the single-household app (originally
+ *  requireAdmin = is_admin): AI providers/models/tasks, token usage, nightly maintenance,
+ *  model review. On the demo these belong to the platform operator, NOT household admins,
+ *  so they collapse to is_super_admin — but off-demo they stay is_admin (unchanged). This
+ *  mirrors the frontend `operatorOnly = !demo || isSuper` section gating exactly. */
+export async function requireOperator(req: FastifyRequest, reply: FastifyReply): Promise<void> {
+  const ok = DEMO_MODE ? req.user?.is_super_admin : req.user?.is_admin;
   if (!ok) return reply.code(403).send({ error: 'forbidden' });
 }
 

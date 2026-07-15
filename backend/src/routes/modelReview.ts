@@ -1,13 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import sql from '../db.js';
-import { requirePlatformAdmin } from '../auth/plugin.js';
+import { requireOperator } from '../auth/plugin.js';
 import { runModelReview, decideModelReview, isModelReviewRunning, type ReviewAction } from '../maintenance/modelReview.js';
 
 const ACTIONS: ReviewAction[] = ['apply_api', 'apply_open', 'reject'];
 
 export function modelReviewRoutes(app: FastifyInstance): void {
   /** Latest review (for the admin display). */
-  app.get('/api/model-review/latest', { preHandler: requirePlatformAdmin }, async () => {
+  app.get('/api/model-review/latest', { preHandler: requireOperator }, async () => {
     const [row] = await sql`
       SELECT id, created_at, status, proposals, token, decided_at
       FROM model_review ORDER BY id DESC LIMIT 1
@@ -16,7 +16,7 @@ export function modelReviewRoutes(app: FastifyInstance): void {
   });
 
   /** Run the review now (manual/testing). */
-  app.post('/api/model-review/run', { preHandler: requirePlatformAdmin }, async (_req, reply) => {
+  app.post('/api/model-review/run', { preHandler: requireOperator }, async (_req, reply) => {
     if (isModelReviewRunning()) return reply.code(409).send({ error: 'review already running' });
     try {
       const id = await runModelReview();
@@ -27,7 +27,7 @@ export function modelReviewRoutes(app: FastifyInstance): void {
   });
 
   /** In-app apply/reject from the admin UI (admin-authed; uses the row token). */
-  app.post('/api/model-review/:id/decide', { preHandler: requirePlatformAdmin }, async (req, reply) => {
+  app.post('/api/model-review/:id/decide', { preHandler: requireOperator }, async (req, reply) => {
     const id = parseInt((req.params as { id: string }).id, 10);
     const { action } = (req.body ?? {}) as { action?: ReviewAction };
     if (!id || !action || !ACTIONS.includes(action)) return reply.code(400).send({ error: 'id + valid action required' });

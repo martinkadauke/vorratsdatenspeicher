@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import sql, { DEMO_MODE } from '../db.js';
-import { requireAdmin } from '../auth/plugin.js';
+import { requireAdmin, requireOperator } from '../auth/plugin.js';
 import { getAllConfig, setConfig, getConfig, isProtectedConfigKey, redactConfig } from '../config.js';
 import { rescheduleChurner } from '../churner/scheduler.js';
 import { rescheduleSupermarket } from '../supermarket/scheduler.js';
@@ -65,7 +65,7 @@ export function adminRoutes(app: FastifyInstance): void {
     if (key.startsWith('model_review.')) await rescheduleModelReview();
     if (key.startsWith('mailimport.')) await rescheduleMailImport();
     if (key.startsWith('dropfolder.')) await rescheduleDropfolder();
-    if (key.startsWith('demo_sweep.')) await rescheduleDemoSweep();
+    if (DEMO_MODE && key.startsWith('demo_sweep.')) await rescheduleDemoSweep();
     return { ok: true };
   });
 
@@ -252,12 +252,12 @@ export function adminRoutes(app: FastifyInstance): void {
   app.get('/api/searxng/health', { preHandler: requireAdmin }, async () => searxngHealth());
 
   // ── AI providers (Ollama + DeepSeek) ────────────────────────────────────
-  app.get('/api/ai/providers', { preHandler: requireAdmin }, async () => ({
+  app.get('/api/ai/providers', { preHandler: requireOperator }, async () => ({
     providers: VALID_PROVIDERS,
     tasks: VALID_TASKS,
   }));
 
-  app.get('/api/ai/models', { preHandler: requireAdmin }, async (req, reply) => {
+  app.get('/api/ai/models', { preHandler: requireOperator }, async (req, reply) => {
     const q = req.query as { provider?: string; vision?: string };
     const provider = q.provider as ProviderName | undefined;
     if (!provider || !VALID_PROVIDERS.includes(provider)) {
@@ -273,7 +273,7 @@ export function adminRoutes(app: FastifyInstance): void {
     }
   });
 
-  app.get('/api/ai/health', { preHandler: requireAdmin }, async (req, reply) => {
+  app.get('/api/ai/health', { preHandler: requireOperator }, async (req, reply) => {
     const provider = (req.query as { provider?: string }).provider as ProviderName | undefined;
     if (!provider || !VALID_PROVIDERS.includes(provider)) {
       return reply.code(400).send({ error: 'invalid provider' });
@@ -282,7 +282,7 @@ export function adminRoutes(app: FastifyInstance): void {
   });
 
   /** Set provider+model for one task atomically. */
-  app.put('/api/ai/tasks/:task', { preHandler: requireAdmin }, async (req, reply) => {
+  app.put('/api/ai/tasks/:task', { preHandler: requireOperator }, async (req, reply) => {
     const task = (req.params as { task: string }).task as AiTask;
     if (!VALID_TASKS.includes(task)) return reply.code(400).send({ error: 'invalid task' });
     const { provider, model } = (req.body ?? {}) as { provider?: ProviderName; model?: string };
@@ -295,7 +295,7 @@ export function adminRoutes(app: FastifyInstance): void {
 
   /** Token-usage analytics: consumption per provider/model/task + a daily
    *  series, with a rough cost estimate and top-up links per provider. */
-  app.get('/api/ai/usage', { preHandler: requireAdmin }, async () => {
+  app.get('/api/ai/usage', { preHandler: requireOperator }, async () => {
     const grouped = await sql`
       SELECT provider, model, task,
              COUNT(*)::int            AS calls,
@@ -373,7 +373,7 @@ export function adminRoutes(app: FastifyInstance): void {
   });
 
   /** Model-change history: who set which provider/model for which task, when. */
-  app.get('/api/ai/tasks/log', { preHandler: requireAdmin }, async (req) => {
+  app.get('/api/ai/tasks/log', { preHandler: requireOperator }, async (req) => {
     const limit = Math.min(parseInt((req.query as { limit?: string }).limit ?? '50', 10) || 50, 200);
     return sql`
       SELECT l.id, l.task, l.provider, l.model, l.source, l.changed_at, u.username AS changed_by
