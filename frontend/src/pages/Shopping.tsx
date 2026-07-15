@@ -271,8 +271,6 @@ export function Shopping() {
 
   return (
     <div className="flex max-w-2xl flex-col gap-3">
-      <h1 className="text-lg font-bold">{t('shopping.title')}</h1>
-
       {/* List switcher: pick / add / edit lists */}
       <div className="flex flex-wrap items-center gap-1.5">
         {(lists ?? []).map(l => (

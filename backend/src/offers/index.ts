@@ -4,6 +4,7 @@
 // the subscribers get an email digest + an in-app "Angebote für dich" view.
 import sql from '../db.js';
 import { getConfig } from '../config.js';
+import { householdGeo, zipFromAddress, regionFromAddress } from '../lib/household.js';
 import { providerForTask } from '../llm/provider.js';
 import { parseLlmJson } from '../llm/ollama.js';
 import { searxngSearchRaw } from '../llm/searxng.js';
@@ -50,21 +51,6 @@ async function offerSearchHits(product: string, region: string): Promise<{ query
     } catch { /* try next */ }
   }
   return { query: queries[0] ?? product, hits: [] };
-}
-
-/** Region hint (city) from the household address, to bias the search locally. */
-async function regionHint(): Promise<string> {
-  const addr = (await getConfig('household.address')).trim();
-  if (!addr) return '';
-  const zip = addr.match(/\d{5}\s+([^\d,]+)/);
-  if (zip) return zip[1].trim();
-  return addr.split(',').pop()!.trim();
-}
-
-/** 5-digit zip from the household address (Marktguru needs a zip code). */
-async function householdZip(): Promise<string> {
-  const addr = (await getConfig('household.address')).trim();
-  return addr.match(/\b(\d{5})\b/)?.[1] ?? '';
 }
 
 const fmtEur = (n: number | null) => (n == null ? null : `${n.toFixed(2).replace('.', ',')} €`);
@@ -119,8 +105,11 @@ async function marktguruForProduct(product: string, zip: string): Promise<number
   return found;
 }
 
-/** Search the web for current offers of every subscribed product. Returns stats. */
-export async function runOfferSearch(): Promise<{ checked: number; found: number }> {
+/** Why a search produced nothing — surfaced to the user so the empty result isn't silent. */
+export type OfferSearchReason = 'ok' | 'no_products' | 'no_address';
+
+/** Search the web for current offers of every subscribed product. Returns stats + a reason. */
+export async function runOfferSearch(): Promise<{ checked: number; found: number; reason: OfferSearchReason }> {
   if (running) throw new Error('Angebotssuche läuft bereits');
   running = true;
   // Track the run in a maintenance_event so /api/offers/status is reliable across
@@ -134,11 +123,17 @@ export async function runOfferSearch(): Promise<{ checked: number; found: number
   try {
     const products = (await sql`SELECT DISTINCT ref FROM offer_subscription WHERE kind IN ('artikel', 'watch')`).map(r => r.ref as string);
     if (!products.length) {
-      await sql`UPDATE maintenance_event SET status = 'success', ended_at = NOW(), summary = ${sql.json({ checked: 0, found: 0 })} WHERE id = ${eventId}`;
-      return { checked: 0, found: 0 };
+      await sql`UPDATE maintenance_event SET status = 'success', ended_at = NOW(), summary = ${sql.json({ checked: 0, found: 0, reason: 'no_products' })} WHERE id = ${eventId}`;
+      return { checked: 0, found: 0, reason: 'no_products' };
     }
-    const zip = await householdZip();
-    const region = await regionHint();
+    const geo = await householdGeo();
+    const zip = zipFromAddress(geo.address);
+    const region = regionFromAddress(geo.address);
+    if (!geo.address) {
+      // No household address → no ZIP for Marktguru and no region for the web fallback.
+      await sql`UPDATE maintenance_event SET status = 'success', ended_at = NOW(), summary = ${sql.json({ checked: 0, found: 0, reason: 'no_address' })} WHERE id = ${eventId}`;
+      return { checked: 0, found: 0, reason: 'no_address' };
+    }
     let llm: Awaited<ReturnType<typeof providerForTask>> | null = null; // lazy: only if we fall back
 
     let checked = 0, found = 0;
@@ -183,7 +178,7 @@ export async function runOfferSearch(): Promise<{ checked: number; found: number
       } catch { /* skip this product */ }
     }
     await sql`UPDATE maintenance_event SET status = 'success', ended_at = NOW(), summary = ${sql.json({ checked, found })} WHERE id = ${eventId}`;
-    return { checked, found };
+    return { checked, found, reason: 'ok' };
   } catch (e) {
     await sql`UPDATE maintenance_event SET status = 'error', ended_at = NOW(), summary = ${sql.json({ error: (e as Error).message })} WHERE id = ${eventId}`;
     throw e;
@@ -194,7 +189,7 @@ export async function runOfferSearch(): Promise<{ checked: number; found: number
 
 /** Debug helper: show Marktguru hits (primary) + the SearXNG/LLM fallback for one product. */
 export async function debugOfferSearch(product: string): Promise<unknown> {
-  const zip = await householdZip();
+  const zip = zipFromAddress((await householdGeo()).address);
   let marktguru: { count: number; offers?: MarktguruOffer[]; matched?: number; error?: string } = { count: 0 };
   if (zip) {
     try {
@@ -206,7 +201,7 @@ export async function debugOfferSearch(product: string): Promise<unknown> {
     marktguru = { count: 0, error: 'no household zip configured' };
   }
 
-  const region = await regionHint();
+  const region = regionFromAddress((await householdGeo()).address);
   let query = '';
   let hits: { title: string; content: string; url: string }[] = [];
   let llmRaw = '';

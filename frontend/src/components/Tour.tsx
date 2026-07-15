@@ -1,37 +1,23 @@
-import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import {
-  ReceiptText, ChartPie, ShoppingCart, Package, Tags, Users, Sparkles, BadgePercent,
-  ChevronLeft, ChevronRight, X,
-} from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { ScanLine, X } from 'lucide-react';
 import { api } from '../api/client';
 import { Button } from './ui';
 import { useAuth } from '../context/auth';
 
-interface TourStep {
-  icon: typeof ReceiptText;
-  titleKey: string;
-  bodyKey: string;
-  emoji: string;
-}
-
-const STEPS: TourStep[] = [
-  { icon: Sparkles,     titleKey: 'tour.welcome.title',  bodyKey: 'tour.welcome.body',  emoji: '👋' },
-  { icon: ReceiptText,  titleKey: 'tour.receipts.title', bodyKey: 'tour.receipts.body', emoji: '🧾' },
-  { icon: Tags,         titleKey: 'tour.names.title',    bodyKey: 'tour.names.body',    emoji: '🏷️' },
-  { icon: BadgePercent, titleKey: 'tour.offers.title',   bodyKey: 'tour.offers.body',   emoji: '🛒' },
-  { icon: ChartPie,     titleKey: 'tour.stats.title',    bodyKey: 'tour.stats.body',    emoji: '📊' },
-  { icon: ShoppingCart, titleKey: 'tour.shopping.title', bodyKey: 'tour.shopping.body', emoji: '🛍️' },
-  { icon: Package,      titleKey: 'tour.pantry.title',   bodyKey: 'tour.pantry.body',   emoji: '📦' },
-  { icon: Users,        titleKey: 'tour.family.title',   bodyKey: 'tour.family.body',   emoji: '👨‍👩‍👧‍👦' },
-  { icon: Sparkles,     titleKey: 'tour.done.title',     bodyKey: 'tour.done.body',     emoji: '🎉' },
-];
-
+/**
+ * After the setup wizard, ONE hands-on nudge: scan your first receipt. A receipt is the seed
+ * of everything VDS does — only from a scan does it learn where you shop and what you buy.
+ * The CTA opens the exact same scanner the Receipts "+" FAB opens; that modal's open-state
+ * lives on the Receipts page, so we trigger it via the same window-event bus the "replay tour"
+ * button already uses. Dismissal persists via has_seen_tour so it shows only once.
+ */
 export function Tour({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { t } = useTranslation();
-  const { refreshUser } = useAuth();
-  const [step, setStep] = useState(0);
+  const { user, refreshUser } = useAuth();
+  const navigate = useNavigate();
+  const canWrite = user?.can_write !== false;
 
   const markSeen = useMutation({
     mutationFn: () => api('/api/me', { method: 'PATCH', body: { has_seen_tour: true } }),
@@ -40,79 +26,48 @@ export function Tour({ open, onClose }: { open: boolean; onClose: () => void }) 
 
   if (!open) return null;
 
-  const finish = () => {
-    markSeen.mutate();
-    onClose();
-    setStep(0);
+  const dismiss = () => { markSeen.mutate(); onClose(); };
+  const scanNow = () => {
+    dismiss();
+    navigate('/receipts');
+    // Open the scanner via the window-event bus (its state is local to the Receipts page).
+    // A tick after navigation so the Receipts listener is mounted.
+    setTimeout(() => window.dispatchEvent(new Event('vds:new-purchase')), 60);
   };
-
-  const skip = () => finish();
-  const next = () => (step < STEPS.length - 1 ? setStep(step + 1) : finish());
-  const prev = () => step > 0 && setStep(step - 1);
-
-  const current = STEPS[step];
-  const Icon = current.icon;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-3 backdrop-blur-sm">
       <div className="relative w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-zinc-900">
-        <button
-          onClick={skip}
-          className="absolute right-3 top-3 z-10 rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-          aria-label={t('tour.skip')}
-        >
+        <button onClick={dismiss} className="absolute right-3 top-3 z-10 rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800" aria-label={t('tour.later')}>
           <X size={18} />
         </button>
 
-        {/* Hero illustration */}
         <div className="flex h-32 items-center justify-center bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-950 dark:to-emerald-900">
-          <div className="text-6xl">{current.emoji}</div>
+          <div className="text-6xl">🧾</div>
         </div>
 
         <div className="flex flex-col gap-4 p-6">
           <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-500">
-            <Icon size={18} />
-            <span className="text-xs font-medium uppercase tracking-wide">
-              {step + 1} / {STEPS.length}
-            </span>
+            <ScanLine size={18} />
+            <span className="text-xs font-medium uppercase tracking-wide">{t('tour.scan.eyebrow')}</span>
           </div>
+          <h2 className="text-xl font-bold">{t('tour.scan.title')}</h2>
+          <p className="whitespace-pre-line text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">{t('tour.scan.body')}</p>
 
-          <h2 className="text-xl font-bold">{t(current.titleKey)}</h2>
-          <p className="text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">
-            {t(current.bodyKey)}
-          </p>
-
-          {/* Progress dots */}
-          <div className="flex justify-center gap-1.5 pt-2">
-            {STEPS.map((_, i) => (
-              <button
-                key={i}
-                onClick={() => setStep(i)}
-                className={`h-1.5 rounded-full transition-all ${
-                  i === step ? 'w-6 bg-emerald-600' : 'w-1.5 bg-zinc-300 dark:bg-zinc-700'
-                }`}
-                aria-label={`${t('tour.gotoStep')} ${i + 1}`}
-              />
-            ))}
-          </div>
-
-          <div className="mt-2 flex items-center justify-between gap-2">
-            <Button
-              variant="ghost"
-              onClick={prev}
-              disabled={step === 0}
-              className="px-3"
-            >
-              <ChevronLeft size={16} /> {t('tour.prev')}
+          {canWrite ? (
+            <div className="mt-2 flex flex-col gap-2">
+              <Button onClick={scanNow} className="w-full justify-center py-2.5 text-[15px] font-semibold">
+                <ScanLine size={17} /> {t('tour.scan.cta')}
+              </Button>
+              <button onClick={dismiss} className="text-center text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300">
+                {t('tour.later')}
+              </button>
+            </div>
+          ) : (
+            <Button variant="secondary" onClick={dismiss} className="mt-2 w-full justify-center">
+              {t('tour.gotIt')}
             </Button>
-            <Button variant="ghost" onClick={skip} className="text-xs text-zinc-400">
-              {t('tour.skip')}
-            </Button>
-            <Button onClick={next} className="px-4">
-              {step === STEPS.length - 1 ? t('tour.finish') : t('tour.next')}
-              {step < STEPS.length - 1 && <ChevronRight size={16} />}
-            </Button>
-          </div>
+          )}
         </div>
       </div>
     </div>

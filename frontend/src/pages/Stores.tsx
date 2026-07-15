@@ -2,13 +2,15 @@ import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Search, ArrowRightLeft, ChevronRight, ChevronDown, Store as StoreIco, SlidersHorizontal } from 'lucide-react';
+import { Search, ArrowRightLeft, ChevronRight, ChevronDown, Store as StoreIco, SlidersHorizontal, MapPin, Plus } from 'lucide-react';
 import { api } from '../api/client';
 import { Card, Input, Button, Label, Modal, Spinner, EmptyState, Select } from '../components/ui';
 import { StoreIcon } from '../components/IconPicker';
 import { eur } from '../lib/utils';
 import { searchMatch } from '../lib/search';
 import { useUrlState } from '../hooks/useUrlState';
+import { useAuth } from '../context/auth';
+import { toast } from '../components/Toast';
 
 interface Filiale { name: string; receipts: number; total: number; branch_id: number | null }
 interface StoreRow {
@@ -26,7 +28,11 @@ const STORE_TYPES = ['Supermarkt', 'Drogerie', 'Baumarkt', 'Tierbedarf', 'Apothe
 
 export function Stores() {
   const { t } = useTranslation();
+  const { user } = useAuth();
+  const canWrite = user?.can_write !== false;
   const navigate = useNavigate();
+  const [addOpen, setAddOpen] = useState(false);
+  const [addName, setAddName] = useState('');
   const [search, setSearch] = useUrlState('q', '');
   const [view, setView] = useUrlState<'filialen' | 'shops'>('view', 'filialen');
   const [editing, setEditing] = useState<StoreRow | null>(null);
@@ -59,6 +65,31 @@ export function Stores() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['stores'] }),
   });
 
+  // Discover nearby stores (OSM) / add one by name — so a fresh household has stores for the
+  // Läden list + offers-by-store, without waiting for the first receipt.
+  const discover = useMutation({
+    mutationFn: () => api<{ added: number; found: number; reason: string }>('/api/stores/discover', { method: 'POST' }),
+    onSuccess: (r) => {
+      if (r.reason === 'no_address') toast(t('stores.needAddress'), 'info');
+      else if (r.reason === 'geocode_failed') toast(t('stores.geocodeFailed'), 'error');
+      else toast(r.added > 0 ? t('stores.discovered', { count: r.added }) : t('stores.discoveredNone'), r.added > 0 ? 'success' : 'info');
+      void qc.invalidateQueries({ queryKey: ['stores'] });
+    },
+    onError: (e: Error) => toast(e.message, 'error'),
+  });
+  const addStore = useMutation({
+    mutationFn: (name: string) => api<{ added: boolean; name?: string; reason: string }>('/api/stores/add', { method: 'POST', body: { name } }),
+    onSuccess: (r) => {
+      if (r.reason === 'no_address') toast(t('stores.needAddress'), 'info');
+      else if (r.reason === 'not_found') toast(t('stores.addNotFound'), 'info');
+      else if (r.reason === 'exists') toast(t('stores.addExists', { name: r.name ?? addName }), 'info');
+      else if (r.reason === 'geocode_failed') toast(t('stores.geocodeFailed'), 'error');
+      else { toast(t('stores.added', { name: r.name }), 'success'); setAddOpen(false); setAddName(''); }
+      void qc.invalidateQueries({ queryKey: ['stores'] });
+    },
+    onError: (e: Error) => toast(e.message, 'error'),
+  });
+
   const filtered = useMemo(() => {
     if (!data) return [];
     if (!search.trim()) return data;
@@ -67,8 +98,6 @@ export function Stores() {
 
   return (
     <div className="flex flex-col gap-3">
-      <h1 className="text-lg font-bold">{t('stores.title')}</h1>
-
       {/* Filialen (physical, from Kassenbon) vs Shops (online, from Email) */}
       <div className="flex gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-zinc-800/60">
         {(['filialen', 'shops'] as const).map(v => (
@@ -96,6 +125,17 @@ export function Stores() {
           onChange={e => setSearch(e.target.value)}
         />
       </div>
+
+      {canWrite && (
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" className="flex-1 justify-center" disabled={discover.isPending} onClick={() => discover.mutate()}>
+            <MapPin size={15} /> {discover.isPending ? t('stores.discovering') : t('stores.discoverNearby')}
+          </Button>
+          <Button variant="secondary" className="flex-1 justify-center" onClick={() => setAddOpen(true)}>
+            <Plus size={15} /> {t('stores.addStore')}
+          </Button>
+        </div>
+      )}
 
       {isLoading && <Spinner />}
       {!isLoading && !filtered.length && <EmptyState>{t('stores.empty')}</EmptyState>}
@@ -219,6 +259,23 @@ export function Stores() {
       </div>
 
       <StoreEditModal store={editing} allStores={data ?? []} onClose={() => setEditing(null)} />
+
+      {addOpen && (
+        <Modal open={addOpen} onClose={() => setAddOpen(false)} title={t('stores.addStore')}>
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-zinc-500">{t('stores.addHint')}</p>
+            <Input autoFocus placeholder={t('stores.addPlaceholder')} value={addName}
+              onChange={e => setAddName(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && addName.trim()) addStore.mutate(addName.trim()); }} />
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setAddOpen(false)}>{t('common.cancel')}</Button>
+              <Button disabled={!addName.trim() || addStore.isPending} onClick={() => addStore.mutate(addName.trim())}>
+                <Search size={15} /> {addStore.isPending ? t('stores.searching') : t('stores.addSearch')}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
       </>
       )}
     </div>

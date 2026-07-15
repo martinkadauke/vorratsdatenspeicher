@@ -9,6 +9,7 @@ import { Positionen } from './pages/Positionen';
 import { Stats } from './pages/Stats';
 import { Pantry } from './pages/Pantry';
 import { Shopping } from './pages/Shopping';
+import { ShoppingHub } from './pages/ShoppingHub';
 import { Artikel } from './pages/Artikel';
 import { Warenstamm } from './pages/Warenstamm';
 import { Stores } from './pages/Stores';
@@ -61,7 +62,13 @@ export function App() {
           <Route path="/receipts" element={<Receipts />} />
           <Route path="/receipts/:id" element={<ReceiptDetailPage />} />
           <Route path="/stats" element={<Stats />} />
-          <Route path="/shopping" element={<Shopping />} />
+          {/* Shopping = hub with Liste / Angebote / Läden tabs (List is the default tab) */}
+          <Route path="/shopping" element={<ShoppingHub />}>
+            <Route index element={<Redirect to="/shopping/list" />} />
+            <Route path="list" element={<Shopping />} />
+            <Route path="offers" element={<Offers />} />
+            <Route path="stores" element={<Stores />} />
+          </Route>
           {/* Warenstamm = master-data hub with Artikel / Positionen / Vorrat / Prüfen tabs */}
           <Route path="/warenstamm" element={<Warenstamm />}>
             <Route index element={<Navigate to="artikel" replace />} />
@@ -75,9 +82,10 @@ export function App() {
           <Route path="/positionen" element={<Redirect to="/warenstamm/positionen" />} />
           <Route path="/pantry" element={<Redirect to="/warenstamm/vorrat" />} />
           <Route path="/queue" element={<Redirect to="/warenstamm/pruefen" />} />
-          <Route path="/stores" element={<Stores />} />
+          {/* Legacy shopping paths → hub tabs (query string preserved) */}
+          <Route path="/stores" element={<Redirect to="/shopping/stores" />} />
+          <Route path="/offers" element={<Redirect to="/shopping/offers" />} />
           <Route path="/filialen/:id" element={<FilialProfil />} />
-          <Route path="/offers" element={<Offers />} />
           <Route path="/ziele" element={<Ziele />} />
           <Route path="/finanzen" element={<Finanzen />} />
           <Route path="/admin" element={<AdminOnly><Admin /></AdminOnly>} />

@@ -223,7 +223,12 @@ export function Offers() {
   const refresh = async () => {
     setBusy(true);
     try {
-      await api('/api/offers/refresh', { method: 'POST' });
+      const res = await api<{ ok: boolean; reason?: 'no_products' | 'no_address' }>('/api/offers/refresh', { method: 'POST' });
+      // Empty-state feedback: tell the user WHY nothing can be fetched instead of a silent no-op.
+      if (res.ok === false) {
+        toast(res.reason === 'no_address' ? t('offers.needAddress') : t('offers.needProducts'), 'info');
+        return;
+      }
       // Poll the (now DB-backed, cross-replica) status until the search finishes.
       // Give the run a moment to register before the first check.
       await new Promise(r => setTimeout(r, 1500));
@@ -285,8 +290,7 @@ export function Offers() {
 
   return (
     <div className="flex max-w-2xl flex-col gap-3">
-      <div className="flex items-center justify-between gap-2">
-        <h1 className="text-lg font-bold">{t('offers.title')}</h1>
+      <div className="flex items-center justify-end gap-2">
         {canWrite && (
           <Button variant="secondary" onClick={refresh} disabled={busy} className="shrink-0">
             <RefreshCw size={15} className={busy ? 'animate-spin' : ''} />

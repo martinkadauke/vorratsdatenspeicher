@@ -8,6 +8,7 @@ import { estimateVorrat, type VorratLine, type VorratOverride } from '../lib/vor
 import { PROGRESS_FRESH_MS } from '../maintenance/progress.js';
 import { haversineKm } from '../lib/geo.js';
 import { getConfig } from '../config.js';
+import { householdGeo } from '../lib/household.js';
 
 /** "0,99 €" / "1.299,00 €" → 0.99 / 1299.00. null if unparseable. */
 function parsePrice(s: string | null): number | null {
@@ -240,6 +241,12 @@ export function offerRoutes(app: FastifyInstance): void {
    *  accounts are blocked by the global write guard. */
   app.post('/api/offers/refresh', async (req, reply) => {
     if (isOfferSearchRunning()) return reply.code(409).send({ error: 'Angebotssuche läuft bereits' });
+    // Pre-flight so an empty result is never silent: the search needs BOTH subscribed/watched
+    // products AND a household address (for the ZIP Marktguru requires). Report why if not.
+    const [{ n }] = await sql`SELECT COUNT(*)::int AS n FROM offer_subscription WHERE kind IN ('artikel', 'watch')`;
+    if (!n) return { ok: false, reason: 'no_products' as const };
+    const geo = await householdGeo();
+    if (!geo.address) return { ok: false, reason: 'no_address' as const };
     // Wipe the caller's offers first so the re-search returns FRESH rows (prospekt
     // link, validity, chain) instead of being skipped by the cross-run de-dup.
     const refs = (await sql`

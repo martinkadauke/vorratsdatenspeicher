@@ -4,6 +4,7 @@
     "receipts": "Belege",
     "stats": "Statistik",
     "shopping": "Liste",
+    "einkauf": "Einkauf",
     "pantry": "Vorrat",
     "names": "Artikel",
     "warenstamm": "Warenstamm",
@@ -574,6 +575,20 @@
     "prospekt": "Prospekt",
     "prospektTitle": "Aktuellen Prospekt bei marktguru ansehen ({{count}} deiner Artikel im Angebot)",
     "tab_filialen": "Filialen",
+    "discoverNearby": "Läden in der Nähe finden",
+    "discovering": "Suche läuft…",
+    "discovered": "{{count}} Läden hinzugefügt",
+    "discoveredNone": "Keine neuen Läden in der Nähe gefunden",
+    "addStore": "Laden hinzufügen",
+    "addHint": "Gib einen Ladennamen ein — ich suche ihn per OpenStreetMap in der Nähe deiner Haushaltsadresse und lege ihn an.",
+    "addPlaceholder": "z. B. Kaufland, dm, Rewe…",
+    "addSearch": "Suchen & anlegen",
+    "searching": "Suche läuft…",
+    "added": "„{{name}}“ hinzugefügt",
+    "addNotFound": "In der Nähe deiner Adresse nicht gefunden.",
+    "addExists": "„{{name}}“ gibt es bereits.",
+    "needAddress": "Keine Haushaltsadresse hinterlegt — trag sie im Einrichtungs-Assistenten ein.",
+    "geocodeFailed": "Adresse konnte nicht verortet werden — bitte prüfen.",
     "tab_shops": "Shops",
     "searchShops": "Shop suchen…",
     "shopsEmpty": "Noch keine Online-Shops. Shops (z.B. Amazon, eBay) entstehen aus Email-Rechnungen."
@@ -657,6 +672,8 @@
     "refreshing": "Suche läuft…",
     "refreshingHint": "VDS sucht gerade nach aktuellen Angeboten für deine Artikel – das dauert einen Moment.",
     "refreshDone": "Angebote aktualisiert",
+    "needProducts": "Noch keine Artikel oder beobachteten Produkte — scanne einen Beleg oder füge unten ein Produkt hinzu, dann suche ich Angebote.",
+    "needAddress": "Keine Haushaltsadresse hinterlegt — trag sie im Einrichtungs-Assistenten (bzw. im Admin) ein, damit ich Angebote in deiner Nähe finden kann.",
     "allKetten": "Alle Ketten",
     "deineLaeden": "Deine Läden",
     "pin": "Zu „Deine Läden“ anpinnen",
@@ -1114,44 +1131,14 @@
   "tour": {
     "next": "Weiter",
     "prev": "Zurück",
-    "skip": "Überspringen",
-    "finish": "Los geht's",
     "gotoStep": "Schritt",
-    "welcome": {
-      "title": "Willkommen beim Vorratsdatenspeicher!",
-      "body": "Ich begleite dich kurz durch die wichtigsten Funktionen. Das dauert weniger als eine Minute. Den Rundgang kannst du jederzeit überspringen und später im Profil neu starten."
-    },
-    "receipts": {
-      "title": "Belege — alle deine Einkäufe",
-      "body": "Bons per Telegram-Bot scannen, oder mit dem grünen +-Knopf direkt einen Bar- oder Karteneinkauf anlegen (Foto optional, OCR läuft im Hintergrund). Im Beleg springst du mit ↑/↓ durch die Posten und öffnest mit Enter direkt den kanonischen Namen — passt die Summe der Posten zum Bon-Total, blitzt der Bildschirm kurz grün."
-    },
-    "stats": {
-      "title": "Statistik — wohin geht das Geld",
-      "body": "Pro Monat siehst du Ausgaben nach Kategorie, mit Hochrechnung bis Monatsende. Setze ein Ziel pro Kategorie (Bleistift-Symbol), die App warnt wenn du drüberliegst. Diese-Woche-vs-letzte-Woche zeigt Trends oben."
-    },
-    "shopping": {
-      "title": "Einkaufsliste — was bald aus geht",
-      "body": "Hier landen Vorschläge basierend darauf, wie schnell etwas verbraucht wird. „Erledigt“ entfernt es, „Später“ schiebt es 7 Tage, „Nie wieder“ schließt den Artikel dauerhaft aus."
-    },
-    "pantry": {
-      "title": "Vorrat — was du noch hast",
-      "body": "Geschätzte Restmenge und Tage-bis-leer für jeden Artikel den du regelmäßig kaufst. Berechnet aus Kaufhistorie + typischem Verbrauch."
-    },
-    "names": {
-      "title": "Artikel — was du kaufst",
-      "body": "Alle Produkte unter ihrem kanonischen Namen gebündelt. Suche mit Operatoren (»eier -bio«, »äpfel, bananen«, laden:lidl, preis>2), Taste F springt in die Suche, C in die Kategorie-Suche. Filtere nach Kategorie + Zeitraum (zeigt die Ausgabensumme), nach Konto, sowie nach abonnierten und gemiedenen Artikeln. Mehrere markieren → Kategorie/Mitglied setzen, Angebote abonnieren oder vermeiden."
-    },
-    "offers": {
-      "title": "Angebote für dich 🛒",
-      "body": "Abonniere Artikel (in der Artikel-Liste »Angebote abonnieren«), dann findet VDS über die Marktguru-API echte aktuelle Prospekt-Angebote in deiner Nähe — mit Preis, Laden und Gültigkeit. Per »Angebote holen« sofort aktualisieren; nachts kommt zusätzlich ein E-Mail-Digest."
-    },
-    "family": {
-      "title": "Familie & Zugänge",
-      "body": "Im Admin legst du Familienmitglieder an und taggst sie an Artikel („nur eine Person isst Thunfisch“) — in der Statistik dann nach Person filterbar. Außerdem lädst du dort per E-Mail weitere Nutzer ein und vergibst Schreibrechte: ohne Häkchen bekommt jemand einen Nur-Lese-Zugang und kann nichts ändern oder löschen."
-    },
-    "done": {
-      "title": "Du bist startklar 🎉",
-      "body": "Viel Spaß mit Vorratsdatenspeicher! Wenn du Hilfe brauchst, findest du diese Tour jederzeit unter Profil → Hilfe."
+    "later": "Vielleicht später",
+    "gotIt": "Verstanden",
+    "scan": {
+      "eyebrow": "Erster Schritt",
+      "title": "Scanne deinen ersten Beleg",
+      "body": "Hier fängt der Vorratsdatenspeicher an. Fotografiere einen Kassenbon und die KI liest Laden, Datum und jeden einzelnen Posten für dich aus — ganz ohne Tippen.\n\nErst mit deinem ersten Scan lernt VDS, wo du einkaufst und was du kaufst. Alles andere — Statistik, Vorrat, Angebote und Einkaufslisten — wächst aus deinen Belegen.",
+      "cta": "Jetzt Beleg scannen"
     }
   },
   "categoriesAdmin": {

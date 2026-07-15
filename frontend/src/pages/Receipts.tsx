@@ -76,6 +76,13 @@ export function Receipts() {
   const kontoInit = useRef(false); // have we applied the default account scope yet?
 
   const [createOpen, setCreateOpen] = useState(false);
+  // The first-run "scan your first receipt" step (Tour.tsx) opens this scanner via a window
+  // event, since its open-state lives here (mirrors the vds:open-tour bus).
+  useEffect(() => {
+    const open = () => setCreateOpen(true);
+    window.addEventListener('vds:new-purchase', open);
+    return () => window.removeEventListener('vds:new-purchase', open);
+  }, []);
   const [filtersOpen, setFiltersOpen] = useState(false); // collapse the filter chips behind a toggle
   // "Nur versteckte": super-admin-only filter → show ONLY private receipts.
   const [hiddenOnly, setHiddenOnly] = useState(params.get('hidden') === '1');

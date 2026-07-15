@@ -135,7 +135,13 @@ export function Onboarding() {
     mutationFn: () => demo
       ? api('/api/onboarding/complete', { method: 'POST' })
       : api('/api/config/onboarding.done', { method: 'PUT', body: { value: true } }),
-    onSuccess: async () => { await refreshUser(); navigate('/receipts'); },
+    onSuccess: async () => {
+      // Seed the household's Läden list from its address (OSM, best-effort, non-blocking), so
+      // offers-by-store have stores to work with before the first receipt is even scanned.
+      void api('/api/stores/discover', { method: 'POST' }).catch(() => {});
+      await refreshUser();
+      navigate('/receipts');
+    },
     onError: (e: Error) => toast(e.message, 'error'),
   });
 

@@ -4,6 +4,7 @@
     "receipts": "Receipts",
     "stats": "Statistics",
     "shopping": "List",
+    "einkauf": "Shopping",
     "pantry": "Pantry",
     "names": "Items",
     "warenstamm": "Master data",
@@ -574,6 +575,20 @@
     "prospekt": "Flyer",
     "prospektTitle": "View the current flyer on marktguru ({{count}} of your items on offer)",
     "tab_filialen": "Branches",
+    "discoverNearby": "Find stores near me",
+    "discovering": "Searching…",
+    "discovered": "Added {{count}} stores",
+    "discoveredNone": "No new stores found nearby",
+    "addStore": "Add store",
+    "addHint": "Enter a store name — I'll look it up on OpenStreetMap near your household address and add it.",
+    "addPlaceholder": "e.g. Kaufland, dm, Tesco…",
+    "addSearch": "Search & add",
+    "searching": "Searching…",
+    "added": "Added “{{name}}”",
+    "addNotFound": "Not found near your address.",
+    "addExists": "“{{name}}” already exists.",
+    "needAddress": "No household address set — add it in the setup wizard.",
+    "geocodeFailed": "Couldn't locate your address — please check it.",
     "tab_shops": "Shops",
     "searchShops": "Search shop…",
     "shopsEmpty": "No online shops yet. Shops (e.g. Amazon, eBay) are created from email receipts."
@@ -657,6 +672,8 @@
     "refreshing": "Searching…",
     "refreshingHint": "VDS is searching for current offers for your items – this takes a moment.",
     "refreshDone": "Offers updated",
+    "needProducts": "No articles or watched products yet — scan a receipt or add a product below, then I can look for offers.",
+    "needAddress": "No household address set — add it in the setup wizard (or Admin) so I can find offers near you.",
     "allKetten": "All chains",
     "deineLaeden": "Your stores",
     "pin": "Pin to \"Your stores\"",
@@ -1112,44 +1129,14 @@
   "tour": {
     "next": "Next",
     "prev": "Back",
-    "skip": "Skip",
-    "finish": "Let's go",
     "gotoStep": "Step",
-    "welcome": {
-      "title": "Welcome to Vorratsdatenspeicher!",
-      "body": "Let me walk you through the main features. It takes less than a minute. You can skip the tour any time and replay it later from your profile."
-    },
-    "receipts": {
-      "title": "Receipts — every shopping trip",
-      "body": "Scan receipts via the Telegram bot, or add a cash/card purchase directly with the green + button (photo optional, OCR runs in the background). Inside a receipt, ↑/↓ jump between items and Enter opens the canonical name right away — when the item sum matches the receipt total, the screen flashes green."
-    },
-    "stats": {
-      "title": "Statistics — where the money goes",
-      "body": "Monthly spending per category with end-of-month projection. Set a goal per category (pencil icon) and the app warns you when you're over. The top card shows this-week-vs-last-week trends."
-    },
-    "shopping": {
-      "title": "Shopping list — what's running low",
-      "body": "Suggestions based on how fast things get used up. \"Done\" removes it, \"Later\" snoozes 7 days, \"Never\" excludes the item for good."
-    },
-    "pantry": {
-      "title": "Pantry — what you still have",
-      "body": "Estimated remaining quantity and days-until-empty for items you buy regularly. Computed from purchase history + typical consumption."
-    },
-    "names": {
-      "title": "Items — what you buy",
-      "body": "Every product grouped under its canonical name. Search with operators (»eggs -organic«, »apples, bananas«, laden:lidl, preis>2); press F to jump to search, C to the category search. Filter by category + date range (shows total spend), by account, and by subscribed or avoided items. Select several → set category/member, subscribe to offers, or avoid."
-    },
-    "offers": {
-      "title": "Offers for you 🛒",
-      "body": "Subscribe to items (»Subscribe to offers« in the Items list) and VDS finds real current flyer deals near you via the Marktguru API — with price, store and validity. Hit »Fetch offers« to refresh now; a nightly email digest comes on top."
-    },
-    "family": {
-      "title": "Family & access",
-      "body": "In Admin you add family members and tag them to items (\"only one person eats tuna\") — then filter Statistics per person. You also invite more users by email there and grant write access: leave it off and someone gets read-only access and can't change or delete anything."
-    },
-    "done": {
-      "title": "You're all set 🎉",
-      "body": "Enjoy Vorratsdatenspeicher! Need a refresher? Replay this tour any time from Profile → Help."
+    "later": "Maybe later",
+    "gotIt": "Got it",
+    "scan": {
+      "eyebrow": "First step",
+      "title": "Scan your first receipt",
+      "body": "This is where Vorratsdatenspeicher starts. Snap a photo of a supermarket receipt and the AI reads the store, the date and every single item for you — no typing.\n\nOnly from your first scan does VDS learn where you shop and what you buy. Everything else — your stats, pantry, offers and shopping lists — grows from your receipts.",
+      "cta": "Scan a receipt now"
     }
   },
   "categoriesAdmin": {

@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import sql from '../db.js';
 import { kontoScope } from '../auth/konto.js';
 import { loadUnits, comparisonGroups, type PriceLine } from '../lib/units.js';
+import { discoverStoresForHousehold, addStoreByName } from '../stores/discover.js';
 
 /** Normalize free-text store name into a stable key for grouping.
  *  "LIDL", "Lidl", "Lidl GmbH" → "lidl". */
@@ -147,6 +148,21 @@ export function storeRoutes(app: FastifyInstance): void {
       e.filialen.push({ name: r.roh_ladenname as string, receipts: r.receipts, total: Number(r.total ?? 0), branch_id: (r.branch_id as number | null) ?? null });
       grouped.set(key, e);
     }
+    // Surface household store_branch rows that have NO receipts yet (manually added or
+    // OSM-discovered) so they appear on the Läden list too — otherwise a brand-new household's
+    // discovered stores would be invisible. RLS-scoped to the household on demo.
+    const seenNames = new Set(rows.map(r => r.roh_ladenname as string));
+    const branches = await sql`SELECT id, name FROM store_branch WHERE kind = 'filiale'`;
+    for (const b of branches) {
+      const name = b.name as string;
+      if (seenNames.has(name)) continue;
+      const key = normalizeStore(name);
+      if (!key) continue;
+      const e = grouped.get(key) ?? { receipts: 0, total: 0, filialen: [] };
+      if (e.filialen.some(f => f.name === name)) continue;
+      e.filialen.push({ name, receipts: 0, total: 0, branch_id: b.id as number });
+      grouped.set(key, e);
+    }
     const typeMap = new Map((await sql`SELECT store_key, store_type FROM store_meta WHERE store_type IS NOT NULL`)
       .map(r => [r.store_key as string, r.store_type as string]));
     return [...grouped.entries()]
@@ -165,6 +181,22 @@ export function storeRoutes(app: FastifyInstance): void {
         };
       })
       .sort((a, b) => b.receipts - a.receipts);
+  });
+
+  /** Discover supermarkets/drugstores near the household address (OSM) and add them as
+   *  branches, so a fresh household has stores for the Läden list + offers-by-store. */
+  app.post('/api/stores/discover', async (req, reply) => {
+    if (req.user?.can_write === false) return reply.code(403).send({ error: 'forbidden' });
+    return discoverStoresForHousehold();
+  });
+
+  /** Add a single named store near the household address (OSM lookup: "<name>" near home). */
+  app.post('/api/stores/add', async (req, reply) => {
+    if (req.user?.can_write === false) return reply.code(403).send({ error: 'forbidden' });
+    const name = String((req.body as { name?: string })?.name ?? '').trim();
+    if (!name) return reply.code(400).send({ error: 'name required' });
+    if (name.length > 80) return reply.code(400).send({ error: 'name too long' });
+    return addStoreByName(name);
   });
 
   /** Set/clear a chain's store-type (Supermarkt/Drogerie/…) — drives which shopping
