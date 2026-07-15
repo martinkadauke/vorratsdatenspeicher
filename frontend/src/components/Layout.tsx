@@ -12,6 +12,8 @@ import { Toaster } from './Toast';
 import { ConfirmHost } from './Confirm';
 import { cn } from '../lib/utils';
 import { NAV, MOBILE_PRIMARY, navExtras } from '../lib/nav';
+import { BugReportButton } from './BugReportButton';
+import { InstallButton } from './InstallButton';
 
 /** Colour-coded environment badge keyed on the runtime VDS_ENV (prod/stage/dev),
  *  which is reliable even when branches share a commit SHA. Unknown → no badge. */
@@ -23,7 +25,7 @@ const ENV_BADGE: Record<string, { label: string; cls: string }> = {
 
 export function Layout() {
   const { t } = useTranslation();
-  const { user, logout } = useAuth();
+  const { user, logout, demo } = useAuth();
   const navigate = useNavigate();
   const [tourOpen, setTourOpen] = useState(false);
 
@@ -120,7 +122,7 @@ export function Layout() {
         {/* Desktop sidebar */}
         <aside className="sticky top-[53px] hidden h-[calc(100dvh-53px)] w-52 shrink-0 flex-col gap-1 overflow-y-auto p-3 md:flex">
           {NAV.map(n => navItem(n.to, n.icon, t(n.key), false, n.to === '/warenstamm' ? pruefenCount : 0))}
-          {navExtras(!!user?.is_admin).map(n => navItem(n.to, n.icon, t(n.key)))}
+          {navExtras(!!user?.is_admin, !!user?.is_super_admin).map(n => navItem(n.to, n.icon, t(n.key)))}
           <div className="mt-auto">
             <button
               onClick={() => { logout(); navigate('/login'); }}
@@ -150,6 +152,8 @@ export function Layout() {
         {navItem('/more', MoreHorizontal, t('nav.more'), true)}
       </nav>
 
+      {/* Demo-only floating CTAs: "Get VDS" install guide + a bug-report button on every page. */}
+      {demo && <><InstallButton /><BugReportButton /></>}
       <Onboarding />
       <Tour open={tourOpen} onClose={() => setTourOpen(false)} />
       <Toaster />

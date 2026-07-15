@@ -7,7 +7,11 @@ import { setLanguage } from '../i18n';
 interface AuthContextValue {
   user: User | null;
   loading: boolean;
+  /** DEMO_MODE flag from /api/version — drives demo-only UI (signup, install button,
+   *  household admin). Always false off-demo (dev/prod), so demo UI never renders there. */
+  demo: boolean;
   login: (username: string, password: string) => Promise<void>;
+  signup: (email: string, password: string, household: string) => Promise<void>;
   logout: () => void;
   refreshUser: () => Promise<void>;
 }
@@ -18,6 +22,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [demo, setDemo] = useState(false);
 
   const applyUser = (u: User | null) => {
     setUser(u);
@@ -42,6 +47,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const onLogout = () => { setUser(null); queryClient.clear(); };
     window.addEventListener('vds:logout', onLogout);
     (async () => {
+      // Resolve the demo flag BEFORE clearing loading, so demo-gated UI never
+      // flashes the wrong state on first render (Login signup, admin sections).
+      try { const v = await api<{ demo?: boolean }>('/api/version'); setDemo(!!v.demo); } catch { /* default false */ }
       if (getToken()) await refreshUser();
       setLoading(false);
     })();
@@ -61,6 +69,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     applyUser(res.user);
   };
 
+  // Open signup (demo only): creates a brand-new household + its admin, returns only a
+  // token (no user body), so we set the token then load the user via /api/auth/me.
+  const signup = async (email: string, password: string, household: string) => {
+    const res = await api<{ token: string }>('/api/auth/signup', {
+      method: 'POST',
+      body: { email, password, household },
+    });
+    queryClient.clear();
+    setToken(res.token);
+    await refreshUser();
+  };
+
   const logout = () => {
     setToken(null);
     setUser(null);
@@ -68,7 +88,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, refreshUser }}>
+    <AuthContext.Provider value={{ user, loading, demo, login, signup, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

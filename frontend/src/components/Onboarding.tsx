@@ -26,7 +26,9 @@ const AI_TASKS: [string, string][] = [
   ['nlanalytics', 'onboarding.models.nlanalytics'],
 ];
 
-const STEP_META = [
+// Full wizard = the single-household admin (off-demo) OR the demo platform super-admin
+// (operator): sets up AI, mail, accounts, …
+const FULL_STEPS = [
   { icon: Languages, emoji: '🌍', key: 'lang' },
   { icon: Sparkles, emoji: '👋', key: 'welcome' },
   { icon: Bot, emoji: '🤖', key: 'ai' },
@@ -39,6 +41,9 @@ const STEP_META = [
   { icon: Inbox, emoji: '📥', key: 'imap' },
   { icon: PartyPopper, emoji: '🎉', key: 'done' },
 ];
+// Slim wizard = a demo household admin: only their own household (address / categories /
+// family). Infra + AI (the operator's domain) is excluded.
+const SLIM_STEPS = FULL_STEPS.filter(s => ['welcome', 'categories', 'household', 'family', 'done'].includes(s.key));
 
 const composeAddr = (a: { street: string; nr: string; plz: string; city: string }): string => {
   const l1 = [a.street.trim(), a.nr.trim()].filter(Boolean).join(' ');
@@ -48,10 +53,16 @@ const composeAddr = (a: { street: string; nr: string; plz: string; city: string 
 
 export function Onboarding() {
   const { t, i18n } = useTranslation();
-  const { user, refreshUser } = useAuth();
+  const { user, refreshUser, demo } = useAuth();
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [step, setStep] = useState(0);
+  // Off-demo (dev/prod): the single admin always gets the full wizard writing to global
+  // config. On-demo: the platform super-admin gets the full wizard; a household admin gets
+  // the slim wizard (own-household address / categories / family, saved to their row).
+  const isSuper = !!user?.is_super_admin;
+  const fullWizard = !demo || isSuper;
+  const STEP_META = fullWizard ? FULL_STEPS : SLIM_STEPS;
   const show = !!user?.is_admin && user?.onboarding_done === false;
 
   const { data: config } = useQuery({ queryKey: ['config'], queryFn: () => api<Record<string, unknown>>('/api/config'), enabled: show });
@@ -82,7 +93,16 @@ export function Onboarding() {
   const pickLang = (l: string) => { void i18n.changeLanguage(l); setLang.mutate(l); setCfg.mutate({ key: 'app.default_lang', value: l }); };
 
   const [addr, setAddr] = useState({ street: '', nr: '', plz: '', city: '' });
-  const saveAddr = (nextA: typeof addr) => setCfg.mutate({ key: 'household.address', value: composeAddr(nextA) });
+  const [detailSel, setDetailSel] = useState<string | null>(null);
+  // Demo household admins persist address/categories to THEIR household row — NOT the
+  // global operator config (which only the full wizard writes).
+  const saveProfile = useMutation({
+    mutationFn: (b: { address?: string; categories_detail?: string }) => api('/api/onboarding/profile', { method: 'PUT', body: b }),
+    onError: (e: Error) => toast(e.message, 'error'),
+  });
+  const saveAddr = (nextA: typeof addr) => fullWizard
+    ? setCfg.mutate({ key: 'household.address', value: composeAddr(nextA) })
+    : saveProfile.mutate({ address: composeAddr(nextA) });
 
   const [newFam, setNewFam] = useState({ name: '', emoji: '🙂' });
   const addFam = useMutation({
@@ -111,7 +131,10 @@ export function Onboarding() {
   });
 
   const finishMut = useMutation({
-    mutationFn: () => api('/api/config/onboarding.done', { method: 'PUT', body: { value: true } }),
+    // Demo: per-household flag (household.onboarding_done). Off-demo: global config.
+    mutationFn: () => demo
+      ? api('/api/onboarding/complete', { method: 'POST' })
+      : api('/api/config/onboarding.done', { method: 'PUT', body: { value: true } }),
     onSuccess: async () => { await refreshUser(); navigate('/receipts'); },
     onError: (e: Error) => toast(e.message, 'error'),
   });
@@ -135,7 +158,12 @@ export function Onboarding() {
       defaultValue={(config?.[key] as string | number) ?? ''} placeholder={opts.placeholder}
       onBlur={e => e.target.value !== String((config?.[key] as string | number) ?? '') && setCfg.mutate({ key, value: opts.type === 'number' ? Number(e.target.value) : e.target.value })} />
   );
-  const detail = (config?.['categories.detail'] as string) ?? 'mittel';
+  const detail = detailSel ?? ((config?.['categories.detail'] as string) ?? 'mittel');
+  const saveDetail = (d: string) => {
+    setDetailSel(d);
+    if (fullWizard) setCfg.mutate({ key: 'categories.detail', value: d });
+    else saveProfile.mutate({ categories_detail: d });
+  };
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-3 backdrop-blur-sm">
@@ -143,6 +171,14 @@ export function Onboarding() {
         <div className="flex h-24 shrink-0 items-center justify-center bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-950 dark:to-emerald-900">
           <div className="text-5xl">{cur.emoji}</div>
         </div>
+
+        {demo && !isSuper && (
+          <div className="shrink-0 bg-amber-100 px-4 py-2 text-center text-xs font-semibold text-amber-800 dark:bg-amber-950/50 dark:text-amber-300">
+            {i18n.language.startsWith('de')
+              ? '⚠️ Demo — alle Daten dieses Haushalts werden heute um Mitternacht gelöscht.'
+              : '⚠️ Demo — all data in this household is deleted tonight at midnight.'}
+          </div>
+        )}
 
         <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-6">
           <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-500">
@@ -187,7 +223,7 @@ export function Onboarding() {
             <div className="flex flex-col gap-2">
               <div className="grid grid-cols-3 gap-2">
                 {DETAILS.map(d => (
-                  <button key={d} type="button" onClick={() => setCfg.mutate({ key: 'categories.detail', value: d })}
+                  <button key={d} type="button" onClick={() => saveDetail(d)}
                     className={cn('rounded-xl border px-2 py-3 text-sm font-medium transition-colors',
                       detail === d ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40' : 'border-zinc-300 hover:border-zinc-400 dark:border-zinc-700')}>
                     {t(`onboarding.categories.${d}`)}

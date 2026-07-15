@@ -1,6 +1,6 @@
 import {
   ReceiptText, ShoppingCart, BadgePercent, Boxes, Store,
-  ChartPie, Settings, UserCircle, Wallet, type LucideIcon,
+  ChartPie, Settings, UserCircle, Wallet, Building2, type LucideIcon,
 } from 'lucide-react';
 
 export interface NavItem { to: string; icon: LucideIcon; key: string }
@@ -19,10 +19,13 @@ export const NAV: NavItem[] = [
 
 export const MOBILE_PRIMARY = 4;
 
-/** Tail items after the main nav: admin (only for admins), then profile. */
-export function navExtras(isAdmin: boolean): NavItem[] {
+/** Tail items after the main nav: admin (admins), households (super-admin only, demo), then
+ *  profile. Sourced here so BOTH the desktop sidebar and the mobile "More" page get them.
+ *  isSuper is always false off-demo, so the households entry only appears on the demo. */
+export function navExtras(isAdmin: boolean, isSuper = false): NavItem[] {
   return [
     ...(isAdmin ? [{ to: '/admin', icon: Settings, key: 'nav.admin' }] : []),
+    ...(isSuper ? [{ to: '/admin/households', icon: Building2, key: 'nav.households' }] : []),
     { to: '/profile', icon: UserCircle, key: 'nav.profile' },
   ];
 }

@@ -12,7 +12,7 @@ export function More() {
 
   // Everything not in the mobile bottom bar: the rest of NAV, then admin + profile.
   // (The Prüfen review badge lives on the Warenstamm item, which is in the bottom bar.)
-  const items = [...NAV.slice(MOBILE_PRIMARY), ...navExtras(!!user?.is_admin)];
+  const items = [...NAV.slice(MOBILE_PRIMARY), ...navExtras(!!user?.is_admin, !!user?.is_super_admin)];
 
   return (
     <div className="flex flex-col gap-2">

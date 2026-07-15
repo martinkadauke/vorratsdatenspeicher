@@ -19,6 +19,7 @@ import { Finanzen } from './pages/Finanzen';
 import { Queue } from './pages/Queue';
 import { Admin } from './pages/Admin';
 import { CategoriesAdmin } from './pages/CategoriesAdmin';
+import { Households } from './pages/Households';
 import { Profile } from './pages/Profile';
 import { More } from './pages/More';
 import { Spinner } from './components/ui';
@@ -33,6 +34,12 @@ function Protected({ children }: { children: React.ReactNode }) {
 function AdminOnly({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   if (!user?.is_admin) return <Navigate to="/receipts" replace />;
+  return <>{children}</>;
+}
+
+function SuperAdminOnly({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (!user?.is_super_admin) return <Navigate to="/receipts" replace />;
   return <>{children}</>;
 }
 
@@ -75,6 +82,7 @@ export function App() {
           <Route path="/finanzen" element={<Finanzen />} />
           <Route path="/admin" element={<AdminOnly><Admin /></AdminOnly>} />
           <Route path="/admin/categories" element={<AdminOnly><CategoriesAdmin /></AdminOnly>} />
+          <Route path="/admin/households" element={<SuperAdminOnly><Households /></SuperAdminOnly>} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/more" element={<More />} />
           <Route path="*" element={<Navigate to="/receipts" replace />} />

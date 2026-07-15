@@ -53,7 +53,14 @@ type AdminEntry = { id: string; title: string; keywords: string; el: React.React
 
 export function Admin() {
   const { t } = useTranslation();
-  const { user } = useAuth();
+  const { user, demo } = useAuth();
+  const isSuper = !!user?.is_super_admin;
+  // Platform-level areas (full data mgmt, backup): whoever administers the whole platform —
+  // the super-admin on demo, any sees-all-konten admin off-demo.
+  const platformAdmin = demo ? isSuper : !!user?.sees_all_konten;
+  // Operator-only areas (AI, infra, nightly maintenance): on demo, hidden from household
+  // admins; off-demo every admin sees them (single-tenant — no such split).
+  const operatorOnly = !demo || isSuper;
   const [q, setQ] = useState('');
   const [openGroups, setOpenGroups] = useState<Set<string>>(() => {
     try { return new Set<string>(JSON.parse(localStorage.getItem(OPEN_KEY) || '[]')); } catch { return new Set(); }
@@ -69,15 +76,15 @@ export function Admin() {
   };
 
   const sections: AdminEntry[] = [
-    { id: 'ai-providers', title: t('admin.aiProviders'), keywords: 'ki ai modell model provider anbieter ollama deepseek anthropic api key schluessel url health verbindung connection searxng', el: <AiProvidersSection /> },
-    { id: 'ai-tasks', title: t('admin.aiTasks'), keywords: 'ki ai aufgaben tasks ocr churner recategorize kategorisierung modell zuweisung provider', el: <AiTasksSection /> },
-    { id: 'model-review', title: t('admin.reviewTitle'), keywords: 'modell review ueberpruefung vorschlag suggestion automatisch api open weight empfehlung recommendation', el: <ModelReviewSection /> },
-    { id: 'token-usage', title: t('admin.usageTitle'), keywords: 'token verbrauch usage kosten cost analytics statistik aufladen top up guthaben credit', el: <TokenUsageSection /> },
-    { id: 'churner', title: t('admin.maintenance'), keywords: 'wartung maintenance churner namen kanonisch canonical bilder icons bereinigung cleanup hintergrund background batch', el: <ChurnerSection /> },
+    { id: 'ai-providers', title: t('admin.aiProviders'), keywords: 'ki ai modell model provider anbieter ollama deepseek anthropic api key schluessel url health verbindung connection searxng', el: <AiProvidersSection />, show: operatorOnly },
+    { id: 'ai-tasks', title: t('admin.aiTasks'), keywords: 'ki ai aufgaben tasks ocr churner recategorize kategorisierung modell zuweisung provider', el: <AiTasksSection />, show: operatorOnly },
+    { id: 'model-review', title: t('admin.reviewTitle'), keywords: 'modell review ueberpruefung vorschlag suggestion automatisch api open weight empfehlung recommendation', el: <ModelReviewSection />, show: operatorOnly },
+    { id: 'token-usage', title: t('admin.usageTitle'), keywords: 'token verbrauch usage kosten cost analytics statistik aufladen top up guthaben credit', el: <TokenUsageSection />, show: operatorOnly },
+    { id: 'churner', title: t('admin.maintenance'), keywords: 'wartung maintenance churner namen kanonisch canonical bilder icons bereinigung cleanup hintergrund background batch', el: <ChurnerSection />, show: operatorOnly },
     { id: 'categories', title: t('categoriesAdmin.title'), keywords: 'kategorien categories artikelkategorien warengruppen baum tree', el: <CategoriesLinkSection /> },
-    { id: 'data', title: t('admin.data'), keywords: 'daten data export import backup loeschen delete zuruecksetzen reset csv download', el: <DataManagementSection />, show: !!user?.sees_all_konten },
-    { id: 'backup', title: t('admin.backup'), keywords: 'backup sicherung archiv download datenbank dump belege fotos wiederherstellung restore tar gz alles everything', el: <BackupSection />, show: !!user?.sees_all_konten },
-    { id: 'maintenance-log', title: t('admin.maintenance'), keywords: 'wartung maintenance protokoll log verlauf history ereignisse events lauf run nightly', el: <MaintenanceSection /> },
+    { id: 'data', title: t('admin.data'), keywords: 'daten data export import backup loeschen delete zuruecksetzen reset csv download', el: <DataManagementSection />, show: platformAdmin },
+    { id: 'backup', title: t('admin.backup'), keywords: 'backup sicherung archiv download datenbank dump belege fotos wiederherstellung restore tar gz alles everything', el: <BackupSection />, show: platformAdmin },
+    { id: 'maintenance-log', title: t('admin.maintenance'), keywords: 'wartung maintenance protokoll log verlauf history ereignisse events lauf run nightly', el: <MaintenanceSection />, show: operatorOnly },
     { id: 'konten', title: t('admin.konten'), keywords: 'konten accounts konto gkk haushalt budget sichtbarkeit', el: <KontenSection /> },
     { id: 'offers', title: t('admin.offersTitle'), keywords: 'angebote offers prospekt deals umkreis radius adresse abonnement subscription haushalt marktguru', el: <OffersSection /> },
     { id: 'family', title: t('admin.family'), keywords: 'familie family mitglieder members verbraucher consumer haushalt personen', el: <FamilySection /> },

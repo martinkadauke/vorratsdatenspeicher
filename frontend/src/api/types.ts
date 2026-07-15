@@ -3,6 +3,8 @@ export interface User {
   username: string;
   email?: string | null;
   is_admin: boolean;
+  is_super_admin?: boolean;
+  household_id?: number;
   sees_all_konten?: boolean;
   can_write?: boolean;
   pinned_chains?: string[];
