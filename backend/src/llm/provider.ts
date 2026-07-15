@@ -49,7 +49,12 @@ class OllamaProvider implements LlmProvider {
       body: JSON.stringify({
         model: this.model,
         stream: false,
-        format: opts.json ? 'json' : undefined,
+        // Deliberately NOT setting Ollama's legacy `format: 'json'`: it biases the model to a
+        // top-level JSON OBJECT and mangles tasks that must return a top-level ARRAY (e.g.
+        // recategorize → `[{id,category_path}]`) into a broken repeated-key object, so every
+        // item silently falls back to "Sonstiges/Unkategorisiert". The task prompts already
+        // demand JSON-only and parseLlmJson() tolerantly extracts the array/object. (OCR uses a
+        // separate helper in ocr.ts that DOES set format:json — its output is an object.)
         options: { temperature: 0.1 },
         messages: [
           { role: 'system', content: opts.system },
@@ -316,7 +321,7 @@ export function isVisionModel(provider: ProviderName, model: string): boolean {
     return /(gpt-4o|gpt-4\.1|gpt-4-turbo|gpt-5|chatgpt-4o|o1|o3|o4|vision)/.test(m);
   }
   if (provider === 'ollama') {
-    return /(llava|bakllava|moondream|minicpm-?v|llama-?3\.2-vision|qwen2\.?5?-?vl|[-_]vl\b|vision|pixtral|granite.*vision|gemma3)/.test(m);
+    return /(llava|bakllava|moondream|minicpm-?v|llama-?3\.2-vision|qwen2\.?5?-?vl|[-_]vl\b|vision|pixtral|granite.*vision|gemma3|mistral-small3)/.test(m);
   }
   // deepseek: only the (rarely API-served) vl/vision models take images.
   return /(vl|vision)/.test(m);

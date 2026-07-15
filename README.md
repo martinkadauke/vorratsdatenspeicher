@@ -58,10 +58,21 @@ services:
       timeout: 3s
       retries: 20
     restart: unless-stopped
+  searxng:                               # web search for the AI — set http://searxng:8080 in VDS setup
+    image: searxng/searxng:latest
+    configs: [{ source: searxng, target: /etc/searxng/settings.yml }]
+    restart: unless-stopped
+configs:
+  searxng:
+    content: |
+      use_default_settings: true
+      server: { secret_key: "change-me-searxng-secret", limiter: false }
+      search: { formats: [html, json] }
 volumes:
   vds-receipts: {}
   vds-db: {}
 ```
+> SearXNG ships in the stack so the AI's web-search (churn stage 2, store enrichment) works out of the box — it's [AGPL-3.0](https://github.com/searxng/searxng), run unmodified. It's optional: remove the `searxng` service if you don't want it. Point VDS at it in **Setup → SearXNG** with `http://searxng:8080`. Needs Docker Compose ≥ 2.23 for the inline `configs`.
 
 Then open **http://localhost:8766** — the first-run setup wizard walks you through the rest (AI provider, categories, household). First login is `admin` / `vorrat-start-2026` (override with `ADMIN_PASSWORD`, reset with `ADMIN_RESET=true`).
 

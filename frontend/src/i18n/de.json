@@ -576,6 +576,7 @@
     "prospektTitle": "Aktuellen Prospekt bei marktguru ansehen ({{count}} deiner Artikel im Angebot)",
     "tab_filialen": "Filialen",
     "discoverNearby": "Läden in der Nähe finden",
+    "osmAttribution": "Standort- & Adressdaten © OpenStreetMap-Mitwirkende (ODbL)",
     "discovering": "Suche läuft…",
     "discovered": "{{count}} Läden hinzugefügt",
     "discoveredNone": "Keine neuen Läden in der Nähe gefunden",
@@ -626,6 +627,9 @@
     "viewProspekt": "Aktuellen Prospekt ansehen",
     "changeChainImage": "Kettenbild ändern",
     "subscribe": "Angebote abonnieren",
+    "remove": "Laden entfernen",
+    "removed": "Laden entfernt.",
+    "removeConfirm": "„{{name}}“ wirklich entfernen? Der Beleg-Verlauf bleibt erhalten.",
     "wipHint": "In Arbeit — kommt in einem späteren Update."
   },
   "warenstamm": {

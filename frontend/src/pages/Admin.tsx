@@ -350,10 +350,10 @@ function TaskRow({ task, taskLabel, taskDesc, config }: {
   config: Record<string, unknown>;
 }) {
   const qc = useQueryClient();
-  // OCR runs vision → provider is locked to Anthropic (the only vision backend) and the list is vision-only.
+  // OCR runs vision → only the vision-capable providers (Anthropic + Ollama) are offered, and the model list is vision-only.
   const visionOnly = task === 'ocr';
   // Derive from config each render so external config changes (e.g. model-review Apply) reflect immediately.
-  const provider = (visionOnly ? 'anthropic' : (config[`ai.${task}.provider`] ?? 'ollama')) as Provider;
+  const provider = (config[`ai.${task}.provider`] ?? (visionOnly ? 'anthropic' : 'ollama')) as Provider;
   const model = (config[`ai.${task}.model`] ?? '') as string;
 
   const { data: modelsData, isLoading: modelsLoading } = useQuery({
@@ -374,7 +374,7 @@ function TaskRow({ task, taskLabel, taskDesc, config }: {
   // resort if the new provider serves none).
   const onProviderChange = async (next: Provider) => {
     try {
-      const r = await api<{ models: string[] }>(`/api/ai/models?provider=${next}`);
+      const r = await api<{ models: string[] }>(`/api/ai/models?provider=${next}${visionOnly ? '&vision=1' : ''}`);
       setTask.mutate({ provider: next, model: r.models[0] ?? model });
     } catch { setTask.mutate({ provider: next, model }); }
   };
@@ -388,9 +388,12 @@ function TaskRow({ task, taskLabel, taskDesc, config }: {
       <div className="mb-0.5 text-sm font-medium">{taskLabel}</div>
       <p className="mb-2 text-xs text-zinc-500 dark:text-zinc-400">{taskDesc}</p>
       <div className="grid gap-2 sm:grid-cols-2">
-        <Select value={provider} disabled={visionOnly} onChange={e => onProviderChange(e.target.value as Provider)}>
+        <Select value={provider} onChange={e => onProviderChange(e.target.value as Provider)}>
           {visionOnly ? (
-            <option value="anthropic">Anthropic</option>
+            <>
+              <option value="anthropic">Anthropic</option>
+              <option value="ollama">Ollama</option>
+            </>
           ) : (
             <>
               <option value="ollama">Ollama</option>

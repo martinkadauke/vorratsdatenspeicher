@@ -47,6 +47,7 @@ import { modelReviewRoutes } from './routes/modelReview.js';
 import { analyticsRoutes } from './routes/analytics.js';
 import { mailboxRoutes } from './routes/mailbox.js';
 import { demoRoutes } from './routes/demo.js';
+import { feedbackRoutes } from './routes/feedback.js';
 import { rescheduleDemoSweep } from './maintenance/demoSweep.js';
 
 /** Wait for Postgres to accept connections before the first query. The app container often
@@ -163,6 +164,7 @@ async function main(): Promise<void> {
   analyticsRoutes(app);
   mailboxRoutes(app);
   pushRoutes(app);
+  feedbackRoutes(app); // bug-report/feedback — available in all builds (header button)
   if (DEMO_MODE) demoRoutes(app);
 
   const receiptsDir = process.env.RECEIPTS_LOCAL_PATH ?? '/receipts';

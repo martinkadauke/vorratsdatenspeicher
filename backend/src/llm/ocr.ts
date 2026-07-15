@@ -68,19 +68,47 @@ export interface OcrResult {
   usage?: { input_tokens: number; output_tokens: number };
 }
 
+// ── Ollama vision path (self-hosted OCR alternative to Anthropic) ───────────
+// Ollama vision models are a viable self-hosted alternative for receipt PHOTOS
+// (evaluated: mistral-small3.2 matches Claude on store/date/total). Two extra hints close
+// the gap vs Claude on weaker models: (1) anchor "today" so a 2-digit year like "26" isn't
+// guessed as the model's training year; (2) spell out that `preis` is the LINE total
+// (qty×unit) as printed. Images only — Ollama can't read PDFs (those still need Anthropic).
+function ollamaOcrHints(): string {
+  const today = new Date().toISOString().slice(0, 10);
+  return `\n\nZUSATZ-HINWEISE (WICHTIG):
+- Heutiges Datum: ${today}. Belege sind meist aktuell (heute oder wenige Tage/Wochen alt). Lies das Datum GENAU vom Beleg ab und gib es als YYYY-MM-DD aus. Eine zweistellige Jahreszahl (z.B. "26") gehört ins aktuelle Jahrhundert (20XX) — rate das Jahr NIEMALS aus deinem Vorwissen.
+- preis ist IMMER der ZEILEN-Gesamtpreis der Position (Menge × Einzelpreis), so wie er rechts auf dem Bon steht — NICHT der Einzelpreis. Beispiel "2 St × 1,50" ergibt preis 3.00. Pfand ist eine eigene Position mit ihrem Zeilenbetrag.`;
+}
+
+/** Vision/text chat via an Ollama server (self-hosted). Returns raw content + token usage.
+ *  think:false + a generous num_predict keep "thinking" models (e.g. qwen3-vl) from spending
+ *  the whole budget on hidden reasoning and truncating the JSON. `images` = base64, no prefix. */
+async function ollamaOcrChat(model: string, system: string, userText: string, images: string[]): Promise<{ text: string; input: number; output: number }> {
+  const url = await getConfig('ollama.url');
+  if (!url) throw new Error('ollama.url nicht konfiguriert');
+  const res = await fetch(`${url}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model, stream: false, format: 'json', think: false,
+      options: { temperature: 0.1, num_ctx: 16384, num_predict: 8192 },
+      messages: [{ role: 'system', content: system }, { role: 'user', content: userText, images: images.length ? images : undefined }],
+    }),
+    signal: AbortSignal.timeout(300_000),
+  });
+  if (!res.ok) throw new Error(`Ollama HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  const data = await res.json() as { message?: { content?: string }; prompt_eval_count?: number; eval_count?: number };
+  return { text: data.message?.content ?? '', input: data.prompt_eval_count ?? 0, output: data.eval_count ?? 0 };
+}
+
 /** Runs vision OCR on an image. Source can be a local filesystem path
  *  (preferred — fastest, no roundtrip) or an absolute URL. The provider
- *  and model are taken from the `ai.ocr.*` config — currently only
- *  Anthropic Vision is implemented. */
+ *  and model are taken from the `ai.ocr.*` config — Anthropic (images + PDF)
+ *  or Ollama (self-hosted, images only). */
 export async function ocrFromImage(source: string, hint?: string | null): Promise<OcrResult> {
   const provider = await getConfig('ai.ocr.provider');
   const model = await getConfig('ai.ocr.model');
-  if (provider !== 'anthropic') {
-    throw new Error(`OCR provider "${provider}" not implemented yet — only "anthropic" is supported`);
-  }
-  const url = await getConfig('anthropic.url');
-  const apiKey = await getConfig('anthropic.api_key');
-  if (!apiKey) throw new Error('anthropic.api_key not configured');
 
   let buf: Buffer;
   if (/^https?:\/\//i.test(source)) {
@@ -96,6 +124,25 @@ export async function ocrFromImage(source: string, hint?: string | null): Promis
   if (!isPdf && isHeic(buf)) {
     throw new Error('HEIC/HEIF-Fotos werden vom Vision-Modell nicht unterstützt — bitte als JPEG oder PNG hochladen (iPhone: Einstellungen → Kamera → Formate → "Maximale Kompatibilität").');
   }
+  const userHint = hint && hint.trim() ? `\n\nWICHTIGER HINWEIS DES NUTZERS zu diesem Beleg — bitte unbedingt berücksichtigen: ${hint.trim().slice(0, 500)}` : '';
+
+  // Self-hosted Ollama vision (images only — Ollama can't read PDFs).
+  if (provider === 'ollama') {
+    if (isPdf) throw new Error('Ollama-OCR unterstützt nur Bilder (JPEG/PNG), keine PDFs — für PDF-Rechnungen bitte Anthropic (Vision) als OCR-Provider wählen.');
+    const { text, input, output } = await ollamaOcrChat(model, VISION_SYSTEM + ollamaOcrHints(), 'Extrahiere die Bon-Daten als JSON.' + userHint, [b64]);
+    const parsed = parseLlmJson<OcrResult>(text);
+    parsed.usage = { input_tokens: input, output_tokens: output };
+    await recordUsage('ocr', 'ollama', model, input, output);
+    return parsed;
+  }
+
+  if (provider !== 'anthropic') {
+    throw new Error(`OCR-Provider "${provider}" wird nicht unterstützt — nur "anthropic" (Bilder + PDF) oder "ollama" (nur Bilder).`);
+  }
+  const url = await getConfig('anthropic.url');
+  const apiKey = await getConfig('anthropic.api_key');
+  if (!apiKey) throw new Error('anthropic.api_key not configured');
+
   // Trust the actual bytes over the extension; fall back to the extension only if unrecognised.
   const mediaType = sniffMediaType(buf) ?? (/\.png$/i.test(source) ? 'image/png' : 'image/jpeg');
   // A PDF invoice (common for utilities/telecom/online orders) is sent as a
@@ -122,7 +169,7 @@ export async function ocrFromImage(source: string, hint?: string | null): Promis
         role: 'user',
         content: [
           docBlock,
-          { type: 'text', text: 'Extrahiere die Bon-Daten als JSON.' + (hint && hint.trim() ? `\n\nWICHTIGER HINWEIS DES NUTZERS zu diesem Beleg — bitte unbedingt berücksichtigen: ${hint.trim().slice(0, 500)}` : '') },
+          { type: 'text', text: 'Extrahiere die Bon-Daten als JSON.' + userHint },
         ],
       }],
     }),
@@ -176,8 +223,16 @@ JSON-Schema:
 export async function ocrFromText(text: string): Promise<OcrResult> {
   const provider = await getConfig('ai.ocr.provider');
   const model = await getConfig('ai.ocr.model');
+
+  if (provider === 'ollama') {
+    const { text: out, input, output } = await ollamaOcrChat(model, TEXT_SYSTEM + ollamaOcrHints(), text.slice(0, 24000), []);
+    const parsed = parseLlmJson<OcrResult>(out);
+    parsed.usage = { input_tokens: input, output_tokens: output };
+    await recordUsage('ocr', 'ollama', model, input, output);
+    return parsed;
+  }
   if (provider !== 'anthropic') {
-    throw new Error(`OCR provider "${provider}" not implemented yet — only "anthropic" is supported`);
+    throw new Error(`OCR-Provider "${provider}" wird nicht unterstützt — nur "anthropic" oder "ollama".`);
   }
   const url = await getConfig('anthropic.url');
   const apiKey = await getConfig('anthropic.api_key');
@@ -245,16 +300,24 @@ export interface PayslipResult {
 export async function extractPayslip(buf: Buffer): Promise<PayslipResult> {
   const provider = await getConfig('ai.ocr.provider');
   const model = await getConfig('ai.ocr.model');
-  if (provider !== 'anthropic') throw new Error(`OCR provider "${provider}" not implemented yet — only "anthropic" is supported`);
-  const url = await getConfig('anthropic.url');
-  const apiKey = await getConfig('anthropic.api_key');
-  if (!apiKey) throw new Error('anthropic.api_key not configured');
-
   const b64 = buf.toString('base64');
   const isPdf = (buf.length >= 4 && buf.toString('ascii', 0, 4) === '%PDF');
   if (!isPdf && isHeic(buf)) {
     throw new Error('HEIC/HEIF-Fotos werden vom Vision-Modell nicht unterstützt — bitte als PDF, JPEG oder PNG hochladen.');
   }
+
+  if (provider === 'ollama') {
+    if (isPdf) throw new Error('Ollama-OCR unterstützt nur Bilder (JPEG/PNG), keine PDFs — für PDF-Abrechnungen bitte Anthropic (Vision) wählen.');
+    const { text, input, output } = await ollamaOcrChat(model, PAYSLIP_SYSTEM, 'Extrahiere die Gehaltsdaten als JSON.', [b64]);
+    const parsed = parseLlmJson<PayslipResult>(text);
+    parsed.usage = { input_tokens: input, output_tokens: output };
+    await recordUsage('ocr', 'ollama', model, input, output);
+    return parsed;
+  }
+  if (provider !== 'anthropic') throw new Error(`OCR-Provider "${provider}" wird nicht unterstützt — nur "anthropic" oder "ollama" (nur Bilder).`);
+  const url = await getConfig('anthropic.url');
+  const apiKey = await getConfig('anthropic.api_key');
+  if (!apiKey) throw new Error('anthropic.api_key not configured');
   const mediaType = sniffMediaType(buf) ?? 'image/jpeg';
   const docBlock = isPdf
     ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } }

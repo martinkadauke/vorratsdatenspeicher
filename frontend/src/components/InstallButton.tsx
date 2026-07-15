@@ -24,6 +24,16 @@ const COMPOSE = `services:
       timeout: 3s
       retries: 20
     restart: unless-stopped
+  searxng:                              # Websuche für die KI — in VDS-Setup als http://searxng:8080 eintragen
+    image: searxng/searxng:latest
+    configs: [{ source: searxng, target: /etc/searxng/settings.yml }]
+    restart: unless-stopped
+configs:
+  searxng:
+    content: |
+      use_default_settings: true
+      server: { secret_key: "aendern-searxng-secret", limiter: false }
+      search: { formats: [html, json] }
 volumes: { vds-belege: {}, vds-daten: {} }`;
 
 const REPO = 'https://github.com/martinkadauke/vorratsdatenspeicher';

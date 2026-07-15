@@ -1,8 +1,8 @@
 import { useMemo, useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, MapPin, Clock, FileText, GripVertical, ExternalLink, Image as ImageIcon, Globe, Phone, Sparkles } from 'lucide-react';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import { ArrowLeft, MapPin, Clock, FileText, GripVertical, ExternalLink, Image as ImageIcon, Globe, Phone, Sparkles, Trash2 } from 'lucide-react';
 import {
   DndContext, closestCenter, PointerSensor, KeyboardSensor, useSensor, useSensors, type DragEndEvent,
 } from '@dnd-kit/core';
@@ -40,6 +40,7 @@ function marktguruProspektUrl(chainKey: string): string {
 export function FilialProfil() {
   const { t, i18n } = useTranslation();
   const { id } = useParams();
+  const navigate = useNavigate();
   const qc = useQueryClient();
 
   const { data: branch, isLoading } = useQuery({
@@ -86,6 +87,18 @@ export function FilialProfil() {
     onError: (e) => toast((e as Error).message, 'error'),
   });
 
+  // Remove a store (e.g. an auto-discovered OSM branch the user doesn't want). Deletes only
+  // the branch metadata — receipt history keyed by the store name is untouched.
+  const del = useMutation({
+    mutationFn: () => api(`/api/filialen/${id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      toast(t('filiale.removed'), 'success');
+      void qc.invalidateQueries({ queryKey: ['stores'] });
+      navigate('/shopping/stores');
+    },
+    onError: (e) => toast((e as Error).message, 'error'),
+  });
+
   const mark = <T,>(fn: (v: T) => void) => (v: T) => { fn(v); setDirty(true); };
 
   if (isLoading || !branch) return <div className="py-10"><Spinner /></div>;
@@ -116,6 +129,16 @@ export function FilialProfil() {
             <span>{branch.kind === 'shop' ? t('filiale.kindShop') : t('filiale.kindFiliale')}</span>
           </div>
         </div>
+        {/* Remove this store (e.g. an auto-discovered one the user doesn't want). */}
+        <button
+          type="button"
+          onClick={() => { if (window.confirm(t('filiale.removeConfirm', { name: branch.name }))) del.mutate(); }}
+          disabled={del.isPending}
+          title={t('filiale.remove')}
+          className="shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:hover:bg-red-950/40"
+        >
+          <Trash2 size={18} />
+        </button>
       </div>
 
       {/* stats */}

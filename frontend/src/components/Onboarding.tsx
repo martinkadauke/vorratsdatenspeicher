@@ -373,7 +373,7 @@ function ProviderRow({ provider, cfgKey, label, config, setCfg, password, placeh
 function TaskModelRow({ task, label, cfgProvider, cfgModel, saveTask, visionOnly }: {
   task: string; label: string; cfgProvider: string; cfgModel: string; saveTask: (task: string, provider: string, model: string) => void; visionOnly?: boolean;
 }) {
-  const provider = visionOnly ? 'anthropic' : cfgProvider;
+  const provider = cfgProvider || (visionOnly ? 'anthropic' : 'ollama');
   const model = cfgModel;
   const { data, isFetching } = useQuery({
     queryKey: ['ai-models', provider, visionOnly ? 'vision' : 'all'],
@@ -386,7 +386,7 @@ function TaskModelRow({ task, label, cfgProvider, cfgModel, saveTask, visionOnly
   // the new provider serves none).
   const onProvider = async (p: string) => {
     try {
-      const list = await api<{ models: string[] }>(`/api/ai/models?provider=${p}`).then(r => r.models);
+      const list = await api<{ models: string[] }>(`/api/ai/models?provider=${p}${visionOnly ? '&vision=1' : ''}`).then(r => r.models);
       saveTask(task, p, list[0] ?? model);
     } catch { saveTask(task, p, model); }
   };
@@ -395,8 +395,8 @@ function TaskModelRow({ task, label, cfgProvider, cfgModel, saveTask, visionOnly
   return (
     <div className="flex items-center gap-2">
       <span className="w-24 shrink-0 truncate text-xs font-medium text-zinc-600 dark:text-zinc-300" title={label}>{label}</span>
-      <Select className="w-24 shrink-0" value={provider} disabled={visionOnly} onChange={e => onProvider(e.target.value)}>
-        {(visionOnly ? ['anthropic'] : PROVIDERS).map(p => <option key={p} value={p}>{p}</option>)}
+      <Select className="w-24 shrink-0" value={provider} onChange={e => onProvider(e.target.value)}>
+        {(visionOnly ? ['anthropic', 'ollama'] : PROVIDERS).map(p => <option key={p} value={p}>{p}</option>)}
       </Select>
       {isFetching ? <Input className="flex-1" value="…" disabled />
         : opts.length ? (

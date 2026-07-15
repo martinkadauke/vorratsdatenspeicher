@@ -119,6 +119,19 @@ export function storeRoutes(app: FastifyInstance): void {
     return { ok: true, ...row };
   });
 
+  /** Remove a store branch (e.g. an auto-discovered OSM store the user doesn't want on
+   *  their Läden list). Deletes only the store_branch metadata row — receipt history keyed
+   *  by roh_ladenname is untouched, so a store that later reappears on a receipt still shows.
+   *  RLS-scoped to the household on demo; plain by id off-demo. */
+  app.delete('/api/filialen/:id', async (req, reply) => {
+    if (req.user?.can_write === false) return reply.code(403).send({ error: 'forbidden' });
+    const id = parseInt((req.params as { id: string }).id, 10);
+    if (!id) return reply.code(400).send({ error: 'invalid id' });
+    const rows = await sql`DELETE FROM store_branch WHERE id = ${id} RETURNING id, name`;
+    if (!rows.length) return reply.code(404).send({ error: 'not found' });
+    return { ok: true, id, name: rows[0].name as string };
+  });
+
   /** List all stores ever seen with receipt count + total spend. */
   app.get('/api/stores', async (req) => {
     // E-mail receipts are online shops (filed as kind='shop'); by default they're

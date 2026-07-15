@@ -1,12 +1,16 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Bug, X } from 'lucide-react';
 import { api } from '../api/client';
 
-/** Demo feedback: a small floating button (bottom-left, above the mobile nav) on every
- *  page. Opens a modal that posts a bug report; the current page + household go along. */
-export function BugReportButton() {
+/** Feedback / bug report. Two placements share one modal:
+ *  - variant="header": a small icon button for the top bar (left of the notification bell),
+ *    present in ALL builds.
+ *  - variant="floating" (default): the demo's bottom-left floating pill.
+ *  Posts a bug report; the current page + household go along. */
+export function BugReportButton({ variant = 'floating' }: { variant?: 'floating' | 'header' } = {}) {
   const { i18n } = useTranslation();
   const de = i18n.language.startsWith('de');
   const { pathname } = useLocation();
@@ -25,17 +29,28 @@ export function BugReportButton() {
     } catch { /* swallow — feedback should never surface an error */ } finally { setSending(false); }
   };
 
+  const title = de ? 'Fehler / Feedback melden' : 'Report a bug / feedback';
   return (
     <>
-      <button
-        onClick={() => setOpen(true)}
-        title={de ? 'Fehler / Feedback melden' : 'Report a bug / feedback'}
-        className="fixed bottom-20 left-3 z-40 flex items-center gap-1.5 rounded-full border border-zinc-300 bg-white/95 px-3 py-2 text-xs font-medium text-zinc-600 shadow-lg backdrop-blur transition-colors hover:text-emerald-600 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-300 dark:hover:text-emerald-400 md:bottom-4"
-      >
-        <Bug size={15} /> Feedback
-      </button>
+      {variant === 'header' ? (
+        <button
+          onClick={() => setOpen(true)}
+          title={title} aria-label={title}
+          className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-emerald-600 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-emerald-400"
+        >
+          <Bug size={18} />
+        </button>
+      ) : (
+        <button
+          onClick={() => setOpen(true)}
+          title={title}
+          className="fixed bottom-20 left-3 z-40 flex items-center gap-1.5 rounded-full border border-zinc-300 bg-white/95 px-3 py-2 text-xs font-medium text-zinc-600 shadow-lg backdrop-blur transition-colors hover:text-emerald-600 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-300 dark:hover:text-emerald-400 md:bottom-4"
+        >
+          <Bug size={15} /> Feedback
+        </button>
+      )}
 
-      {open && (
+      {open && createPortal(
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center" onClick={() => setOpen(false)}>
           <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl dark:bg-zinc-900" onClick={e => e.stopPropagation()}>
             <div className="mb-3 flex items-center justify-between">
@@ -59,7 +74,8 @@ export function BugReportButton() {
               </>
             )}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );

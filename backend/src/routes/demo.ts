@@ -1,11 +1,10 @@
 import type { FastifyInstance } from 'fastify';
-import sql, { adminSql, DEMO_MODE } from '../db.js';
+import { adminSql, DEMO_MODE } from '../db.js';
 import { requireAdmin, requirePlatformAdmin } from '../auth/plugin.js';
 import { runDemoSweep } from '../maintenance/demoSweep.js';
-import { sendMail } from '../mailer.js';
-import { feedbackEmail } from '../email/templates.js';
 
-/** Demo-only routes: user bug reports + platform super-admin household management. */
+/** Demo-only routes: onboarding profile + platform super-admin household management.
+ *  (Bug-report routes moved to routes/feedback.ts so they exist in all builds.) */
 export function demoRoutes(app: FastifyInstance): void {
   // Defense-in-depth: this module registers DESTRUCTIVE household-management routes
   // (POST /api/households/wipe-all and DELETE /api/households/:id). They must never exist
@@ -13,27 +12,6 @@ export function demoRoutes(app: FastifyInstance): void {
   // here too so a future refactor that mounts this unconditionally registers NOTHING off-demo
   // rather than silently exposing a data-delete route.
   if (!DEMO_MODE) { console.error('[demo] demoRoutes() invoked with DEMO_MODE off — refusing to register demo routes'); return; }
-
-  // ── Bug report — any authenticated user ─────────────────────────────────
-  app.post('/api/bug-reports', async (req, reply) => {
-    const { message, page } = (req.body ?? {}) as { message?: string; page?: string };
-    if (!message || !message.trim()) return reply.code(400).send({ error: 'message required' });
-    const ctx = {
-      page: (page ?? '').slice(0, 300),
-      household_id: req.user?.household_id ?? null,
-      ua: String(req.headers['user-agent'] ?? '').slice(0, 300),
-    };
-    // bug_report is global (no RLS) → the ambient connection inserts fine regardless of scope.
-    await sql`INSERT INTO bug_report (user_id, message, context) VALUES (${req.user?.id ?? null}, ${message.trim().slice(0, 5000)}, ${sql.json(ctx)})`;
-    // Forward to the operator (fire-and-forget; never blocks the report).
-    void (async () => {
-      try {
-        const mail = feedbackEmail({ message: message.trim(), page: ctx.page, from: req.user?.email ?? req.user?.username ?? 'anonym', householdId: req.user?.household_id ?? null });
-        await sendMail('webmaster@vorratsdatenspeicher.com', mail.subject, mail.text, mail.html, req.user?.email ?? undefined);
-      } catch (err) { req.log.error(`feedback mail failed: ${(err as Error).message}`); }
-    })();
-    return { ok: true };
-  });
 
   // ── Onboarding: per-household completion + slim-wizard profile ───────────
   /** Mark THIS household's first-run wizard done (per-household, not global config). */
@@ -49,21 +27,6 @@ export function demoRoutes(app: FastifyInstance): void {
     const hid = req.user!.household_id ?? 1;
     if (typeof address === 'string') await adminSql`UPDATE household SET address = ${address.slice(0, 200)} WHERE id = ${hid}`;
     if (typeof categories_detail === 'string') await adminSql`UPDATE household SET categories_detail = ${categories_detail.slice(0, 20)} WHERE id = ${hid}`;
-    return { ok: true };
-  });
-
-  // ── Platform super-admin: bug reports across all households ──────────────
-  app.get('/api/bug-reports', { preHandler: requirePlatformAdmin }, async () =>
-    adminSql`
-      SELECT b.id, b.message, b.context, b.status, b.created_at, u.username, u.email
-      FROM bug_report b LEFT JOIN users u ON u.id = b.user_id
-      ORDER BY b.created_at DESC LIMIT 500`);
-
-  app.patch('/api/bug-reports/:id', { preHandler: requirePlatformAdmin }, async (req, reply) => {
-    const id = parseInt((req.params as { id: string }).id, 10);
-    const { status } = (req.body ?? {}) as { status?: string };
-    if (!status) return reply.code(400).send({ error: 'status required' });
-    await adminSql`UPDATE bug_report SET status = ${status} WHERE id = ${id}`;
     return { ok: true };
   });
 

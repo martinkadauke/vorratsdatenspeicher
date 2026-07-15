@@ -139,6 +139,9 @@ export function Stores() {
         </div>
       )}
 
+      {/* ODbL requires attribution wherever OSM-derived data (store locations/addresses) is shown. */}
+      <p className="text-center text-[11px] text-zinc-400">{t('stores.osmAttribution')}</p>
+
       {isLoading && <Spinner />}
       {!isLoading && !filtered.length && <EmptyState>{t('stores.empty')}</EmptyState>}
 

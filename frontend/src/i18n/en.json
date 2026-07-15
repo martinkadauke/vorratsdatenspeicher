@@ -576,6 +576,7 @@
     "prospektTitle": "View the current flyer on marktguru ({{count}} of your items on offer)",
     "tab_filialen": "Branches",
     "discoverNearby": "Find stores near me",
+    "osmAttribution": "Location & address data © OpenStreetMap contributors (ODbL)",
     "discovering": "Searching…",
     "discovered": "Added {{count}} stores",
     "discoveredNone": "No new stores found nearby",
@@ -626,6 +627,9 @@
     "viewProspekt": "View current flyer",
     "changeChainImage": "Change chain image",
     "subscribe": "Subscribe to offers",
+    "remove": "Remove store",
+    "removed": "Store removed.",
+    "removeConfirm": "Remove \"{{name}}\"? Your receipt history stays intact.",
     "wipHint": "Work in progress — coming in a later update."
   },
   "warenstamm": {

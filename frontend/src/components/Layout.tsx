@@ -108,6 +108,7 @@ export function Layout() {
           )}
         </NavLink>
         <div className="flex items-center gap-1">
+          <BugReportButton variant="header" />
           <NotificationBell />
           <NavLink
             to="/profile" title={user?.username}
