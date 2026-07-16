@@ -6,7 +6,7 @@ import {
   Wallet, Plus, Pencil, Trash2, Home, User as UserIcon, Info,
   ChevronLeft, ChevronRight, ChevronDown, CheckCircle2, Circle, CircleDot, AlertCircle, Search, X, Upload, Layers, Lock,
   Link2, Link2Off, RefreshCw, Landmark, SlidersHorizontal, Flag, FilePlus2, Receipt, FileText, Paperclip, Sparkles, Calendar, ExternalLink,
-  TrendingUp, Archive, Zap, ArrowDownLeft, ArrowUpRight,
+  TrendingUp, Archive, Zap, ArrowDownLeft, ArrowUpRight, Undo2,
 } from 'lucide-react';
 import { api, getToken } from '../api/client';
 import { Card, Spinner, Button, Input, Label, Select, Switch, Modal, EmptyState, Badge } from '../components/ui';
@@ -1945,11 +1945,31 @@ interface ImportBatch {
   n: number; imported_at: string | null; first_date: string; last_date: string;
 }
 
-/** Compact list of imported CSV batches (filename · account · count · import date). */
+/** Compact list of imported CSV batches (filename · account · count · import date),
+ *  each with an "undo import" button — for the common slip of importing a CSV onto
+ *  the wrong account. Undo deletes exactly that import's rows; any receipts it had
+ *  matched just lose the bank link (FK SET NULL) and re-match on a correct re-import. */
 function ImportBatches({ t }: { t: (k: string, o?: Record<string, unknown>) => string }) {
+  const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ['bank-batches'], queryFn: () => api<{ batches: ImportBatch[] }>('/api/finances/bank/batches') });
+  const undo = useMutation({
+    mutationFn: (batch: string) => api<{ ok: boolean; deleted: number; unlinked: number }>('/api/finances/bank/undo-import', { method: 'POST', body: { batch } }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['bank-batches'] });
+      void qc.invalidateQueries({ queryKey: ['bank-tx'] });
+      void qc.invalidateQueries({ queryKey: ['fin-month'] });
+    },
+  });
   const batches = data?.batches ?? [];
   if (!batches.length) return null;
+  const onUndo = async (b: ImportBatch) => {
+    const ok = await confirm({
+      title: t('finances.bank.undoTitle'),
+      message: t('finances.bank.undoMsg', { file: b.filename, konto: b.konto_name ?? '—', n: b.n }),
+      confirmLabel: t('finances.bank.undoConfirm'), cancelLabel: t('common.cancel'),
+    });
+    if (ok) undo.mutate(b.batch);
+  };
   return (
     <div className="rounded-xl border border-zinc-200 p-2.5 dark:border-zinc-800">
       <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-400">{t('finances.bank.imports')}</div>
@@ -1961,6 +1981,11 @@ function ImportBatches({ t }: { t: (k: string, o?: Record<string, unknown>) => s
             {b.konto_name && <span className="shrink-0 rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] dark:bg-zinc-800">{b.konto_name}</span>}
             <span className="shrink-0 tabular-nums text-zinc-400">{b.n}</span>
             <span className="shrink-0 tabular-nums text-zinc-400" title={t('finances.bank.importedOn')}>{b.imported_at ? ddmmyyyy(b.imported_at.slice(0, 10)) : '–'}</span>
+            <button type="button" onClick={() => void onUndo(b)} disabled={undo.isPending}
+              title={t('finances.bank.undo')} aria-label={t('finances.bank.undo')}
+              className="shrink-0 rounded p-0.5 text-zinc-400 transition-colors hover:text-red-600 disabled:opacity-40 dark:hover:text-red-400">
+              <Undo2 size={13} />
+            </button>
           </li>
         ))}
       </ul>

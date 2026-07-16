@@ -1458,6 +1458,29 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
     return { ok: true };
   });
 
+  /** Undo a whole CSV import: delete every bank_tx row of one import_batch. For the
+   *  common mistake of picking the wrong account (or a bad column mapping). Linked
+   *  receipts/income/fixed-cost checks are ON DELETE SET NULL, so they survive but
+   *  lose the bank link — re-importing onto the right account re-matches them. */
+  app.post('/api/finances/bank/undo-import', async (req, reply) => {
+    const batch = String((req.body as { batch?: string } | undefined)?.batch ?? '').trim();
+    if (!batch) return reply.code(400).send({ error: 'batch required' });
+    const result = await sql.begin(async tx => {
+      // Count links about to be broken, so the UI can tell the user what it cost.
+      const [pre] = await tx`SELECT
+        (SELECT COUNT(*)::int FROM einkauf          WHERE bank_tx_id IN (SELECT id FROM bank_tx WHERE import_batch = ${batch})) AS receipts,
+        (SELECT COUNT(*)::int FROM income           WHERE bank_tx_id IN (SELECT id FROM bank_tx WHERE import_batch = ${batch})) AS income,
+        (SELECT COUNT(*)::int FROM fixed_cost_check WHERE bank_tx_id IN (SELECT id FROM bank_tx WHERE import_batch = ${batch})) AS checks`;
+      // Detach split-shipment siblings (see single-row delete) before removing the rows.
+      await tx`UPDATE bank_tx SET einkauf_id = NULL
+               WHERE einkauf_id IN (SELECT id FROM einkauf WHERE bank_tx_id IN (SELECT id FROM bank_tx WHERE import_batch = ${batch}))`;
+      const del = await tx`DELETE FROM bank_tx WHERE import_batch = ${batch} RETURNING id`;
+      return { deleted: del.length, unlinked: (pre.receipts as number) + (pre.income as number) + (pre.checks as number) };
+    });
+    if (result.deleted === 0) return reply.code(404).send({ error: 'no such import' });
+    return { ok: true, ...result };
+  });
+
   /** Guard (run inside a tx that holds the bank_tx row FOR UPDATE): a line that
    *  already backs a receipt / income row / fixed-cost check must not get a second
    *  generated home. Closes the generate-vs-generate / generate-vs-link race. */
