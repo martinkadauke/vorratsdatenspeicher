@@ -614,6 +614,7 @@
     "lastVisit": "Last visit",
     "address": "Address",
     "addressPlaceholder": "Street, ZIP City",
+    "openInMaps": "Open in maps",
     "contact": "Contact",
     "enrichNow": "Enrich all stores",
     "enriching": "running…",

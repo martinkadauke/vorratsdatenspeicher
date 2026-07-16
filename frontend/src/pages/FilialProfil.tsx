@@ -20,6 +20,8 @@ import { toast } from '../components/Toast';
 interface Branch {
   id: number; chain_key: string; name: string; kind: string;
   address: string | null;
+  lat: number | string | null;
+  lon: number | string | null;
   website: string | null;
   phone: string | null;
   opening_hours: { text?: string } | null;
@@ -35,6 +37,28 @@ const CHAIN_SLUG_ALIASES: Record<string, string> = { aldi: 'aldi-sued', netto: '
 function marktguruProspektUrl(chainKey: string): string {
   const slug = CHAIN_SLUG_ALIASES[chainKey] ?? chainKey;
   return `https://www.marktguru.de/rp/${slug}-prospekte`;
+}
+
+/** One tap → the user's own maps app. We hand the OS a platform-native URL so it (and the
+ *  user) picks the app: Android `geo:` pops the app chooser (Google Maps, Waze, OsmAnd, Organic
+ *  Maps…); iOS/macOS opens Apple Maps (which itself offers "open in Google Maps"); everywhere
+ *  else a Google Maps web link. Prefers exact coordinates, falls back to the address text. */
+function mapsHref(lat: number | string | null, lon: number | string | null, label: string, address: string | null): string {
+  const hasCoords = lat != null && lon != null && Number.isFinite(Number(lat)) && Number.isFinite(Number(lon));
+  const ll = hasCoords ? `${Number(lat)},${Number(lon)}` : '';
+  const text = (address && address.trim()) || label;
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+  if (/iPhone|iPad|iPod|Macintosh/i.test(ua)) {
+    return hasCoords
+      ? `https://maps.apple.com/?ll=${ll}&q=${encodeURIComponent(label)}`
+      : `https://maps.apple.com/?q=${encodeURIComponent(text)}`;
+  }
+  if (/Android/i.test(ua)) {
+    return hasCoords
+      ? `geo:${ll}?q=${ll}(${encodeURIComponent(label)})`
+      : `geo:0,0?q=${encodeURIComponent(text)}`;
+  }
+  return `https://www.google.com/maps/search/?api=1&query=${hasCoords ? ll : encodeURIComponent(text)}`;
 }
 
 export function FilialProfil() {
@@ -169,6 +193,15 @@ export function FilialProfil() {
           placeholder={t('filiale.addressPlaceholder')}
           onChange={e => mark(setAddress)(e.target.value)}
         />
+        {(address.trim() || (branch.lat != null && branch.lon != null)) && (
+          <a
+            href={mapsHref(branch.lat, branch.lon, branch.name, address)}
+            target="_blank" rel="noopener noreferrer"
+            className="inline-flex w-fit items-center gap-1.5 text-sm font-medium text-emerald-600 hover:underline dark:text-emerald-400"
+          >
+            <MapPin size={14} className="shrink-0" /> {t('filiale.openInMaps')} <ExternalLink size={12} className="shrink-0" />
+          </a>
+        )}
       </Card>
 
       {/* Contact — auto-filled by the enrichment runner (OSM address/website/phone +
