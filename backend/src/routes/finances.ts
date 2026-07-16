@@ -1046,6 +1046,73 @@ export function financeRoutes(app: FastifyInstance): void {
     return linkedDebits;
   };
 
+  /** LATE-PARCEL matcher: the split-shipment case where the parcels arrive in DIFFERENT
+   *  imports. The matchers above all require an UNLINKED receipt (e.bank_tx_id IS NULL),
+   *  so once the first parcel claimed the invoice, a parcel booked later (next month's
+   *  CSV) finds no candidate and stays open forever — and its amount is only a FRACTION
+   *  of the invoice total, so the amount matcher below can never catch it either.
+   *  Here we go the other way round: for an open debit carrying an order number, find the
+   *  ONE receipt whose e-mail owns that order and still has uncovered value, then attach
+   *  the debit as a SIBLING (bank_tx.einkauf_id) — the invoice keeps its primary. Safe
+   *  because: the order number is near-certain and date-immune, it must be unique to a
+   *  single receipt (same rule as above), and the parcel may never overshoot what the
+   *  invoice still owes. A receipt with no primary yet adopts this debit as its primary,
+   *  so we never leave siblings without one (the delete path relies on that). */
+  const autoMatchBankByOrderSibling = async (kontoId?: number | null): Promise<number> => {
+    const debits = await sql`
+      SELECT id, amount::float8 AS amount, description, raw, counterparty
+      FROM bank_tx bt
+      WHERE bt.amount < 0 AND bt.einkauf_id IS NULL
+        AND NOT EXISTS (SELECT 1 FROM einkauf e WHERE e.bank_tx_id = bt.id)
+        ${kontoId ? sql`AND bt.konto_id = ${kontoId}` : sql``}
+      ORDER BY bt.booking_date, bt.id`;
+    let linked = 0;
+    for (const d of debits) {
+      const text = `${(d.description as string | null) ?? ''}\n${(d.raw as string | null) ?? ''}\n${(d.counterparty as string | null) ?? ''}`;
+      const orders = [...new Set(text.match(ORDER_RE) ?? [])];
+      if (!orders.length) continue;
+      const amount = Math.abs(d.amount as number);
+      // Resolve EVERY order the text names BEFORE linking anything. Amazon can bill several
+      // orders as a single debit, and then there is no way to tell how much of it belongs to
+      // which invoice — so a debit only counts as unambiguous when every order it names
+      // resolves to the SAME single receipt. An order owned by two receipts (duplicate e-mail
+      // import), an unknown order next to a known one, or two different receipts named at
+      // once all go to the manual picker instead of being silently booked against the first.
+      let target: { id: number; bank_tx_id: number | null; remaining: number } | null = null;
+      let ambiguous = false;
+      for (const ord of orders) {
+        const like = `%${ord}%`;
+        // Receipts whose e-mail carries this order, with the value still uncovered by the
+        // statements already attached (either link direction — the OR can't double-count a
+        // row that is both primary and sibling). Same expression as /candidates.
+        const cands = await sql`
+          SELECT e.id, e.bank_tx_id,
+                 (e.gesamt_betrag - COALESCE((SELECT SUM(ABS(bt2.amount)) FROM bank_tx bt2
+                    WHERE bt2.einkauf_id = e.id OR bt2.id = e.bank_tx_id), 0))::float8 AS remaining
+          FROM einkauf e JOIN email_message em ON em.einkauf_id = e.id
+          WHERE e.gesamt_betrag IS NOT NULL
+            AND (em.body_text ILIKE ${like} OR em.html ILIKE ${like} OR em.subject ILIKE ${like})`;
+        if (cands.length !== 1) { ambiguous = true; break; }
+        const c = { id: cands[0].id as number, bank_tx_id: (cands[0].bank_tx_id as number | null) ?? null, remaining: cands[0].remaining as number };
+        if (target && target.id !== c.id) { ambiguous = true; break; }
+        target = c;
+      }
+      if (ambiguous || !target) continue;
+      // The invoice must still owe something, and the parcel must fit in what is owed. The
+      // tolerance stays tight ON PURPOSE: a slack as big as the parcel itself would let a
+      // FULLY paid invoice swallow a small debit (remaining 0 vs a 0.50 charge).
+      if (target.remaining <= 0.005) continue;
+      if (amount - target.remaining > Math.max(0.02, target.remaining * 0.015)) continue;
+      const linkedNow = await sql`UPDATE bank_tx SET einkauf_id = ${target.id} WHERE id = ${d.id} AND einkauf_id IS NULL RETURNING id`;
+      if (!linkedNow.length) continue;
+      // No primary yet (every parcel arrived late) → this debit becomes it, so a receipt
+      // never ends up with siblings but no primary (the delete path relies on that).
+      if (target.bank_tx_id == null) await sql`UPDATE einkauf SET bank_tx_id = ${d.id} WHERE id = ${target.id} AND bank_tx_id IS NULL`;
+      linked++;
+    }
+    return linked;
+  };
+
   /** Auto-link bank debits to scanned receipts. A match needs the exact amount, a
    *  shared merchant token AND a date window: the booking lags a few days behind the
    *  purchase, so the receipt must fall on/before the booking day (≤10 days back) or
@@ -1309,7 +1376,7 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
         ON CONFLICT DO NOTHING RETURNING id`;
       if (ins.length) imported++; else skipped++;
     }
-    const matched = imported ? (await autoMatchBankByOrder(kontoId)) + (await autoMatchBankByOrderSum(kontoId)) + (await autoMatchBank(kontoId)) + (await autoMatchBankCredits(kontoId)) : 0;
+    const matched = imported ? (await autoMatchBankByOrder(kontoId)) + (await autoMatchBankByOrderSum(kontoId)) + (await autoMatchBankByOrderSibling(kontoId)) + (await autoMatchBank(kontoId)) + (await autoMatchBankCredits(kontoId)) : 0;
     return { ok: true, filename: bdy.filename ?? null, account: parsed.account, period: parsed.period, imported, skipped, matched, total: parsed.rows.length };
   });
 
@@ -1583,7 +1650,7 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
   app.post('/api/finances/bank/rematch', async (req) => {
     const body = (req.body ?? {}) as { konto_id?: number; ai?: boolean };
     const kontoId = body.konto_id != null ? parseInt(String(body.konto_id), 10) : null;
-    const linked = (await autoMatchBankByOrder(kontoId)) + (await autoMatchBankByOrderSum(kontoId)) + (await autoMatchBank(kontoId)) + (await autoMatchBankCredits(kontoId));
+    const linked = (await autoMatchBankByOrder(kontoId)) + (await autoMatchBankByOrderSum(kontoId)) + (await autoMatchBankByOrderSibling(kontoId)) + (await autoMatchBank(kontoId)) + (await autoMatchBankCredits(kontoId));
     let suggested = 0;
     if (body.ai !== false) {
       try { suggested = await aiMatchBank(kontoId); }
@@ -1601,11 +1668,17 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
       await sql.begin(async tx => {
         const [s] = await tx`SELECT target_kind, einkauf_id, income_id, fixed_cost_id FROM bank_match_suggestion WHERE bank_tx_id = ${id} FOR UPDATE`;
         if (!s) throw new HttpError(404, 'kein Vorschlag');
+        // "Still open" must also mean "not already a split-shipment SIBLING": a stale
+        // suggestion on a debit a matcher has meanwhile attached to receipt R would
+        // otherwise be approved as receipt Q's primary, and the same money would count
+        // towards both invoices' coverage. (aiMatchBank excludes such debits when it
+        // WRITES suggestions; this is the same guard on the approve path.)
         const [open] = await tx`SELECT
           EXISTS(SELECT 1 FROM einkauf WHERE bank_tx_id = ${id}) AS r,
           EXISTS(SELECT 1 FROM income WHERE bank_tx_id = ${id}) AS i,
-          EXISTS(SELECT 1 FROM fixed_cost_check WHERE bank_tx_id = ${id}) AS f`;
-        if (open.r || open.i || open.f) throw new HttpError(400, 'Buchung ist bereits zugeordnet');
+          EXISTS(SELECT 1 FROM fixed_cost_check WHERE bank_tx_id = ${id}) AS f,
+          EXISTS(SELECT 1 FROM bank_tx WHERE id = ${id} AND einkauf_id IS NOT NULL) AS s`;
+        if (open.r || open.i || open.f || open.s) throw new HttpError(400, 'Buchung ist bereits zugeordnet');
         if (s.target_kind === 'receipt' && s.einkauf_id) {
           const [e] = await tx`SELECT bank_tx_id, private_for_user_id FROM einkauf WHERE id = ${s.einkauf_id} FOR UPDATE`;
           if (!e) throw new HttpError(400, 'Beleg nicht mehr vorhanden');
