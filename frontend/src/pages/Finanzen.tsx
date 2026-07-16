@@ -1965,7 +1965,7 @@ function ImportBatches({ t }: { t: (k: string, o?: Record<string, unknown>) => s
   const onUndo = async (b: ImportBatch) => {
     const ok = await confirm({
       title: t('finances.bank.undoTitle'),
-      message: t('finances.bank.undoMsg', { file: b.filename, konto: b.konto_name ?? '—', n: b.n }),
+      message: t('finances.bank.undoMsg', { file: b.filename, konto: b.konto_name ?? '—', count: b.n }),
       confirmLabel: t('finances.bank.undoConfirm'), cancelLabel: t('common.cancel'),
     });
     if (ok) undo.mutate(b.batch);
