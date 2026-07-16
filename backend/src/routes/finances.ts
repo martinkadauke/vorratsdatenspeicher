@@ -4,12 +4,13 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
-import sql from '../db.js';
+import sql, { adminSql } from '../db.js';
 import { kontoScope } from '../auth/konto.js';
 import { extractPayslip } from '../llm/ocr.js';
 import { providerForTask } from '../llm/provider.js';
 import { parseLlmJson } from '../llm/ollama.js';
 import { parseComdirectCsv } from '../finances/bankCsv.js';
+import { sniffCsv, fingerprintHeader, applyCsvMapping, generateCsvMapping, type CsvMappingSpec } from '../finances/csvMapping.js';
 import { normMerchant, alignInvoiceToBank } from '../lib/merchant.js';
 
 /** Pay-slip files live in a NON-static subdir of the receipts volume (the static
@@ -1227,11 +1228,48 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
     return n;
   };
 
-  /** Import one comdirect "Umsätze Girokonto" CSV into bank_tx for a chosen konto.
-   *  Idempotent: rows already present (same konto + Ref.) are skipped, so re-importing
-   *  an overlapping / full-year export never duplicates. Runs auto-matching after. */
+  /** Analyse an uploaded bank CSV WITHOUT importing: recognise the format (built-in comdirect,
+   *  a previously-learned mapping by header fingerprint, or a fresh AI-generated mapping) and
+   *  return a preview of the first rows so the user can confirm before it's trusted/stored. */
+  app.post('/api/finances/bank/analyze', { bodyLimit: 25 * 1024 * 1024 }, async (req, reply) => {
+    const bdy = (req.body ?? {}) as { data_b64?: string };
+    if (!bdy.data_b64) return reply.code(400).send({ error: 'data_b64 required' });
+    let buf: Buffer;
+    try { buf = Buffer.from(bdy.data_b64.replace(/^data:[^,]*,/, ''), 'base64'); }
+    catch { return reply.code(400).send({ error: 'bad base64' }); }
+    if (!buf.length) return reply.code(400).send({ error: 'empty file' });
+
+    const preview = (rows: { booking_date: string; amount: number; counterparty: string | null; description: string }[]) =>
+      rows.slice(0, 8).map(r => ({ booking_date: r.booking_date, amount: r.amount, counterparty: r.counterparty, description: (r.description || '').slice(0, 80) }));
+
+    const sn = sniffCsv(buf);
+    // Built-in: comdirect (its counterparty/Ref hide in a free-text field a column-map can't express).
+    if (/buchungstag/i.test(sn.headerLine) && /umsatz in eur/i.test(sn.headerLine)) {
+      const p = parseComdirectCsv(buf.toString('latin1'));
+      return { recognized: true, source: 'builtin', label: 'comdirect', spec: null, total: p.rows.length, preview: preview(p.rows) };
+    }
+    const fingerprint = fingerprintHeader(sn.headerLine, sn.delimiter);
+    const [stored] = await adminSql`SELECT label, spec FROM bank_csv_format WHERE fingerprint = ${fingerprint}`;
+    if (stored) {
+      const spec: CsvMappingSpec = { ...(stored.spec as CsvMappingSpec), encoding: sn.encoding };
+      const p = applyCsvMapping(spec, spec.encoding === 'latin1' ? buf.toString('latin1') : sn.text);
+      return { recognized: true, source: 'learned', label: (stored.label as string | null), spec, fingerprint, total: p.rows.length, preview: preview(p.rows) };
+    }
+    // New format → AI generates a mapping; the user must confirm before it's trusted + stored.
+    let spec: CsvMappingSpec;
+    try { spec = await generateCsvMapping(sn.headerLine, sn.sampleRows); }
+    catch (e) { return { recognized: false, error: `AI-Zuordnung fehlgeschlagen: ${(e as Error).message}`, header: sn.headerLine }; }
+    spec.encoding = sn.encoding;
+    const p = applyCsvMapping(spec, spec.encoding === 'latin1' ? buf.toString('latin1') : sn.text);
+    return { recognized: false, source: 'ai', spec, fingerprint, header: sn.headerLine, total: p.rows.length, preview: preview(p.rows) };
+  });
+
+  /** Import a bank CSV into bank_tx for a chosen konto. Built-in comdirect parser, or a generic
+   *  mapping spec (from /analyze). Idempotent: rows already present (same konto + ref) are skipped,
+   *  so re-importing an overlapping/full-year export never duplicates. Runs auto-matching after.
+   *  With save_mapping, remembers the AI mapping so the next CSV of this bank imports automatically. */
   app.post('/api/finances/bank/upload', { bodyLimit: 25 * 1024 * 1024 }, async (req, reply) => {
-    const bdy = (req.body ?? {}) as { konto_id?: number; filename?: string; data_b64?: string };
+    const bdy = (req.body ?? {}) as { konto_id?: number; filename?: string; data_b64?: string; spec?: CsvMappingSpec; save_mapping?: boolean; fingerprint?: string; label?: string };
     const kontoId = bdy.konto_id != null ? parseInt(String(bdy.konto_id), 10) : null;
     if (!kontoId) return reply.code(400).send({ error: 'konto_id required' });
     if (!bdy.data_b64) return reply.code(400).send({ error: 'data_b64 required' });
@@ -1240,9 +1278,21 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
     catch { return reply.code(400).send({ error: 'bad base64' }); }
     if (!buf.length) return reply.code(400).send({ error: 'empty file' });
 
-    const parsed = parseComdirectCsv(buf.toString('latin1')); // comdirect exports are Latin-1
+    let parsed;
+    if (bdy.spec) {
+      const spec = bdy.spec;
+      parsed = applyCsvMapping(spec, spec.encoding === 'latin1' ? buf.toString('latin1') : buf.toString('utf-8'));
+      if (bdy.save_mapping && bdy.fingerprint && parsed.rows.length) {
+        await adminSql`
+          INSERT INTO bank_csv_format (fingerprint, label, spec, created_by)
+          VALUES (${bdy.fingerprint}, ${bdy.label ?? null}, ${adminSql.json(spec as never)}, ${req.user?.id ?? null})
+          ON CONFLICT (fingerprint) DO UPDATE SET spec = EXCLUDED.spec, label = COALESCE(EXCLUDED.label, bank_csv_format.label)`;
+      }
+    } else {
+      parsed = parseComdirectCsv(buf.toString('latin1')); // built-in comdirect (Latin-1)
+    }
     if (!parsed.rows.length) {
-      return { ok: false, filename: bdy.filename ?? null, reason: 'no transactions found — is this a comdirect Umsätze CSV?' };
+      return { ok: false, filename: bdy.filename ?? null, reason: 'no transactions found — re-upload to let the AI re-read the format' };
     }
     const batch = `${(bdy.filename ?? 'upload').slice(0, 80)}@${new Date().toISOString()}`;
     // Dedup on (konto, ref): fetch refs already present for this konto, skip them.

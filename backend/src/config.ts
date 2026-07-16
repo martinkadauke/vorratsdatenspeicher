@@ -31,6 +31,8 @@ export interface AppConfig {
   'ai.bankmatch.model': string;
   'ai.statsask.provider': string;
   'ai.statsask.model': string;
+  'ai.csvmapping.provider': string;
+  'ai.csvmapping.model': string;
   'churner.enabled': boolean;
   'churner.cron': string;
   // Run a churn pass right after any receipt is OCR'd (debounced), so imports get
@@ -130,6 +132,10 @@ const DEFAULTS: AppConfig = {
   // range + accounts) — a small, structured extraction → cheap DeepSeek is plenty.
   'ai.statsask.provider': 'deepseek',
   'ai.statsask.model': 'deepseek-v4-flash',
+  // Bank-CSV column-mapping generator: reasons over a header + samples → a reusable mapping
+  // spec. Needs solid reasoning → defaults to Claude (self-host without a key: switch to ollama).
+  'ai.csvmapping.provider': 'anthropic',
+  'ai.csvmapping.model': 'claude-sonnet-5',
   'churner.enabled': true,
   'churner.cron': '0 3 * * *',
   'churner.run_after_ocr': true,

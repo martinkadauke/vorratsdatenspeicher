@@ -1493,6 +1493,9 @@ function BankUpload({ scopeKonten, embedded }: { scopeKonten: KontoLite[]; embed
   const [kontoId, setKontoId] = useState('');
   const [busy, setBusy] = useState(false);
   const [results, setResults] = useState<{ name: string; ok: boolean; text: string }[]>([]);
+  // A new (unrecognized) bank format → the AI-generated mapping awaits the user's one-time confirm.
+  type PreviewRow = { booking_date: string; amount: number; counterparty: string | null; description: string };
+  const [confirm, setConfirm] = useState<null | { file: string; b64: string; konto: number; spec: unknown; fingerprint: string; preview: PreviewRow[]; total: number; label: string }>(null);
   const eff = kontoId || String(scopeKonten[0]?.id ?? '');
   const readB64 = (file: File) => new Promise<string>((res, rej) => {
     const r = new FileReader();
@@ -1500,6 +1503,12 @@ function BankUpload({ scopeKonten, embedded }: { scopeKonten: KontoLite[]; embed
     r.onerror = () => rej(new Error('read failed'));
     r.readAsDataURL(file);
   });
+  interface AnalyzeResult { recognized: boolean; source?: string; label?: string | null; spec?: unknown; fingerprint?: string; preview: PreviewRow[]; total: number; error?: string }
+  const refreshBank = () => { void qc.invalidateQueries({ queryKey: ['bank-tx'] }); void qc.invalidateQueries({ queryKey: ['bank-batches'] }); void qc.invalidateQueries({ queryKey: ['fin-month'] }); };
+  const doImport = (p: { file: string; b64: string; konto: number; spec?: unknown; save?: boolean; fingerprint?: string; label?: string }) =>
+    api<{ ok: boolean; imported?: number; skipped?: number; reason?: string }>('/api/finances/bank/upload', { method: 'POST',
+      body: { filename: p.file, data_b64: p.b64, konto_id: p.konto, spec: p.spec, save_mapping: p.save, fingerprint: p.fingerprint, label: p.label } });
+
   async function onFiles(list: FileList | null) {
     if (!list?.length) return;
     if (!eff) { toast(t('finances.bank.pickAccount'), 'error'); return; }
@@ -1508,20 +1517,42 @@ function BankUpload({ scopeKonten, embedded }: { scopeKonten: KontoLite[]; embed
     for (const file of Array.from(list)) {
       try {
         const b64 = await readB64(file);
-        const r = await api<{ ok: boolean; imported?: number; skipped?: number; reason?: string }>(
-          '/api/finances/bank/upload', { method: 'POST', body: { filename: file.name, data_b64: b64, konto_id: Number(eff) } });
-        out.push(r.ok
-          ? { name: file.name, ok: true, text: t('finances.bank.importedResult', { imported: r.imported, skipped: r.skipped }) }
-          : { name: file.name, ok: false, text: r.reason ?? t('finances.bank.unreadable') });
-      } catch (e) { out.push({ name: file.name, ok: false, text: (e as Error).message }); }
-      setResults([...out]);
+        // Detect the format first — no import yet.
+        const a = await api<AnalyzeResult>('/api/finances/bank/analyze', { method: 'POST', body: { data_b64: b64 } });
+        if (a.recognized) {
+          const r = await doImport({ file: file.name, b64, konto: Number(eff), spec: a.spec ?? undefined });
+          out.push(r.ok
+            ? { name: file.name, ok: true, text: t('finances.bank.importedResult', { imported: r.imported, skipped: r.skipped }) + (a.label ? ` · ${a.label}` : '') }
+            : { name: file.name, ok: false, text: r.reason ?? t('finances.bank.unreadable') });
+          setResults([...out]);
+        } else if (a.spec) {
+          // New format — pause and let the user verify the AI mapping once (handles one at a time).
+          setConfirm({ file: file.name, b64, konto: Number(eff), spec: a.spec, fingerprint: a.fingerprint ?? '', preview: a.preview ?? [], total: a.total ?? 0, label: '' });
+          setBusy(false);
+          return;
+        } else {
+          out.push({ name: file.name, ok: false, text: a.error ?? t('finances.bank.unreadable') });
+          setResults([...out]);
+        }
+      } catch (e) { out.push({ name: file.name, ok: false, text: (e as Error).message }); setResults([...out]); }
     }
     setBusy(false);
-    void qc.invalidateQueries({ queryKey: ['bank-tx'] });
-    void qc.invalidateQueries({ queryKey: ['bank-batches'] });
-    void qc.invalidateQueries({ queryKey: ['fin-month'] });
+    refreshBank();
     const n = out.filter(o => o.ok).length;
     if (n) toast(t('finances.bank.importedToast', { n }), 'success');
+  }
+
+  async function confirmImport() {
+    if (!confirm) return;
+    setBusy(true);
+    try {
+      const r = await doImport({ file: confirm.file, b64: confirm.b64, konto: confirm.konto, spec: confirm.spec, save: true, fingerprint: confirm.fingerprint, label: confirm.label.trim() || undefined });
+      setResults(rs => [...rs, r.ok
+        ? { name: confirm.file, ok: true, text: t('finances.bank.importedResult', { imported: r.imported, skipped: r.skipped }) }
+        : { name: confirm.file, ok: false, text: r.reason ?? t('finances.bank.unreadable') }]);
+      if (r.ok) toast(t('finances.bank.importedToast', { n: 1 }), 'success');
+    } catch (e) { toast((e as Error).message, 'error'); }
+    setBusy(false); setConfirm(null); refreshBank();
   }
   const body = (
     <>
@@ -1557,6 +1588,39 @@ function BankUpload({ scopeKonten, embedded }: { scopeKonten: KontoLite[]; embed
         </ul>
       )}
       <p className="text-[11px] text-zinc-400">{t('finances.bank.hint')}</p>
+
+      {confirm && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center" onClick={() => !busy && setConfirm(null)}>
+          <div className="max-h-[85dvh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-xl dark:bg-zinc-900" onClick={e => e.stopPropagation()}>
+            <div className="mb-1 flex items-center gap-2 text-base font-bold"><Sparkles size={18} className="text-emerald-600" /> {t('finances.bank.aiTitle')}</div>
+            <p className="mb-3 text-xs text-zinc-500">{t('finances.bank.aiHint', { total: confirm.total })}</p>
+            <div className="overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-zinc-50 text-zinc-500 dark:bg-zinc-800/60">
+                  <tr><th className="px-2 py-1.5">{t('finances.bank.colDate')}</th><th className="px-2 py-1.5 text-right">{t('finances.bank.colAmount')}</th><th className="px-2 py-1.5">{t('finances.bank.colCounterparty')}</th></tr>
+                </thead>
+                <tbody>
+                  {confirm.preview.map((r, i) => (
+                    <tr key={i} className="border-t border-zinc-100 dark:border-zinc-800">
+                      <td className="whitespace-nowrap px-2 py-1 tabular-nums">{r.booking_date}</td>
+                      <td className={cn('whitespace-nowrap px-2 py-1 text-right tabular-nums', r.amount < 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400')}>{eur(r.amount)}</td>
+                      <td className="px-2 py-1"><span className="line-clamp-1">{r.counterparty || r.description || '—'}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="mt-3">
+              <Label>{t('finances.bank.aiLabel')}</Label>
+              <Input value={confirm.label} onChange={e => setConfirm(c => c && { ...c, label: e.target.value })} placeholder={t('finances.bank.aiLabelPh')} />
+            </div>
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <Button variant="secondary" disabled={busy} onClick={() => setConfirm(null)}>{t('common.cancel')}</Button>
+              <Button disabled={busy} onClick={() => void confirmImport()}>{busy ? '…' : t('finances.bank.aiConfirm')}</Button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
   return embedded ? <div className="flex flex-col gap-3">{body}</div> : <Card className="flex flex-col gap-3 p-4">{body}</Card>;
