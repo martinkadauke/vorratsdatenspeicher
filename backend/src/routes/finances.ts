@@ -514,7 +514,13 @@ export function financeRoutes(app: FastifyInstance): void {
       WHERE bu.active AND e.datum BETWEEN ${prevFirst} AND ${b.last}
         AND (bu.konto_id IS NULL OR e.konto_id = bu.konto_id)
         ${sumsKonto}
-        AND NOT EXISTS (SELECT 1 FROM fixed_cost_check fc WHERE fc.einkauf_id = e.id)
+        -- Exclude a receipt that is a fixed cost's confirmed bill — via the receipt link OR
+        -- the bank link (an e-mailed Internet/phone bill is verified through its bank booking,
+        -- so fc.einkauf_id alone misses it and it double-counts the fixed cost in the budget).
+        AND NOT EXISTS (
+          SELECT 1 FROM fixed_cost_check fc
+          WHERE fc.einkauf_id = e.id OR (fc.bank_tx_id IS NOT NULL AND fc.bank_tx_id = e.bank_tx_id)
+        )
       GROUP BY bu.id, date_trunc('month', e.datum)
     `;
     // NB: no PRIVACY kontoScope here on purpose — a private receipt still counts toward
@@ -559,7 +565,13 @@ export function financeRoutes(app: FastifyInstance): void {
         AND a.category_path NOT LIKE 'Meta/%'
         AND e.datum BETWEEN ${b.first} AND ${b.last}
         ${sumsKonto}
-        AND NOT EXISTS (SELECT 1 FROM fixed_cost_check fc WHERE fc.einkauf_id = e.id)
+        -- Not a fixed cost's confirmed bill — via the receipt link OR the bank link (an
+        -- e-mailed Internet/phone bill is a separate einkauf verified through its bank
+        -- booking, so fc.einkauf_id alone misses it and it would double-count the fixed cost).
+        AND NOT EXISTS (
+          SELECT 1 FROM fixed_cost_check fc
+          WHERE fc.einkauf_id = e.id OR (fc.bank_tx_id IS NOT NULL AND fc.bank_tx_id = e.bank_tx_id)
+        )
         AND NOT EXISTS (
           SELECT 1 FROM budget bu JOIN budget_category bc ON bc.budget_id = bu.id
           WHERE bu.active AND (bu.konto_id IS NULL OR e.konto_id = bu.konto_id)
