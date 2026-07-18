@@ -38,7 +38,7 @@ async function ensureCoords(): Promise<{ lat: number; lon: number } | null> {
   return loc;
 }
 
-interface OsmContact { address: string | null; website: string | null; phone: string | null }
+interface OsmContact { address: string | null; website: string | null; phone: string | null; opening_hours: string | null }
 
 /** OSM tags (address / website / phone) of the nearest shop matching `name` near (lat,lon). */
 async function overpassContact(name: string, lat: number, lon: number, radiusM: number): Promise<OsmContact | null> {
@@ -76,6 +76,7 @@ async function overpassContact(name: string, lat: number, lon: number, radiusM: 
         address: [street, city].filter(Boolean).join(', ') || null,
         website: best['website'] ?? best['contact:website'] ?? null,
         phone: best['phone'] ?? best['contact:phone'] ?? null,
+        opening_hours: best['opening_hours'] ?? null,
       };
     } catch { /* try next mirror */ }
   }
@@ -103,7 +104,7 @@ export type EnrichReason = 'ok' | 'no_address';
  *  never overwrites an already-set value. */
 export async function enrichStores(): Promise<{ enriched: number; total: number; reason: EnrichReason }> {
   const coords = await ensureCoords(); // needed for the physical-branch OSM lookup
-  const branches = await sql`SELECT id, name, kind, address, website, phone FROM store_branch`;
+  const branches = await sql`SELECT id, name, kind, address, website, phone, opening_hours FROM store_branch`;
   let enriched = 0;
   for (const b of branches) {
     const name = b.name as string;
@@ -115,6 +116,14 @@ export async function enrichStores(): Promise<{ enriched: number; total: number;
           if (!b.address && c.address) updates.address = c.address;
           if (!b.website && c.website) updates.website = c.website;
           if (!b.phone && c.phone) updates.phone = c.phone;
+          // Opening hours: fill the field from OSM's opening_hours tag. Refresh an
+          // earlier OSM value, but never clobber a hand-typed one (same rule the
+          // supermarket/info crawler uses: protect anything whose source ≠ 'osm').
+          const ohSource = (b.opening_hours as { source?: string } | null)?.source;
+          const ohProtected = b.opening_hours != null && ohSource !== 'osm';
+          if (!ohProtected && c.opening_hours) {
+            updates.opening_hours = JSON.stringify({ text: c.opening_hours, source: 'osm', updated_at: new Date().toISOString() });
+          }
         }
         await sleep(1200); // gentle on the public Overpass instances
       }
