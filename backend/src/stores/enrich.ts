@@ -40,13 +40,20 @@ async function ensureCoords(): Promise<{ lat: number; lon: number } | null> {
 
 interface OsmContact { address: string | null; website: string | null; phone: string | null; opening_hours: string | null }
 
-/** OSM tags (address / website / phone) of the nearest shop matching `name` near (lat,lon). */
+/** OSM tags (address / website / phone / opening_hours) of the nearest shop matching the
+ *  store's CHAIN near (lat,lon). Store names are "CHAIN Ort" ("LIDL Gomaringen",
+ *  "DM-drogerie Gomaringen"), but OSM names the shop just "Lidl"/"dm", so a full-name regex
+ *  matches nothing (verified: "EDEKA Gomaringen" → 0 hits, "EDEKA" → 8 hits, all with hours).
+ *  Match on the first word (the chain), anchored to the start of the OSM name, and take the
+ *  geographically nearest branch — the same chain-based approach the supermarket/info crawler
+ *  uses. Fall back to the whole cleaned name when the first word is too short to be a chain. */
 async function overpassContact(name: string, lat: number, lon: number, radiusM: number): Promise<OsmContact | null> {
-  const clean = name.replace(/[^\p{L}\p{N} ]/gu, '').trim();
-  if (!clean) return null;
+  const firstTok = name.match(/[\p{L}\p{N}]+/u)?.[0] ?? ''; // splits on space AND punctuation → "DM-drogerie" → "DM"
+  const pat = firstTok.length >= 2 ? `^${firstTok}` : name.replace(/[^\p{L}\p{N} ]/gu, '').trim();
+  if (!pat) return null;
   const q = `[out:json][timeout:25];(`
-    + `node["shop"]["name"~"${clean}",i](around:${radiusM},${lat},${lon});`
-    + `way["shop"]["name"~"${clean}",i](around:${radiusM},${lat},${lon});`
+    + `node["shop"]["name"~"${pat}",i](around:${radiusM},${lat},${lon});`
+    + `way["shop"]["name"~"${pat}",i](around:${radiusM},${lat},${lon});`
     + `);out center 12;`;
   for (const endpoint of OVERPASS_ENDPOINTS) {
     try {
