@@ -545,6 +545,28 @@ export function financeRoutes(app: FastifyInstance): void {
     const forecastBy = new Map<number, number | null>();
     for (const [bid, mm] of histByMonth) forecastBy.set(bid, median(priorKeys.map(k => mm.get(k) ?? 0)));
 
+    // "Unbudgetiert": this month's variable spend in categories NOT covered by any active
+    // budget — so the month view reflects ALL variable spend, even before every category
+    // has a budget. Same exclusions as the budget sums so nothing is double-counted here:
+    // Meta lines (Pfand/Rabatt) are dropped, and a receipt already confirmed as a fixed
+    // cost's evidence (fixed_cost_check) counts ONCE as that fixed cost, never here.
+    // ⚠️ A receipt in a category you ALSO run as a fixed cost still double-counts (fixed
+    // plan + here) UNLESS you link it to that fixed cost — same rule as budgets.
+    const [unbudget] = await sql`
+      SELECT COALESCE(SUM(a.preis), 0)::float8 AS actual
+      FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
+      WHERE a.preis IS NOT NULL AND a.category_path IS NOT NULL
+        AND a.category_path NOT LIKE 'Meta/%'
+        AND e.datum BETWEEN ${b.first} AND ${b.last}
+        ${sumsKonto}
+        AND NOT EXISTS (SELECT 1 FROM fixed_cost_check fc WHERE fc.einkauf_id = e.id)
+        AND NOT EXISTS (
+          SELECT 1 FROM budget bu JOIN budget_category bc ON bc.budget_id = bu.id
+          WHERE bu.active AND (bu.konto_id IS NULL OR e.konto_id = bu.konto_id)
+            AND (a.category_path = bc.category_path OR a.category_path LIKE bc.category_path || '/%')
+        )
+    `;
+
     // Map a plan row (expense or income) to its month-view shape (check + suggestion).
     const mapPlan = (f: typeof fixed[number]) => ({
       id: f.id, label: f.label, monthly_eur: f.monthly_eur, kind: f.kind, frequency: f.frequency, is_transfer: f.is_transfer, expect_receipt: f.expect_receipt,
@@ -577,6 +599,8 @@ export function financeRoutes(app: FastifyInstance): void {
         actual: Math.round(((actualBy.get(bu.id as number) ?? 0)) * 100) / 100,
         forecast: forecastBy.get(bu.id as number) ?? null,
       })),
+      // Variable spend this month whose category isn't in any budget yet.
+      unbudgeted: Math.round(((unbudget?.actual as number) ?? 0) * 100) / 100,
     };
   });
 

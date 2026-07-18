@@ -202,6 +202,8 @@
     "reopen": "Unlink",
     "addBudget": "Budget",
     "noBudgets": "No budgets yet – create e.g. \"Food\" with your grocery categories.",
+    "unbudgeted": "Unbudgeted",
+    "unbudgetedHint": "Spending in categories with no budget of their own",
     "forecast": "Ø 3 mo",
     "target": "Target",
     "wholeHousehold": "Whole household",

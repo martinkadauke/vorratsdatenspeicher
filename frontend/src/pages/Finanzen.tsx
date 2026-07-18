@@ -45,7 +45,7 @@ interface MonthBudget {
   konto_name: string | null; is_shared: boolean | null; owner: string | null;
   categories: string[]; actual: number; forecast: number | null;
 }
-interface MonthData { month: string; incomes: MonthFix[]; fixed: MonthFix[]; budgets: MonthBudget[] }
+interface MonthData { month: string; incomes: MonthFix[]; fixed: MonthFix[]; budgets: MonthBudget[]; unbudgeted: number }
 
 const today = () => new Date().toISOString().slice(0, 10);
 const curMonth = () => new Date().toISOString().slice(0, 7);
@@ -221,6 +221,7 @@ function MonthTab() {
   const incomes = data?.incomes ?? [];   // recurring income PLANS (Einnahmen-Soll)
   const fixed = data?.fixed ?? [];
   const budgets = data?.budgets ?? [];
+  const unbudgeted = data?.unbudgeted ?? 0;
 
   // Deep-link from the Auszüge list (?fx=<id>): open that plan's evidence modal so a
   // statement allocated to a generated one-off income jumps straight to the entry.
@@ -262,7 +263,7 @@ function MonthTab() {
   const incomeTotal = incomes.reduce((s, f) => s + (counts(f) ? effEur(f) : 0), 0);
   const fixTotal = fixedCosts.reduce((s, f) => s + (counts(f) ? effEur(f) : 0), 0);
   const oneOffCostTotal = oneOffCosts.reduce((s, f) => s + (counts(f) ? effEur(f) : 0), 0);
-  const varActual = budgets.reduce((s, b) => s + b.actual, 0) + oneOffCostTotal;
+  const varActual = budgets.reduce((s, b) => s + b.actual, 0) + oneOffCostTotal + unbudgeted;
   // The "of target" comparison is only coherent in the whole-household view: there both
   // varActual and varTarget cover the full budget set. Under any partial scope varActual
   // is a person-scoped slice while the (household) targets are not, so we drop the target
@@ -400,11 +401,20 @@ function MonthTab() {
           </Section>
 
           {/* Variable costs — category budgets + one-off (single-month) expenses */}
-          <Section title={t('finances.varTitle')} count={budgets.length + oneOffCosts.length} defaultOpen={false}
+          <Section title={t('finances.varTitle')} count={budgets.length + oneOffCosts.length + (unbudgeted > 0 ? 1 : 0)} defaultOpen={false}
             right={<Button variant="secondary" className="px-2.5 py-1.5 text-xs" onClick={() => setBudgetModal({})}><Plus size={14} /> {t('finances.addBudget')}</Button>}>
             {oneOffCosts.map(fixRow)}
-            {!budgets.length && !oneOffCosts.length && <Card className="p-3 text-xs text-zinc-400">{t('finances.noBudgets')}</Card>}
+            {!budgets.length && !oneOffCosts.length && !unbudgeted && <Card className="p-3 text-xs text-zinc-400">{t('finances.noBudgets')}</Card>}
             {budgets.map(b => <BudgetRow key={b.id} b={b} t={t} hideTarget={!isAll && b.konto_id == null} onEdit={() => setBudgetModal(b)} onOpen={() => setPosBudget(b)} />)}
+            {unbudgeted > 0 && (
+              <Card className="flex items-center justify-between gap-2 p-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-zinc-500 dark:text-zinc-400">{t('finances.unbudgeted')}</div>
+                  <div className="text-xs text-zinc-400">{t('finances.unbudgetedHint')}</div>
+                </div>
+                <div className="shrink-0 text-sm font-semibold tabular-nums text-zinc-700 dark:text-zinc-200">{eur(unbudgeted)}</div>
+              </Card>
+            )}
           </Section>
         </>
       )}

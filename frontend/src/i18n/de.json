@@ -202,6 +202,8 @@
     "reopen": "Lösen",
     "addBudget": "Budget",
     "noBudgets": "Noch keine Budgets – leg z. B. „Essen“ mit deinen Lebensmittel-Kategorien an.",
+    "unbudgeted": "Unbudgetiert",
+    "unbudgetedHint": "Ausgaben in Kategorien ohne eigenes Budget",
     "forecast": "Ø 3 Mon.",
     "target": "Ziel",
     "wholeHousehold": "Ganzer Haushalt",
