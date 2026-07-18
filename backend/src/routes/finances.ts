@@ -579,6 +579,24 @@ export function financeRoutes(app: FastifyInstance): void {
         )
     `;
 
+    // TRUE variable-cost total: EVERY variable receipt line counted exactly ONCE, so
+    // overlapping budgets (e.g. "Lebensmittel" and a nested "Obst") can never inflate it.
+    // This — NOT the sum of budget actuals — is the month's Variable Kosten; budgets are
+    // only spending GOALS shown against it. Same exclusions as the sums above (Meta lines
+    // and a fixed cost's confirmed bill via receipt- OR bank-link).
+    const [varTotalRow] = await sql`
+      SELECT COALESCE(SUM(a.preis), 0)::float8 AS total
+      FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
+      WHERE a.preis IS NOT NULL AND a.category_path IS NOT NULL
+        AND a.category_path NOT LIKE 'Meta/%'
+        AND e.datum BETWEEN ${b.first} AND ${b.last}
+        ${sumsKonto}
+        AND NOT EXISTS (
+          SELECT 1 FROM fixed_cost_check fc
+          WHERE fc.einkauf_id = e.id OR (fc.bank_tx_id IS NOT NULL AND fc.bank_tx_id = e.bank_tx_id)
+        )
+    `;
+
     // Map a plan row (expense or income) to its month-view shape (check + suggestion).
     const mapPlan = (f: typeof fixed[number]) => ({
       id: f.id, label: f.label, monthly_eur: f.monthly_eur, kind: f.kind, frequency: f.frequency, is_transfer: f.is_transfer, expect_receipt: f.expect_receipt,
@@ -611,7 +629,10 @@ export function financeRoutes(app: FastifyInstance): void {
         actual: Math.round(((actualBy.get(bu.id as number) ?? 0)) * 100) / 100,
         forecast: forecastBy.get(bu.id as number) ?? null,
       })),
-      // Variable spend this month whose category isn't in any budget yet.
+      // The month's TRUE variable-cost total (every receipt line once) — this is what the
+      // top-line Variable Kosten must use, NOT the sum of the (possibly overlapping) budgets.
+      variableTotal: Math.round(((varTotalRow?.total as number) ?? 0) * 100) / 100,
+      // Of that, the part whose category isn't in any budget yet (informational breakdown).
       unbudgeted: Math.round(((unbudget?.actual as number) ?? 0) * 100) / 100,
     };
   });

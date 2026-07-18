@@ -45,7 +45,7 @@ interface MonthBudget {
   konto_name: string | null; is_shared: boolean | null; owner: string | null;
   categories: string[]; actual: number; forecast: number | null;
 }
-interface MonthData { month: string; incomes: MonthFix[]; fixed: MonthFix[]; budgets: MonthBudget[]; unbudgeted: number }
+interface MonthData { month: string; incomes: MonthFix[]; fixed: MonthFix[]; budgets: MonthBudget[]; variableTotal: number; unbudgeted: number }
 
 const today = () => new Date().toISOString().slice(0, 10);
 const curMonth = () => new Date().toISOString().slice(0, 7);
@@ -221,6 +221,7 @@ function MonthTab() {
   const incomes = data?.incomes ?? [];   // recurring income PLANS (Einnahmen-Soll)
   const fixed = data?.fixed ?? [];
   const budgets = data?.budgets ?? [];
+  const variableTotal = data?.variableTotal ?? 0;
   const unbudgeted = data?.unbudgeted ?? 0;
 
   // Deep-link from the Auszüge list (?fx=<id>): open that plan's evidence modal so a
@@ -259,17 +260,17 @@ function MonthTab() {
   );
   // Summary tiles mirror the 2×2 lists so the numbers match the sections beneath them:
   //   Einnahmen = ALL income · Fixkosten = RECURRING costs only (one-offs live under
-  //   Variable Kosten) · Variable Kosten = budgets + one-off costs. Net covers all costs.
+  //   Variable Kosten) · Variable Kosten = the month's TRUE variable spend (every receipt
+  //   line ONCE) + one-off costs — NOT the sum of budget actuals, which overlap and would
+  //   double-count. Budgets are only spending goals shown against this total. Net covers all.
   const incomeTotal = incomes.reduce((s, f) => s + (counts(f) ? effEur(f) : 0), 0);
   const fixTotal = fixedCosts.reduce((s, f) => s + (counts(f) ? effEur(f) : 0), 0);
   const oneOffCostTotal = oneOffCosts.reduce((s, f) => s + (counts(f) ? effEur(f) : 0), 0);
-  const varActual = budgets.reduce((s, b) => s + b.actual, 0) + oneOffCostTotal + unbudgeted;
-  // The "of target" comparison is only coherent in the whole-household view: there both
-  // varActual and varTarget cover the full budget set. Under any partial scope varActual
-  // is a person-scoped slice while the (household) targets are not, so we drop the target
-  // line entirely rather than compare mismatched populations (individual account-specific
-  // BudgetRows still show their own bar). varActual stays the person's FULL variable spend.
-  const varTarget = isAll ? budgets.reduce((s, b) => s + b.monthly_target, 0) : 0;
+  const varActual = variableTotal + oneOffCostTotal;
+  // No top-line "of target": varActual is now the true total spend (incl. spend outside any
+  // budget), while budget targets can overlap (a "Lebensmittel" goal and a nested "Obst"
+  // goal) — summing them and comparing to the total is apples-to-oranges. Each budget tracks
+  // its own goal on its own bar (BudgetRow) instead.
   const net = Math.round((incomeTotal - fixTotal - varActual) * 100) / 100;
   // Reconciliation completeness covers EVERY plan that still needs a bank match —
   // recurring AND one-off, income AND cost — except internal transfers that net out
@@ -360,7 +361,6 @@ function MonthTab() {
               <div>
                 <div className="text-xs text-zinc-500 dark:text-zinc-400">{t('finances.varTitle')}</div>
                 <div className="text-lg font-bold">{eur(varActual)}</div>
-                {varTarget > 0 && <div className="text-xs text-zinc-500 dark:text-zinc-400">{t('finances.ofTarget', { target: eur(varTarget) })}</div>}
               </div>
             </div>
             <div className="flex items-center justify-between border-t border-zinc-100 pt-2 dark:border-zinc-800">
