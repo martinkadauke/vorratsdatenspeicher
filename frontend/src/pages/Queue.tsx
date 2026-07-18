@@ -102,7 +102,13 @@ function NameReview() {
   const decide = useMutation({
     mutationFn: (b: { artikel_ids: number[]; canonical?: string; action: string }) =>
       api('/api/pruefen/decide', { method: 'POST', body: b }),
-    onSuccess: invalidate,
+    onSuccess: (_r, vars) => {
+      invalidate();
+      // Make "reject" visibly do something (it buries the wrong proposal so the
+      // churner won't re-mint it) — otherwise the row just reappears and it reads
+      // as a no-op. Approve keeps its silent flow (the row simply drops out).
+      if (vars.action === 'reject') toast(t('queue.rejected'), 'success');
+    },
     onError: (e) => toast((e as Error).message, 'error'),
   });
   const decideBulk = useMutation({
@@ -185,6 +191,30 @@ function NameReview() {
                   )}
                 </div>
               </div>
+              {(() => {
+                // One-tap "teach" chips: the churner's proposal, the OCR product guess,
+                // and the OCR's expanded name — deduped. Tapping one confirms it directly
+                // (and learns the alias), so a wrong pre-fill like "Chili-Sauce" no longer
+                // forces retyping when the faithful "Chili"/"Chili 50g" is right there.
+                const cands = [g.suggestion, g.ai_guess, g.name]
+                  .map(s => (s ?? '').trim())
+                  .filter(Boolean)
+                  .filter((s, i, arr) => arr.findIndex(x => x.toLowerCase() === s.toLowerCase()) === i);
+                if (!cands.length) return null;
+                return (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[11px] font-medium text-zinc-400">{t('queue.adopt')}</span>
+                    {cands.map(c => (
+                      <button key={c} type="button" disabled={decide.isPending}
+                        onClick={() => decide.mutate({ artikel_ids: g.artikel_ids, canonical: c, action: 'approve' })}
+                        title={t('queue.adoptTitle', { name: c })}
+                        className="inline-flex max-w-full items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300">
+                        <Check size={12} className="shrink-0" /> <span className="truncate">{c}</span>
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
               <Input value={value} onChange={e => setEdits(prev => ({ ...prev, [g.grp]: e.target.value }))} placeholder={t('queue.proposed')} />
               <div className="flex flex-wrap gap-2">
                 <Button className="min-w-[6rem] flex-1" disabled={!value.trim()} onClick={() => decide.mutate({ artikel_ids: g.artikel_ids, canonical: value.trim(), action: 'approve' })}>{t('queue.approve')}</Button>

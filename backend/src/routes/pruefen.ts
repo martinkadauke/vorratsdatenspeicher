@@ -51,6 +51,7 @@ export function pruefenRoutes(app: FastifyInstance): void {
                MIN(ocr_key) AS ocr_key,
                COUNT(*)::int AS occurrences,
                (array_agg(original_text ORDER BY id))[1] AS original_text,
+               (array_agg(name ORDER BY id))[1] AS name,
                (array_agg(COALESCE(NULLIF(ai_guess, ''), name) ORDER BY id))[1] AS ai_guess,
                (array_agg(einkauf_id ORDER BY datum DESC NULLS LAST, id DESC))[1] AS einkauf_id,
                (array_agg(id ORDER BY datum DESC NULLS LAST, id DESC))[1] AS sample_artikel_id,

@@ -184,6 +184,7 @@ export interface PruefenGroup {
   artikel_ids: number[];
   occurrences: number;
   original_text: string | null;
+  name: string | null;
   ai_guess: string | null;
   einkauf_id: number | null;
   sample_artikel_id: number | null;
