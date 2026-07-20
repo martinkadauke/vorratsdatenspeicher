@@ -234,9 +234,13 @@ class AnthropicProvider implements LlmProvider {
       },
       body: JSON.stringify({
         model: this.model,
-        // Headroom for thinking models (Sonnet 5) that spend part of the budget on a
-        // hidden thinking block before the answer.
         max_tokens: 8192,
+        // Disable extended thinking. claude-sonnet-5 auto-thinks on these chats, which
+        // (a) can burn the whole token budget and truncate BEFORE any text block is emitted
+        // → an empty response ("LLM returned unparseable JSON:"), and (b) adds latency/cost
+        // for structured-output tasks that don't need it. With it off the model returns the
+        // JSON directly. (parseLlmJson still repairs any stray unescaped quotes.)
+        thinking: { type: 'disabled' },
         system: opts.system,
         messages: [{ role: 'user', content: opts.user }],
       }),
