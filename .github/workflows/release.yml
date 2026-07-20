@@ -1,0 +1,33 @@
+name: Release
+
+# Fires ONLY on a v* tag. It never touches a running stack (no deploy job) and never
+# runs on a branch push, so the dev/stage/main pipelines in cicd.yml are unaffected.
+# All it does: add the semver + :stable tags to the image the dev build already published
+# for the tagged commit (:<sha> → :X.Y.Z + :stable). Pure registry tagging, no rebuild.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  retag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      - name: Tag the tagged commit's image as :X.Y.Z and :stable
+        env:
+          REPO: ghcr.io/${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          VER="${TAG#v}"   # v1.0.0 -> 1.0.0
+          echo "Tagging ${REPO}:${SHA:0:12} as :${VER} and :stable (no rebuild) ..."
+          docker buildx imagetools create \
+            -t "${REPO}:${VER}" \
+            -t "${REPO}:stable" \
+            "${REPO}:${SHA}"
+          echo "✅ ${REPO}:${VER} and :stable now point at ${SHA:0:12}"
