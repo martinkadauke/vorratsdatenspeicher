@@ -24,9 +24,10 @@ export function Positionen() {
   const store = params.get('store') ?? '';
   const from = params.get('from') ?? '';
   const to = params.get('to') ?? '';
+  const uncat = params.get('uncat') ?? '';   // '1' → only lines the AI never categorised (deep-link from Finanzen "Kategorie fehlt")
   const sort = params.get('sort') ?? 'date_desc';
   const [filterOpen, setFilterOpen] = useState(false);
-  const filtersActive = !!(store || from || to || (sort && sort !== 'date_desc'));
+  const filtersActive = !!(store || from || to || uncat || (sort && sort !== 'date_desc'));
 
   const setParam = useCallback((key: string, val: string | null) => {
     const next = new URLSearchParams(params);
@@ -41,9 +42,10 @@ export function Positionen() {
     if (store) p.set('store', store);
     if (from) p.set('from', from);
     if (to) p.set('to', to);
+    if (uncat) p.set('uncat', uncat);
     p.set('sort', sort);
     return p.toString();
-  }, [q, store, from, to, sort]);
+  }, [q, store, from, to, uncat, sort]);
 
   const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteQuery({
     queryKey: ['positionen', apiQs],

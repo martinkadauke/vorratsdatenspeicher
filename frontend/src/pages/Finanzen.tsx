@@ -45,7 +45,7 @@ interface MonthBudget {
   konto_name: string | null; is_shared: boolean | null; owner: string | null;
   categories: string[]; actual: number; forecast: number | null;
 }
-interface MonthData { month: string; incomes: MonthFix[]; fixed: MonthFix[]; budgets: MonthBudget[]; variableTotal: number; unbudgeted: number }
+interface MonthData { month: string; incomes: MonthFix[]; fixed: MonthFix[]; budgets: MonthBudget[]; variableTotal: number; unbudgeted: number; categoryMissing: number; receiptMissing: number; receiptMissingCount: number }
 
 const today = () => new Date().toISOString().slice(0, 10);
 const curMonth = () => new Date().toISOString().slice(0, 7);
@@ -131,6 +131,7 @@ export function Finanzen() {
 function MonthTab() {
   const { t, i18n } = useTranslation();
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [month, setMonth] = useUrlState('m', curMonth());
   const [fx, setFx] = useUrlState('fx', '');   // deep-link from Auszüge: open this plan's evidence
   const [picker, setPicker] = useState<MonthFix | null>(null);
@@ -223,6 +224,9 @@ function MonthTab() {
   const budgets = data?.budgets ?? [];
   const variableTotal = data?.variableTotal ?? 0;
   const unbudgeted = data?.unbudgeted ?? 0;
+  const categoryMissing = data?.categoryMissing ?? 0;
+  const receiptMissing = data?.receiptMissing ?? 0;
+  const receiptMissingCount = data?.receiptMissingCount ?? 0;
 
   // Deep-link from the Auszüge list (?fx=<id>): open that plan's evidence modal so a
   // statement allocated to a generated one-off income jumps straight to the entry.
@@ -401,10 +405,10 @@ function MonthTab() {
           </Section>
 
           {/* Variable costs — category budgets + one-off (single-month) expenses */}
-          <Section title={t('finances.varTitle')} count={budgets.length + oneOffCosts.length + (unbudgeted > 0 ? 1 : 0)} defaultOpen={false}
+          <Section title={t('finances.varTitle')} count={budgets.length + oneOffCosts.length + (unbudgeted > 0 ? 1 : 0) + (categoryMissing > 0 ? 1 : 0) + (receiptMissing > 0 ? 1 : 0)} defaultOpen={false}
             right={<Button variant="secondary" className="px-2.5 py-1.5 text-xs" onClick={() => setBudgetModal({})}><Plus size={14} /> {t('finances.addBudget')}</Button>}>
             {oneOffCosts.map(fixRow)}
-            {!budgets.length && !oneOffCosts.length && !unbudgeted && <Card className="p-3 text-xs text-zinc-400">{t('finances.noBudgets')}</Card>}
+            {!budgets.length && !oneOffCosts.length && !unbudgeted && !categoryMissing && !receiptMissing && <Card className="p-3 text-xs text-zinc-400">{t('finances.noBudgets')}</Card>}
             {budgets.map(b => <BudgetRow key={b.id} b={b} t={t} hideTarget={!isAll && b.konto_id == null} onEdit={() => setBudgetModal(b)} onOpen={() => setPosBudget(b)} />)}
             {unbudgeted > 0 && (
               <Card className="flex items-center justify-between gap-2 p-3">
@@ -413,6 +417,36 @@ function MonthTab() {
                   <div className="text-xs text-zinc-400">{t('finances.unbudgetedHint')}</div>
                 </div>
                 <div className="shrink-0 text-sm font-semibold tabular-nums text-zinc-700 dark:text-zinc-200">{eur(unbudgeted)}</div>
+              </Card>
+            )}
+            {categoryMissing > 0 && (() => {
+              const [yy, mm] = month.split('-').map(Number);
+              const last = String(new Date(yy, mm, 0).getDate()).padStart(2, '0');
+              return (
+                <Card as="button" onClick={() => navigate(`/warenstamm/positionen?uncat=1&from=${month}-01&to=${month}-${last}`)}
+                  className="flex w-full items-center justify-between gap-2 p-3 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-amber-700 dark:text-amber-400">{t('finances.categoryMissing')}</div>
+                    <div className="text-xs text-zinc-400">{t('finances.categoryMissingHint')}</div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <span className="text-sm font-semibold tabular-nums text-zinc-700 dark:text-zinc-200">{eur(categoryMissing)}</span>
+                    <ChevronRight size={16} className="text-zinc-400" />
+                  </div>
+                </Card>
+              );
+            })()}
+            {receiptMissing > 0 && (
+              <Card as="button" onClick={() => navigate(`/finanzen?tab=bank&bs=open&bm=${month}`)}
+                className="flex w-full items-center justify-between gap-2 p-3 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-amber-700 dark:text-amber-400">{t('finances.receiptMissing')}</div>
+                  <div className="text-xs text-zinc-400">{t('finances.receiptMissingHint', { count: receiptMissingCount })}</div>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <span className="text-sm font-semibold tabular-nums text-zinc-700 dark:text-zinc-200">{eur(receiptMissing)}</span>
+                  <ChevronRight size={16} className="text-zinc-400" />
+                </div>
               </Card>
             )}
           </Section>

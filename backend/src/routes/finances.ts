@@ -579,16 +579,16 @@ export function financeRoutes(app: FastifyInstance): void {
         )
     `;
 
-    // TRUE variable-cost total: EVERY variable receipt line counted exactly ONCE, so
+    // Total RECEIPT spend this month: EVERY variable receipt line counted exactly ONCE, so
     // overlapping budgets (e.g. "Lebensmittel" and a nested "Obst") can never inflate it.
-    // This — NOT the sum of budget actuals — is the month's Variable Kosten; budgets are
-    // only spending GOALS shown against it. Same exclusions as the sums above (Meta lines
-    // and a fixed cost's confirmed bill via receipt- OR bank-link).
-    const [varTotalRow] = await sql`
+    // Includes UNCATEGORISED lines (category_path empty/null) — categorisation can fail, and
+    // that spend still happened. Drops only Meta (Pfand/Rabatt) and fixed-cost bills (via
+    // receipt- OR bank-link). This is NOT the sum of budget actuals; budgets are only goals.
+    const [receiptRow] = await sql`
       SELECT COALESCE(SUM(a.preis), 0)::float8 AS total
       FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
-      WHERE a.preis IS NOT NULL AND a.category_path IS NOT NULL
-        AND a.category_path NOT LIKE 'Meta/%'
+      WHERE a.preis IS NOT NULL
+        AND (a.category_path IS NULL OR a.category_path = '' OR a.category_path NOT LIKE 'Meta/%')
         AND e.datum BETWEEN ${b.first} AND ${b.last}
         ${sumsKonto}
         AND NOT EXISTS (
@@ -596,6 +596,34 @@ export function financeRoutes(app: FastifyInstance): void {
           WHERE fc.einkauf_id = e.id OR (fc.bank_tx_id IS NOT NULL AND fc.bank_tx_id = e.bank_tx_id)
         )
     `;
+    // Of that, the "Kategorie fehlt" slice: priced lines the AI never categorised. Same
+    // exclusions. Surfaced as its own bucket so failed categorisation is visible + fixable.
+    const [catMissing] = await sql`
+      SELECT COALESCE(SUM(a.preis), 0)::float8 AS total
+      FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
+      WHERE a.preis IS NOT NULL AND (a.category_path IS NULL OR a.category_path = '')
+        AND e.datum BETWEEN ${b.first} AND ${b.last}
+        ${sumsKonto}
+        AND NOT EXISTS (
+          SELECT 1 FROM fixed_cost_check fc
+          WHERE fc.einkauf_id = e.id OR (fc.bank_tx_id IS NOT NULL AND fc.bank_tx_id = e.bank_tx_id)
+        )
+    `;
+    // "Beleg fehlt": money that left the account with NO receipt — bank debits not tied to a
+    // receipt and not a fixed cost. Real variable spend the user simply hasn't scanned, so it
+    // belongs in the total; tapping the bucket lists these debits to generate/attach a receipt.
+    // (Transfers modelled as fixed costs are excluded via their fixed_cost_check bank link.)
+    const [recMissing] = await sql`
+      SELECT COALESCE(SUM(ABS(bt.amount)), 0)::float8 AS total, COUNT(*)::int AS n
+      FROM bank_tx bt
+      WHERE bt.amount < 0
+        AND bt.booking_date BETWEEN ${b.first} AND ${b.last}
+        ${kIds && kIds.length ? sql`AND bt.konto_id = ANY(${kIds})` : sql``}
+        AND NOT EXISTS (SELECT 1 FROM einkauf e WHERE e.bank_tx_id = bt.id OR bt.einkauf_id = e.id)
+        AND NOT EXISTS (SELECT 1 FROM fixed_cost_check fc WHERE fc.bank_tx_id = bt.id)
+    `;
+    const receiptSpend = (receiptRow?.total as number) ?? 0;
+    const receiptMissingAmt = (recMissing?.total as number) ?? 0;
 
     // Map a plan row (expense or income) to its month-view shape (check + suggestion).
     const mapPlan = (f: typeof fixed[number]) => ({
@@ -629,11 +657,14 @@ export function financeRoutes(app: FastifyInstance): void {
         actual: Math.round(((actualBy.get(bu.id as number) ?? 0)) * 100) / 100,
         forecast: forecastBy.get(bu.id as number) ?? null,
       })),
-      // The month's TRUE variable-cost total (every receipt line once) — this is what the
-      // top-line Variable Kosten must use, NOT the sum of the (possibly overlapping) budgets.
-      variableTotal: Math.round(((varTotalRow?.total as number) ?? 0) * 100) / 100,
-      // Of that, the part whose category isn't in any budget yet (informational breakdown).
-      unbudgeted: Math.round(((unbudget?.actual as number) ?? 0) * 100) / 100,
+      // The month's TRUE variable-cost total = every receipt line once (incl. uncategorised)
+      // PLUS un-receipted bank debits. NOT the sum of the (possibly overlapping) budgets.
+      variableTotal: Math.round((receiptSpend + receiptMissingAmt) * 100) / 100,
+      // Breakdown buckets that partition the total (budgeted + these), each a tappable row:
+      unbudgeted: Math.round(((unbudget?.actual as number) ?? 0) * 100) / 100,      // categorised, no budget
+      categoryMissing: Math.round(((catMissing?.total as number) ?? 0) * 100) / 100, // priced but uncategorised
+      receiptMissing: Math.round(receiptMissingAmt * 100) / 100,                     // bank debit, no receipt
+      receiptMissingCount: (recMissing?.n as number) ?? 0,
     };
   });
 

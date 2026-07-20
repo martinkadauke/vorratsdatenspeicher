@@ -210,7 +210,7 @@ export function receiptRoutes(app: FastifyInstance): void {
   app.get('/api/positionen', async (req) => {
     const q = req.query as {
       limit?: string; offset?: string; q?: string; from?: string; to?: string;
-      store?: string; branch_id?: string; konto?: string; quelle?: string; kategorie?: string; sort?: string;
+      store?: string; branch_id?: string; konto?: string; quelle?: string; kategorie?: string; uncat?: string; sort?: string;
     };
     const limit = Math.min(parseInt(q.limit ?? '50', 10) || 50, 200);
     const offset = parseInt(q.offset ?? '0', 10) || 0;
@@ -252,6 +252,7 @@ export function receiptRoutes(app: FastifyInstance): void {
         ${kontoId ? sql`AND e.konto_id = ${kontoId}` : sql``}
         ${quellen ? sql`AND e.quelle IN ${sql(quellen)}` : sql``}
         ${katLike ? sql`AND a.category_path ILIKE ${katLike}` : sql``}
+        ${q.uncat === '1' ? sql`AND (a.category_path IS NULL OR a.category_path = '')` : sql``}
         ${q.from ? sql`AND e.datum >= ${q.from}` : sql``}
         ${q.to ? sql`AND e.datum <= ${q.to}` : sql``}
         ${kontoScope(req.user, sql`e`)}
