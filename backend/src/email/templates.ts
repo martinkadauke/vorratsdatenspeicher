@@ -300,18 +300,20 @@ export function newHouseholdEmail(opts: { householdName: string; adminEmail: str
   return { subject, text, html: layout({ preheader: `${opts.householdName} · ${opts.adminEmail}`, heading: subject, inner }) };
 }
 
-/** A user pressed the Feedback button → forward the message to the webmaster (demo only). */
-export function feedbackEmail(opts: { message: string; page: string; from: string; householdId: number | null }): { subject: string; text: string; html: string } {
-  const subject = 'Neues Feedback: ' + opts.message.replace(/\s+/g, ' ').trim().slice(0, 50);
+/** A user pressed the Feedback button → forward the message to the webmaster (demo only).
+ *  On the demo, householdName identifies which household reported it. */
+export function feedbackEmail(opts: { message: string; page: string; from: string; householdId: number | null; householdName?: string | null }): { subject: string; text: string; html: string } {
+  const household = opts.householdName ? `${opts.householdName} (#${opts.householdId})` : (opts.householdId != null ? `#${opts.householdId}` : '—');
+  const subject = (opts.householdName ? `[${opts.householdName}] ` : '') + 'Neues Feedback: ' + opts.message.replace(/\s+/g, ' ').trim().slice(0, 50);
   const text =
     `Neues Feedback über den Feedback-Button.\n\n` +
-    `Von: ${opts.from}\nSeite: ${opts.page || '—'}\nHaushalt: ${opts.householdId ?? '—'}\n\nNachricht:\n${opts.message}\n`;
+    `Von: ${opts.from}\nSeite: ${opts.page || '—'}\nHaushalt: ${household}\n\nNachricht:\n${opts.message}\n`;
   const inner = `
     <h1 style="margin:0 0 12px;font-size:22px;line-height:1.3;font-weight:700;color:${C.heading};letter-spacing:-0.01em;">
       Neues Feedback 💬
     </h1>
     <p style="margin:0 0 16px;font-size:14px;line-height:1.6;color:${C.muted};">
-      Von <strong style="color:${C.body};">${esc(opts.from)}</strong> &middot; Seite <code>${esc(opts.page || '—')}</code> &middot; Haushalt ${opts.householdId ?? '—'}
+      Von <strong style="color:${C.body};">${esc(opts.from)}</strong> &middot; Seite <code>${esc(opts.page || '—')}</code> &middot; Haushalt <strong style="color:${C.body};">${esc(household)}</strong>
     </p>
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
            style="background:${C.accentBg};border:1px solid ${C.accentBorder};border-radius:12px;">
