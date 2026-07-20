@@ -423,8 +423,8 @@ function MonthTab() {
               const [yy, mm] = month.split('-').map(Number);
               const last = String(new Date(yy, mm, 0).getDate()).padStart(2, '0');
               return (
-                <Card as="button" onClick={() => navigate(`/warenstamm/positionen?uncat=1&from=${month}-01&to=${month}-${last}`)}
-                  className="flex w-full items-center justify-between gap-2 p-3 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
+                <Card onClick={() => navigate(`/warenstamm/positionen?uncat=1&from=${month}-01&to=${month}-${last}`)}
+                  className="flex items-center justify-between gap-2 p-3">
                   <div className="min-w-0">
                     <div className="text-sm font-medium text-amber-700 dark:text-amber-400">{t('finances.categoryMissing')}</div>
                     <div className="text-xs text-zinc-400">{t('finances.categoryMissingHint')}</div>
@@ -437,8 +437,8 @@ function MonthTab() {
               );
             })()}
             {receiptMissing > 0 && (
-              <Card as="button" onClick={() => navigate(`/finanzen?tab=bank&bs=open&bm=${month}`)}
-                className="flex w-full items-center justify-between gap-2 p-3 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
+              <Card onClick={() => navigate(`/finanzen?tab=bank&bs=open&bm=${month}`)}
+                className="flex items-center justify-between gap-2 p-3">
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-amber-700 dark:text-amber-400">{t('finances.receiptMissing')}</div>
                   <div className="text-xs text-zinc-400">{t('finances.receiptMissingHint', { count: receiptMissingCount })}</div>
