@@ -210,7 +210,7 @@ export function receiptRoutes(app: FastifyInstance): void {
   app.get('/api/positionen', async (req) => {
     const q = req.query as {
       limit?: string; offset?: string; q?: string; from?: string; to?: string;
-      store?: string; branch_id?: string; konto?: string; quelle?: string; kategorie?: string; uncat?: string; sort?: string;
+      store?: string; branch_id?: string; konto?: string; quelle?: string; kategorie?: string; uncat?: string; nobudget?: string; sort?: string;
     };
     const limit = Math.min(parseInt(q.limit ?? '50', 10) || 50, 200);
     const offset = parseInt(q.offset ?? '0', 10) || 0;
@@ -253,6 +253,14 @@ export function receiptRoutes(app: FastifyInstance): void {
         ${quellen ? sql`AND e.quelle IN ${sql(quellen)}` : sql``}
         ${katLike ? sql`AND a.category_path ILIKE ${katLike}` : sql``}
         ${q.uncat === '1' ? sql`AND (a.category_path IS NULL OR a.category_path = '')` : sql``}
+        ${q.nobudget === '1' ? sql`
+          AND a.preis IS NOT NULL AND a.category_path IS NOT NULL AND a.category_path NOT LIKE 'Meta/%'
+          AND NOT EXISTS (SELECT 1 FROM fixed_cost_check fc WHERE fc.einkauf_id = e.id OR (fc.bank_tx_id IS NOT NULL AND fc.bank_tx_id = e.bank_tx_id))
+          AND NOT EXISTS (
+            SELECT 1 FROM budget bu JOIN budget_category bc ON bc.budget_id = bu.id
+            WHERE bu.active AND (bu.konto_id IS NULL OR e.konto_id = bu.konto_id)
+              AND (a.category_path = bc.category_path OR a.category_path LIKE bc.category_path || '/%')
+          )` : sql``}
         ${q.from ? sql`AND e.datum >= ${q.from}` : sql``}
         ${q.to ? sql`AND e.datum <= ${q.to}` : sql``}
         ${kontoScope(req.user, sql`e`)}

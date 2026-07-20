@@ -410,15 +410,23 @@ function MonthTab() {
             {oneOffCosts.map(fixRow)}
             {!budgets.length && !oneOffCosts.length && !unbudgeted && !categoryMissing && !receiptMissing && <Card className="p-3 text-xs text-zinc-400">{t('finances.noBudgets')}</Card>}
             {budgets.map(b => <BudgetRow key={b.id} b={b} t={t} hideTarget={!isAll && b.konto_id == null} onEdit={() => setBudgetModal(b)} onOpen={() => setPosBudget(b)} />)}
-            {unbudgeted > 0 && (
-              <Card className="flex items-center justify-between gap-2 p-3">
-                <div className="min-w-0">
-                  <div className="text-sm font-medium text-zinc-500 dark:text-zinc-400">{t('finances.unbudgeted')}</div>
-                  <div className="text-xs text-zinc-400">{t('finances.unbudgetedHint')}</div>
-                </div>
-                <div className="shrink-0 text-sm font-semibold tabular-nums text-zinc-700 dark:text-zinc-200">{eur(unbudgeted)}</div>
-              </Card>
-            )}
+            {unbudgeted > 0 && (() => {
+              const [yy, mm] = month.split('-').map(Number);
+              const last = String(new Date(yy, mm, 0).getDate()).padStart(2, '0');
+              return (
+                <Card onClick={() => navigate(`/warenstamm/positionen?nobudget=1&from=${month}-01&to=${month}-${last}`)}
+                  className="flex items-center justify-between gap-2 p-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-zinc-500 dark:text-zinc-400">{t('finances.unbudgeted')}</div>
+                    <div className="text-xs text-zinc-400">{t('finances.unbudgetedHint')}</div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <span className="text-sm font-semibold tabular-nums text-zinc-700 dark:text-zinc-200">{eur(unbudgeted)}</span>
+                    <ChevronRight size={16} className="text-zinc-400" />
+                  </div>
+                </Card>
+              );
+            })()}
             {categoryMissing > 0 && (() => {
               const [yy, mm] = month.split('-').map(Number);
               const last = String(new Date(yy, mm, 0).getDate()).padStart(2, '0');
