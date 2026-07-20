@@ -254,7 +254,7 @@ export function receiptRoutes(app: FastifyInstance): void {
         ${katLike ? sql`AND a.category_path ILIKE ${katLike}` : sql``}
         ${q.uncat === '1' ? sql`AND (a.category_path IS NULL OR a.category_path = '')` : sql``}
         ${q.nobudget === '1' ? sql`
-          AND a.preis IS NOT NULL AND a.category_path IS NOT NULL AND a.category_path NOT LIKE 'Meta/%'
+          AND a.preis IS NOT NULL AND a.category_path IS NOT NULL
           AND NOT EXISTS (SELECT 1 FROM fixed_cost_check fc WHERE fc.einkauf_id = e.id OR (fc.bank_tx_id IS NOT NULL AND fc.bank_tx_id = e.bank_tx_id))
           AND NOT EXISTS (
             SELECT 1 FROM budget bu JOIN budget_category bc ON bc.budget_id = bu.id

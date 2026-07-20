@@ -553,16 +553,15 @@ export function financeRoutes(app: FastifyInstance): void {
 
     // "Unbudgetiert": this month's variable spend in categories NOT covered by any active
     // budget — so the month view reflects ALL variable spend, even before every category
-    // has a budget. Same exclusions as the budget sums so nothing is double-counted here:
-    // Meta lines (Pfand/Rabatt) are dropped, and a receipt already confirmed as a fixed
-    // cost's evidence (fixed_cost_check) counts ONCE as that fixed cost, never here.
+    // has a budget. Meta (Pfand/Rabatt) is a real category too: it counts here until the
+    // user gives it a budget. Only a receipt already confirmed as a fixed cost's evidence
+    // (fixed_cost_check) is excluded — it counts ONCE as that fixed cost, never here.
     // ⚠️ A receipt in a category you ALSO run as a fixed cost still double-counts (fixed
     // plan + here) UNLESS you link it to that fixed cost — same rule as budgets.
     const [unbudget] = await sql`
       SELECT COALESCE(SUM(a.preis), 0)::float8 AS actual
       FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
       WHERE a.preis IS NOT NULL AND a.category_path IS NOT NULL
-        AND a.category_path NOT LIKE 'Meta/%'
         AND e.datum BETWEEN ${b.first} AND ${b.last}
         ${sumsKonto}
         -- Not a fixed cost's confirmed bill — via the receipt link OR the bank link (an
@@ -581,14 +580,13 @@ export function financeRoutes(app: FastifyInstance): void {
 
     // Total RECEIPT spend this month: EVERY variable receipt line counted exactly ONCE, so
     // overlapping budgets (e.g. "Lebensmittel" and a nested "Obst") can never inflate it.
-    // Includes UNCATEGORISED lines (category_path empty/null) — categorisation can fail, and
-    // that spend still happened. Drops only Meta (Pfand/Rabatt) and fixed-cost bills (via
-    // receipt- OR bank-link). This is NOT the sum of budget actuals; budgets are only goals.
+    // Includes UNCATEGORISED lines (categorisation can fail) AND Meta/Pfand/Rabatt (a real
+    // category — deposits add, discounts subtract, so the total equals what was actually
+    // paid). Drops only fixed-cost bills (via receipt- OR bank-link). NOT the sum of budgets.
     const [receiptRow] = await sql`
       SELECT COALESCE(SUM(a.preis), 0)::float8 AS total
       FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
       WHERE a.preis IS NOT NULL
-        AND (a.category_path IS NULL OR a.category_path = '' OR a.category_path NOT LIKE 'Meta/%')
         AND e.datum BETWEEN ${b.first} AND ${b.last}
         ${sumsKonto}
         AND NOT EXISTS (
