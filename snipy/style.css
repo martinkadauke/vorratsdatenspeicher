@@ -1,0 +1,174 @@
+:root {
+  --bg: #0b1020;
+  --accent: #46e0b8;
+  --mult: #ffd23f;
+  --crate: #ff8c42;
+  --danger: #ff4d6d;
+  --ink: #eaf2ff;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+  touch-action: none;
+}
+
+#game-wrap {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+#game {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+.hidden { display: none !important; }
+
+/* ---------- HUD ---------- */
+#hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  padding: max(12px, env(safe-area-inset-top)) 14px 0;
+}
+.hud-left, .hud-right {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.hud-left { left: 14px; flex-direction: column; align-items: flex-start; gap: 6px; }
+.hud-right { right: 14px; }
+
+.label {
+  font-size: 10px;
+  letter-spacing: 2px;
+  opacity: 0.6;
+  display: block;
+}
+#score { font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; }
+#weapon-box { text-align: right; }
+#weapon-name { font-size: 16px; font-weight: 700; color: var(--crate); }
+
+.hearts { display: flex; gap: 4px; font-size: 20px; }
+
+#power-box {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: baseline;
+  color: var(--mult);
+  font-weight: 900;
+  text-shadow: 0 2px 12px rgba(255,210,63,0.5);
+}
+#power-box .mult { font-size: 22px; opacity: 0.85; }
+#power { font-size: 40px; font-variant-numeric: tabular-nums; line-height: 1; }
+#power-box.bump { animation: bump 0.28s ease; }
+@keyframes bump {
+  0% { transform: translateX(-50%) scale(1); }
+  40% { transform: translateX(-50%) scale(1.4); }
+  100% { transform: translateX(-50%) scale(1); }
+}
+
+#mute-btn {
+  pointer-events: auto;
+  background: rgba(255,255,255,0.08);
+  border: none;
+  border-radius: 10px;
+  color: var(--ink);
+  font-size: 18px;
+  width: 40px;
+  height: 40px;
+  cursor: pointer;
+}
+
+/* ---------- Overlays ---------- */
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(circle at 50% 40%, rgba(11,16,32,0.72), rgba(4,6,14,0.94));
+  backdrop-filter: blur(3px);
+  z-index: 10;
+}
+.panel {
+  width: min(88vw, 420px);
+  text-align: center;
+  padding: 28px 26px;
+}
+.logo {
+  font-size: clamp(48px, 15vw, 92px);
+  font-weight: 900;
+  letter-spacing: 4px;
+  background: linear-gradient(180deg, #fff, var(--accent));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 10px 40px rgba(70,224,184,0.25);
+}
+.tagline { opacity: 0.8; margin: 6px 0 26px; font-size: 15px; }
+
+.big-btn {
+  background: linear-gradient(180deg, var(--accent), #22b189);
+  color: #04140f;
+  border: none;
+  border-radius: 16px;
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: 1px;
+  padding: 18px 34px;
+  cursor: pointer;
+  box-shadow: 0 10px 30px rgba(70,224,184,0.35);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+@keyframes pulse {
+  50% { transform: scale(1.05); box-shadow: 0 14px 40px rgba(70,224,184,0.5); }
+}
+.big-btn:active { transform: scale(0.97); }
+
+.how {
+  list-style: none;
+  margin-top: 26px;
+  text-align: left;
+  font-size: 14px;
+  line-height: 1.9;
+  opacity: 0.9;
+}
+.how b { color: var(--accent); }
+.c-mult { color: var(--mult) !important; }
+.c-crate { color: var(--crate) !important; }
+
+.over-title {
+  font-size: clamp(40px, 12vw, 68px);
+  font-weight: 900;
+  color: var(--danger);
+  letter-spacing: 3px;
+  text-shadow: 0 8px 30px rgba(255,77,109,0.4);
+}
+.stat-grid {
+  display: flex;
+  justify-content: center;
+  gap: 28px;
+  margin: 24px 0 10px;
+}
+.stat-grid span { font-size: 34px; font-weight: 800; display: block; }
+.stat-grid small { font-size: 10px; letter-spacing: 2px; opacity: 0.6; }
+#best-line { opacity: 0.7; margin-bottom: 22px; font-size: 14px; }
