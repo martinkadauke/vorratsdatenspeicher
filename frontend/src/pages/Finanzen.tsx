@@ -788,7 +788,7 @@ const sortPositions = (rs: BudgetPos[], sort: PosSort) => [...rs].sort((a, b) =>
 function PosRow({ p, t, onOpen }: { p: BudgetPos; t: (k: string, o?: Record<string, unknown>) => string; onOpen: (p: BudgetPos) => void }) {
   if (p.private) {
     return (
-      <li className="flex items-center gap-2 px-1 py-2">
+      <li className="flex shrink-0 items-center gap-2 px-1 py-2">
         <div className="flex min-w-0 flex-1 items-center gap-1.5 text-sm italic text-zinc-500 dark:text-zinc-400">
           <Lock size={13} className="shrink-0" />
           <span className="truncate">{t('finances.privatePurchase')}</span>
@@ -801,7 +801,7 @@ function PosRow({ p, t, onOpen }: { p: BudgetPos; t: (k: string, o?: Record<stri
     <li onClick={() => onOpen(p)} role="button" tabIndex={0}
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(p); } }}
       title={t('finances.openReceipt')}
-      className="flex cursor-pointer items-center gap-2 rounded-lg px-1 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
+      className="flex shrink-0 cursor-pointer items-center gap-2 rounded-lg px-1 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium">{p.name}</div>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-zinc-500 dark:text-zinc-400">
@@ -820,7 +820,7 @@ function PosRow({ p, t, onOpen }: { p: BudgetPos; t: (k: string, o?: Record<stri
 function CatGroup({ g, t, onOpen }: { g: { key: string; label: string; total: number; items: BudgetPos[] }; t: (k: string, o?: Record<string, unknown>) => string; onOpen: (p: BudgetPos) => void }) {
   const [open, setOpen] = useState(false);
   return (
-    <li className="overflow-hidden rounded-lg border border-zinc-100 dark:border-zinc-800">
+    <li className="shrink-0 overflow-hidden rounded-lg border border-zinc-100 dark:border-zinc-800">
       <button onClick={() => setOpen(o => !o)} className="flex w-full items-center gap-2 px-2 py-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
         <ChevronDown size={14} className={cn('shrink-0 text-zinc-400 transition-transform', !open && '-rotate-90')} />
         <span className="min-w-0 flex-1 truncate text-sm font-medium">{g.label}</span>
