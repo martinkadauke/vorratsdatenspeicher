@@ -161,9 +161,11 @@ export async function ocrFromImage(source: string, hint?: string | null): Promis
     },
     body: JSON.stringify({
       model,
-      // Headroom for long receipts AND for thinking models (e.g. Sonnet 5) that spend
-      // part of the budget on a hidden thinking block before the JSON.
-      max_tokens: 16384,
+      max_tokens: 16384,   // headroom for long receipts
+      // Disable extended thinking: sonnet-5 auto-thinks and can burn the budget + truncate
+      // BEFORE the JSON text block (→ empty → zero line items). We want extraction, not
+      // reasoning. (parseLlmJson still repairs stray quotes; Ollama uses think:false above.)
+      thinking: { type: 'disabled' },
       system: VISION_SYSTEM,
       messages: [{
         role: 'user',
@@ -248,6 +250,7 @@ export async function ocrFromText(text: string): Promise<OcrResult> {
     body: JSON.stringify({
       model,
       max_tokens: 16384,
+      thinking: { type: 'disabled' },   // see ocrFromImage — no thinking on structured extraction
       system: TEXT_SYSTEM,
       messages: [{ role: 'user', content: [{ type: 'text', text: text.slice(0, 24000) }] }],
     }),
@@ -329,6 +332,7 @@ export async function extractPayslip(buf: Buffer): Promise<PayslipResult> {
     body: JSON.stringify({
       model,
       max_tokens: 8192,
+      thinking: { type: 'disabled' },   // see ocrFromImage — no thinking on structured extraction
       system: PAYSLIP_SYSTEM,
       messages: [{ role: 'user', content: [docBlock, { type: 'text', text: 'Extrahiere die Gehaltsdaten als JSON.' }] }],
     }),
