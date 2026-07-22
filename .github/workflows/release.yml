@@ -1,33 +1,72 @@
 name: Release
 
-# Fires ONLY on a v* tag. It never touches a running stack (no deploy job) and never
-# runs on a branch push, so the dev/stage/main pipelines in cicd.yml are unaffected.
-# All it does: add the semver + :stable tags to the image the dev build already published
-# for the tagged commit (:<sha> → :X.Y.Z + :stable). Pure registry tagging, no rebuild.
+# Fires on a strict vMAJOR.MINOR.PATCH tag (or manually for an existing one). Builds the
+# image FROM THE TAGGED COMMIT with APP_VERSION baked in, and publishes :X.Y.Z (+ :stable).
+# Deploys nothing and never runs on a branch push, so cicd.yml's dev/stage/main pipelines
+# are untouched. APP_VERSION must be baked at build time — that's what lets a running
+# self-host instance know its release and show the "update available" banner.
+#
+# ⚠️ :stable is what every self-hoster pulls (README + in-app install snippet). The tag
+# filter is strict so a pre-release tag (v1.1.0-rc1) can never move it, and a manual
+# re-build of an OLDER tag must pass push_stable=false so :stable can't roll backwards.
 on:
   push:
-    tags: ['v*']
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to (re)build, e.g. v1.0.0'
+        required: true
+      push_stable:
+        description: 'Also move :stable to this build? Say false when rebuilding an OLD tag.'
+        type: boolean
+        default: true
 
 permissions:
   contents: read
   packages: write
 
 jobs:
-  retag:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Login to GHCR
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-      - name: Tag the tagged commit's image as :X.Y.Z and :stable
+      - id: v
+        # Via env, never interpolated into the script body (a tag is attacker-ish input).
         env:
-          REPO: ghcr.io/${{ github.repository }}
-          TAG: ${{ github.ref_name }}
-          SHA: ${{ github.sha }}
+          TAG_IN: ${{ github.event.inputs.tag || github.ref_name }}
+          STABLE_IN: ${{ github.event.inputs.push_stable }}
         run: |
-          VER="${TAG#v}"   # v1.0.0 -> 1.0.0
-          echo "Tagging ${REPO}:${SHA:0:12} as :${VER} and :stable (no rebuild) ..."
-          docker buildx imagetools create \
-            -t "${REPO}:${VER}" \
-            -t "${REPO}:stable" \
-            "${REPO}:${SHA}"
-          echo "✅ ${REPO}:${VER} and :stable now point at ${SHA:0:12}"
+          TAG="$TAG_IN"
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::tag must be vMAJOR.MINOR.PATCH — got '$TAG'"; exit 1
+          fi
+          echo "tag=$TAG"                                    >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}"                            >> "$GITHUB_OUTPUT"
+          # tag push → no input → default to moving :stable; dispatch honours the checkbox.
+          if [ "$STABLE_IN" = "false" ]; then echo "stable=no" >> "$GITHUB_OUTPUT"; else echo "stable=yes" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.v.outputs.tag }}
+      # The tag's own commit — on a manual dispatch github.sha is the branch head, not the tag.
+      - id: c
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ steps.v.outputs.version }}
+            ${{ steps.v.outputs.stable == 'yes' && format('ghcr.io/{0}:stable', github.repository) || '' }}
+          build-args: |
+            GIT_SHA=${{ steps.c.outputs.sha }}
+            GIT_REF=${{ steps.v.outputs.tag }}
+            APP_VERSION=${{ steps.v.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - run: echo "✅ published :${{ steps.v.outputs.version }} (stable=${{ steps.v.outputs.stable }}) APP_VERSION=${{ steps.v.outputs.version }}"

@@ -14,6 +14,7 @@ import { cn } from '../lib/utils';
 import { NAV, MOBILE_PRIMARY, navExtras } from '../lib/nav';
 import { BugReportButton } from './BugReportButton';
 import { InstallButton } from './InstallButton';
+import { UpdateBanner } from './UpdateBanner';
 
 /** Colour-coded environment badge keyed on the runtime VDS_ENV (prod/stage/dev),
  *  which is reliable even when branches share a commit SHA. Unknown → no badge. */
@@ -137,6 +138,7 @@ export function Layout() {
 
         {/* Content */}
         <main className="min-w-0 flex-1 p-3 pb-24 sm:p-4 md:pb-8">
+          <UpdateBanner />
           {user && user.can_write === false && !user.is_admin && (
             <div className="mb-3 flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700/50 dark:bg-amber-950/40 dark:text-amber-300">
               <Eye size={16} className="shrink-0" />

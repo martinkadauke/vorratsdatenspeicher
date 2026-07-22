@@ -38,7 +38,7 @@ You need [Docker](https://docs.docker.com/get-docker/). Save this as `docker-com
 ```yaml
 services:
   vds:
-    image: ghcr.io/martinkadauke/vorratsdatenspeicher:latest
+    image: ghcr.io/martinkadauke/vorratsdatenspeicher:stable
     ports: ["8766:80"]                                 # open http://localhost:8766
     environment:
       DATABASE_URL: postgres://vds:vds@db:5432/vds

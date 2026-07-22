@@ -1265,6 +1265,17 @@
     "krypto": "Crypto account",
     "depot": "Securities account"
   },
+  "update": {
+    "available": "Version {{version}} available",
+    "whatsNew": "What's new?",
+    "title": "Update to {{version}}",
+    "current": "You're running version {{current}} — latest stable: {{latest}}.",
+    "howto": "To update (in the folder with your docker-compose.yml):",
+    "copy": "Copy command",
+    "copied": "Command copied",
+    "viewOnGithub": "View release on GitHub",
+    "dismiss": "Dismiss"
+  },
   "common": {
     "searchOps": "Search operators: “eggs organic” = both · “apples, bananas” = or · “eggs -organic” = without “organic” · \"exact phrase\" · laden:lidl · kategorie:fruit · preis>2 (accent/case-insensitive)",
     "save": "Save",

@@ -4,7 +4,7 @@ import { Download, X, Github } from 'lucide-react';
 
 const COMPOSE = `services:
   vds:
-    image: ghcr.io/martinkadauke/vorratsdatenspeicher:latest
+    image: ghcr.io/martinkadauke/vorratsdatenspeicher:stable
     ports: ["8766:80"]
     environment:
       DATABASE_URL: postgres://vds:vds@db:5432/vds

@@ -66,7 +66,9 @@ jobs:
           context: .
           push: true
           # dev is the always-current channel (demo tracks it, prod runs nowhere), so the dev
-          # build ALSO publishes :latest — that's what self-hosters pull per the README.
+          # build ALSO publishes :latest = the bleeding-edge channel. Self-hosters are pointed
+          # at :stable instead (published by release.yml from a v* tag, with APP_VERSION baked
+          # so the in-app update banner works) — see README.
           tags: |
             ghcr.io/${{ github.repository }}:${{ needs.meta.outputs.tag }}
             ghcr.io/${{ github.repository }}:${{ github.sha }}

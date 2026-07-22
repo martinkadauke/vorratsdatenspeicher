@@ -1267,6 +1267,17 @@
     "krypto": "Krypto-Konto",
     "depot": "Depot"
   },
+  "update": {
+    "available": "Version {{version}} verfügbar",
+    "whatsNew": "Was ist neu?",
+    "title": "Update auf {{version}}",
+    "current": "Du läufst auf Version {{current}} — neueste stabile Version: {{latest}}.",
+    "howto": "So aktualisierst du (im Verzeichnis mit deiner docker-compose.yml):",
+    "copy": "Befehl kopieren",
+    "copied": "Befehl kopiert",
+    "viewOnGithub": "Release auf GitHub ansehen",
+    "dismiss": "Ausblenden"
+  },
   "common": {
     "searchOps": "Suchoperatoren: »eier bio« = beide · »äpfel, bananen« = oder · »eier -bio« = ohne »bio« · \"genaue phrase\" · laden:lidl · kategorie:obst · preis>2 (Akzente/Groß-klein egal)",
     "save": "Speichern",

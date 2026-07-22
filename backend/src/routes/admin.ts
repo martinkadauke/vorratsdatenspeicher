@@ -50,7 +50,83 @@ function estCostUsd(model: string, inTok: number, outTok: number): number {
 }
 const VALID_TASKS: AiTask[] = ['recategorize', 'churner_stage1', 'churner_stage2', 'ocr', 'categories_chat', 'model_review'];
 
+// ── update check (self-hosters) ───────────────────────────────────────────
+// Upstream repo — a fork still gets upstream's release info, which is what a
+// self-hoster wants to know about.
+const RELEASES_URL = 'https://api.github.com/repos/martinkadauke/vorratsdatenspeicher/releases?per_page=30';
+interface GhRelease { tag_name: string; name: string | null; body: string | null; html_url: string; published_at: string; draft: boolean; prerelease: boolean }
+// In-memory so a restart just re-fetches; 6h TTL keeps us far under GitHub's
+// unauthenticated 60 req/h even with several replicas.
+let relCache: { at: number; releases: GhRelease[] } | null = null;
+let relFailUntil = 0;                        // don't re-hit GitHub on every page load after a failure
+const REL_TTL = 6 * 60 * 60 * 1000;
+const REL_FAIL_BACKOFF = 15 * 60 * 1000;
+/** Compare two semvers ("1.2.3" / "v1.2.3"). >0 → a is newer. */
+function cmpSemver(a: string, b: string): number {
+  const p = (s: string) => s.replace(/^v/, '').split('.').map(n => parseInt(n, 10) || 0);
+  const [x, y] = [p(a), p(b)];
+  for (let i = 0; i < 3; i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) > (y[i] ?? 0) ? 1 : -1;
+  return 0;
+}
+
 export function adminRoutes(app: FastifyInstance): void {
+  /** Is a newer STABLE release out than the one this container was built as?
+   *  Only meaningful on a release image (APP_VERSION baked) — a dev-channel build
+   *  reports channel:'dev' and never nags. `notes` carries every release newer than
+   *  the running one, so the banner can show what was built since. */
+  app.get('/api/update-check', { preHandler: requireOperator }, async () => {
+    const raw = process.env.APP_VERSION || '';
+    // Only a real semver counts as a release build — a self-hoster who pins
+    // APP_VERSION=latest must not get a permanent "update available".
+    const current = /^\d+\.\d+\.\d+$/.test(raw) ? raw : null;
+    if (!current) return { channel: 'dev' as const, current: null, update_available: false, notes: [] };
+
+    const now = Date.now();
+    let err: string | null = null;
+    if (!(relCache && now - relCache.at < REL_TTL) && now >= relFailUntil) {
+      try {
+        const res = await fetch(RELEASES_URL, {
+          headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'vds-update-check' },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!res.ok) throw new Error(`GitHub HTTP ${res.status}`);
+        const json: unknown = await res.json();
+        // A proxy/captive portal can answer 200 with a non-array body — caching that would
+        // blow up .filter() below on every later request until the TTL expired.
+        if (!Array.isArray(json)) throw new Error('unexpected GitHub payload');
+        relCache = { at: now, releases: json as GhRelease[] };
+      } catch (e) {
+        // Offline / rate-limited / air-gapped: back off, and keep serving the stale cache
+        // instead of discarding what we already knew.
+        relFailUntil = now + REL_FAIL_BACKOFF;
+        err = String((e as Error)?.message ?? e).slice(0, 120);
+      }
+    }
+    const releases = relCache?.releases ?? null;
+    if (!releases) return { channel: 'release' as const, current, update_available: false, notes: [], ...(err ? { error: err } : {}) };
+
+    // Strict semver: a release someone forgot to flag as pre-release (1.2.0-rc1) must not
+    // be treated as stable.
+    const stable = releases.filter(r => !r.draft && !r.prerelease && /^v?\d+\.\d+\.\d+$/.test(r.tag_name));
+    const newest = [...stable].sort((a, b) => cmpSemver(b.tag_name, a.tag_name))[0] ?? null;
+    const newer = [...stable].filter(r => cmpSemver(r.tag_name, current) > 0)
+      .sort((a, b) => cmpSemver(b.tag_name, a.tag_name));
+    return {
+      channel: 'release' as const,
+      current,
+      latest: newest ? newest.tag_name.replace(/^v/, '') : current,
+      update_available: newer.length > 0,
+      url: newest?.html_url ?? null,
+      published_at: newest?.published_at ?? null,
+      notes: newer.map(r => ({
+        version: r.tag_name.replace(/^v/, ''),
+        name: r.name ?? r.tag_name,
+        body: (r.body ?? '').slice(0, 8000),
+        published_at: r.published_at,
+      })),
+    };
+  });
+
   // ── app config ──────────────────────────────────────────────────────────
   app.get('/api/config', { preHandler: requireAdmin }, async (req) => {
     const cfg = await getAllConfig();

@@ -121,6 +121,8 @@ async function main(): Promise<void> {
   app.get('/api/version', async () => ({
     sha: process.env.GIT_SHA ?? 'unknown',
     ref: process.env.GIT_REF ?? 'unknown',
+    // Semver on a RELEASE image (baked by the release workflow); null on dev builds.
+    version: process.env.APP_VERSION || null,
     // Runtime env (prod/stage/dev), injected at deploy time — reliable even when
     // several branches share a commit SHA (and thus the same baked image/GIT_REF).
     env: process.env.VDS_ENV ?? null,
