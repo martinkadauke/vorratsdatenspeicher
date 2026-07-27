@@ -70,6 +70,7 @@ async function seedWork(eventId: number, onlyMissing: boolean): Promise<void> {
         system: PROMPT,
         user: JSON.stringify({ produkte: batch.map(b => ({ canonical: b.name, erfasste_einheit: b.common_unit })) }),
         json: true,
+        arrayResult: true,   // prompt returns [{canonical,base_unit}]
       }));
     } catch (e) {
       console.error(`[seed-units] batch at ${i} failed: ${(e as Error).message}`);

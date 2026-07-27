@@ -8,6 +8,15 @@ export interface LlmChatOptions {
   system: string;
   user: string;
   json?: boolean;
+  /** The prompt asks for a top-level JSON **array** (e.g. recategorize's
+   *  `[{id,category_path}]`). Providers must then NOT send the OpenAI-style
+   *  `response_format: json_object`, which forces an OBJECT: the model complies by
+   *  degrading the content — measured on deepseek-v4-flash, recategorize returned
+   *  "Sonstiges/Unkategorisiert" for 20/20 items WITH the flag vs real categories
+   *  without it (that's the `fallback == total` signature in churner summaries).
+   *  Same hazard Ollama's `format:'json'` has (see OllamaProvider). parseLlmJson
+   *  extracts arrays fine without the flag. */
+  arrayResult?: boolean;
 }
 
 export interface LlmProvider {
@@ -109,7 +118,7 @@ class DeepSeekProvider implements LlmProvider {
       body: JSON.stringify({
         model: this.model,
         temperature: 0.1,
-        response_format: opts.json ? { type: 'json_object' } : undefined,
+        response_format: opts.json && !opts.arrayResult ? { type: 'json_object' } : undefined,
         messages: [
           { role: 'system', content: opts.system },
           { role: 'user', content: opts.user },
@@ -168,7 +177,7 @@ class OpenAIProvider implements LlmProvider {
       body: JSON.stringify({
         model: this.model,
         temperature: 0.1,
-        response_format: opts.json ? { type: 'json_object' } : undefined,
+        response_format: opts.json && !opts.arrayResult ? { type: 'json_object' } : undefined,
         messages: [
           { role: 'system', content: opts.system },
           { role: 'user', content: opts.user },

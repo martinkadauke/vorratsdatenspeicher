@@ -67,6 +67,7 @@ export async function processRecategorizeBatch(
           gueltige_pfade: validPaths,
         }),
         json: true,
+        arrayResult: true,   // prompt returns [{id,category_path}] — see LlmChatOptions
       }));
     } catch (err) {
       console.error(`[recategorize] batch at ${i} failed: ${(err as Error).message} — falling through to per-item fallback`);
@@ -121,6 +122,7 @@ export async function recategorizeOne(artikelId: number): Promise<string | null>
       gueltige_pfade: validPaths,
     }),
     json: true,
+    arrayResult: true,
   }));
 
   const asg = Array.isArray(assignments) ? assignments[0] : null;
