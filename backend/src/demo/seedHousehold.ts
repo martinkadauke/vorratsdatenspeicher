@@ -2,6 +2,7 @@ import type { TransactionSql } from 'postgres';
 import sql, { DEMO_MODE } from '../db.js';
 import { ocrKey } from '../lib/canonicalAlias.js';
 import { DEMO_SEED_RECEIPTS } from './seedReceipts.js';
+import { DEMO_SEED_ICONS } from './seedIcons.js';
 import { DEMO_TREES, type DemoTreeKey } from './seedTrees.js';
 
 /** Granularity the intro wizard offers. Defaults to 'medium' until the user picks.
@@ -71,6 +72,17 @@ export async function seedDemoHousehold(
 ): Promise<void> {
   if (!DEMO_MODE) return;
   const known = await installTree(tx, householdId, tree);
+
+  // Product images. canonical_meta is per-household, and the job that normally fills it
+  // (runIconFetch) is a scheduled churner run that a 24h-throwaway household never sees —
+  // without this the seeded receipts would show 68 grey placeholders on a page the visitor
+  // reaches seconds after signing up. Pre-harvested URLs, so no SearXNG call either.
+  if (DEMO_SEED_ICONS.length) {
+    await tx`INSERT INTO canonical_meta ${tx(DEMO_SEED_ICONS.map(i => ({
+      canonical_name: i.name, icon_url: i.url, source: 'demo-seed',
+      updated_at: new Date(), updated_by: null, household_id: householdId,
+    })))} ON CONFLICT DO NOTHING`;
+  }
 
   // Dates are relative to signup (a fixed date would age badly) but CLAMPED to the first of
   // the current month: signing up on the 3rd would otherwise push most receipts into last

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import sql from '../db.js';
+import sql, { DEMO_MODE } from '../db.js';
 import { getConfig } from '../config.js';
 
 interface SearxImage { thumbnail_src?: string; img_src?: string; url?: string; title?: string; source?: string }
@@ -18,17 +18,38 @@ export function iconRoutes(app: FastifyInstance): void {
     const { icon_url, source } = (req.body ?? {}) as { icon_url?: string | null; source?: string };
     if (icon_url === undefined) return reply.code(400).send({ error: 'icon_url required (or null to clear)' });
 
+    // Clearing the icon must not drop the row: canonical_meta also holds base_unit,
+    // track_vorrat, reserve_min, expected_price and the consumption override — a DELETE
+    // here would silently reset all of a product's settings.
     if (!icon_url) {
-      await sql`DELETE FROM canonical_meta WHERE canonical_name = ${name}`;
+      await sql`
+        UPDATE canonical_meta
+        SET icon_url = NULL, source = NULL, updated_at = NOW(), updated_by = ${req.user?.id ?? null}
+        WHERE canonical_name = ${name}`;
       return { ok: true, cleared: true };
     }
-    await sql`
-      INSERT INTO canonical_meta (canonical_name, icon_url, source, updated_at, updated_by)
-      VALUES (${name}, ${icon_url}, ${source ?? 'manual'}, NOW(), ${req.user?.id ?? null})
-      ON CONFLICT (canonical_name) DO UPDATE
-        SET icon_url = EXCLUDED.icon_url, source = EXCLUDED.source,
-            updated_at = NOW(), updated_by = EXCLUDED.updated_by
-    `;
+    // Update-then-insert rather than ON CONFLICT: the conflict target differs per env (PK is
+    // canonical_name off-demo, (household_id, canonical_name) on the demo — migration 087), so
+    // naming one shape raises 42P10 on the other. RLS already scopes the UPDATE to this
+    // household. `household_id` is a demo-only column and must be passed explicitly there:
+    // it defaults to 1, which on the demo means the operator's household and an RLS failure.
+    const uid = req.user?.id ?? null;
+    const src = source ?? 'manual';
+    const upd = await sql`
+      UPDATE canonical_meta
+      SET icon_url = ${icon_url}, source = ${src}, updated_at = NOW(), updated_by = ${uid}
+      WHERE canonical_name = ${name}`;
+    if (upd.count === 0) {
+      if (DEMO_MODE) {
+        await sql`
+          INSERT INTO canonical_meta (canonical_name, icon_url, source, updated_at, updated_by, household_id)
+          VALUES (${name}, ${icon_url}, ${src}, NOW(), ${uid}, ${req.user?.household_id ?? 1})`;
+      } else {
+        await sql`
+          INSERT INTO canonical_meta (canonical_name, icon_url, source, updated_at, updated_by)
+          VALUES (${name}, ${icon_url}, ${src}, NOW(), ${uid})`;
+      }
+    }
     return { ok: true };
   });
 
