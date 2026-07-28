@@ -152,7 +152,13 @@
     "incomeActualTitle": "Erfasste Zahlungseingänge",
     "incomeShort": "Einnahme",
     "noIncomeFound": "kein Zahlungseingang gefunden",
-    "incomeSource": { "salary": "Gehalt", "freelance": "Freiberuflich", "gift": "Geschenk", "refund": "Erstattung", "other": "Sonstiges" },
+    "incomeSource": {
+      "salary": "Gehalt",
+      "freelance": "Freiberuflich",
+      "gift": "Geschenk",
+      "refund": "Erstattung",
+      "other": "Sonstiges"
+    },
     "checkedOf": "{{done}}/{{total}} geprüft",
     "ofTarget": "von {{target}} Ziel",
     "checkTitle": "Fixkosten-Check",
@@ -238,8 +244,15 @@
     "amount": "Betrag (€)",
     "frequency": "Häufigkeit",
     "amortizedHint": "≈ {{v}}/Monat",
-    "freq": { "monthly": "monatlich", "quarterly": "quartalsweise", "yearly": "jährlich" },
-    "freqPer": { "quarterly": "/Quartal", "yearly": "/Jahr" },
+    "freq": {
+      "monthly": "monatlich",
+      "quarterly": "quartalsweise",
+      "yearly": "jährlich"
+    },
+    "freqPer": {
+      "quarterly": "/Quartal",
+      "yearly": "/Jahr"
+    },
     "pickerTitle": "Rechnung zuordnen",
     "pickerSearch": "Händler suchen …",
     "pickerEmpty": "Keine Rechnungen in diesem Monat. Fixkosten werden nur mit Rechnungen belegt (E-Mail/Upload) – Kassenbons zählen nicht.",
@@ -375,7 +388,8 @@
     "hint": "Nichts ist Pflicht — Hauptsache angelegt. Details kannst du später jederzeit ergänzen.",
     "save": "Anlegen",
     "created": "Einkauf angelegt",
-    "createdOcr": "Angelegt — wird im Hintergrund ausgelesen"
+    "createdOcr": "Angelegt — wird im Hintergrund ausgelesen",
+    "sampleName": "Beispiel-Bon.jpg"
   },
   "receiptDetail": {
     "avoidedWarning": "Enthält Artikel von der Vermeiden-Liste",
@@ -1131,7 +1145,12 @@
       "body": "Konten bündeln Ausgaben — z. B. ein gemeinsames Haushaltskonto oder Bargeld pro Person. Ein Haushaltskonto ist schon angelegt (Name & Typ editierbar). Optional weitere hinzufügen.",
       "shared": "gemeinsam",
       "namePlaceholder": "Kontoname",
-      "types": { "bar": "Bar", "karte": "Karte", "kreditkarte": "Kreditkarte", "paypal": "PayPal" }
+      "types": {
+        "bar": "Bar",
+        "karte": "Karte",
+        "kreditkarte": "Kreditkarte",
+        "paypal": "PayPal"
+      }
     },
     "models": {
       "title": "KI-Modelle pro Aufgabe",
@@ -1149,14 +1168,28 @@
     "email": {
       "title": "E-Mail senden (SMTP)",
       "body": "Damit VDS Einkaufslisten & Angebote per E-Mail verschicken kann. Optional.",
-      "host": "SMTP-Host", "port": "Port", "user": "Benutzer", "pass": "Passwort", "from": "Absender", "secure": "SSL/TLS (Port 465)",
-      "to": "Test-Mail an", "test": "Test senden", "testOk": "Testmail versendet"
+      "host": "SMTP-Host",
+      "port": "Port",
+      "user": "Benutzer",
+      "pass": "Passwort",
+      "from": "Absender",
+      "secure": "SSL/TLS (Port 465)",
+      "to": "Test-Mail an",
+      "test": "Test senden",
+      "testOk": "Testmail versendet"
     },
     "imap": {
       "title": "E-Mail-Import (IMAP)",
       "body": "VDS kann Belege automatisch aus deinem Postfach holen (z. B. weitergeleitete PDF-Rechnungen). Optional — dein Postfach, Passwort verschlüsselt gespeichert.",
-      "host": "IMAP-Host", "port": "Port", "user": "Benutzer", "pass": "Passwort", "secure": "SSL/TLS (Port 993)",
-      "test": "Verbindung testen", "save": "Speichern", "saved": "Postfach gespeichert", "testOk": "Verbindung erfolgreich"
+      "host": "IMAP-Host",
+      "port": "Port",
+      "user": "Benutzer",
+      "pass": "Passwort",
+      "secure": "SSL/TLS (Port 993)",
+      "test": "Verbindung testen",
+      "save": "Speichern",
+      "saved": "Postfach gespeichert",
+      "testOk": "Verbindung erfolgreich"
     },
     "done": {
       "title": "Fertig — alles bereit!",

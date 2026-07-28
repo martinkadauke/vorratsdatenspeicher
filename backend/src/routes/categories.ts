@@ -1,9 +1,11 @@
 import type { FastifyInstance } from 'fastify';
-import sql from '../db.js';
+import sql, { DEMO_MODE, withHousehold } from '../db.js';
 import { requireAdmin } from '../auth/plugin.js';
 import { providerForTask } from '../llm/provider.js';
 import { parseLlmJson } from '../llm/ollama.js';
 import { getConfig } from '../config.js';
+import { claimDemoRecat, claimDemoChat, chatLimitMessage } from '../demo/limits.js';
+import { processRecategorizeBatch } from '../maintenance/recategorize.js';
 
 const CATEGORY_DESIGNER_PROMPT = `Du bist ein Kategorien-Architekt für „Vorratsdatenspeicher" — eine Haushalts-App, die Kassenbons erfasst und Ausgaben nach Kategorien auswertet.
 
@@ -119,6 +121,11 @@ export function categoryRoutes(app: FastifyInstance): void {
     if (!Array.isArray(messages) || !messages.length) {
       return reply.code(400).send({ error: 'messages required' });
     }
+    // Demo: this is a raw LLM chat any visitor can call in a loop — cap the turns.
+    if (DEMO_MODE) {
+      const claim = await claimDemoChat(req.user?.household_id);
+      if (!claim.ok) return reply.code(429).send({ error: chatLimitMessage(claim.max) });
+    }
 
     // Live context: current catalog with usage counts + a sample of real items
     const cats = await sql`
@@ -210,7 +217,11 @@ export function categoryRoutes(app: FastifyInstance): void {
         await tx`
           INSERT INTO category (path, parent_path, display, display_en, level, sort_order, emoji, is_meta)
           VALUES (${c.path}, ${parent}, ${parts[parts.length - 1]}, ${c.display_en}, ${level}, ${sortOrder++}, ${c.emoji}, FALSE)
-          ON CONFLICT (path) DO UPDATE SET emoji = EXCLUDED.emoji, sort_order = EXCLUDED.sort_order
+          -- Arbiter-free: the demo schema replaced UNIQUE(path) with UNIQUE(household_id, path)
+          -- (migrations/demo/087), so naming (path) here raises 42P10 there. DO NOTHING parses
+          -- on both, and the DO UPDATE branch was unreachable anyway — the DELETE above clears
+          -- every non-meta row first and the seen-set dedupes the batch.
+          ON CONFLICT DO NOTHING
         `;
       }
       await tx`
@@ -224,6 +235,24 @@ export function categoryRoutes(app: FastifyInstance): void {
       WHERE category_path IS NOT NULL
         AND category_path NOT IN (SELECT path FROM category)
     `;
-    return { ok: true, categories: ordered.length, orphaned_artikel: orphans.n };
+
+    // Off-demo the nightly churn re-sorts the now-dangling paths. A demo household is
+    // deleted before that ever runs, so re-categorise straight away — subject to the demo
+    // ceiling, since this is a burst of AI calls a stranger could otherwise trigger on repeat.
+    let recategorized = false;
+    if (DEMO_MODE) {
+      const claim = await claimDemoRecat(req.user?.household_id);
+      if (claim.ok) {
+        recategorized = true;
+        const hid = req.user!.household_id ?? 1;
+        // Background: the tenant connection is released when this response ends, so the job
+        // needs its own household scope.
+        void withHousehold(hid, () => processRecategorizeBatch(false))
+          .catch(e => req.log.error(`demo recategorize after apply failed: ${(e as Error).message}`));
+      } else {
+        req.log.info(`demo recategorize skipped — household ${req.user!.household_id} hit the ${claim.max}-run cap`);
+      }
+    }
+    return { ok: true, categories: ordered.length, orphaned_artikel: orphans.n, recategorized };
   });
 }

@@ -62,7 +62,9 @@ export function Onboarding() {
   // the slim wizard (own-household address / categories / family, saved to their row).
   const isSuper = !!user?.is_super_admin;
   const fullWizard = !demo || isSuper;
-  const STEP_META = fullWizard ? FULL_STEPS : SLIM_STEPS;
+  // IMAP is disabled entirely on the demo (the backend doesn't even register the routes),
+  // so drop that step — it applies to the demo super-admin's full wizard too.
+  const STEP_META = (fullWizard ? FULL_STEPS : SLIM_STEPS).filter(s => !(demo && s.key === 'imap'));
   const show = !!user?.is_admin && user?.onboarding_done === false;
 
   const { data: config } = useQuery({ queryKey: ['config'], queryFn: () => api<Record<string, unknown>>('/api/config'), enabled: show });

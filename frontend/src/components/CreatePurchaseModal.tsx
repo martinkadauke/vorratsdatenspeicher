@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -7,14 +7,23 @@ import { api } from '../api/client';
 import { Modal, Button, Input, Label, Select } from './ui';
 import { toast } from './Toast';
 import { cn, fileToResizedDataUrl, fileToDataUrl } from '../lib/utils';
+import { useAuth } from '../context/auth';
+
+/** Bundled example receipt for the demo's first-run scan (frontend/public/demo-receipts). */
+const SAMPLE_RECEIPT = '/demo-receipts/demo-6-erstscan-aldi.jpg';
 
 interface StoreRow { display: string; raw: string[]; filialen?: { name: string }[] }
 interface Konto { id: number; name: string; is_shared: boolean; is_cash: boolean }
 
 /** Quick manual purchase entry (cash or card) with an optional photo. Nothing
- *  is required; if a photo is added it's OCR'd in the background server-side. */
-export function CreatePurchaseModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+ *  is required; if a photo is added it's OCR'd in the background server-side.
+ *
+ *  `sample` (demo build only): pre-load the bundled example receipt so the first-run tour
+ *  is a single tap — the user presses Speichern and watches the real OCR fill in the items,
+ *  instead of having to find a receipt photo on their phone before seeing anything work. */
+export function CreatePurchaseModal({ open, sample = false, onClose }: { open: boolean; sample?: boolean; onClose: () => void }) {
   const { t } = useTranslation();
+  const { demo } = useAuth();
   const qc = useQueryClient();
   const navigate = useNavigate();
   const today = () => new Date().toISOString().slice(0, 10);
@@ -61,9 +70,48 @@ export function CreatePurchaseModal({ open, onClose }: { open: boolean; onClose:
     setKontoId(String(fallback.id));
   }, [open, kontenForMethod, quelle, kontoId]);
 
+  // Demo first-run: fetch the bundled receipt and drop it in as if the user had picked it,
+  // so "Speichern" is the only step left. Silently does nothing if the fetch fails — the
+  // dialog then behaves exactly like the normal one.
+  //
+  // The deps deliberately exclude photo/photoBusy/t: this effect WRITES photoBusy, so
+  // depending on it made the effect re-run, which ran the previous cleanup (cancelled = true)
+  // while the fetch was still in flight — the photo never landed and photoBusy stuck on,
+  // disabling Speichern forever. A ref latch replaces the state read for "already ran".
+  const sampleTried = useRef(false);
+  useEffect(() => {
+    if (!open || !sample || !demo || sampleTried.current) return;
+    sampleTried.current = true;
+    let cancelled = false;
+    setPhotoBusy(true);
+    void (async () => {
+      try {
+        const res = await fetch(SAMPLE_RECEIPT);
+        if (!res.ok) throw new Error(String(res.status));
+        const blob = await res.blob();
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const fr = new FileReader();
+          fr.onload = () => resolve(String(fr.result));
+          fr.onerror = () => reject(new Error('read failed'));
+          fr.readAsDataURL(blob);
+        });
+        if (cancelled) return;
+        setPhoto(dataUrl);
+        setPhotoMime('image/jpeg');
+        setPhotoName(t('createPurchase.sampleName'));
+      } catch { /* leave the dialog empty — user can still pick their own */ }
+      // Unconditional: a stale fetch must still release the button, or the dialog stays
+      // stuck on "Verarbeite …" for the rest of the session (the modal never unmounts).
+      finally { setPhotoBusy(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [open, sample, demo, t]);
+
   const reset = () => {
     setQuelle('zettel'); setLaden(''); setDatum(today()); setBetrag('');
-    setKontoId(''); setPhoto(null); setPhotoMime('image/jpeg'); setPhotoName(''); setIsPrivate(false);
+    setKontoId(''); setPhoto(null); setPhotoMime('image/jpeg'); setPhotoName('');
+    setPhotoBusy(false); setIsPrivate(false);
+    sampleTried.current = false;   // a replayed tour may preload again
   };
   const close = () => { reset(); onClose(); };
 

@@ -1,11 +1,12 @@
 import type { FastifyInstance } from 'fastify';
-import sql from '../db.js';
+import sql, { DEMO_MODE } from '../db.js';
 import { requireAdmin, requireOperator } from '../auth/plugin.js';
 import { runChurn, isChurnRunning, requestChurnStop, runIconFetch } from '../churner/index.js';
 import { runRecategorize, isRecategorizeRunning, recategorizeOne } from '../maintenance/recategorize.js';
 import { runSeedBaseUnits, isSeedUnitsRunning } from '../maintenance/seedUnits.js';
 import { runSupermarketInfo, isSupermarketRunning } from '../supermarket/info.js';
 import { getConfig } from '../config.js';
+import { claimDemoRecat, recatLimitMessage } from '../demo/limits.js';
 import { PROGRESS_FRESH_MS, type JobProgress } from '../maintenance/progress.js';
 
 export function maintenanceRoutes(app: FastifyInstance): void {
@@ -37,6 +38,12 @@ export function maintenanceRoutes(app: FastifyInstance): void {
 
   app.post('/api/maintenance/recategorize', { preHandler: requireOperator }, async (req, reply) => {
     const { only_missing } = (req.body ?? {}) as { only_missing?: boolean };
+    // Demo only: a household gets a handful of recategorisation runs, then it's done — the
+    // data is deleted within 24h anyway and each run is a burst of AI calls.
+    if (DEMO_MODE) {
+      const claim = await claimDemoRecat(req.user?.household_id);
+      if (!claim.ok) return reply.code(429).send({ error: recatLimitMessage(claim.max) });
+    }
     try {
       const eventId = await runRecategorize(only_missing ?? false);
       return { ok: true, event_id: eventId };

@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import sql, { adminSql, DEMO_MODE } from '../db.js';
 import { requirePlatformAdmin } from '../auth/plugin.js';
 import { sendMail, type MailAttachment } from '../mailer.js';
-import { feedbackEmail } from '../email/templates.js';
+import { feedbackEmail, feedbackThanksEmail } from '../email/templates.js';
 
 /** Bug report / feedback — available in ALL builds (the header "Feedback" button, plus the
  *  demo's floating button). Reports are stored in the global (no-RLS) bug_report table and
@@ -45,6 +45,17 @@ export function feedbackRoutes(app: FastifyInstance): void {
         const mail = feedbackEmail({ message: message.trim(), page: ctx.page, from: req.user?.email ?? req.user?.username ?? 'anonym', householdId: req.user?.household_id ?? null, householdName });
         await sendMail('webmaster@vorratsdatenspeicher.com', mail.subject, mail.text, mail.html, req.user?.email ?? undefined, attachments);
       } catch (err) { req.log.error(`feedback mail failed: ${(err as Error).message}`); }
+
+      // Thank the sender and tell them VDS is free + self-hostable — someone who just took the
+      // time to write in is the best person to hear it. Separate try/catch so a bounce here can
+      // never cost the operator their copy of the report above.
+      const to = req.user?.email;
+      if (to) {
+        try {
+          const thanks = feedbackThanksEmail();
+          await sendMail(to, thanks.subject, thanks.text, thanks.html);
+        } catch (err) { req.log.error(`feedback thank-you mail failed: ${(err as Error).message}`); }
+      }
     })();
     return { ok: true };
   });

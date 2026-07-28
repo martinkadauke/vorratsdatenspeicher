@@ -3,13 +3,14 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import Jimp from 'jimp';
-import sql from '../db.js';
+import sql, { DEMO_MODE, withHousehold } from '../db.js';
 import { requireAdmin } from '../auth/plugin.js';
 import { kontoScope, canSeeKonto } from '../auth/konto.js';
 import { accountHasStatements } from './konten.js';
 import { ocrFromImage, type OcrResult } from '../llm/ocr.js';
 import { searchFilter, col, numCol, lk, type Frag } from '../lib/search.js';
 import { cleanMatch } from '../lib/canonicalMatch.js';
+import { claimDemoOcr, ocrLimitMessage } from '../demo/limits.js';
 import { ocrKey, loadAliasMap, loadUserAliasKeys, recordAliases } from '../lib/canonicalAlias.js';
 import { triggerChurnAfterOcr } from '../churner/index.js';
 
@@ -40,6 +41,11 @@ function receiptSearch(e: Frag) {
 /** Local mount where receipt photos are persisted on disk. Host path is
  *  mapped here via the docker volume in deploy/stack.yml. */
 const RECEIPTS_LOCAL_PATH = process.env.RECEIPTS_LOCAL_PATH ?? '/receipts';
+
+/** Run fire-and-forget work that outlives the request under its own tenant scope.
+ *  Off-demo there is no RLS and `sql` is just the pool, so this stays a plain call. */
+const bgHousehold = <T>(householdId: number | null | undefined, fn: () => Promise<T>): Promise<T> =>
+  DEMO_MODE ? withHousehold(householdId ?? 1, fn) : fn();
 
 /** Turn a verbose OCR'd store name into "Chain City", e.g.
  *  "ALDI Süd Graethäuser Straße 15, 72810 Gomaringen" → "ALDI Gomaringen".
@@ -279,6 +285,13 @@ export function receiptRoutes(app: FastifyInstance): void {
       gesamt_betrag?: number | string; konto_id?: number | null;
       photo_base64?: string; photo_mime?: string; ocr?: boolean; private?: boolean;
     };
+    // Demo only: charge the OCR quota — and ONLY when a photo is attached, since a manual
+    // entry costs nothing. Counted cumulatively, so deleting the receipt afterwards does not
+    // hand the slot back (the tokens were spent either way).
+    if (DEMO_MODE && b.photo_base64) {
+      const claim = await claimDemoOcr(req.user?.household_id);
+      if (!claim.ok) return reply.code(429).send({ error: ocrLimitMessage(claim.max) });
+    }
     const quelle = b.quelle === 'bar' ? 'bar' : 'zettel'; // cash → bar; card → normal store receipt
     const datum = (b.datum && /^\d{4}-\d{2}-\d{2}$/.test(b.datum)) ? b.datum : new Date().toISOString().slice(0, 10);
     const laden = (b.roh_ladenname ?? '').toString().trim() || null;
@@ -322,9 +335,14 @@ export function receiptRoutes(app: FastifyInstance): void {
     // OCR just leaves the created receipt + photo for manual entry / re-OCR.
     if (bildPfad) {
       await sql`UPDATE einkauf SET ocr_pending = TRUE WHERE id = ${row.id}`;
-      void ocrAndStore(row.id as number, bildPfad)
+      // The work outlives the request, and the request's tenant connection is released on
+      // response — so it needs its own household scope. Without it, `sql` falls back to a
+      // pool connection with no app.current_household and RLS silently discards every write:
+      // the vision tokens get spent and the items never appear. (No-op off-demo.)
+      void bgHousehold(req.user?.household_id, () => ocrAndStore(row.id as number, bildPfad))
         .catch(e => req.log.error(`background OCR failed for receipt ${row.id}: ${(e as Error).message}`))
-        .finally(() => sql`UPDATE einkauf SET ocr_pending = FALSE WHERE id = ${row.id}`.catch(() => {}));
+        .finally(() => void bgHousehold(req.user?.household_id, () =>
+          sql`UPDATE einkauf SET ocr_pending = FALSE WHERE id = ${row.id}`).catch(() => {}));
     }
     return { ok: true, id: row.id };
   });
@@ -338,6 +356,11 @@ export function receiptRoutes(app: FastifyInstance): void {
     if (!await guardReceipt(req, reply, id)) return;
     const b = (req.body ?? {}) as { photo_base64?: string; photo_mime?: string };
     if (!b.photo_base64) return reply.code(400).send({ error: 'photo_base64 required' });
+    // Demo: this path also runs vision OCR (when the receipt has no items yet) — same quota.
+    if (DEMO_MODE) {
+      const claim = await claimDemoOcr(req.user?.household_id);
+      if (!claim.ok) return reply.code(429).send({ error: ocrLimitMessage(claim.max) });
+    }
     const mime = b.photo_mime || 'image/jpeg';
     const ext = mime.includes('png') ? 'png' : 'jpg';
     const data = b.photo_base64.replace(/^data:[^,]+,/, '');
@@ -354,9 +377,11 @@ export function receiptRoutes(app: FastifyInstance): void {
     const [{ n }] = await sql`SELECT COUNT(*)::int AS n FROM artikel WHERE einkauf_id = ${id}`;
     if (n === 0) {
       await sql`UPDATE einkauf SET ocr_pending = TRUE WHERE id = ${id}`;
-      void ocrAndStore(id, bildPfad)
+      // Own household scope — see the note on the create path above.
+      void bgHousehold(req.user?.household_id, () => ocrAndStore(id, bildPfad))
         .catch(e => req.log.error(`background OCR failed for receipt ${id}: ${(e as Error).message}`))
-        .finally(() => sql`UPDATE einkauf SET ocr_pending = FALSE WHERE id = ${id}`.catch(() => {}));
+        .finally(() => void bgHousehold(req.user?.household_id, () =>
+          sql`UPDATE einkauf SET ocr_pending = FALSE WHERE id = ${id}`).catch(() => {}));
     }
     return { ok: true, bild_pfad: bildPfad, ocr: n === 0 };
   });
@@ -486,6 +511,11 @@ export function receiptRoutes(app: FastifyInstance): void {
     const bildPfad = rows[0].bild_pfad as string | null;
     if (!bildPfad) return reply.code(400).send({ error: 'receipt has no image' });
 
+    // Demo example receipts are bundled read-only assets outside the receipts mount —
+    // rotating them would 502 on a missing file. Say so instead.
+    if (!bildPfad.startsWith('/receipts/')) {
+      return reply.code(400).send({ error: 'Beispiel-Beleg kann nicht bearbeitet werden' });
+    }
     // Derive the filename from the URL and look it up under the mount.
     const filename = bildPfad.split('/').pop();
     if (!filename) return reply.code(400).send({ error: 'cannot derive filename from bild_pfad' });
@@ -515,10 +545,21 @@ export function receiptRoutes(app: FastifyInstance): void {
     if (!id) return reply.code(400).send({ error: 'invalid id' });
     if (!await guardReceipt(req, reply, id)) return;
 
+    // Demo: re-scanning is an unlimited vision-OCR button otherwise — same quota.
+    if (DEMO_MODE) {
+      const claim = await claimDemoOcr(req.user?.household_id);
+      if (!claim.ok) return reply.code(429).send({ error: ocrLimitMessage(claim.max) });
+    }
+
     const rows = await sql`SELECT id, bild_pfad FROM einkauf WHERE id = ${id}`;
     if (!rows.length) return reply.code(404).send({ error: 'not found' });
     const bildPfad = rows[0].bild_pfad as string | null;
     if (!bildPfad) return reply.code(400).send({ error: 'receipt has no image' });
+    // Bundled demo example (outside the receipts mount) — its items are already seeded,
+    // and re-reading it would 502 on a missing file.
+    if (!bildPfad.startsWith('/receipts/')) {
+      return reply.code(400).send({ error: 'Beispiel-Beleg kann nicht neu ausgelesen werden' });
+    }
 
     // Optional user hint fed into the OCR prompt ("you're missing the VAT", "amounts are
     // gross not net", …) so a re-run can fix what the first pass got wrong.

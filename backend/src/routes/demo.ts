@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { adminSql, DEMO_MODE } from '../db.js';
 import { requireAdmin, requirePlatformAdmin } from '../auth/plugin.js';
 import { runDemoSweep } from '../maintenance/demoSweep.js';
+import { applyDemoTree, asTreeKey } from '../demo/seedHousehold.js';
 
 /** Demo-only routes: onboarding profile + platform super-admin household management.
  *  (Bug-report routes moved to routes/feedback.ts so they exist in all builds.) */
@@ -26,7 +27,14 @@ export function demoRoutes(app: FastifyInstance): void {
     const { address, categories_detail } = (req.body ?? {}) as { address?: string; categories_detail?: string };
     const hid = req.user!.household_id ?? 1;
     if (typeof address === 'string') await adminSql`UPDATE household SET address = ${address.slice(0, 200)} WHERE id = ${hid}`;
-    if (typeof categories_detail === 'string') await adminSql`UPDATE household SET categories_detail = ${categories_detail.slice(0, 20)} WHERE id = ${hid}`;
+    if (typeof categories_detail === 'string') {
+      await adminSql`UPDATE household SET categories_detail = ${categories_detail.slice(0, 20)} WHERE id = ${hid}`;
+      // Swap in the matching curated tree and re-point the seeded receipts to their
+      // pre-computed categories for it. Deterministic and free — no AI tokens, which
+      // matters when anyone on the internet can create a household.
+      try { await applyDemoTree(hid, asTreeKey(categories_detail)); }
+      catch (e) { req.log.error(`demo tree apply failed: ${(e as Error).message}`); }
+    }
     return { ok: true };
   });
 

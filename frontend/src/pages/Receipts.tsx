@@ -78,8 +78,12 @@ export function Receipts() {
   const [createOpen, setCreateOpen] = useState(false);
   // The first-run "scan your first receipt" step (Tour.tsx) opens this scanner via a window
   // event, since its open-state lives here (mirrors the vds:open-tour bus).
+  const [createSample, setCreateSample] = useState(false);   // tour asked for the bundled demo receipt
   useEffect(() => {
-    const open = () => setCreateOpen(true);
+    const open = (e: Event) => {
+      setCreateSample(!!(e as CustomEvent<{ sample?: boolean }>).detail?.sample);
+      setCreateOpen(true);
+    };
     window.addEventListener('vds:new-purchase', open);
     return () => window.removeEventListener('vds:new-purchase', open);
   }, []);
@@ -639,7 +643,7 @@ export function Receipts() {
           >
             <Plus size={26} />
           </button>
-          <CreatePurchaseModal open={createOpen} onClose={() => setCreateOpen(false)} />
+          <CreatePurchaseModal open={createOpen} sample={createSample} onClose={() => { setCreateOpen(false); setCreateSample(false); }} />
         </>
       )}
     </div>

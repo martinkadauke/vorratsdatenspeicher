@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import sql from '../db.js';
+import sql, { DEMO_MODE } from '../db.js';
 import { encryptSecret, decryptSecret } from '../lib/crypto.js';
 import { testMailbox, runMailImportForUser, backfillEmails, retryImportedEmail } from '../mail/importer.js';
 import { ocrAndStore } from './receipts.js';
@@ -48,6 +48,13 @@ function normalise(b: MailboxBody) {
  *  All endpoints act on the authenticated user only; the password is encrypted
  *  at rest and never returned. */
 export function mailboxRoutes(app: FastifyInstance): void {
+  // Defense-in-depth: these routes accept and store REAL IMAP credentials and turn every
+  // attachment into a vision-OCR call. On the public demo — open signup, throwaway
+  // households — neither is acceptable. index.ts already skips this whole module when
+  // DEMO_MODE is on; assert here too so a future refactor that mounts it unconditionally
+  // registers NOTHING rather than silently exposing the mailbox API.
+  if (DEMO_MODE) { console.error('[mailbox] mailboxRoutes() invoked with DEMO_MODE on — refusing to register'); return; }
+
   // Current config (without the password).
   app.get('/api/me/mailbox', async (req) => {
     const userId = req.user!.id;

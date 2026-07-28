@@ -164,7 +164,10 @@ async function main(): Promise<void> {
   offerRoutes(app);
   modelReviewRoutes(app);
   analyticsRoutes(app);
-  mailboxRoutes(app);
+  // No mailbox/IMAP on the public demo: a visitor would be typing REAL e-mail credentials
+  // into a throwaway box anyone can sign up for, and every imported attachment is a vision-OCR
+  // call on the operator's account. Not registered at all — the endpoints simply don't exist.
+  if (!DEMO_MODE) mailboxRoutes(app);
   pushRoutes(app);
   feedbackRoutes(app); // bug-report/feedback — available in all builds (header button)
   if (DEMO_MODE) demoRoutes(app);
@@ -211,6 +214,24 @@ async function main(): Promise<void> {
       app.log.warn(`no receipts dir at ${receiptsDir} — photo serving disabled`);
     }
 
+    // Example receipts for the public demo (seeded households + the first-run scan).
+    // Bundled in the image but served ONLY when DEMO_MODE is on: dev/stage/prod and every
+    // self-host install 404 here, so these photos are unreachable outside the demo.
+    // Deliberately NOT under /receipts — demoSweep unlinks files there by basename.
+    const demoAssetsDir = process.env.DEMO_ASSETS_PATH ?? path.join(process.cwd(), 'demo-assets');
+    if (DEMO_MODE && existsSync(demoAssetsDir)) {
+      app.get('/demo-receipts/:file', (req, reply) => {
+        const file = (req.params as { file: string }).file;
+        const full = path.join(demoAssetsDir, file);
+        if (file.includes('..') || file.includes('/') || file.includes('\\')
+            || !existsSync(full) || !statSync(full).isFile()) {
+          return reply.callNotFound();
+        }
+        return reply.sendFile(file, demoAssetsDir);
+      });
+      app.log.info(`serving demo example receipts from ${demoAssetsDir}`);
+    }
+
     app.setNotFoundHandler((req, reply) => {
       if (req.method === 'GET' && !req.url.startsWith('/api/')) {
         void reply.header('Cache-Control', 'no-cache, must-revalidate');
@@ -226,7 +247,7 @@ async function main(): Promise<void> {
   await rescheduleSupermarket();
   await rescheduleModelReview();
   setEmailBaseUrl(await getConfig('app.base_url')); // hosted logo URL for emails
-  await rescheduleMailImport();
+  if (!DEMO_MODE) await rescheduleMailImport();   // no IMAP polling on the demo — see above
   await rescheduleDropfolder();
   if (DEMO_MODE) await rescheduleDemoSweep();
 

@@ -322,6 +322,48 @@ export function feedbackEmail(opts: { message: string; page: string; from: strin
   return { subject, text, html: layout({ preheader: opts.message.slice(0, 90), heading: subject, inner }) };
 }
 
+/** Auto-reply to whoever sent feedback on the DEMO: thank them, and while we have their
+ *  attention, point out that VDS is free, open source and self-hostable. The demo exists to
+ *  win people over — someone who just bothered to write in is exactly who to tell. */
+export function feedbackThanksEmail(): { subject: string; text: string; html: string } {
+  const subject = 'Danke für dein Feedback! 🙏';
+  const site = 'https://vorratsdatenspeicher.com';
+  const repo = 'https://github.com/martinkadauke/vorratsdatenspeicher';
+  const text =
+    `Danke, dass du dir die Zeit genommen hast!\n\n` +
+    `Deine Rückmeldung ist angekommen und ich schaue sie mir an. Genau so wird die App besser.\n\n` +
+    `Falls du Vorratsdatenspeicher selbst nutzen möchtest: die App ist komplett kostenlos und\n` +
+    `Open Source (AGPL-3.0). Du hostest sie auf deinem eigenen Server — deine Kassenbons und\n` +
+    `Finanzen bleiben damit bei dir, nicht in irgendeiner Cloud.\n\n` +
+    `Loslegen:  ${site}\n` +
+    `Quellcode: ${repo}\n\n` +
+    `Und wenn du jemanden kennst, den das auch nerven würde: erzähl gern davon. 🙂`;
+  const inner = `
+    <h1 style="margin:0 0 12px;font-size:22px;line-height:1.3;font-weight:700;color:${C.heading};letter-spacing:-0.01em;">
+      Danke für dein Feedback! 🙏
+    </h1>
+    <p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:${C.body};">
+      Deine Rückmeldung ist angekommen — ich schaue sie mir an. Genau so wird die App besser.
+    </p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+           style="background:${C.accentBg};border:1px solid ${C.accentBorder};border-radius:12px;margin:0 0 20px;">
+      <tr><td style="padding:14px 16px;font-size:14px;line-height:1.6;color:${C.brandDark};">
+        <strong style="color:${C.heading};">Willst du Vorratsdatenspeicher selbst nutzen?</strong><br>
+        Die App ist <strong>kostenlos</strong> und <strong>Open Source</strong> (AGPL-3.0). Du hostest sie
+        auf deinem eigenen Server — deine Kassenbons und Finanzen bleiben damit bei dir und nicht
+        in irgendeiner fremden Cloud.
+      </td></tr>
+    </table>
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 10px;"><tr><td>
+      ${button('Zur App & Anleitung', site)}
+    </td></tr></table>
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 20px;"><tr><td>
+      ${button('Quellcode auf GitHub', repo, 'secondary')}
+    </td></tr></table>
+    ${footerNote('Kennst du jemanden, den der Zettel-Wahnsinn auch nervt? Erzähl gern davon. 🙂')}`;
+  return { subject, text, html: layout({ preheader: 'Deine Rückmeldung ist angekommen — danke!', heading: subject, inner }) };
+}
+
 /** Shared shopping list — branded, with the item list + an "open list" button. */
 export function shoppingListEmail(opts: { by: string; items: { title: string; menge: number | null }[]; appUrl: string }): { subject: string; text: string; html: string } {
   const n = opts.items.length;

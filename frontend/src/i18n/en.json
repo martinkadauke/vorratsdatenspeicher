@@ -152,7 +152,13 @@
     "incomeActualTitle": "Recorded payments in",
     "incomeShort": "Income",
     "noIncomeFound": "no payment found",
-    "incomeSource": { "salary": "Salary", "freelance": "Freelance", "gift": "Gift", "refund": "Refund", "other": "Other" },
+    "incomeSource": {
+      "salary": "Salary",
+      "freelance": "Freelance",
+      "gift": "Gift",
+      "refund": "Refund",
+      "other": "Other"
+    },
     "checkedOf": "{{done}}/{{total}} checked",
     "ofTarget": "of {{target}} target",
     "checkTitle": "Fixed-cost check",
@@ -238,8 +244,15 @@
     "amount": "Amount (€)",
     "frequency": "Frequency",
     "amortizedHint": "≈ {{v}}/month",
-    "freq": { "monthly": "monthly", "quarterly": "quarterly", "yearly": "yearly" },
-    "freqPer": { "quarterly": "/quarter", "yearly": "/year" },
+    "freq": {
+      "monthly": "monthly",
+      "quarterly": "quarterly",
+      "yearly": "yearly"
+    },
+    "freqPer": {
+      "quarterly": "/quarter",
+      "yearly": "/year"
+    },
     "pickerTitle": "Assign invoice",
     "pickerSearch": "Search merchant …",
     "pickerEmpty": "No invoices this month. Fixed costs are only backed by invoices (e-mail/upload) – till receipts don't count.",
@@ -375,7 +388,8 @@
     "hint": "Nothing is required — just log it. You can fill in details anytime later.",
     "save": "Create",
     "created": "Purchase created",
-    "createdOcr": "Created — reading in the background"
+    "createdOcr": "Created — reading in the background",
+    "sampleName": "sample-receipt.jpg"
   },
   "receiptDetail": {
     "avoidedWarning": "Contains items from the avoid list",
@@ -1129,7 +1143,12 @@
       "body": "Accounts group spending — e.g. a shared household account or cash per person. A household account already exists (name & type editable). Optionally add more.",
       "shared": "shared",
       "namePlaceholder": "Account name",
-      "types": { "bar": "Cash", "karte": "Card", "kreditkarte": "Credit card", "paypal": "PayPal" }
+      "types": {
+        "bar": "Cash",
+        "karte": "Card",
+        "kreditkarte": "Credit card",
+        "paypal": "PayPal"
+      }
     },
     "models": {
       "title": "AI models per task",
@@ -1147,14 +1166,28 @@
     "email": {
       "title": "Send email (SMTP)",
       "body": "So VDS can email shopping lists & offers. Optional.",
-      "host": "SMTP host", "port": "Port", "user": "User", "pass": "Password", "from": "Sender", "secure": "SSL/TLS (port 465)",
-      "to": "Test email to", "test": "Send test", "testOk": "Test email sent"
+      "host": "SMTP host",
+      "port": "Port",
+      "user": "User",
+      "pass": "Password",
+      "from": "Sender",
+      "secure": "SSL/TLS (port 465)",
+      "to": "Test email to",
+      "test": "Send test",
+      "testOk": "Test email sent"
     },
     "imap": {
       "title": "Email import (IMAP)",
       "body": "VDS can pull receipts automatically from your mailbox (e.g. forwarded PDF invoices). Optional — your mailbox, password stored encrypted.",
-      "host": "IMAP host", "port": "Port", "user": "User", "pass": "Password", "secure": "SSL/TLS (port 993)",
-      "test": "Test connection", "save": "Save", "saved": "Mailbox saved", "testOk": "Connection successful"
+      "host": "IMAP host",
+      "port": "Port",
+      "user": "User",
+      "pass": "Password",
+      "secure": "SSL/TLS (port 993)",
+      "test": "Test connection",
+      "save": "Save",
+      "saved": "Mailbox saved",
+      "testOk": "Connection successful"
     },
     "done": {
       "title": "Done — all set!",

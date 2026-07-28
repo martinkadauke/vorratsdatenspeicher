@@ -6,6 +6,7 @@ import { signToken, resolvedEmoji } from './plugin.js';
 import { sendMail } from '../mailer.js';
 import { resetEmail, newHouseholdEmail } from '../email/templates.js';
 import { getConfig } from '../config.js';
+import { seedDemoHousehold } from '../demo/seedHousehold.js';
 
 export async function createAuthToken(userId: number, kind: 'invite' | 'reset', hours: number): Promise<string> {
   const token = crypto.randomBytes(32).toString('hex');
@@ -121,11 +122,14 @@ export function authRoutes(app: FastifyInstance): void {
         const [{ id: uid }] = await tx`
           INSERT INTO users (username, email, password_hash, is_admin, sees_all_konten, is_super_admin, household_id)
           VALUES (${username}, ${cleanEmail}, ${hash}, TRUE, TRUE, FALSE, ${hid}) RETURNING id`;
-        await tx`INSERT INTO konto (name, is_shared, sort_order, is_cash, account_type, household_id)
-                 VALUES ('Haushaltskonto', TRUE, 0, FALSE, 'giro', ${hid})`;
+        const [{ id: kid }] = await tx`INSERT INTO konto (name, is_shared, sort_order, is_cash, account_type, household_id)
+                 VALUES ('Haushaltskonto', TRUE, 0, FALSE, 'giro', ${hid}) RETURNING id`;
         await tx`INSERT INTO category (path, parent_path, display, display_en, level, sort_order, emoji, is_meta, household_id)
                  SELECT path, parent_path, display, display_en, level, sort_order, emoji, is_meta, ${hid}
                  FROM category WHERE household_id = 1`;
+        // Demo only: a few finished receipts so the app isn't an empty shell on first login
+        // (no OCR — see seedDemoHousehold). Must come after konto + category above.
+        await seedDemoHousehold(tx, hid as number, kid as number);
         return uid as number;
       });
       void (async () => {

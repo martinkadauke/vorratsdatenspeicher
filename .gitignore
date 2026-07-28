@@ -8,3 +8,7 @@ dist/
 backend/public/
 *.tsbuildinfo
 tools/reimport-state.json
+
+# Demo example receipts: real (redacted) receipt photos — kept OUT of this public repo.
+# Bind-mounted on the demo host instead (see index.ts DEMO_ASSETS_PATH).
+demo-assets/

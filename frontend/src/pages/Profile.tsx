@@ -15,7 +15,7 @@ import { toast } from '../components/Toast';
 
 export function Profile() {
   const { t } = useTranslation();
-  const { user, logout, refreshUser } = useAuth();
+  const { user, logout, refreshUser, demo } = useAuth();
   const navigate = useNavigate();
   const [oldPw, setOldPw] = useState('');
   const [newPw, setNewPw] = useState('');
@@ -81,7 +81,9 @@ export function Profile() {
 
       <PushSettings />
 
-      <MailboxSettings />
+      {/* No mailbox/IMAP on the public demo — the backend doesn't register those routes there,
+          and nobody should type real e-mail credentials into a throwaway demo household. */}
+      {!demo && <MailboxSettings />}
 
       <Card className="flex flex-col gap-3 p-4">
         <h2 className="text-base font-semibold">{t('profile.changePw')}</h2>

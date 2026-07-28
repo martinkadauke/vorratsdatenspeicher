@@ -31,8 +31,10 @@ export function Tour({ open, onClose }: { open: boolean; onClose: () => void }) 
     dismiss();
     navigate('/receipts');
     // Open the scanner via the window-event bus (its state is local to the Receipts page).
-    // A tick after navigation so the Receipts listener is mounted.
-    setTimeout(() => window.dispatchEvent(new Event('vds:new-purchase')), 60);
+    // A tick after navigation so the Receipts listener is mounted. `sample` asks the modal
+    // to pre-load the bundled demo receipt (demo build only) so the user can watch a real
+    // OCR run in one tap instead of hunting for a receipt photo on their phone.
+    setTimeout(() => window.dispatchEvent(new CustomEvent('vds:new-purchase', { detail: { sample: true } })), 60);
   };
 
   return (

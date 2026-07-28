@@ -145,7 +145,7 @@ export function adminRoutes(app: FastifyInstance): void {
     if (key.startsWith('churner.')) await rescheduleChurner();
     if (key.startsWith('supermarket.')) await rescheduleSupermarket();
     if (key.startsWith('model_review.')) await rescheduleModelReview();
-    if (key.startsWith('mailimport.')) await rescheduleMailImport();
+    if (!DEMO_MODE && key.startsWith('mailimport.')) await rescheduleMailImport();   // no IMAP on demo
     if (key.startsWith('dropfolder.')) await rescheduleDropfolder();
     if (DEMO_MODE && key.startsWith('demo_sweep.')) await rescheduleDemoSweep();
     return { ok: true };

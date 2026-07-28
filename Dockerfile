@@ -25,6 +25,10 @@ RUN npm ci --omit=dev
 COPY --from=backend-build /app/backend/dist ./dist
 COPY backend/migrations ./migrations
 COPY --from=frontend-build /app/frontend/dist ./public
+# NB: the demo's example receipts are deliberately NOT baked in. They are photos of real
+# (redacted) receipts, and this repo is public — so they are kept out of git entirely and
+# bind-mounted on the demo host instead (DEMO_ASSETS_PATH, default /app/demo-assets).
+# Every other install simply has no such directory and the route stays disabled.
 # Build metadata LAST: it changes every build, so keeping it below `npm ci` leaves the
 # production-deps layer cached instead of reinstalling on every commit.
 ARG GIT_SHA=unknown
