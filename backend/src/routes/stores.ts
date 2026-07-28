@@ -4,6 +4,7 @@ import { kontoScope } from '../auth/konto.js';
 import { loadUnits, comparisonGroups, type PriceLine } from '../lib/units.js';
 import { discoverStoresForHousehold, addStoreByName } from '../stores/discover.js';
 import { enrichStores } from '../stores/enrich.js';
+import { claimDemoAi, aiLimitMessage } from '../demo/limits.js';
 
 /** Normalize free-text store name into a stable key for grouping.
  *  "LIDL", "Lidl", "Lidl GmbH" → "lidl". */
@@ -212,6 +213,11 @@ export function storeRoutes(app: FastifyInstance): void {
   app.post('/api/stores/enrich', async (req, reply) => {
     if (req.user?.can_write === false) return reply.code(403).send({ error: 'forbidden' });
     if (DEMO_MODE) {
+      // One enrich run is a BURST: a web-search LLM call per branch without a website, and the
+      // branch count is visitor-controlled (/api/stores/discover bulk-adds every OSM shop near
+      // the household address). Charge the shared AI bucket before starting the background job.
+      const claim = await claimDemoAi(req.user?.household_id);
+      if (!claim.ok) return reply.code(429).send({ error: aiLimitMessage(claim.max) });
       const hid = req.user!.household_id ?? 1;
       void withHousehold(hid, () => enrichStores()).catch(err => req.log.error(`store enrich failed: ${err.message}`));
     } else {

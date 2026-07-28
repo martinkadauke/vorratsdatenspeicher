@@ -31,16 +31,36 @@ export async function recordAlias(
   const canon = (canonical ?? '').trim();
   if (key.length < 2 || !canon) return;
   try {
-    await sql`
-      INSERT INTO canonical_alias (ocr_key, canonical_name, count, user_confirmed, updated_at)
-      VALUES (${key}, ${canon}, 1, ${userConfirmed}, NOW())
-      ON CONFLICT (ocr_key) DO UPDATE
-        SET canonical_name = CASE
-              WHEN ${userConfirmed} OR NOT canonical_alias.user_confirmed THEN EXCLUDED.canonical_name
-              ELSE canonical_alias.canonical_name END,
-            user_confirmed = canonical_alias.user_confirmed OR ${userConfirmed},
-            count = canonical_alias.count + 1, updated_at = NOW()
+    // Update-then-insert instead of a NAMED ON CONFLICT arbiter: canonical_alias's primary key
+    // is (ocr_key) off-demo but (household_id, ocr_key) on the demo (migrations/demo/087), so
+    // `ON CONFLICT (ocr_key)` raises 42P10 there — and because alias learning is best-effort the
+    // catch below silently swallowed it. Net effect on the demo: the churner reported
+    // auto_applied > 0 while canonical_alias stayed permanently empty, so every repeat of the
+    // same OCR text paid a full stage-1 LLM call instead of hitting the free alias tier. Naming
+    // no arbiter works in both key shapes. RLS scopes the UPDATE — and the INSERT's household_id
+    // default (migration 093) — to the caller's household. Same idiom as the canonical_meta
+    // upserts in churner/index.ts and routes/icons.ts.
+    const upd = await sql`
+      UPDATE canonical_alias SET
+        canonical_name = CASE
+          WHEN ${userConfirmed} OR NOT canonical_alias.user_confirmed THEN ${canon}
+          ELSE canonical_alias.canonical_name END,
+        user_confirmed = canonical_alias.user_confirmed OR ${userConfirmed},
+        count = canonical_alias.count + 1,
+        updated_at = NOW()
+      WHERE canonical_alias.ocr_key = ${key}
     `;
+    if (upd.count === 0) {
+      // Bare DO NOTHING (still no named arbiter): a writer that created the row between the
+      // UPDATE and here must not turn best-effort learning into a thrown error. The PK is this
+      // table's only unique constraint (migration 023), so off-demo an unnamed arbiter resolves
+      // to exactly the same conflict the named one did.
+      await sql`
+        INSERT INTO canonical_alias (ocr_key, canonical_name, count, user_confirmed, updated_at)
+        VALUES (${key}, ${canon}, 1, ${userConfirmed}, NOW())
+        ON CONFLICT DO NOTHING
+      `;
+    }
   } catch { /* alias learning is best-effort */ }
 }
 
@@ -93,9 +113,12 @@ export async function backfillAliases(): Promise<void> {
   let added = 0;
   for (const [key, m] of byKey) {
     const best = [...m.entries()].sort((a, b) => b[1] - a[1])[0][0];
+    // Unnamed arbiter for the same reason as recordAlias above: the PK is (ocr_key) off-demo
+    // and (household_id, ocr_key) on the demo, and this one is NOT wrapped in a try/catch — a
+    // 42P10 here would abort boot's backfill outright.
     await sql`
       INSERT INTO canonical_alias (ocr_key, canonical_name, count, updated_at)
-      VALUES (${key}, ${best}, 1, NOW()) ON CONFLICT (ocr_key) DO NOTHING
+      VALUES (${key}, ${best}, 1, NOW()) ON CONFLICT DO NOTHING
     `;
     added++;
   }

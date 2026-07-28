@@ -4,8 +4,9 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
-import sql, { adminSql } from '../db.js';
+import sql, { adminSql, DEMO_MODE } from '../db.js';
 import { kontoScope } from '../auth/konto.js';
+import { claimDemoAi, aiLimitMessage } from '../demo/limits.js';
 import { extractPayslip } from '../llm/ocr.js';
 import { providerForTask } from '../llm/provider.js';
 import { parseLlmJson } from '../llm/ollama.js';
@@ -937,6 +938,14 @@ export function financeRoutes(app: FastifyInstance): void {
     catch { return reply.code(400).send({ error: 'bad base64' }); }
     if (!buf.length) return reply.code(400).send({ error: 'empty file' });
 
+    // Demo only: this is a Vision call on a caller-supplied file of up to 25 MB — the single
+    // most expensive thing a visitor can trigger. Claimed here, after the file is known to be
+    // valid but before a single token is spent.
+    if (DEMO_MODE) {
+      const claim = await claimDemoAi(req.user?.household_id);
+      if (!claim.ok) return reply.code(429).send({ error: aiLimitMessage(claim.max) });
+    }
+
     let ex;
     try { ex = await extractPayslip(buf); }
     catch (e) { return reply.code(502).send({ error: (e as Error).message.slice(0, 300) }); }
@@ -1311,8 +1320,17 @@ export function financeRoutes(app: FastifyInstance): void {
    *  pre-filtered by amount+date (so it decides, never scans blindly), and we accept
    *  a proposal ONLY if its (kind,id) was actually in the set we offered (anti-
    *  hallucination) AND confidence ≥ 0.75. Proposals are stored as SUGGESTIONS
-   *  (⭐, human-approved) — never auto-linked. Bounded to keep prompt + cost small. */
-  const aiMatchBank = async (kontoId?: number | null): Promise<number> => {
+   *  (⭐, human-approved) — never auto-linked. Bounded to keep prompt + cost small.
+   *
+   *  `gate` is the demo-only spend claim, deliberately passed IN instead of taken by the caller:
+   *  the two early exits below are pure SQL and are the normal state of a household that never
+   *  imported a bank CSV, so the claim has to sit at the last moment before the provider call.
+   *  It returns an error message when the bucket is empty, null when a unit was claimed. Off-demo
+   *  the caller passes nothing and not one byte of it runs. */
+  const aiMatchBank = async (
+    kontoId?: number | null,
+    gate?: () => Promise<string | null>,
+  ): Promise<{ n: number; limit?: string }> => {
     const open = await sql`
       SELECT bt.id, bt.konto_id, bt.amount::float8 AS amount, bt.counterparty, bt.description,
              bt.booking_date::text AS booking, bt.purchase_date::text AS purchase
@@ -1325,7 +1343,7 @@ export function financeRoutes(app: FastifyInstance): void {
         ${kontoId ? sql`AND bt.konto_id = ${kontoId}` : sql``}
       ORDER BY bt.booking_date DESC, bt.id
       LIMIT 25`;
-    if (!open.length) return 0;
+    if (!open.length) return { n: 0 };
     // PRIVATE receipts are never offered to the AI: their merchant text must not
     // leave to a third-party LLM, and a masked suggestion must not be approvable by
     // a non-owner. Private receipts can only be linked manually (konto-scoped picker).
@@ -1348,7 +1366,18 @@ export function financeRoutes(app: FastifyInstance): void {
         .map(f => ({ kind: 'fixed', id: f.id as number, label: f.label as string | null, amount: f.monthly as number, merchant: f.match_merchant as string | null }));
       return { bank_tx_id: bt.id as number, counterparty: bt.counterparty as string | null, description: ((bt.description as string | null) ?? '').slice(0, 120), amount: bt.amount as number, date: booking, candidates: [...recC, ...incC, ...fixC] };
     }).filter(it => it.candidates.length);
-    if (!items.length) return 0;
+    if (!items.length) return { n: 0 };
+
+    // Demo only: the claim belongs HERE — everything above is plain SQL, and both early exits
+    // above ("no open bookings at all", "none of them has an amount+date candidate") are the
+    // DEFAULT state of a fresh demo household, which has no imported bank CSV. Claiming in the
+    // route would let a button that never reaches a provider drain the whole shared bucket in
+    // forty clicks and then refuse the payslip Vision upload, both assistants and the offer
+    // search. Nothing below this line is free, so from here on a unit is genuinely owed.
+    if (gate) {
+      const limit = await gate();
+      if (limit) return { n: 0, limit };
+    }
 
     const system = `Du ordnest Bankbuchungen ihren passenden Nachweisen zu (Beleg, Einnahme oder Fixkosten-Position). Der deterministische Abgleich konnte diese Buchungen NICHT sicher zuordnen; du bist der kreative Zweitversuch.
 STRIKTE REGELN:
@@ -1360,10 +1389,10 @@ STRIKTE REGELN:
 Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed","target_id":N,"confidence":0.0-1.0,"reason":"kurz"}]}. Nimm nur Vorschläge mit confidence >= 0.75 auf.`;
     let raw: string;
     try { raw = await (await providerForTask('bankmatch')).chat({ system, user: `Offene Buchungen mit Kandidaten:\n${JSON.stringify(items)}`, json: true }); }
-    catch (e) { app.log.warn(`aiMatchBank chat failed: ${(e as Error).message}`); return 0; }
+    catch (e) { app.log.warn(`aiMatchBank chat failed: ${(e as Error).message}`); return { n: 0 }; }
     let matches: { bank_tx_id?: number; kind?: string; target_id?: number; confidence?: number; reason?: string }[] = [];
     try { const j = parseLlmJson<{ matches?: typeof matches }>(raw); matches = Array.isArray(j?.matches) ? j.matches : []; }
-    catch { app.log.warn('aiMatchBank: unparseable JSON'); return 0; }
+    catch { app.log.warn('aiMatchBank: unparseable JSON'); return { n: 0 }; }
     let n = 0;
     const seen = new Set<number>(); // one accepted proposal per bank_tx (first wins)
     for (const m of matches) {
@@ -1378,7 +1407,7 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
         if (ins.length) { n++; seen.add(btId); }
       } catch { /* skip */ }
     }
-    return n;
+    return { n };
   };
 
   /** Analyse an uploaded bank CSV WITHOUT importing: recognise the format (built-in comdirect,
@@ -1409,6 +1438,14 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
       return { recognized: true, source: 'learned', label: (stored.label as string | null), spec, fingerprint, total: p.rows.length, preview: preview(p.rows) };
     }
     // New format → AI generates a mapping; the user must confirm before it's trusted + stored.
+    // Demo only: the claim sits HERE, not at the top of the route — the built-in comdirect and
+    // learned-fingerprint paths above cost nothing and must stay free. The fingerprint is
+    // derived from the uploaded header line, so a visitor who renames one column misses the
+    // cache on every request; only the bucket bounds that.
+    if (DEMO_MODE) {
+      const claim = await claimDemoAi(req.user?.household_id);
+      if (!claim.ok) return reply.code(429).send({ error: aiLimitMessage(claim.max) });
+    }
     let spec: CsvMappingSpec;
     try { spec = await generateCsvMapping(sn.headerLine, sn.sampleRows); }
     catch (e) { return { recognized: false, error: `AI-Zuordnung fehlgeschlagen: ${(e as Error).message}`, header: sn.headerLine }; }
@@ -1733,15 +1770,31 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
   /** Re-run matching: deterministic first (writes real links), then the creative
    *  AI pass (writes ⭐ suggestions that need human approval). `ai:false` skips the
    *  LLM step. */
-  app.post('/api/finances/bank/rematch', async (req) => {
+  app.post('/api/finances/bank/rematch', async (req, reply) => {
     const body = (req.body ?? {}) as { konto_id?: number; ai?: boolean };
     const kontoId = body.konto_id != null ? parseInt(String(body.konto_id), 10) : null;
+    // Demo only: the AI pass writes only SUGGESTIONS, so the bookings it looks at stay open and a
+    // visitor can loop rematch for a fresh 25-booking prompt every time — it has to be capped.
+    // The claim is handed DOWN as a gate instead of taken here: aiMatchBank returns 0 without
+    // touching a provider when there is no open booking (the normal state of a demo household,
+    // which has no imported bank CSV) or when none of them has an amount+date candidate, and
+    // charging for those would exhaust the shared bucket on a button that never spends a token.
+    // The price of moving it: the free deterministic matchers have already run when the limit
+    // bites, so the 429 reports what they linked rather than pretending nothing happened.
+    const gate = DEMO_MODE && body.ai !== false
+      ? async (): Promise<string | null> => {
+        const claim = await claimDemoAi(req.user?.household_id);
+        return claim.ok ? null : aiLimitMessage(claim.max);
+      }
+      : undefined;
     const linked = (await autoMatchBankByOrder(kontoId)) + (await autoMatchBankByOrderSum(kontoId)) + (await autoMatchBankByOrderSibling(kontoId)) + (await autoMatchBank(kontoId)) + (await autoMatchBankCredits(kontoId));
     let suggested = 0;
+    let limit: string | null = null;
     if (body.ai !== false) {
-      try { suggested = await aiMatchBank(kontoId); }
+      try { const res = await aiMatchBank(kontoId, gate); suggested = res.n; limit = res.limit ?? null; }
       catch (e) { app.log.warn(`aiMatchBank failed: ${(e as Error).message}`); }
     }
+    if (limit) return reply.code(429).send({ error: limit, linked });
     return { ok: true, linked, suggested };
   });
 

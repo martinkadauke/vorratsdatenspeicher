@@ -23,9 +23,40 @@ export function asTreeKey(v: unknown): DemoTreeKey {
     : undefined) ?? DEFAULT_TREE;
 }
 
-/** Stable identity of a seeded position, so we can re-point it when the tree changes. */
-const itemKey = (canonical: string | null, name: string, orig: string | null) =>
-  `${canonical || name}|${orig || ''}`;
+/** Stable identity of a seeded position, so we can re-point it when the tree changes.
+ *
+ *  ⚠️ Deliberately the RAW OCR text, NOT canonical_name and not name. Both of those change:
+ *  correcting a wrong canonical is exactly what seedReceipts.ts gets opened for, and both are
+ *  in routes/articles.ts PATCHABLE so the visitor can edit them too. original_text is neither —
+ *  it is the provenance field nothing ever rewrites. Keying on a mutable field strands every
+ *  household seeded by an OLDER deploy: on the next wizard click installTree() replaces the
+ *  whole tree, the renamed rows match nothing here, and they keep a category_path that no
+ *  longer exists in `category`. routes/spending.ts:110-125 still credits that spend to the
+ *  parent via pathChain() but builds `nodes` only from rows that DO exist, so the money shows
+ *  up on a parent with no leaf to drill into. Falls back to `name` when a position has no OCR
+ *  text, mirroring how seedDemoHousehold derives ocr_key below. */
+const itemKey = (name: string, orig: string | null) => orig || name;
+
+/** seedIcons.ts is a GENERATED harvest, keyed by the canonical name each seeded position
+ *  carried AT HARVEST TIME. routes/icons.ts resolves a picture with a plain
+ *  `WHERE canonical_name IN (...)` — exact equality, no trim, no fuzzy match — so every
+ *  canonical renamed in seedReceipts.ts orphans its image (the position falls back to the grey
+ *  placeholder) AND leaves a dead canonical_meta row behind on every single signup. Re-key here
+ *  rather than hand-editing a generated file: harvest name → the canonical it is now called.
+ *  Keep this table in step whenever a `canonical` in seedReceipts.ts changes. */
+const ICON_RENAMES: Record<string, string> = {
+  'Bio Eier': 'Freilandeier',                             // same Kaufland egg carton, husbandry label corrected
+  'Preisvorteil ': 'Preisvorteil',                         // canonical lost its stray trailing space
+  'Sonnenblumensamen': 'Sonnenblume (Pflanze)',            // BAUHAUS sold the potted plant, not a seed packet
+  'Tomatensauce Basilikum': 'Basilikum (Kräuterpflanze)',  // BAUHAUS "GREENBAR Basilikum" is a herb pot, not sauce
+};
+
+/** Every canonical the seeded positions actually reference. An icon for anything else is a row
+ *  written into each new household that nothing will ever join to — e.g. 'Joghurt' after its
+ *  position merged into 'Griechischer Joghurt', which brought its own harvested image. */
+const SEEDED_CANONICALS = new Set(
+  DEMO_SEED_RECEIPTS.flatMap(r => r.items.map(it => it.canonical || it.name)),
+);
 
 /** Install one of the three curated trees for a household (replacing any non-meta
  *  categories) and return the paths it contains. Meta/* is system-owned and untouched. */
@@ -37,7 +68,10 @@ async function installTree(tx: TransactionSql, householdId: number, tree: DemoTr
       path: c.path,
       parent_path: parts.length > 1 ? parts.slice(0, -1).join('/') : null,
       display: parts[parts.length - 1],
-      display_en: null,
+      // The curated trees are German, but the household-1 template rows we replace below carry
+      // English — without c.en an EN visitor would see a fully German tree, because every
+      // consumer (categories/trends/spending/statsAsk) falls back to `display` on NULL.
+      display_en: c.en ?? null,
       level: parts.length,
       sort_order: i,
       emoji: c.emoji ?? null,
@@ -75,11 +109,20 @@ export async function seedDemoHousehold(
 
   // Product images. canonical_meta is per-household, and the job that normally fills it
   // (runIconFetch) is a scheduled churner run that a 24h-throwaway household never sees —
-  // without this the seeded receipts would show 68 grey placeholders on a page the visitor
-  // reaches seconds after signing up. Pre-harvested URLs, so no SearXNG call either.
-  if (DEMO_SEED_ICONS.length) {
-    await tx`INSERT INTO canonical_meta ${tx(DEMO_SEED_ICONS.map(i => ({
-      canonical_name: i.name, icon_url: i.url, source: 'demo-seed',
+  // without this the seeded receipts would show a grey placeholder on every row of a page the
+  // visitor reaches seconds after signing up. Pre-harvested URLs, so no SearXNG call either.
+  // Re-keyed through ICON_RENAMES and filtered to the canonicals the receipts actually use, so
+  // renaming a canonical can neither strand its picture nor leave a dead row behind. The Map
+  // also dedupes: a rename that lands on a name the harvest already carries would otherwise put
+  // two rows with the same primary key into one INSERT.
+  const icons = new Map<string, string>();
+  for (const i of DEMO_SEED_ICONS) {
+    const name = ICON_RENAMES[i.name] ?? i.name;
+    if (SEEDED_CANONICALS.has(name) && !icons.has(name)) icons.set(name, i.url);
+  }
+  if (icons.size) {
+    await tx`INSERT INTO canonical_meta ${tx([...icons].map(([name, url]) => ({
+      canonical_name: name, icon_url: url, source: 'demo-seed',
       updated_at: new Date(), updated_by: null, household_id: householdId,
     })))} ON CONFLICT DO NOTHING`;
   }
@@ -136,17 +179,53 @@ export async function applyDemoTree(householdId: number, tree: DemoTreeKey): Pro
   if (!DEMO_MODE) return;
   await sql.begin(async tx => {
     const known = await installTree(tx as TransactionSql, householdId, tree);
-    const items = await tx`
-      SELECT a.id, a.name, a.canonical_name, a.original_text
-      FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
-      WHERE e.bild_pfad LIKE '/demo-receipts/%'`;
-    const want = new Map<string, string | null>();
+    // Identity → wanted category, pre-filtered to what the tree we just installed actually
+    // contains: same guard as the seeding path, so a path the tree lacks leaves the position
+    // on its current category instead of blanking it.
+    const want = new Map<string, string>();
+    // A few seeded positions legitimately share one raw OCR text — the two "Double Choc Cookie"
+    // lines, and LIDL's Preisvorteil/Rabatt pair, both booked as "manuell hinzugefügt". Today
+    // every such group wants the same path, so the Map simply dedupes them. If a later edit ever
+    // gives them different paths the identity is ambiguous, and picking one would silently move
+    // the other position's money: drop the key and leave both rows on the category they have.
+    const ambiguous = new Set<string>();
     for (const r of DEMO_SEED_RECEIPTS) {
-      for (const it of r.items) want.set(itemKey(it.canonical, it.name, it.orig), it.cats[tree]);
+      for (const it of r.items) {
+        const p = it.cats[tree];
+        if (!p || !known.has(p)) continue;
+        const k = itemKey(it.name, it.orig);
+        const prev = want.get(k);
+        if (prev === undefined) want.set(k, p);
+        else if (prev !== p) ambiguous.add(k);
+      }
     }
-    for (const a of items) {
-      const p = want.get(itemKey(a.canonical_name as string | null, a.name as string, a.original_text as string | null));
-      if (p && known.has(p)) await tx`UPDATE artikel SET category_path = ${p} WHERE id = ${a.id}`;
+    for (const k of ambiguous) want.delete(k);
+    if (!want.size) return;
+    // Grouped by target path: a couple of dozen paths cover all ~80 positions, so this is a
+    // handful of set-based UPDATEs instead of one round-trip per position — it runs on the
+    // request path while the visitor waits in the intro wizard. Deliberately built from
+    // `= ANY(<text array>)`, the shape this codebase already runs in production
+    // (spending.ts, finances.ts, demoSweep.ts), rather than a single multi-argument unnest():
+    // routes/demo.ts has ALREADY committed household.categories_detail on adminSql before
+    // calling us, and it swallows a throw from here and still answers {ok:true}. A statement
+    // that failed to parse would therefore roll back installTree() as well and leave the
+    // household claiming a granularity whose tree was never installed — with no error the
+    // visitor can see. Not a place to be clever with SQL nobody else in the backend uses.
+    const byPath = new Map<string, string[]>();
+    for (const [key, path] of want) {
+      const keys = byPath.get(path);
+      if (keys) keys.push(key); else byPath.set(path, [key]);
+    }
+    // The bild_pfad filter keeps us strictly on the seeded receipts: whatever the visitor
+    // scanned themselves keeps the category the real AI gave it. The join key is itemKey()
+    // spelled in SQL — NULLIF because JS `||` also falls through on ''.
+    for (const [path, keys] of byPath) {
+      await tx`
+        UPDATE artikel a SET category_path = ${path}
+        FROM einkauf e
+        WHERE e.id = a.einkauf_id
+          AND e.bild_pfad LIKE '/demo-receipts/%'
+          AND COALESCE(NULLIF(a.original_text, ''), a.name) = ANY(${keys})`;
     }
   });
 }

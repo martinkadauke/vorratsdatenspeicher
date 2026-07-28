@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
-import sql from '../db.js';
+import sql, { DEMO_MODE } from '../db.js';
 import { getConfig } from '../config.js';
+import { claimDemoAi, aiLimitMessage } from '../demo/limits.js';
 import { sendMail, smtpConfigured } from '../mailer.js';
 import { runAnalyticsQuery } from '../analytics/query.js';
 import { askAnalytics } from '../analytics/agent.js';
@@ -48,6 +49,13 @@ export function analyticsRoutes(app: FastifyInstance): void {
     const prior = body.prior && typeof body.prior.question === 'string' && typeof body.prior.clarify === 'string'
       ? { question: body.prior.question.slice(0, 1000), clarify: body.prior.clarify.slice(0, 1000) }
       : undefined;
+    // Demo only: free-text question → one LLM call, and this route is reachable by any visitor
+    // (it is even exempted from the read-only write guard). Charge the shared AI bucket. Claimed
+    // AFTER the cheap validation so a malformed request doesn't eat a slot.
+    if (DEMO_MODE) {
+      const claim = await claimDemoAi(req.user?.household_id);
+      if (!claim.ok) return reply.code(429).send({ error: aiLimitMessage(claim.max) });
+    }
     try {
       return await askAnalytics(question, req.user, lang, prior);
     } catch (e) {
@@ -63,6 +71,13 @@ export function analyticsRoutes(app: FastifyInstance): void {
     const user = req.user;
     if (!user?.email) return reply.code(400).send({ error: 'no_email', message: 'Für dein Konto ist keine E-Mail-Adresse hinterlegt.' });
     if (!(await smtpConfigured())) return reply.code(400).send({ error: 'no_smtp', message: 'SMTP ist nicht konfiguriert (Admin → SMTP).' });
+    // Demo only: no LLM here, but it IS a visitor-triggered send on the operator's SMTP relay
+    // (whose reputation a loop would burn just as effectively as tokens), so it draws on the
+    // same shared bucket. Claimed after the two cheap pre-checks, before anything is sent.
+    if (DEMO_MODE) {
+      const claim = await claimDemoAi(user.household_id);
+      if (!claim.ok) return reply.code(429).send({ error: aiLimitMessage(claim.max) });
+    }
 
     const body = (req.body ?? {}) as {
       filters?: FilterSpec; periodLabel?: string;

@@ -1,0 +1,27 @@
+-- Demo-only spend guard, part 2: the catch-all AI bucket.
+--
+-- 098 capped the three AI paths that existed then (receipt OCR, category-designer chat,
+-- recategorisation). Since then a whole set of OTHER visitor-reachable endpoints also reach an
+-- LLM — the analytics/spending assistants, the offer web-search, the bank matcher, the AI CSV
+-- format reader, the pay-slip vision extraction, the store web-search and the unit seeder. On
+-- demo every logged-in visitor is is_admin of their own household, so all of them are one
+-- unauthenticated signup away from looping the operator's AI credit.
+--
+--   ai_count — every OTHER LLM invocation (see backend/src/demo/limits.ts, DEMO_MAX_AI)
+--
+-- ONE shared bucket rather than one column per endpoint: a demo household is deleted within
+-- 24h, so the interesting question is only "has this visitor had enough AI in total", not
+-- which feature they spent it on. Six counters would be six migrations of accounting for a
+-- throwaway row.
+--
+-- Cumulative and never decremented, exactly like 098's counters: counting live rows would hand
+-- the slot straight back on delete while the tokens stay spent.
+--
+-- NOT always charged one-at-a-time: the LOOPING features (the offer search walks every
+-- subscribed/watched product and can spend an LLM call on each) charge several units per run, so
+-- the ceiling bounds the work done rather than the number of button presses. See
+-- DEMO_AI_PRODUCTS_PER_UNIT in backend/src/demo/limits.ts.
+--
+-- Lives in migrations/demo/ and therefore only ever runs when DEMO_MODE=true — self-hosted,
+-- dev, stage and prod installs never get this column and are never capped.
+ALTER TABLE household ADD COLUMN IF NOT EXISTS ai_count INTEGER NOT NULL DEFAULT 0;

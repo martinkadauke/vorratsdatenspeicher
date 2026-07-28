@@ -151,8 +151,13 @@ export function adminRoutes(app: FastifyInstance): void {
     return { ok: true };
   });
 
-  /** Manual "scan now" for the drop-folder invoice importer → returns counts. */
-  app.post('/api/dropfolder/scan', { preHandler: requireAdmin }, async () => {
+  /** Manual "scan now" for the drop-folder invoice importer → returns counts.
+   *  requireOperator, not requireAdmin: this reads a path from the OPERATOR's config and
+   *  vision-OCRs every file it finds there, uncapped. Off-demo requireOperator IS is_admin, so
+   *  nothing changes; on the demo requireAdmin is satisfied by every visitor for their own
+   *  household, which would hand a stranger both the operator's filesystem and an unbounded
+   *  OCR burst. */
+  app.post('/api/dropfolder/scan', { preHandler: requireOperator }, async () => {
     if (isDropfolderRunning()) return { running: true };
     return runDropfolderImport('manual');
   });

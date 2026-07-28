@@ -1,10 +1,22 @@
-// AUTO-GENERATED demo seed data — DO NOT EDIT BY HAND.
+// Hand-maintained demo seed data (the original generator was never committed — edit this
+// file directly and keep it in sync with seedTrees.ts).
 // 5 pre-parsed receipts every new DEMO household starts with, so the app looks alive
 // immediately. Inserted as finished data — NO OCR, NO AI call — because a demo household is
 // throwaway (swept nightly) and random visitors must not burn API tokens.
 // Each position carries a PRE-COMPUTED category for each of the three onboarding
 // granularities (simple / medium / complex, see seedTrees.ts), so picking a granularity costs
-// nothing at signup. The 6th receipt is NOT here: it ships as a bundled image the "scan your
+// nothing at signup. Two invariants when editing a `cats` block: the path must exist VERBATIM
+// in the matching DEMO_TREES array (or be Meta/Pfand / Meta/Rabatt) — seedHousehold silently
+// drops an unknown path to NULL and the position lands uncategorised — and all three paths must
+// share the same level-1 branch, or the wizard's granularity buttons would shift spend between
+// top-level categories for the same receipts.
+// Renaming a `canonical` has TWO couplings. (1) seedIcons.ts is keyed by canonical_name and
+// routes/icons.ts joins on exact equality, so the old name must get an ICON_RENAMES entry in
+// seedHousehold.ts or the position drops to a grey placeholder. (2) `orig` — not `canonical`,
+// not `name` — is the identity applyDemoTree re-points existing households by, so a rename is
+// only free as long as `orig` stays untouched; changing `orig` strands every household seeded
+// by an earlier deploy.
+// The 6th receipt is NOT here: it ships as a bundled image the "scan your
 // first receipt" dialog pre-loads, so the user watches ONE real OCR run.
 // Images live OUTSIDE this repo (it is public) — bind-mounted on the demo host, see
 // DEMO_ASSETS_PATH in index.ts.
@@ -45,7 +57,7 @@ export const DEMO_SEED_RECEIPTS: DemoSeedReceipt[] = [
         "sort": 1,
         "cats": {
           "simple": "Haushalt/Reinigung",
-          "medium": "Haushalt/Reinigung/Bad & WC",
+          "medium": "Haushalt/Reinigung/Fenster & Glas",
           "complex": "Haushalt/Reinigung/Fenster & Glas"
         }
       },
@@ -76,7 +88,7 @@ export const DEMO_SEED_RECEIPTS: DemoSeedReceipt[] = [
         "cats": {
           "simple": "Haushalt/Küchenzubehör",
           "medium": "Haushalt/Küchenzubehör/Geschirr & Becher",
-          "complex": "Haushalt/Küchenzubehör/Dessertbecher & Eisbecher"
+          "complex": "Haushalt/Küchenzubehör/Dessertbecher"
         }
       },
       {
@@ -262,8 +274,8 @@ export const DEMO_SEED_RECEIPTS: DemoSeedReceipt[] = [
         "orig": "Tragetasche Altp",
         "sort": 0,
         "cats": {
-          "simple": "Meta/Pfand",
-          "medium": "Meta/Pfand",
+          "simple": "Haushalt/Papier & Hygiene",
+          "medium": "Haushalt/Papier & Hygiene/Papierprodukte",
           "complex": "Haushalt/Papier & Hygiene/Tragetaschen"
         }
       },
@@ -338,7 +350,7 @@ export const DEMO_SEED_RECEIPTS: DemoSeedReceipt[] = [
         "sort": 5,
         "cats": {
           "simple": "Lebensmittel/Fleisch & Fisch",
-          "medium": "Lebensmittel/Fleisch & Fisch/Vegetarisch & Vegan",
+          "medium": "Lebensmittel/Fleisch & Fisch/Fleisch & Wurst",
           "complex": "Lebensmittel/Fleisch & Fisch/Burger & Patties"
         }
       },
@@ -378,7 +390,7 @@ export const DEMO_SEED_RECEIPTS: DemoSeedReceipt[] = [
         "menge": 1,
         "einheit": "stk",
         "preis": 2.79,
-        "guess": "Gefüllte Blätterteig-Kissen",
+        "guess": "Gefüllte Cerealien-Kissen",
         "orig": "Gefüllte Kissen",
         "sort": 8,
         "cats": {
@@ -547,7 +559,7 @@ export const DEMO_SEED_RECEIPTS: DemoSeedReceipt[] = [
       },
       {
         "name": "Eier Freilandhaltung",
-        "canonical": "Bio Eier",
+        "canonical": "Freilandeier",
         "menge": 1,
         "einheit": "stk",
         "preis": 4.29,
@@ -557,7 +569,7 @@ export const DEMO_SEED_RECEIPTS: DemoSeedReceipt[] = [
         "cats": {
           "simple": "Lebensmittel/Molkerei & Eier",
           "medium": "Lebensmittel/Molkerei & Eier/Eier",
-          "complex": "Lebensmittel/Molkerei & Eier/Bio-Eier"
+          "complex": "Lebensmittel/Molkerei & Eier/Eier Freilandhaltung"
         }
       },
       {
@@ -632,7 +644,7 @@ export const DEMO_SEED_RECEIPTS: DemoSeedReceipt[] = [
         "cats": {
           "simple": "Lebensmittel/Saucen & Gewürze",
           "medium": "Lebensmittel/Saucen & Gewürze/Gewürze & Kräuter",
-          "complex": "Lebensmittel/Obst & Gemüse/Gemüse"
+          "complex": "Lebensmittel/Saucen & Gewürze/Gewürzkräuter"
         }
       },
       {
@@ -707,7 +719,7 @@ export const DEMO_SEED_RECEIPTS: DemoSeedReceipt[] = [
         "cats": {
           "simple": "Lebensmittel/Süßes & Gebäck",
           "medium": "Lebensmittel/Süßes & Gebäck/Speiseeis",
-          "complex": "Haushalt/Küchenzubehör/Dessertbecher & Eisbecher"
+          "complex": "Lebensmittel/Süßes & Gebäck/Speiseeis"
         }
       },
       {
@@ -722,7 +734,7 @@ export const DEMO_SEED_RECEIPTS: DemoSeedReceipt[] = [
         "cats": {
           "simple": "Lebensmittel/Süßes & Gebäck",
           "medium": "Lebensmittel/Süßes & Gebäck/Speiseeis",
-          "complex": "Haushalt/Küchenzubehör/Dessertbecher & Eisbecher"
+          "complex": "Lebensmittel/Süßes & Gebäck/Speiseeis"
         }
       },
       {
@@ -810,7 +822,7 @@ export const DEMO_SEED_RECEIPTS: DemoSeedReceipt[] = [
       },
       {
         "name": "Helianthus annuus",
-        "canonical": "Sonnenblumensamen",
+        "canonical": "Sonnenblume (Pflanze)",
         "menge": 1,
         "einheit": "stk",
         "preis": 2.99,
@@ -820,7 +832,7 @@ export const DEMO_SEED_RECEIPTS: DemoSeedReceipt[] = [
         "cats": {
           "simple": "Pflanzen & Garten/Kräuter & Pflanzen",
           "medium": "Pflanzen & Garten/Kräuter & Pflanzen/Zierpflanzen",
-          "complex": "Pflanzen & Garten/Kräuter & Pflanzen/Samen"
+          "complex": "Pflanzen & Garten/Kräuter & Pflanzen/Zierpflanzen"
         }
       },
       {
@@ -879,7 +891,7 @@ export const DEMO_SEED_RECEIPTS: DemoSeedReceipt[] = [
         "sort": 5,
         "cats": {
           "simple": "Pflanzen & Garten/Kräuter & Pflanzen",
-          "medium": "Pflanzen & Garten/Kräuter & Pflanzen/Kräuter",
+          "medium": "Pflanzen & Garten/Kräuter & Pflanzen/Zierpflanzen",
           "complex": "Pflanzen & Garten/Kräuter & Pflanzen/Zierpflanzen"
         }
       },
@@ -960,7 +972,7 @@ export const DEMO_SEED_RECEIPTS: DemoSeedReceipt[] = [
       },
       {
         "name": "Greenbar Basilikum",
-        "canonical": "Tomatensauce Basilikum",
+        "canonical": "Basilikum (Kräuterpflanze)",
         "menge": 1,
         "einheit": "stk",
         "preis": 3.29,
@@ -968,9 +980,9 @@ export const DEMO_SEED_RECEIPTS: DemoSeedReceipt[] = [
         "orig": "GREENBAR Basilikum",
         "sort": 11,
         "cats": {
-          "simple": "Lebensmittel/Saucen & Gewürze",
-          "medium": "Lebensmittel/Saucen & Gewürze/Saucen",
-          "complex": "Lebensmittel/Saucen & Gewürze/Tomatensaucen"
+          "simple": "Pflanzen & Garten/Kräuter & Pflanzen",
+          "medium": "Pflanzen & Garten/Kräuter & Pflanzen/Kräuter",
+          "complex": "Pflanzen & Garten/Kräuter & Pflanzen/Kräuter"
         }
       }
     ]
@@ -998,7 +1010,7 @@ export const DEMO_SEED_RECEIPTS: DemoSeedReceipt[] = [
       },
       {
         "name": "Griechischer Joghurt 10%",
-        "canonical": "Joghurt",
+        "canonical": "Griechischer Joghurt",
         "menge": 2,
         "einheit": "stk",
         "preis": 4.38,
@@ -1067,8 +1079,8 @@ export const DEMO_SEED_RECEIPTS: DemoSeedReceipt[] = [
         "sort": 60,
         "cats": {
           "simple": "Lebensmittel/Molkerei & Eier",
-          "medium": "Lebensmittel/Molkerei & Eier",
-          "complex": "Lebensmittel/Molkerei & Eier/Frischkäse"
+          "medium": "Lebensmittel/Molkerei & Eier/Butter & Fette",
+          "complex": "Lebensmittel/Molkerei & Eier/Butter & Fette"
         }
       },
       {
@@ -1118,11 +1130,11 @@ export const DEMO_SEED_RECEIPTS: DemoSeedReceipt[] = [
       },
       {
         "name": "Preisvorteil",
-        "canonical": "Preisvorteil ",
+        "canonical": "Preisvorteil",
         "menge": 1,
         "einheit": "stk",
         "preis": -1.2,
-        "guess": "Preisvorteil ",
+        "guess": "Preisvorteil",
         "orig": "manuell hinzugefügt",
         "sort": 100,
         "cats": {

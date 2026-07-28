@@ -1,4 +1,4 @@
-import sql from '../db.js';
+import sql, { adminSql, DEMO_MODE, withHousehold } from '../db.js';
 import { parseLlmJson } from '../llm/ollama.js';
 import { providerForTask } from '../llm/provider.js';
 import { notify } from '../notify.js';
@@ -25,23 +25,71 @@ Antworte AUSSCHLIESSLICH mit JSON-Array (keine Code-Fences):
 let running = false;
 export function isSeedUnitsRunning(): boolean { return running; }
 
-/** One-time: let the LLM pick a base_unit for every canonical product. */
-export async function runSeedBaseUnits(onlyMissing: boolean): Promise<number> {
+/** Tenant scope for `void`-detached work. Off-demo a plain call (no RLS, `sql` is the pool).
+ *  On the demo the detached body outlives the request, so the request's reserved household
+ *  connection is already released by then — the job would read/write nothing (no
+ *  app.current_household → the RLS predicate is NULL) or land in whichever household the
+ *  recycled connection now serves. Re-opening the household fixes both. Fails closed when the
+ *  household is unknown rather than inventing one; the caller's `.catch` records it. */
+const bgHousehold = <T>(householdId: number | null | undefined, fn: () => Promise<T>): Promise<T> => {
+  if (!DEMO_MODE) return fn();
+  if (householdId == null) return Promise.reject(new Error('kein Haushalt im Kontext – Hintergrundlauf abgebrochen'));
+  return withHousehold(householdId, fn);
+};
+
+/** The household this call is scoped to, read from the session GUC while we are still on the
+ *  caller's reserved connection. Demo only; never throws, so it can't strand `running`. */
+async function currentHousehold(): Promise<number | null> {
+  try {
+    const [row] = await sql`SELECT NULLIF(current_setting('app.current_household', true), '')::bigint AS hid`;
+    const hid = Number(row?.hid ?? NaN);
+    return Number.isFinite(hid) && hid > 0 ? hid : null;
+  } catch { return null; }
+}
+
+/** One-time: let the LLM pick a base_unit for every canonical product.
+ *  `householdId` is demo-only and three-valued: `undefined` = the caller never looked (an
+ *  awaited route call, still on its own live connection) → derive it from the GUC, `null` = the
+ *  caller looked and found none → fail closed, a number = that tenant. Off-demo it is ignored. */
+export async function runSeedBaseUnits(onlyMissing: boolean, householdId?: number | null): Promise<number> {
   if (running) throw new Error('seed-units already running');
   running = true;
 
-  const [event] = await sql`
-    INSERT INTO maintenance_event (kind, status, summary)
-    VALUES ('seed_units.run', 'running', ${sql.json({ only_missing: onlyMissing })})
-    RETURNING id`;
-  const eventId = event.id as number;
+  let hid: number | null = null;
+  let eventId = 0;
+  try {
+    // Capture the tenant scope BEFORE the `void` below detaches the work — see bgHousehold().
+    // Re-read the GUC only when the caller never looked; a late re-read on the demo could
+    // answer from a recycled connection that now serves a different household.
+    hid = DEMO_MODE ? (householdId !== undefined ? householdId : await currentHousehold()) : null;
 
-  void seedWork(eventId, onlyMissing)
+    // adminSql, not sql: the hazard is connection IDENTITY, not RLS. maintenance_event really is
+    // platform-global, but a detached caller reaches this line after its reserved connection was
+    // released, so the AsyncLocalStorage handle would pipeline this INSERT into whatever request
+    // now owns that physical connection. Off-demo `adminSql` IS the pool object `sql` uses.
+    const [event] = await adminSql`
+      INSERT INTO maintenance_event (kind, status, summary)
+      VALUES ('seed_units.run', 'running', ${adminSql.json({ only_missing: onlyMissing })})
+      RETURNING id`;
+    eventId = event.id as number;
+  } catch (err) {
+    // Setup failed before the `.finally` below exists — release the single-flight flag by hand,
+    // otherwise every later run 409s "seed-units already running" for the process lifetime.
+    running = false;
+    throw err;
+  }
+
+  void bgHousehold(hid, () => seedWork(eventId, onlyMissing))
     .catch(async err => {
-      await sql`UPDATE maintenance_event SET ended_at = NOW(), status = 'error',
-                summary = ${sql.json({ error: (err as Error).message })} WHERE id = ${eventId}`;
+      // Owner pool for the same reason as the INSERT above: a promise continuation inherits the
+      // store captured when it was registered — the caller's already-released connection.
+      await adminSql`UPDATE maintenance_event SET ended_at = NOW(), status = 'error',
+                summary = ${adminSql.json({ error: (err as Error).message })} WHERE id = ${eventId}`;
     })
-    .finally(() => { running = false; });
+    .finally(() => { running = false; })
+    // Tail guard: an unobserved rejection from the error handler would kill the container under
+    // Node's default policy (→ Swarm rollback). bgHousehold fails closed, so this path is real.
+    .catch(err => console.error('[seed-units] run bookkeeping failed:', (err as Error).message));
 
   return eventId;
 }
@@ -83,10 +131,22 @@ async function seedWork(eventId: number, onlyMissing: boolean): Promise<void> {
     for (const b of batch) {
       const bu = byName.get(b.name as string);
       if (!bu) continue;
-      await sql`
-        INSERT INTO canonical_meta (canonical_name, base_unit, updated_at)
-        VALUES (${b.name}, ${bu}, NOW())
-        ON CONFLICT (canonical_name) DO UPDATE SET base_unit = EXCLUDED.base_unit, updated_at = NOW()`;
+      // Update-then-insert rather than ON CONFLICT: the conflict target differs per env (PK is
+      // canonical_name off-demo, (household_id, canonical_name) on the demo — migration 087), so
+      // naming one shape raises 42P10 on the other. Same idiom as routes/icons.ts. RLS already
+      // scopes the UPDATE — and the INSERT's household_id — to the run's household.
+      const upd = await sql`
+        UPDATE canonical_meta SET base_unit = ${bu}, updated_at = NOW()
+        WHERE canonical_name = ${b.name}`;
+      if (upd.count === 0) {
+        // Bare DO NOTHING (no named arbiter, same reason): a writer that created the row
+        // between the UPDATE and here must not abort the whole seed run over one product.
+        // The PK is this table's only unique constraint → identical arbitration off-demo.
+        await sql`
+          INSERT INTO canonical_meta (canonical_name, base_unit, updated_at)
+          VALUES (${b.name}, ${bu}, NOW())
+          ON CONFLICT DO NOTHING`;
+      }
       set++;
     }
   }

@@ -1,12 +1,12 @@
 import type { FastifyInstance } from 'fastify';
-import sql, { DEMO_MODE } from '../db.js';
+import sql, { DEMO_MODE, withHousehold } from '../db.js';
 import { requireAdmin, requireOperator } from '../auth/plugin.js';
 import { runChurn, isChurnRunning, requestChurnStop, runIconFetch } from '../churner/index.js';
 import { runRecategorize, isRecategorizeRunning, recategorizeOne } from '../maintenance/recategorize.js';
 import { runSeedBaseUnits, isSeedUnitsRunning } from '../maintenance/seedUnits.js';
 import { runSupermarketInfo, isSupermarketRunning } from '../supermarket/info.js';
 import { getConfig } from '../config.js';
-import { claimDemoRecat, recatLimitMessage } from '../demo/limits.js';
+import { claimDemoRecat, recatLimitMessage, claimDemoAi, aiLimitMessage } from '../demo/limits.js';
 import { PROGRESS_FRESH_MS, type JobProgress } from '../maintenance/progress.js';
 
 export function maintenanceRoutes(app: FastifyInstance): void {
@@ -56,6 +56,15 @@ export function maintenanceRoutes(app: FastifyInstance): void {
   app.post('/api/maintenance/seed-base-units', { preHandler: requireAdmin }, async (req, reply) => {
     const { only_missing } = (req.body ?? {}) as { only_missing?: boolean };
     if (isSeedUnitsRunning()) return reply.code(409).send({ error: 'Einheiten-Zuordnung läuft bereits' });
+    // Demo only: unlike its siblings this job is behind requireAdmin, which on demo every
+    // visitor satisfies for their own household — so it is a visitor-startable AI batch over the
+    // whole product list. Charge the shared AI bucket. (The detached job re-opens the caller's
+    // household scope itself — see runSeedBaseUnits — so it really does run; the cap is the only
+    // thing bounding it, not RLS starvation.)
+    if (DEMO_MODE) {
+      const claim = await claimDemoAi(req.user?.household_id);
+      if (!claim.ok) return reply.code(429).send({ error: aiLimitMessage(claim.max) });
+    }
     try {
       const eventId = await runSeedBaseUnits(only_missing ?? false);
       return { ok: true, event_id: eventId };
@@ -64,11 +73,40 @@ export function maintenanceRoutes(app: FastifyInstance): void {
     }
   });
 
-  /** Fetch supermarket info (opening hours via OSM) for all branches now. */
+  /** Fetch supermarket info for all branches now: opening hours via OSM AND — at the end of the
+   *  same job — a full offer search plus the digest mails (supermarket/info.ts). The name only
+   *  describes the first half. */
   app.post('/api/maintenance/supermarket-info', { preHandler: requireAdmin }, async (_req, reply) => {
     if (isSupermarketRunning()) return reply.code(409).send({ error: 'Supermarkt-Infos laufen bereits' });
-    // run in background; the event log + button state reflect progress
-    void runSupermarketInfo().catch(err => _req.log.error(`supermarket-info failed: ${err.message}`));
+    // Demo only: requireAdmin is satisfied by every visitor for their own household, and this job
+    // is NOT "OSM opening hours only" — runSupermarketInfo() ends with `runOfferSearch()` +
+    // `sendOfferDigests()`, i.e. exactly the per-product LLM burst and the digest mail that
+    // /api/offers/refresh is charged for. Uncapped it is a one-request bypass of that cap with a
+    // different button. The burst used to be mostly inert because the detached job carried no
+    // household scope and RLS handed it an empty subscription list — an accident, not a control
+    // (same reasoning as seed-base-units above). That accident is gone as of the withHousehold
+    // scoping below, which is exactly why this charge has to stand on the shape of the code
+    // rather than on yesterday's luck.
+    if (DEMO_MODE) {
+      const claim = await claimDemoAi(_req.user?.household_id);
+      if (!claim.ok) return reply.code(429).send({ error: aiLimitMessage(claim.max) });
+    }
+    // Run in background; the event log + button state reflect progress. On demo the detached job
+    // must hold its OWN household-scoped connection, exactly like /api/offers/refresh: this
+    // handler's reserved connection is released the moment the response is sent, and the crawler
+    // then works on household-scoped tables with id-only predicates that ONLY RLS filters —
+    // `SELECT id, name FROM store_branch WHERE kind='filiale'` and two
+    // `UPDATE store_branch … WHERE id = $1`. Unscoped that means either nothing at all (RLS →
+    // zero rows, so the button reports "fertig, 0 geprüft" forever with no explanation) or, if
+    // the pool has meanwhile handed that physical connection to another household's request,
+    // those id-only UPDATEs land in a stranger's scope. The cap above is charged either way
+    // (see there), so scoping it costs the demo nothing extra. Off-demo this branch never runs.
+    if (DEMO_MODE) {
+      const hid = _req.user!.household_id ?? 1;
+      void withHousehold(hid, () => runSupermarketInfo()).catch(err => _req.log.error(`supermarket-info failed: ${err.message}`));
+    } else {
+      void runSupermarketInfo().catch(err => _req.log.error(`supermarket-info failed: ${err.message}`));
+    }
     return { ok: true, started: true };
   });
 

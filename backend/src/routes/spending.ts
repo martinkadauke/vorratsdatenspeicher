@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify';
-import sql from '../db.js';
+import sql, { DEMO_MODE } from '../db.js';
 import { kontoScope } from '../auth/konto.js';
 import { askStats } from '../analytics/statsAsk.js';
+import { claimDemoAi, aiLimitMessage } from '../demo/limits.js';
 
 interface ArtikelRow {
   id: number;
@@ -279,6 +280,13 @@ export function spendingRoutes(app: FastifyInstance): void {
     const body = (req.body ?? {}) as { q?: string; lang?: string };
     const q = (body.q ?? '').trim();
     if (!q) return reply.code(400).send({ error: 'empty_question' });
+    // Demo only: same shared AI bucket as the analytics assistant — both are unguarded free-text
+    // LLM endpoints (and both are exempt from the read-only write guard), so a visitor gets ONE
+    // budget across the two rather than two separate ones to loop.
+    if (DEMO_MODE) {
+      const claim = await claimDemoAi(req.user?.household_id);
+      if (!claim.ok) return reply.code(429).send({ error: aiLimitMessage(claim.max) });
+    }
     const lang = body.lang ?? req.user?.preferred_lang ?? 'de';
     return askStats(q.slice(0, 500), req.user, lang);
   });

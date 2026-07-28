@@ -15,6 +15,11 @@ import { sendPush } from '../push.js';
 
 const fold = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
+// Single-flight guard. NOTE (demo): this is one flag per REPLICA, not per household — a second
+// household asking for a refresh while another's search is in flight gets "läuft bereits" and
+// has to retry. Kept deliberately global: it bounds concurrent SearXNG/Marktguru/LLM load and
+// pool reservations on a shared demo host, which is worth more than parallel refreshes for a
+// throwaway household. The maintenance_event row below is what /api/offers/status really reads.
 let running = false;
 export function isOfferSearchRunning(): boolean { return running; }
 
