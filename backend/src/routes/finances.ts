@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import sql, { adminSql, DEMO_MODE } from '../db.js';
+import type { User } from '../types.js';
 import { kontoScope } from '../auth/konto.js';
 import { claimDemoAi, aiLimitMessage } from '../demo/limits.js';
 import { extractPayslip } from '../llm/ocr.js';
@@ -22,6 +23,10 @@ const MIME_BY_EXT: Record<string, string> = {
   '.pdf': 'application/pdf', '.png': 'image/png', '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.heic': 'image/heic',
 };
+
+/** A composable SQL snippet (same alias auth/konto.ts uses), so a handler can hand a
+ *  ready-made WHERE fragment to a shared query builder. */
+type Frag = ReturnType<typeof sql>;
 
 /** Fixed costs (recurring monthly expenses) CRUD — the manual-entry UI the
  *  analytics foundation (mig 040 `fixed_cost` → `v_transactions`) always expected.
@@ -284,6 +289,18 @@ export function financeRoutes(app: FastifyInstance): void {
     return firstOfMonth;
   };
 
+  /** "This row has a home in the category tree": the catalogue still knows its path OR an
+   *  ANCESTOR of it. Migration 008 dropped artikel's FK to category on purpose, so a level-3
+   *  path can dangle while its level-2 parent lives on — and such a row is NOT lost, the
+   *  month view rolls it up into that surviving parent (see `homeChain` below). Only a path
+   *  with no surviving ancestor at all sits outside every tree row, in the "Unbekannte
+   *  Kategorie" bucket. Every query that has to agree with the tree — the drill-downs, the
+   *  "Unbudgetiert" bucket — uses this one fragment so they cannot drift apart.
+   *  A factory, not a shared const: a postgres.js fragment is a lazy Query object, and one
+   *  built once at route-registration time would outlive every request that embeds it. */
+  const hasTreeHome = (): Frag => sql`AND EXISTS (
+    SELECT 1 FROM category c WHERE a.category_path = c.path OR a.category_path LIKE c.path || '/%')`;
+
   /** Everything the month view needs: fixed-cost checklist (state + suggestion)
    *  and budget rows (forecast / target / actual). Matching is deliberately a
    *  self-contained, deterministic step here — when bank-CSV transactions arrive
@@ -305,6 +322,10 @@ export function financeRoutes(app: FastifyInstance): void {
     // (einkauf.konto_id), whose owner defines the person/household scope — NOT the
     // snapper (any member may hold the household card). Scope the budget sums by it.
     const sumsKonto = kIds && kIds.length ? sql`AND e.konto_id = ANY(${kIds})` : sql``;
+    // Category display names are the only translated thing in this response. Same fallback
+    // rule as the spending tree (spending.ts:73) so Statistik and Finanzen never disagree
+    // about what a category is called.
+    const lang = (req.query as { lang?: string }).lang ?? req.user?.preferred_lang ?? 'de';
 
     // 1) Recurring plans active this month + their check. `kind` splits them into
     //    expenses (Fixkosten) and income (Einnahmen-Soll); both share the same
@@ -485,8 +506,12 @@ export function financeRoutes(app: FastifyInstance): void {
       takenKeys.add(key);
     }
 
-    // 3) Budgets: actual (this month) + forecast (median of the 3 previous months).
-    //    Receipts confirmed as fixed-cost evidence are excluded from the variable sums.
+    // 3) LEGACY flat budget list: actual (this month) + forecast (median of the 3 previous
+    //    months). Receipts confirmed as fixed-cost evidence are excluded from the variable sums.
+    //    @deprecated superseded by `categoryTree` + `lenses` below. Still populated — and
+    //    still computed by its ORIGINAL query — so nothing 500s mid-rollout and so the old
+    //    numbers stay provably byte-identical while the page migrates. Delete both this
+    //    query and the `budgets` field once the frontend no longer reads it.
     const budgets = await sql`
       SELECT bu.id, bu.label, bu.monthly_target::float8 AS monthly_target, bu.konto_id, bu.active,
              k.name AS konto_name, k.is_shared, u.username AS owner,
@@ -552,17 +577,330 @@ export function financeRoutes(app: FastifyInstance): void {
     const forecastBy = new Map<number, number | null>();
     for (const [bid, mm] of histByMonth) forecastBy.set(bid, median(priorKeys.map(k => mm.get(k) ?? 0)));
 
+    // ── 3b) Variable Kosten: DERIVED category tree + STORED limits + overlapping lenses ──
+    // The per-category tracker is DERIVED from the category catalogue on every request, so
+    // every category always shows up with its real spend and there is nothing to create,
+    // reset or re-attach when the category tree changes. The only STORED part is an
+    // optional LIMIT (migration 100, budget.kind = 'category') keyed to ONE path — and its
+    // ABSENCE is what the UI renders as "kein Ziel", never a 0,00 that would read as
+    // "instantly over budget".
+    const catalogue = await sql`
+      SELECT path, parent_path, display, display_en, level, sort_order, emoji, is_meta
+      FROM category ORDER BY sort_order, path
+    `;
+    const knownPaths = new Set(catalogue.map(c => c.path as string));
+
+    // Stored LIMITS. budKonto decides which are VISIBLE at all; the per-budget konto
+    // narrowing is applied to the NUMBERS further down, not here — a personal limit must
+    // keep showing its personal figure even while the household view is on.
+    const limitRows = await sql`
+      SELECT bu.id, bu.label, bu.monthly_target::float8 AS monthly_target, bu.konto_id,
+             k.name AS konto_name, k.is_shared, u.username AS owner, bc.category_path
+      FROM budget bu
+      JOIN budget_category bc ON bc.budget_id = bu.id
+      LEFT JOIN konto k ON k.id = bu.konto_id
+      LEFT JOIN users u ON u.id = k.user_id
+      WHERE bu.active AND bu.kind = 'category' ${budKonto}
+      ORDER BY bu.label, bu.id
+    `;
+    // LENSES: budgets that deliberately OVERLAP the tree — several categories and/or single
+    // articles ("Energydrinks" = three canonicals living in three different categories).
+    // DISTINCT on both aggregates because joining the two membership tables at once
+    // multiplies their rows out against each other.
+    const lensRows = await sql`
+      SELECT bu.id, bu.label, bu.monthly_target::float8 AS monthly_target, bu.konto_id,
+             k.name AS konto_name, k.is_shared, u.username AS owner,
+             COALESCE(ARRAY_AGG(DISTINCT bc.category_path ORDER BY bc.category_path)
+                      FILTER (WHERE bc.category_path IS NOT NULL), '{}') AS categories,
+             COALESCE(ARRAY_AGG(DISTINCT ba.canonical_name ORDER BY ba.canonical_name)
+                      FILTER (WHERE ba.canonical_name IS NOT NULL), '{}') AS articles
+      FROM budget bu
+      LEFT JOIN konto k ON k.id = bu.konto_id
+      LEFT JOIN users u ON u.id = k.user_id
+      LEFT JOIN budget_category bc ON bc.budget_id = bu.id
+      LEFT JOIN budget_article ba ON ba.budget_id = bu.id
+      WHERE bu.active AND bu.kind = 'lens' ${budKonto}
+      GROUP BY bu.id, k.name, k.is_shared, u.username
+      ORDER BY bu.label, bu.id
+    `;
+
+    // ONE scan over the very window the legacy budget sums above already cover, feeding
+    // EVERYTHING variable in this response: the tree rollup, every limit's and lens's own
+    // actual, and the three buckets. Deriving them all from ONE row set is what makes
+    //     variableTotal = categoryTree.total.actual + categoryMissing + unknownCategory + receiptMissing
+    // hold BY CONSTRUCTION — a separate SQL SUM could drift from the JS rollup by a cent
+    // and turn "the tree adds up" into a lie the user can see on screen.
+    // NB: no privacy kontoScope() here, on purpose and exactly as before — a private
+    // receipt still contributes its AMOUNT; only the drill-down masks its details.
+    const varRows = await sql`
+      SELECT a.preis::float8 AS preis, a.category_path, a.canonical_name, e.konto_id,
+             date_trunc('month', e.datum)::date::text AS mon
+      FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
+      WHERE a.preis IS NOT NULL AND e.datum BETWEEN ${prevFirst} AND ${b.last}
+        ${sumsKonto}
+        -- The one fixed-cost exclusion used by every figure on this page: a receipt that is
+        -- a fixed cost's confirmed bill counts ONCE, as that fixed cost. The bank leg
+        -- matters — an e-mailed Internet bill is verified through its booking, so
+        -- fc.einkauf_id alone would miss it and double-count.
+        AND NOT EXISTS (
+          SELECT 1 FROM fixed_cost_check fc
+          WHERE fc.einkauf_id = e.id OR (fc.bank_tx_id IS NOT NULL AND fc.bank_tx_id = e.bank_tx_id)
+        )
+    `;
+
+    const eur2 = (n: number): number => Math.round(n * 100) / 100;
+    // Ancestor chain of a category path (itself included, plus '' for the tree's total
+    // node), memoised: a handful of paths repeat across hundreds of rows and each row has
+    // to land in every ancestor's bucket. Mirrors spending.ts:59 `pathChain` — kept local
+    // so the two route modules stay independent of each other.
+    const chainCache = new Map<string, string[]>();
+    const chainOf = (p: string): string[] => {
+      let c = chainCache.get(p);
+      if (!c) {
+        const parts = p.split('/');
+        c = [''];
+        for (let i = 1; i <= parts.length; i++) c.push(parts.slice(0, i).join('/'));
+        chainCache.set(p, c);
+      }
+      return c;
+    };
+    // …and the same chain TRUNCATED at the deepest ancestor the catalogue still knows.
+    // A path may legitimately dangle (migration 008 dropped artikel's FK to category), but
+    // "dangling" is not the same as "homeless": when a category redesign removes
+    // 'Lebensmittel/Getränke/Energydrinks' while 'Lebensmittel/Getränke' survives, that
+    // spend still belongs to Getränke and to Lebensmittel. Dropping it out of the tree
+    // instead would (a) silently shrink every ancestor — including a legacy 1-path budget
+    // whose pre-100 actual was a plain prefix match that DID count it — and (b) make the
+    // row disagree with the 📊 chart right next to it, since /api/spending/history and
+    // /api/spending/items prefix-match with no catalogue filter at all.
+    // null = not one segment is in the catalogue → the "Unbekannte Kategorie" bucket.
+    const homeCache = new Map<string, string[] | null>();
+    const homeChain = (p: string): string[] | null => {
+      let c = homeCache.get(p);
+      if (c === undefined) {
+        const parts = p.split('/');
+        let deepest = 0;
+        for (let i = 1; i <= parts.length; i++) if (knownPaths.has(parts.slice(0, i).join('/'))) deepest = i;
+        if (!deepest) c = null;
+        else {
+          c = [''];
+          for (let i = 1; i <= deepest; i++) c.push(parts.slice(0, i).join('/'));
+        }
+        homeCache.set(p, c);
+      }
+      return c;
+    };
+
+    type Series = Map<string, number>;             // 'YYYY-MM-01' → €
+    const treeSums = new Map<string, Series>();    // category path → its subtree series
+    // A second, NARROWER rollup of the same rows per konto — built only for the accounts
+    // that actually own a limit, because that is the only thing that needs it: a personal
+    // limit keeps showing its personal number even in the household view.
+    const kontoTree = new Map<number, Map<string, Series>>();
+    for (const l of limitRows) {
+      if (l.konto_id != null && !kontoTree.has(l.konto_id as number)) kontoTree.set(l.konto_id as number, new Map());
+    }
+    const bump = (store: Map<string, Series>, key: string, mon: string, eur: number): void => {
+      let s = store.get(key);
+      if (!s) { s = new Map(); store.set(key, s); }
+      s.set(mon, (s.get(mon) ?? 0) + eur);
+    };
+
+    // Lenses and ORPHANED limits (a stored limit whose category left the catalogue) are
+    // both just "a membership rule + an optional konto narrowing", so they share one
+    // accumulator shape and one pass over the rows.
+    type Group = { id: number; cats: Set<string>; arts: Set<string>; konto: number | null; sums: Series };
+    const groups: Group[] = [
+      ...lensRows.map(l => ({
+        id: l.id as number,
+        cats: new Set((l.categories as string[] | null) ?? []),
+        arts: new Set((l.articles as string[] | null) ?? []),
+        konto: l.konto_id as number | null,
+        sums: new Map() as Series,
+      })),
+      ...limitRows.filter(l => !knownPaths.has(l.category_path as string)).map(l => ({
+        id: l.id as number,
+        cats: new Set([l.category_path as string]),
+        arts: new Set<string>(),
+        konto: l.konto_id as number | null,
+        sums: new Map() as Series,
+      })),
+    ];
+
+    let receiptSpend = 0, categoryMissingAmt = 0, unknownCategoryAmt = 0;
+    for (const r of varRows) {
+      const eur = r.preis as number;
+      const mon = String(r.mon);
+      const cp = (r.category_path as string | null) || '';
+      const kid = r.konto_id as number | null;
+      const thisMonth = mon === b.first;
+      if (thisMonth) receiptSpend += eur;
+
+      // THREE DISJOINT homes for a priced line, so the tree plus the two buckets partition
+      // the month's receipt spend exactly:
+      //   no category at all                       → "Kategorie fehlt"
+      //   a path with NO surviving ancestor        → "Unbekannte Kategorie". Counting it in
+      //     the bucket AND rolling it up would count it twice and break the invariant above.
+      //   otherwise → rolled up to the deepest ancestor the catalogue still knows, so a
+      //     dangling LEAF keeps its money inside the parent it always belonged to.
+      const home = cp ? homeChain(cp) : null;
+      if (!cp) {
+        if (thisMonth) categoryMissingAmt += eur;
+      } else if (!home) {
+        if (thisMonth) unknownCategoryAmt += eur;
+      } else {
+        const kt = kid != null ? kontoTree.get(kid) : undefined;
+        for (const p of home) {
+          bump(treeSums, p, mon, eur);
+          if (kt) bump(kt, p, mon, eur);
+        }
+      }
+
+      // Lenses/orphans see the row whether or not its category is still in the catalogue —
+      // they are memberships over rows, not nodes of the tree.
+      if (groups.length) {
+        const chain = cp ? chainOf(cp) : null;
+        const canon = r.canonical_name as string | null;
+        for (const g of groups) {
+          if (g.konto != null && kid !== g.konto) continue;   // per-budget konto narrowing
+          // An OR, never a sum: a row matching BOTH a lens category and one of its articles
+          // counts ONCE — the same reason the legacy budget sum uses EXISTS, not a JOIN.
+          const hit = (chain !== null && g.cats.size > 0 && chain.some(p => p !== '' && g.cats.has(p)))
+            || (canon !== null && g.arts.has(canon));
+          if (hit) g.sums.set(mon, (g.sums.get(mon) ?? 0) + eur);
+        }
+      }
+    }
+
+    // Same forecast rule as the legacy budget rows: median of the 3 prior months with a
+    // month that had no spend counted as a real €0 — but null when there is NO prior month
+    // at all, because "no history" must read as "–", not as a confident €0.
+    const seriesForecast = (s: Series | undefined): number | null =>
+      s && priorKeys.some(k => s.has(k)) ? median(priorKeys.map(k => s.get(k) ?? 0)) : null;
+
+    // Nothing in the schema stops two ACTIVE budgets from claiming the same category path
+    // (one household-wide + one for a person), and 100 deliberately adds no UNIQUE index —
+    // it could have failed outright on the owner's live data. So pick a deterministic
+    // PRIMARY and hand the rest over as `extra_limits`: a real target must never silently
+    // vanish just because a duplicate exists. New duplicates are refused by the API (409).
+    const oneKonto = !!(kIds && kIds.length === 1);
+    const mkLimit = (l: typeof limitRows[number]) => {
+      // A limit WITH a konto gets its own, narrower series; a household-wide one (konto_id
+      // NULL) reads the node's own series, so its numbers ARE the node's numbers.
+      const s = l.konto_id != null
+        ? kontoTree.get(l.konto_id as number)?.get(l.category_path as string)
+        : treeSums.get(l.category_path as string);
+      return {
+        id: l.id as number, label: l.label as string,
+        monthly_target: l.monthly_target as number | null,
+        konto_id: l.konto_id as number | null, konto_name: l.konto_name as string | null,
+        is_shared: l.is_shared as boolean | null, owner: l.owner as string | null,
+        actual: eur2(s?.get(b.first) ?? 0),
+        forecast: seriesForecast(s),
+      };
+    };
+    const limitsByPath = new Map<string, ReturnType<typeof mkLimit>[]>();
+    for (const l of limitRows) {
+      const p = l.category_path as string;
+      if (!knownPaths.has(p)) continue;                       // orphan → its own block below
+      const list = limitsByPath.get(p) ?? [];
+      list.push(mkLimit(l));
+      limitsByPath.set(p, list);
+    }
+    for (const list of limitsByPath.values()) {
+      // Scoped to ONE person → their own limit is the one they came to see; in the household
+      // view the household-wide limit leads. Ties broken by lowest id so the pick is stable
+      // from request to request (and the frontend's "extra" hint doesn't jump around).
+      const rank = (x: ReturnType<typeof mkLimit>) => oneKonto
+        ? (x.konto_id != null ? 0 : 1)
+        : (x.konto_id == null ? 0 : 1);
+      list.sort((x, y) => rank(x) - rank(y) || x.id - y.id);
+    }
+
+    const nodeNums = (p: string) => {
+      const s = treeSums.get(p);
+      return { actual: eur2(s?.get(b.first) ?? 0), forecast: seriesForecast(s) };
+    };
+    const categoryTree = {
+      total: {
+        path: '', parent_path: null, label: lang === 'en' ? 'Total' : 'Gesamt',
+        emoji: null, level: 0, sort_order: 0, is_meta: false,
+        ...nodeNums(''), limit: null, extra_limits: [] as ReturnType<typeof mkLimit>[],
+      },
+      // Meta/Pfand + Meta/Rabatt are INCLUDED here, unlike /api/spending/tree: Finanzen
+      // counts them in the month total (deposits add, discounts subtract, so the total
+      // equals what was actually paid), and dropping them would break the invariant.
+      // Statistik keeps excluding them — that endpoint is untouched.
+      nodes: catalogue.map(c => {
+        const dup = limitsByPath.get(c.path as string) ?? [];
+        return {
+          path: c.path as string, parent_path: c.parent_path as string | null,
+          label: (lang === 'en' && c.display_en ? c.display_en : c.display) as string,
+          emoji: c.emoji as string | null, level: c.level as number,
+          sort_order: c.sort_order as number, is_meta: c.is_meta === true,
+          ...nodeNums(c.path as string),
+          limit: dup[0] ?? null,
+          extra_limits: dup.slice(1),
+        };
+      }),
+    };
+
+    const groupSums = new Map<number, Series>(groups.map(g => [g.id, g.sums] as const));
+    const lenses = lensRows.map(l => {
+      const s = groupSums.get(l.id as number);
+      return {
+        id: l.id as number, label: l.label as string,
+        monthly_target: l.monthly_target as number | null,
+        konto_id: l.konto_id as number | null, konto_name: l.konto_name as string | null,
+        is_shared: l.is_shared as boolean | null, owner: l.owner as string | null,
+        categories: (l.categories as string[] | null) ?? [],
+        articles: (l.articles as string[] | null) ?? [],
+        actual: eur2(s?.get(b.first) ?? 0),
+        forecast: seriesForecast(s),
+      };
+    });
+    // A stored limit whose category is gone from the catalogue. Kept VISIBLE (never deleted
+    // behind the user's back) together with whatever spend still lands on its prefix —
+    // usually 0 — so it can be re-pointed instead of silently doing nothing forever.
+    const orphanLimits = limitRows
+      .filter(l => !knownPaths.has(l.category_path as string))
+      .map(l => {
+        const s = groupSums.get(l.id as number);
+        return {
+          id: l.id as number, label: l.label as string,
+          monthly_target: l.monthly_target as number | null,
+          konto_id: l.konto_id as number | null, konto_name: l.konto_name as string | null,
+          is_shared: l.is_shared as boolean | null, owner: l.owner as string | null,
+          category_path: l.category_path as string,
+          actual: eur2(s?.get(b.first) ?? 0),
+        };
+      });
+
     // "Unbudgetiert": this month's variable spend in categories NOT covered by any active
-    // budget — so the month view reflects ALL variable spend, even before every category
-    // has a budget. Meta (Pfand/Rabatt) is a real category too: it counts here until the
-    // user gives it a budget. Only a receipt already confirmed as a fixed cost's evidence
+    // LIMIT — so the month view reflects ALL variable spend, even before every category
+    // has a goal. Meta (Pfand/Rabatt) is a real category too: it counts here until the
+    // user gives it a limit. Only a receipt already confirmed as a fixed cost's evidence
     // (fixed_cost_check) is excluded — it counts ONCE as that fixed cost, never here.
     // ⚠️ A receipt in a category you ALSO run as a fixed cost still double-counts (fixed
-    // plan + here) UNLESS you link it to that fixed cost — same rule as budgets.
+    // plan + here) UNLESS you link it to that fixed cost — same rule as limits.
+    // ⚠️ CHANGED with 100: only kind='category' budgets suppress a category now. A legacy
+    // MULTI-category budget is a lens, and a lens overlaps the tree by definition — letting
+    // it suppress three categories would hide their spend from a bucket whose whole job is
+    // "what has no goal yet". Nothing is lost: those categories are visible in the tree with
+    // their own spend, and the lens still shows its own actual in its own block. This makes
+    // `unbudgeted` GO UP the first time the page loads for anyone who had such a budget.
+    // `variableTotal` is untouched by this.
     const [unbudget] = await sql`
       SELECT COALESCE(SUM(a.preis), 0)::float8 AS actual
       FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
       WHERE a.preis IS NOT NULL AND a.category_path IS NOT NULL
+        -- A SLICE OF THE TREE, so it may only count rows the tree actually carries.
+        -- category_path = '' (→ "Kategorie fehlt") and a path with no surviving ancestor
+        -- (→ "Unbekannte Kategorie") each have their own tile; without this filter their
+        -- euros would be printed twice on two adjacent rows, and this tile could exceed
+        -- the very tree it is a slice of. (No budget_category prefix can suppress a
+        -- homeless path either, so they were guaranteed to show up here.)
+        ${hasTreeHome()}
         AND e.datum BETWEEN ${b.first} AND ${b.last}
         ${sumsKonto}
         -- Not a fixed cost's confirmed bill — via the receipt link OR the bank link (an
@@ -574,40 +912,19 @@ export function financeRoutes(app: FastifyInstance): void {
         )
         AND NOT EXISTS (
           SELECT 1 FROM budget bu JOIN budget_category bc ON bc.budget_id = bu.id
-          WHERE bu.active AND (bu.konto_id IS NULL OR e.konto_id = bu.konto_id)
+          WHERE bu.active AND bu.kind = 'category' AND (bu.konto_id IS NULL OR e.konto_id = bu.konto_id)
             AND (a.category_path = bc.category_path OR a.category_path LIKE bc.category_path || '/%')
         )
     `;
 
-    // Total RECEIPT spend this month: EVERY variable receipt line counted exactly ONCE, so
-    // overlapping budgets (e.g. "Lebensmittel" and a nested "Obst") can never inflate it.
-    // Includes UNCATEGORISED lines (categorisation can fail) AND Meta/Pfand/Rabatt (a real
-    // category — deposits add, discounts subtract, so the total equals what was actually
-    // paid). Drops only fixed-cost bills (via receipt- OR bank-link). NOT the sum of budgets.
-    const [receiptRow] = await sql`
-      SELECT COALESCE(SUM(a.preis), 0)::float8 AS total
-      FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
-      WHERE a.preis IS NOT NULL
-        AND e.datum BETWEEN ${b.first} AND ${b.last}
-        ${sumsKonto}
-        AND NOT EXISTS (
-          SELECT 1 FROM fixed_cost_check fc
-          WHERE fc.einkauf_id = e.id OR (fc.bank_tx_id IS NOT NULL AND fc.bank_tx_id = e.bank_tx_id)
-        )
-    `;
-    // Of that, the "Kategorie fehlt" slice: priced lines the AI never categorised. Same
-    // exclusions. Surfaced as its own bucket so failed categorisation is visible + fixable.
-    const [catMissing] = await sql`
-      SELECT COALESCE(SUM(a.preis), 0)::float8 AS total
-      FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
-      WHERE a.preis IS NOT NULL AND (a.category_path IS NULL OR a.category_path = '')
-        AND e.datum BETWEEN ${b.first} AND ${b.last}
-        ${sumsKonto}
-        AND NOT EXISTS (
-          SELECT 1 FROM fixed_cost_check fc
-          WHERE fc.einkauf_id = e.id OR (fc.bank_tx_id IS NOT NULL AND fc.bank_tx_id = e.bank_tx_id)
-        )
-    `;
+    // Total RECEIPT spend this month (`receiptSpend`, above) and its "Kategorie fehlt" /
+    // "Unbekannte Kategorie" slices come out of the SAME single scan as the tree, so the
+    // three are guaranteed to partition each other to the cent. Semantics are unchanged:
+    // EVERY variable receipt line counted exactly ONCE — so overlapping budgets can never
+    // inflate the total — including UNCATEGORISED lines (categorisation can fail) AND
+    // Meta/Pfand/Rabatt (a real category: deposits add, discounts subtract, so the total
+    // equals what was actually paid). Only fixed-cost bills drop out. NOT a sum of budgets.
+
     // "Beleg fehlt": money that left the account with NO receipt — bank debits not tied to a
     // receipt and not a fixed cost. Real variable spend the user simply hasn't scanned, so it
     // belongs in the total; tapping the bucket lists these debits to generate/attach a receipt.
@@ -621,8 +938,17 @@ export function financeRoutes(app: FastifyInstance): void {
         AND NOT EXISTS (SELECT 1 FROM einkauf e WHERE e.bank_tx_id = bt.id OR bt.einkauf_id = e.id)
         AND NOT EXISTS (SELECT 1 FROM fixed_cost_check fc WHERE fc.bank_tx_id = bt.id)
     `;
-    const receiptSpend = (receiptRow?.total as number) ?? 0;
     const receiptMissingAmt = (recMissing?.total as number) ?? 0;
+
+    // Intra-month position, so the page can project the running variable total the way the
+    // (absorbed) Statistik page did — "Prognose 812 € · Tag 12/31". Local time on purpose,
+    // exactly as spending.ts does it: the user's "today" is what makes the projection mean
+    // anything, and both surfaces must agree on which day of the month it is.
+    const nowLocal = new Date();
+    const curYm = `${nowLocal.getFullYear()}-${String(nowLocal.getMonth() + 1).padStart(2, '0')}`;
+    const isCurrentMonth = m === curYm;
+    const daysTotal = Number(b.last.slice(8, 10));
+    const daysElapsed = isCurrentMonth ? nowLocal.getDate() : daysTotal;
 
     // Map a plan row (expense or income) to its month-view shape (check + suggestion).
     const mapPlan = (f: typeof fixed[number]) => ({
@@ -649,6 +975,8 @@ export function financeRoutes(app: FastifyInstance): void {
       // the month view sums the PLANS, so they are not returned.)
       incomes: fixed.filter(f => f.kind === 'income').map(mapPlan),
       fixed: fixed.filter(f => f.kind !== 'income').map(mapPlan),
+      // @deprecated legacy flat budget list — kept only so nothing 500s mid-rollout. The
+      // Variable-Kosten section MUST read categoryTree/lenses/orphanLimits instead.
       budgets: budgets.map(bu => ({
         id: bu.id, label: bu.label, monthly_target: bu.monthly_target, konto_id: bu.konto_id,
         konto_name: bu.konto_name, is_shared: bu.is_shared, owner: bu.owner,
@@ -656,14 +984,25 @@ export function financeRoutes(app: FastifyInstance): void {
         actual: Math.round(((actualBy.get(bu.id as number) ?? 0)) * 100) / 100,
         forecast: forecastBy.get(bu.id as number) ?? null,
       })),
+      // The DERIVED tree (always complete, limit or not) + the two things that deliberately
+      // sit OUTSIDE it. `lenses` overlap the tree on purpose and are therefore NOT part of
+      // variableTotal — that is precisely what "overlapping" means here, and it is why the
+      // total can never be inflated by adding another lens.
+      categoryTree,
+      lenses,
+      orphanLimits,
       // The month's TRUE variable-cost total = every receipt line once (incl. uncategorised)
       // PLUS un-receipted bank debits. NOT the sum of the (possibly overlapping) budgets.
-      variableTotal: Math.round((receiptSpend + receiptMissingAmt) * 100) / 100,
-      // Breakdown buckets that partition the total (budgeted + these), each a tappable row:
-      unbudgeted: Math.round(((unbudget?.actual as number) ?? 0) * 100) / 100,      // categorised, no budget
-      categoryMissing: Math.round(((catMissing?.total as number) ?? 0) * 100) / 100, // priced but uncategorised
-      receiptMissing: Math.round(receiptMissingAmt * 100) / 100,                     // bank debit, no receipt
+      variableTotal: eur2(receiptSpend + receiptMissingAmt),
+      // Breakdown buckets, each a tappable row. The tree + the next three partition the
+      // total exactly: total.actual + categoryMissing + unknownCategory + receiptMissing.
+      unbudgeted: eur2((unbudget?.actual as number) ?? 0),  // categorised, no LIMIT (kind='category')
+      categoryMissing: eur2(categoryMissingAmt),            // priced but uncategorised
+      unknownCategory: eur2(unknownCategoryAmt),            // priced, category_path dangles
+      receiptMissing: eur2(receiptMissingAmt),              // bank debit, no receipt
       receiptMissingCount: (recMissing?.n as number) ?? 0,
+      // Where in the month we are, for the running projection.
+      isCurrentMonth, daysElapsed, daysTotal,
     };
   });
 
@@ -2042,27 +2381,90 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
     return { ok: true };
   });
 
-  // ── Budgets (custom groups over Warenkategorien) ──────────────────────────
+  // ── Budgets: LIMITS (one category) and LENSES (several categories / articles) ─────
+  // Two shapes behind one table (migration 100, budget.kind):
+  //   'category' — a LIMIT keyed to exactly one category_path. It is a goal on a node of
+  //                the DERIVED tree; deleting it removes the goal, not the category.
+  //   'lens'     — an overlapping group ("Energydrinks" = three canonicals in three
+  //                categories). May carry NO target at all: a lens is allowed to exist
+  //                purely to observe. Lenses are excluded from the variable-cost total.
+
+  const trimList = (v: unknown): string[] =>
+    [...new Set((Array.isArray(v) ? v : []).map(x => String(x).trim()).filter(Boolean))];
+
+  /** Uniqueness of (category_path, konto_id) among ACTIVE limits is enforced HERE, not in
+   *  the schema: 100 deliberately adds no UNIQUE index because it could have failed
+   *  outright on live data that already holds two budgets for one path. Legacy duplicates
+   *  therefore keep working (the month view surfaces them as `extra_limits`) — only NEW
+   *  collisions are refused, so the rule can tighten without ever destroying data. */
+  const limitExists = async (categoryPath: string, kontoId: number | null, excludeId: number | null): Promise<boolean> => {
+    const rows = await sql`
+      SELECT 1 FROM budget bu JOIN budget_category bc ON bc.budget_id = bu.id
+      WHERE bu.active AND bu.kind = 'category' AND bc.category_path = ${categoryPath}
+        AND bu.konto_id IS NOT DISTINCT FROM ${kontoId}::int
+        ${excludeId != null ? sql`AND bu.id <> ${excludeId}` : sql``}
+      LIMIT 1`;
+    return rows.length > 0;
+  };
+
+  /** Read a target off a request body. Distinguishes "absent" from "explicitly null":
+   *  clearing the goal is a real, meaningful edit for a lens. */
+  const readTarget = (raw: unknown): { ok: true; value: number | null } | { ok: false } => {
+    if (raw == null || raw === '') return { ok: true, value: null };
+    const n = toNum(raw);
+    return n == null || n < 0 ? { ok: false } : { ok: true, value: n };
+  };
 
   app.post('/api/budgets', async (req, reply) => {
-    const bdy = (req.body ?? {}) as { label?: string; monthly_target?: unknown; konto_id?: number | null; categories?: string[] };
+    const bdy = (req.body ?? {}) as { kind?: string; label?: string; monthly_target?: unknown; konto_id?: number | null; categories?: unknown; articles?: unknown };
     const label = (bdy.label ?? '').toString().trim();
-    const target = toNum(bdy.monthly_target);
-    const cats = [...new Set((bdy.categories ?? []).map(c => c.trim()).filter(Boolean))];
+    const cats = trimList(bdy.categories);
+    const arts = trimList(bdy.articles);
     if (!label) return reply.code(400).send({ error: 'label required' });
-    if (target == null || target < 0) return reply.code(400).send({ error: 'monthly_target must be >= 0' });
-    if (!cats.length) return reply.code(400).send({ error: 'at least one category required' });
-    const [row] = await sql`
-      INSERT INTO budget (label, monthly_target, konto_id, created_by)
-      VALUES (${label}, ${target}, ${bdy.konto_id ?? null}, ${req.user?.id ?? null}) RETURNING id`;
-    for (const c of cats) await sql`INSERT INTO budget_category (budget_id, category_path) VALUES (${row.id}, ${c})`;
-    return { ok: true, id: row.id };
+    // Default exactly like the migration classified the existing rows, so the UI can stay
+    // dumb and simply post what the user assembled: one category and nothing else = a LIMIT
+    // on that node; anything else = an overlapping LENS.
+    const kind = bdy.kind === 'category' || bdy.kind === 'lens'
+      ? bdy.kind
+      : (cats.length === 1 && !arts.length ? 'category' : 'lens');
+    const kontoId = bdy.konto_id ?? null;
+    const t = readTarget(bdy.monthly_target);
+    if (!t.ok) return reply.code(400).send({ error: 'monthly_target must be >= 0' });
+
+    if (kind === 'category') {
+      if (cats.length !== 1) return reply.code(400).send({ error: 'a category limit needs exactly one category' });
+      if (arts.length) return reply.code(400).send({ error: 'a category limit cannot carry articles' });
+      // A limit without a goal is not a limit — that state is expressed by having NO row
+      // at all, which the tree renders as "kein Ziel".
+      if (t.value == null) return reply.code(400).send({ error: 'monthly_target required' });
+      if (await limitExists(cats[0], kontoId, null)) return reply.code(409).send({ error: 'limit_exists' });
+    } else if (!cats.length && !arts.length) {
+      return reply.code(400).send({ error: 'at least one category or article required' });
+    }
+
+    const id = await sql.begin(async tx => {
+      const [row] = await tx`
+        INSERT INTO budget (label, monthly_target, konto_id, kind, created_by)
+        VALUES (${label}, ${t.value}, ${kontoId}, ${kind}, ${req.user?.id ?? null}) RETURNING id`;
+      for (const c of cats) await tx`INSERT INTO budget_category (budget_id, category_path) VALUES (${row.id}, ${c})`;
+      for (const a of arts) await tx`INSERT INTO budget_article (budget_id, canonical_name) VALUES (${row.id}, ${a})`;
+      return row.id as number;
+    });
+    return { ok: true, id };
   });
 
   app.patch('/api/budgets/:id', async (req, reply) => {
     const id = parseInt((req.params as { id: string }).id, 10);
     if (!id) return reply.code(400).send({ error: 'invalid id' });
-    const bdy = (req.body ?? {}) as { label?: string; monthly_target?: unknown; konto_id?: number | null; categories?: string[]; active?: boolean };
+    const bdy = (req.body ?? {}) as { kind?: string; label?: string; monthly_target?: unknown; konto_id?: number | null; categories?: unknown; articles?: unknown; active?: boolean };
+    const [cur] = await sql`SELECT id, kind, konto_id FROM budget WHERE id = ${id}`;
+    if (!cur) return reply.code(404).send({ error: 'not found' });
+    // `kind` is IMMUTABLE. Flipping a limit into a lens (or back) would silently move the
+    // row into another block AND change whether its categories count as "Unbudgetiert" —
+    // too much invisible consequence for an inline edit. Delete + recreate is the path.
+    if (bdy.kind && bdy.kind !== cur.kind) return reply.code(400).send({ error: 'kind is immutable' });
+    const kind = cur.kind as 'category' | 'lens';
+
     const updates: Record<string, unknown> = {};
     if ('label' in bdy) {
       const l = (bdy.label ?? '').toString().trim();
@@ -2070,27 +2472,60 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
       updates.label = l;
     }
     if ('monthly_target' in bdy) {
-      const tgt = toNum(bdy.monthly_target);
-      if (tgt == null || tgt < 0) return reply.code(400).send({ error: 'monthly_target must be >= 0' });
-      updates.monthly_target = tgt;
+      const t = readTarget(bdy.monthly_target);
+      if (!t.ok) return reply.code(400).send({ error: 'monthly_target must be >= 0' });
+      // Clearing the goal is how a lens goes back to pure observation. A category limit IS
+      // its goal, so it cannot be cleared — delete it instead, and the category keeps
+      // appearing in the tree with its spend and "kein Ziel".
+      if (t.value == null && kind === 'category') return reply.code(400).send({ error: 'monthly_target required for a category limit' });
+      updates.monthly_target = t.value;
     }
     if ('konto_id' in bdy) updates.konto_id = bdy.konto_id ?? null;
     if ('active' in bdy) updates.active = !!bdy.active;
-    if (Object.keys(updates).length) {
-      const [row] = await sql`UPDATE budget SET ${sql(updates)} WHERE id = ${id} RETURNING id`;
-      if (!row) return reply.code(404).send({ error: 'not found' });
+
+    // null = "not sent, leave alone"; an array = "replace wholesale" (even with []).
+    const cats = Array.isArray(bdy.categories) ? trimList(bdy.categories) : null;
+    const arts = Array.isArray(bdy.articles) ? trimList(bdy.articles) : null;
+
+    if (kind === 'category') {
+      if (cats && cats.length !== 1) return reply.code(400).send({ error: 'a category limit needs exactly one category' });
+      if (arts && arts.length) return reply.code(400).send({ error: 'a category limit cannot carry articles' });
+      // Re-check uniqueness whenever the (path, konto) pair could have MOVED — a konto
+      // change alone is enough to collide with an existing limit.
+      if (cats || 'konto_id' in bdy) {
+        const [ex] = await sql`SELECT category_path FROM budget_category WHERE budget_id = ${id} LIMIT 1`;
+        const p = cats ? cats[0] : (ex?.category_path as string | undefined);
+        const k = 'konto_id' in bdy ? (bdy.konto_id ?? null) : (cur.konto_id as number | null);
+        if (p && await limitExists(p, k, id)) return reply.code(409).send({ error: 'limit_exists' });
+      }
+    } else if (cats || arts) {
+      // A lens must keep at least one member. Check the EFFECTIVE membership (what is being
+      // sent, falling back to what is stored) so emptying one list while the other still
+      // holds members stays legal.
+      const nCats = cats ? cats.length : (await sql`SELECT 1 FROM budget_category WHERE budget_id = ${id} LIMIT 1`).length;
+      const nArts = arts ? arts.length : (await sql`SELECT 1 FROM budget_article WHERE budget_id = ${id} LIMIT 1`).length;
+      if (!nCats && !nArts) return reply.code(400).send({ error: 'at least one category or article required' });
     }
-    if (Array.isArray(bdy.categories)) {
-      const cats = [...new Set(bdy.categories.map(c => c.trim()).filter(Boolean))];
-      if (!cats.length) return reply.code(400).send({ error: 'at least one category required' });
-      await sql.begin(async tx => {
+
+    // One transaction for the row AND both membership lists (mirroring 068's wholesale
+    // replace of budget_category), so a half-applied edit can never leave a budget pointing
+    // at a mix of old and new members.
+    await sql.begin(async tx => {
+      if (Object.keys(updates).length) await tx`UPDATE budget SET ${tx(updates)} WHERE id = ${id}`;
+      if (cats) {
         await tx`DELETE FROM budget_category WHERE budget_id = ${id}`;
         for (const c of cats) await tx`INSERT INTO budget_category (budget_id, category_path) VALUES (${id}, ${c})`;
-      });
-    }
+      }
+      if (arts) {
+        await tx`DELETE FROM budget_article WHERE budget_id = ${id}`;
+        for (const a of arts) await tx`INSERT INTO budget_article (budget_id, canonical_name) VALUES (${id}, ${a})`;
+      }
+    });
     return { ok: true };
   });
 
+  /** Deleting a category LIMIT removes only the goal: the category keeps appearing in the
+   *  derived tree with its spend and "kein Ziel". (budget_article/budget_category cascade.) */
   app.delete('/api/budgets/:id', async (req, reply) => {
     const id = parseInt((req.params as { id: string }).id, 10);
     if (!id) return reply.code(400).send({ error: 'invalid id' });
@@ -2098,44 +2533,47 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
     return { ok: true };
   });
 
-  /** Drill-down: the individual article positions that make up a budget's "Ist"
-   *  (actual) for a month. Same filter as the month view's actual sum (category-
-   *  prefix match, the budget's own konto scope, fixed-cost-evidence receipts
-   *  excluded) — so `total` equals the displayed Ist exactly.
-   *
-   *  Privacy: a receipt marked private (private_for_user_id) still CONTRIBUTES its
-   *  amount to the household budget, but its DETAILS (item name, store, category,
-   *  date, link) are masked server-side for anyone who is neither the owner nor a
-   *  super-admin — they only see "Privater Einkauf" + the amount. The sensitive
-   *  fields never leave the server for those users. */
-  app.get('/api/finances/budget/:id/positions', async (req, reply) => {
-    const id = parseInt(String((req.params as { id: string }).id), 10);
-    if (!id) return reply.code(400).send({ error: 'invalid id' });
-    const q = req.query as { month?: string; konten?: string };
-    const b = monthBounds((q.month ?? '').trim());
-    if (!b) return reply.code(400).send({ error: 'month must be YYYY-MM' });
-    // Same account scope as the month tile (charged account = einkauf.konto_id) so the
-    // drill-down total matches the tile's Ist under a person/household filter.
-    const kIds = (q.konten ?? '').trim() ? q.konten!.split(',').map(s => parseInt(s, 10)).filter(Number.isFinite) : null;
+  // ── Variable-cost drill-down ───────────────────────────────────────────────
+  // Every figure in the Variable-Kosten section is tappable, and every one of them lands
+  // here. `scope` (which rows belong) is the ONLY thing that differs between callers — the
+  // month window, the account scope, the fixed-cost exclusion and the privacy masking are
+  // shared, which is what makes `total` equal the number that was tapped.
+
+
+  /** Shared body of both drill-downs.
+   *  Privacy: a receipt marked private (private_for_user_id) still CONTRIBUTES its amount,
+   *  but its DETAILS (item name, store, category, date, link) are masked server-side for
+   *  anyone who is neither the owner nor a super-admin — they only see "Privater Einkauf"
+   *  + the amount. The sensitive fields never leave the server for those users. */
+  const positionsFor = async (
+    user: User | undefined,
+    b: { first: string; last: string },
+    kIds: number[] | null,
+    scope: Frag,
+  ): Promise<{ positions: unknown[]; total: number }> => {
+    // Same account scope as the tile (charged account = einkauf.konto_id) so the drill-down
+    // total matches under a person/household filter.
     const posKonto = kIds && kIds.length ? sql`AND e.konto_id = ANY(${kIds})` : sql``;
     const rows = await sql`
       SELECT a.id, COALESCE(NULLIF(a.canonical_name, ''), a.name) AS name,
              a.preis::float8 AS preis, a.menge::float8 AS menge, a.einheit, a.category_path,
              e.id AS einkauf_id, e.datum::text AS datum, e.roh_ladenname AS laden,
              e.private_for_user_id
-      FROM budget bu
-      JOIN artikel a ON a.preis IS NOT NULL AND a.category_path IS NOT NULL
-        AND EXISTS (SELECT 1 FROM budget_category bc WHERE bc.budget_id = bu.id
-                    AND (a.category_path = bc.category_path OR a.category_path LIKE bc.category_path || '/%'))
-      JOIN einkauf e ON e.id = a.einkauf_id
-      WHERE bu.id = ${id} AND bu.active AND e.datum BETWEEN ${b.first} AND ${b.last}
-        AND (bu.konto_id IS NULL OR e.konto_id = bu.konto_id)
+      FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
+      WHERE a.preis IS NOT NULL AND e.datum BETWEEN ${b.first} AND ${b.last}
+        ${scope}
         ${posKonto}
-        AND NOT EXISTS (SELECT 1 FROM fixed_cost_check fc WHERE fc.einkauf_id = e.id)
+        -- The month view's FULL exclusion, both legs. The old budget drill-down checked
+        -- only fc.einkauf_id and so could report MORE than the tile's Ist for an e-mailed
+        -- bill that is verified through its bank booking.
+        AND NOT EXISTS (
+          SELECT 1 FROM fixed_cost_check fc
+          WHERE fc.einkauf_id = e.id OR (fc.bank_tx_id IS NOT NULL AND fc.bank_tx_id = e.bank_tx_id)
+        )
       ORDER BY e.datum DESC, a.id
     `;
-    const uid = req.user?.id ?? -1;
-    const seesAll = !!req.user?.sees_all_konten;
+    const uid = user?.id ?? -1;
+    const seesAll = !!user?.sees_all_konten;
     const positions = rows.map((r, i) => {
       const priv = r.private_for_user_id as number | null;
       const masked = priv != null && priv !== uid && !seesAll;
@@ -2146,5 +2584,90 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
     });
     const total = Math.round(positions.reduce((s, r) => s + Number(r.preis), 0) * 100) / 100;
     return { positions, total };
+  };
+
+  /** Positions behind ONE budget — a limit's node figure or a lens's own actual. */
+  const budgetPositions = async (
+    user: User | undefined, id: number, b: { first: string; last: string }, kIds: number[] | null,
+  ) => {
+    const [bu] = await sql`SELECT id, kind, konto_id FROM budget WHERE id = ${id} AND active`;
+    // Deliberately lenient (empty list, not 404) — this is exactly what the pre-100 route
+    // did for a deleted/deactivated budget, and the drill-down is a read-only detail view.
+    if (!bu) return { positions: [], total: 0 };
+    const cats = (await sql`SELECT category_path FROM budget_category WHERE budget_id = ${id}`).map(r => r.category_path as string);
+    const arts = (await sql`SELECT canonical_name FROM budget_article WHERE budget_id = ${id}`).map(r => r.canonical_name as string);
+
+    // Prefix match over the budget's categories OR an exact hit on one of its articles —
+    // an OR, so a row that is both counts ONCE (same reason the month sums use EXISTS).
+    const catFrag = cats.length
+      ? sql`EXISTS (SELECT 1 FROM budget_category bc WHERE bc.budget_id = ${id}
+                    AND (a.category_path = bc.category_path OR a.category_path LIKE bc.category_path || '/%'))`
+      : null;
+    const artFrag = arts.length ? sql`a.canonical_name = ANY(${arts})` : null;
+    const member = catFrag && artFrag ? sql`AND (${catFrag} OR ${artFrag})`
+      : catFrag ? sql`AND ${catFrag}`
+      : artFrag ? sql`AND ${artFrag}`
+      : sql`AND FALSE`;   // a member-less budget owns nothing; never fall through to "all"
+
+    // No catalogue filter on top of the membership, for ANY of the three shapes. A tree
+    // node's figure is now a plain prefix match too — a dangling descendant rolls up into
+    // the deepest surviving ancestor rather than being dropped (see `homeChain`) — so a
+    // limit, an orphan limit and a lens all drill down to exactly the rows their prefix
+    // matches, which is exactly what each of their totals was summed from.
+    // The budget's OWN konto narrowing, on top of the view's account scope: a personal
+    // limit's positions are the ones charged to that account, whatever the view shows.
+    const narrow = bu.konto_id != null ? sql`AND e.konto_id = ${bu.konto_id}` : sql``;
+    return positionsFor(user, b, kIds, sql`${member} ${narrow}`);
+  };
+
+  /** Variable-cost drill-down with EXACTLY ONE selector:
+   *    ?path=<category_path>  → that node's subtree. A node with NO limit is drillable too
+   *                             — that is the whole point of a derived tree.
+   *    ?budget=<id>           → that limit's/lens's own membership + its konto narrowing.
+   *  Response is byte-identical to the deprecated /api/finances/budget/:id/positions. */
+  app.get('/api/finances/positions', async (req, reply) => {
+    const q = req.query as { month?: string; konten?: string; path?: string; budget?: string };
+    const b = monthBounds((q.month ?? '').trim());
+    if (!b) return reply.code(400).send({ error: 'month must be YYYY-MM' });
+    const hasPath = typeof q.path === 'string';
+    const hasBudget = typeof q.budget === 'string' && q.budget.trim() !== '';
+    // Exactly one — two selectors would silently intersect and produce a total that matches
+    // nothing on screen.
+    if (hasPath === hasBudget) return reply.code(400).send({ error: 'exactly one of path or budget required' });
+    const kIds = (q.konten ?? '').trim() ? q.konten!.split(',').map(s => parseInt(s, 10)).filter(Number.isFinite) : null;
+
+    if (hasPath) {
+      const p = (q.path ?? '').trim();
+      // Annotated `Frag` on purpose: a bare `sql` call defaults its row generic to `Row[]`,
+      // which is NOT assignable to Frag. Everywhere else the fragment is passed straight into
+      // positionsFor and picks the parameter type up contextually; a const in between loses
+      // that context, so it has to be stated here.
+      const scope: Frag = p
+        // A plain prefix match — the node's own arithmetic. A dangling descendant
+        // ('…/Getränke/Energydrinks' after that leaf left the catalogue) is rolled up into
+        // this node's number by `homeChain`, so it has to be listed here too.
+        ? sql`AND (a.category_path = ${p} OR a.category_path LIKE ${p + '/%'})`
+        // path='' is the tree's TOTAL node: every line that has a home somewhere in the
+        // tree. Uncategorised lines and paths with no surviving ancestor have their own
+        // buckets and are left out for the same reason they are left out of the total.
+        : sql`AND a.category_path IS NOT NULL AND a.category_path <> '' ${hasTreeHome()}`;
+      return positionsFor(req.user, b, kIds, scope);
+    }
+    const id = parseInt(String(q.budget), 10);
+    if (!id) return reply.code(400).send({ error: 'invalid budget id' });
+    return budgetPositions(req.user, id, b, kIds);
+  });
+
+  /** @deprecated Use GET /api/finances/positions?budget=<id>. Kept as an alias because it
+   *  is what the pre-100 Finanzen page calls; now routed through the same helper, which
+   *  also fixes its fixed-cost exclusion (it used to omit the bank leg). */
+  app.get('/api/finances/budget/:id/positions', async (req, reply) => {
+    const id = parseInt(String((req.params as { id: string }).id), 10);
+    if (!id) return reply.code(400).send({ error: 'invalid id' });
+    const q = req.query as { month?: string; konten?: string };
+    const b = monthBounds((q.month ?? '').trim());
+    if (!b) return reply.code(400).send({ error: 'month must be YYYY-MM' });
+    const kIds = (q.konten ?? '').trim() ? q.konten!.split(',').map(s => parseInt(s, 10)).filter(Number.isFinite) : null;
+    return budgetPositions(req.user, id, b, kIds);
   });
 }

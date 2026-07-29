@@ -6,7 +6,6 @@ import { Reset } from './pages/Reset';
 import { Receipts } from './pages/Receipts';
 import { ReceiptDetailPage } from './pages/ReceiptDetailPage';
 import { Positionen } from './pages/Positionen';
-import { Stats } from './pages/Stats';
 import { Pantry } from './pages/Pantry';
 import { Shopping } from './pages/Shopping';
 import { ShoppingHub } from './pages/ShoppingHub';
@@ -61,7 +60,9 @@ export function App() {
           <Route path="/" element={<Navigate to="/receipts" replace />} />
           <Route path="/receipts" element={<Receipts />} />
           <Route path="/receipts/:id" element={<ReceiptDetailPage />} />
-          <Route path="/stats" element={<Stats />} />
+          {/* Statistik was folded into Finanzen (one page: summary, search/KI, the
+              category tree, the plans). Old links and the Trend bar still point here. */}
+          <Route path="/stats" element={<Redirect to="/finanzen" />} />
           {/* Shopping = hub with Liste / Angebote / Läden tabs (List is the default tab) */}
           <Route path="/shopping" element={<ShoppingHub />}>
             <Route index element={<Redirect to="/shopping/list" />} />

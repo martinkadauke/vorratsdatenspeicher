@@ -261,10 +261,21 @@ export function receiptRoutes(app: FastifyInstance): void {
         ${q.uncat === '1' ? sql`AND (a.category_path IS NULL OR a.category_path = '')` : sql``}
         ${q.nobudget === '1' ? sql`
           AND a.preis IS NOT NULL AND a.category_path IS NOT NULL
+          -- …and it has to have a home in the category tree, again exactly as the tile
+          -- counts it: a line with no category at all lives in "Kategorie fehlt" and one
+          -- whose path has no surviving ancestor in "Unbekannte Kategorie", each its own
+          -- tile. Without this, those euros would be listed here AND counted there.
+          AND EXISTS (SELECT 1 FROM category c WHERE a.category_path = c.path OR a.category_path LIKE c.path || '/%')
           AND NOT EXISTS (SELECT 1 FROM fixed_cost_check fc WHERE fc.einkauf_id = e.id OR (fc.bank_tx_id IS NOT NULL AND fc.bank_tx_id = e.bank_tx_id))
           AND NOT EXISTS (
+            -- MUST stay byte-for-byte the same definition of "has a goal" as the tile that
+            -- links here (finances.ts, the "unbudget" query): only a kind='category' LIMIT
+            -- suppresses a category. A LENS overlaps the tree on purpose — migration 100
+            -- reclassified every legacy multi-category budget as one — so letting it
+            -- suppress its categories here would empty the list behind a tile that just
+            -- counted those very euros, with no way for the user to reconcile the two.
             SELECT 1 FROM budget bu JOIN budget_category bc ON bc.budget_id = bu.id
-            WHERE bu.active AND (bu.konto_id IS NULL OR e.konto_id = bu.konto_id)
+            WHERE bu.active AND bu.kind = 'category' AND (bu.konto_id IS NULL OR e.konto_id = bu.konto_id)
               AND (a.category_path = bc.category_path OR a.category_path LIKE bc.category_path || '/%')
           )` : sql``}
         ${q.from ? sql`AND e.datum >= ${q.from}` : sql``}

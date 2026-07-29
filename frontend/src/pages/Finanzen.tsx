@@ -6,14 +6,17 @@ import {
   Wallet, Plus, Pencil, Trash2, Home, User as UserIcon, Info,
   ChevronLeft, ChevronRight, ChevronDown, CheckCircle2, Circle, CircleDot, AlertCircle, Search, X, Upload, Layers, Lock,
   Link2, Link2Off, RefreshCw, Landmark, SlidersHorizontal, Flag, FilePlus2, Receipt, FileText, Paperclip, Sparkles, Calendar, ExternalLink,
-  TrendingUp, Archive, Zap, ArrowDownLeft, ArrowUpRight, Undo2,
+  TrendingUp, Archive, Zap, ArrowDownLeft, ArrowUpRight, Undo2, BarChart3, Loader2,
 } from 'lucide-react';
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { api, getToken } from '../api/client';
 import { Card, Spinner, Button, Input, Label, Select, Switch, Modal, EmptyState, Badge } from '../components/ui';
 import { CategoryPicker } from '../components/CategoryPicker';
 import { toast } from '../components/Toast';
 import { confirm } from '../components/Confirm';
-import { eur, cn } from '../lib/utils';
+// monthNameOf is the shared "Juli 2026" formatter; MonthTab keeps a local `monthLabel`
+// string for the header, hence the rename on import.
+import { eur, cn, fmtDate, monthLabel as monthNameOf } from '../lib/utils';
 import { useUrlState } from '../hooks/useUrlState';
 
 // ── shared types ────────────────────────────────────────────────────────────
@@ -40,12 +43,52 @@ interface MonthFix {
   check: { status: 'confirmed' | 'skipped'; source: 'receipt' | 'bank' | 'income' | 'none'; einkauf_id: number | null; bank_tx_id: number | null; income_id: number | null; amount: number | null; laden: string | null; datum: string | null } | null;
   suggestion: { source: 'receipt' | 'bank' | 'income'; einkauf_id: number | null; bank_tx_id: number | null; income_id: number | null; laden: string | null; betrag: number; datum: string; amount_ok: boolean; merchant_ok: boolean } | null;
 }
-interface MonthBudget {
-  id: number; label: string; monthly_target: number; konto_id: number | null;
+/** A STORED limit. Optional by design: its ABSENCE is what "kein Ziel" means, which is
+ *  why monthly_target may be null and why we never fall back to 0 (0,00 would read as
+ *  "instantly over budget" on a category nobody ever set a goal for). */
+interface BudgetLimit {
+  id: number; label: string; monthly_target: number | null; konto_id: number | null;
   konto_name: string | null; is_shared: boolean | null; owner: string | null;
-  categories: string[]; actual: number; forecast: number | null;
+  actual: number;             // € under THIS limit's konto narrowing (= node.actual when konto_id is null)
+  forecast: number | null;    // median of the 3 prior months; null = no history
 }
-interface MonthData { month: string; incomes: MonthFix[]; fixed: MonthFix[]; budgets: MonthBudget[]; variableTotal: number; unbudgeted: number; categoryMissing: number; receiptMissing: number; receiptMissingCount: number }
+/** One node of the DERIVED category tree — always present, limit or not. `actual` is
+ *  SUBTREE-INCLUSIVE, so a folded-away level-4 child is still inside its parent's number. */
+interface MonthCategoryNode {
+  path: string; parent_path: string | null; label: string; emoji: string | null;
+  level: number; sort_order: number; is_meta: boolean;
+  actual: number; forecast: number | null;
+  limit: BudgetLimit | null;      // the limit keyed to this exact path, if any
+  extra_limits: BudgetLimit[];    // normally []; duplicates (household-wide + personal) surface here
+}
+interface MonthCategoryTree { total: MonthCategoryNode; nodes: MonthCategoryNode[] }
+/** A budget that deliberately OVERLAPS the tree: several categories and/or single
+ *  articles ("Energydrinks" = three canonicals in three different categories). */
+interface BudgetLens {
+  id: number; label: string; monthly_target: number | null; konto_id: number | null;
+  konto_name: string | null; is_shared: boolean | null; owner: string | null;
+  categories: string[]; articles: string[]; actual: number; forecast: number | null;
+}
+/** A stored limit whose category_path is no longer in the catalogue (a category redesign
+ *  left it dangling — migration 008 allows exactly that on artikel too). */
+interface OrphanLimit {
+  id: number; label: string; monthly_target: number | null; konto_id: number | null;
+  konto_name: string | null; is_shared: boolean | null; owner: string | null;
+  category_path: string; actual: number;
+}
+interface MonthData {
+  month: string; incomes: MonthFix[]; fixed: MonthFix[];
+  categoryTree: MonthCategoryTree; lenses: BudgetLens[]; orphanLimits: OrphanLimit[];
+  // variableTotal stays the month's TRUE spend (every receipt line counted ONCE) plus
+  // one-off costs — never the sum of the (overlapping) budget actuals. The tree, the
+  // buckets and this number satisfy:
+  //   variableTotal === categoryTree.total.actual + categoryMissing + unknownCategory + receiptMissing
+  // Lenses are excluded from that sum on purpose — that IS what "overlapping" means.
+  variableTotal: number; unbudgeted: number; categoryMissing: number; unknownCategory: number;
+  receiptMissing: number; receiptMissingCount: number;
+  // Where in the month we are — drives the running projection ("Tag 12/31").
+  isCurrentMonth: boolean; daysElapsed: number; daysTotal: number;
+}
 
 const today = () => new Date().toISOString().slice(0, 10);
 const curMonth = () => new Date().toISOString().slice(0, 7);
@@ -128,6 +171,46 @@ export function Finanzen() {
 
 // ── month view ──────────────────────────────────────────────────────────────
 
+/** What the assistant (/api/spending/ask) answers with. It only ever SETS this page's
+ *  filters — every € on screen is computed by the deterministic endpoints below, never
+ *  by the model. Ported together with the search bar from the retired Statistik page. */
+interface AiAnswer {
+  category_path: string | null;
+  category_label: string | null;
+  canonicals: string[];
+  group_label: string | null;
+  from: string | null;
+  to: string | null;
+  konto_ids: number[];
+  answer: string | null;
+  clarify: string | null;
+}
+/** The answer as the page actually applied it. `konto_ids` is narrowed to the accounts the
+ *  bubble scope could really express and `droppedKonten` holds the rest, so the banner can
+ *  never claim a filter that was not applied. */
+type AiState = AiAnswer & { droppedKonten: number[] };
+/** An explicit analysis period. The month view itself is month-scoped by construction
+ *  (plans and limits are monthly), so a range lives where range analysis belongs: in the
+ *  spending drill-down and in the assistant's answer card. Both read the SAME deterministic
+ *  /api/spending endpoints, which have supported from/to all along. */
+interface DateRange { from: string; to: string }
+/** The spending-over-time drilldown targets either a whole category subtree or a set of
+ *  articles by canonical name (the assistant can group articles across categories). */
+type DrillTarget =
+  | { kind: 'category'; path: string; label: string }
+  | { kind: 'article'; canonicals: string[]; label: string };
+/** What the positions list is scoped to. `q` is the selector the backend expects
+ *  (`path=…` for a tree node, `budget=…` for a stored limit/lens); `bases` are the
+ *  category paths its rows get grouped under ("Nach Kategorien"). */
+interface PosTarget { label: string; q: string; bases: string[] }
+/** Draft handed to BudgetModal. `kind` is immutable once stored, so an edit — and a
+ *  create that starts from a category row — locks the switcher. */
+interface BudgetDraft {
+  id?: number; kind: 'category' | 'lens'; lockKind?: boolean;
+  label?: string; monthly_target?: number | null; konto_id?: number | null;
+  categories?: string[]; articles?: string[];
+}
+
 function MonthTab() {
   const { t, i18n } = useTranslation();
   const qc = useQueryClient();
@@ -135,9 +218,27 @@ function MonthTab() {
   const [month, setMonth] = useUrlState('m', curMonth());
   const [fx, setFx] = useUrlState('fx', '');   // deep-link from Auszüge: open this plan's evidence
   const [picker, setPicker] = useState<MonthFix | null>(null);
-  const [budgetModal, setBudgetModal] = useState<Partial<MonthBudget> | null>(null);
-  const [posBudget, setPosBudget] = useState<MonthBudget | null>(null);
+  const [budgetModal, setBudgetModal] = useState<BudgetDraft | null>(null);
+  const [posTarget, setPosTarget] = useState<PosTarget | null>(null);
+  // The drill-down carries its own period: normally the page's month, but an answer card
+  // for a multi-month question opens it on that whole range.
+  const [drill, setDrill] = useState<{ target: DrillTarget; range: DateRange | null } | null>(null);
+  const openDrill = (target: DrillTarget, range: DateRange | null = null) => setDrill({ target, range });
   const [evidence, setEvidence] = useState<{ id: number; label: string; kind: 'expense' | 'income'; expectReceipt: boolean } | null>(null);
+  // Tree folding. We store DEVIATIONS from the default (level 1 open, everything below
+  // it closed) rather than the open set itself: 84 categories expanded at once is
+  // unusable on a phone, and a fresh load must always come up folded the same way.
+  const [toggled, setToggled] = useState<Set<string>>(new Set());
+  // Per-parent "also show the children that carry no money and no goal". They still
+  // EXIST — that is the whole point of a derived tracker — they are just not worth a row
+  // until you go looking for them.
+  const [showEmpty, setShowEmpty] = useState<Set<string>>(new Set());
+
+  // Search + ✨ + filter bar, ported 1:1 from the Statistik page this one absorbed.
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [asking, setAsking] = useState(false);
+  const [aiAnswer, setAiAnswer] = useState<AiState | null>(null);
 
   // Account-holder scope: one bubble per person + one for the household account;
   // default = all (Gesamthaushalt). Selecting a single person reveals sub-bubbles
@@ -178,12 +279,83 @@ function MonthTab() {
   };
   const toggleKonto = (id: number) => setExclKonten(s => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const kontenParam = isAll ? '' : `&konten=${effKonten.join(',')}`;
+  // Every konto the bubble scope can actually express. `scope` above is built from
+  // non-cash, user-linked accounts ONLY, while the assistant grounds its answer on the full
+  // `konto` table (statsAsk.ts) — so a legitimate id (a Bargeld account, an account linked
+  // to nobody) simply has no bubble to switch on.
+  const scopeKontoIds = useMemo(() => {
+    const s = new Set<number>();
+    for (const m of scope.members) for (const k of m.konten) s.add(k.id);
+    for (const k of scope.household) s.add(k.id);
+    return s;
+  }, [scope]);
+  // The assistant answers with raw konto IDs; this page's scope model is groups (person /
+  // household) plus per-konto exclusions. Map one onto the other: select every group that
+  // owns at least one of the ids, then exclude that group's OTHER accounts, so "was hat
+  // Lena auf dem Girokonto ausgegeben" lands on exactly that account.
+  // Returns the ids it could really apply. Anything else is REPORTED, never swallowed: the
+  // old code let an unrepresentable id fall through to "no group selected" = ALL accounts
+  // while the banner still rendered that account's chip, so the page asserted a filter it
+  // had never applied — the exact opposite of what was asked for.
+  const applyKonten = (ids: number[]): number[] => {
+    if (!ids.length) { setSelKeys(null); setExclKonten(new Set()); return []; }
+    const usable = ids.filter(id => scopeKontoIds.has(id));
+    // Nothing expressible → leave the scope exactly as the user had it. Widening it to the
+    // whole household would answer a narrower question than the one that was asked.
+    if (!usable.length) return [];
+    const keys = new Set<string>();
+    const excl = new Set<number>();
+    for (const m of scope.members) if (m.konten.some(k => usable.includes(k.id))) keys.add(m.key);
+    if (scope.household.some(k => usable.includes(k.id))) keys.add('household');
+    for (const m of scope.members) if (keys.has(m.key)) for (const k of m.konten) if (!usable.includes(k.id)) excl.add(k.id);
+    if (keys.has('household')) for (const k of scope.household) if (!usable.includes(k.id)) excl.add(k.id);
+    setExclKonten(excl);
+    setSelKeys(keys.size === 0 || keys.size === scope.allKeys.length ? null : keys);
+    return usable;
+  };
 
   const { data, isLoading } = useQuery({
-    queryKey: ['fin-month', month, isAll ? 'all' : effKonten.join(',')],
-    queryFn: () => api<MonthData>(`/api/finances/month?month=${month}${kontenParam}`),
+    // lang picks category display vs display_en on the tree — part of the key or a
+    // language switch would keep serving the other language's labels from cache.
+    queryKey: ['fin-month', month, isAll ? 'all' : effKonten.join(','), i18n.language],
+    queryFn: () => api<MonthData>(`/api/finances/month?month=${month}${kontenParam}&lang=${i18n.language}`),
   });
   const invalidate = () => void qc.invalidateQueries({ queryKey: ['fin-month'] });
+
+  // Enter (or the ✨ button) hands the question to the assistant, which answers with THIS
+  // page's filters. The month view is inherently month-scoped (fixed costs and goals are
+  // monthly), so the LISTS below jump to the month the range starts in — but the answer
+  // itself is computed over the FULL range the question asked for (aiRange, below), so
+  // "wie viel habe ich 2026 für Kraftstoff ausgegeben" gets the year, not January.
+  const askAI = async () => {
+    const q = search.trim();
+    if (!q || asking) return;
+    setAsking(true);
+    try {
+      const res = await api<AiAnswer>('/api/spending/ask', { method: 'POST', body: { q, lang: i18n.language } });
+      if (res.from) setMonth(res.from.slice(0, 7));
+      const applied = applyKonten(res.konto_ids ?? []);
+      const dropped = (res.konto_ids ?? []).filter(id => !applied.includes(id));
+      setAiAnswer({ ...res, konto_ids: applied, droppedKonten: dropped });
+      setSearch('');
+    } catch {
+      setAiAnswer({ category_path: null, category_label: null, canonicals: [], group_label: null, from: null, to: null, konto_ids: [], droppedKonten: [], answer: null, clarify: t('stats.aiError') });
+    } finally {
+      setAsking(false);
+    }
+  };
+  // The period the ANSWER covers: only a genuine multi-month span becomes a range — a
+  // question about one month is already what the page shows, and re-fetching it from
+  // /api/spending would answer it with slightly different arithmetic (that endpoint does
+  // not subtract receipts tied to a fixed cost) than the row right below.
+  const aiRange: DateRange | null = aiAnswer?.from && aiAnswer.to && aiAnswer.from.slice(0, 7) !== aiAnswer.to.slice(0, 7)
+    ? { from: aiAnswer.from, to: aiAnswer.to } : null;
+
+  // Article names → their category, for the search box (an article jumps to its purchases).
+  const { data: names = [] } = useQuery({
+    queryKey: ['names'],
+    queryFn: () => api<{ canonical_name: string; category_path: string | null }[]>('/api/names'),
+  });
 
   const check = useMutation({
     mutationFn: (b: { fixed_cost_id: number; month: string; action: 'confirm' | 'skip' | 'clear'; einkauf_id?: number | null; bank_tx_id?: number | null; income_id?: number | null }) =>
@@ -221,12 +393,102 @@ function MonthTab() {
 
   const incomes = data?.incomes ?? [];   // recurring income PLANS (Einnahmen-Soll)
   const fixed = data?.fixed ?? [];
-  const budgets = data?.budgets ?? [];
+  const lenses = data?.lenses ?? [];
+  const orphanLimits = data?.orphanLimits ?? [];
   const variableTotal = data?.variableTotal ?? 0;
   const unbudgeted = data?.unbudgeted ?? 0;
   const categoryMissing = data?.categoryMissing ?? 0;
+  const unknownCategory = data?.unknownCategory ?? 0;
   const receiptMissing = data?.receiptMissing ?? 0;
   const receiptMissingCount = data?.receiptMissingCount ?? 0;
+
+  // ── derived category tree ────────────────────────────────────────────────
+  const treeNodes = data?.categoryTree?.nodes ?? [];
+  const nodeByPath = useMemo(() => new Map(treeNodes.map(n => [n.path, n])), [treeNodes]);
+  const childrenOf = useMemo(() => {
+    const m = new Map<string | null, MonthCategoryNode[]>();
+    for (const n of treeNodes) { const k = n.parent_path ?? null; const list = m.get(k) ?? []; list.push(n); m.set(k, list); }
+    return m;
+  }, [treeNodes]);
+  // "Substantial" = this node, or anything below it, actually carries money or a stored
+  // goal. Everything else is real and reachable (see the "+ n weitere" row) but does not
+  // deserve a permanent row: showing all 84 categories at once is unusable on a phone.
+  // `actual` is subtree-inclusive, so a parent inherits its children's spend for free;
+  // the ancestor walk is only needed for a zero-spend category that DOES carry a goal.
+  const substantial = useMemo(() => {
+    const s = new Set<string>();
+    for (const n of treeNodes) {
+      if (n.actual === 0 && !n.limit && !n.extra_limits?.length) continue;
+      let cur: MonthCategoryNode | undefined = n;
+      for (let guard = 0; cur && guard < 8; guard++) { s.add(cur.path); cur = cur.parent_path ? nodeByPath.get(cur.parent_path) : undefined; }
+    }
+    return s;
+  }, [treeNodes, nodeByPath]);
+  // Level 1 is open by default, everything below it closed — `toggled` flips that.
+  const isOpen = (n: MonthCategoryNode) => (n.level === 1) !== toggled.has(n.path);
+  const flip = (set: Set<string>, p: string) => { const nx = new Set(set); if (nx.has(p)) nx.delete(p); else nx.add(p); return nx; };
+
+  const openPositions = (label: string, path: string) =>
+    setPosTarget({ label, q: `path=${encodeURIComponent(path)}`, bases: [path] });
+  // Edit ONE stored limit of a node — the primary one, or (see `extra_limits`) any of the
+  // legacy duplicates that also claim this path. `l == null` means "no limit yet, create one".
+  const editLimit = (n: MonthCategoryNode, l: BudgetLimit | null) => setBudgetModal(l
+    ? { id: l.id, kind: 'category', lockKind: true, label: l.label, monthly_target: l.monthly_target, konto_id: l.konto_id, categories: [n.path], articles: [] }
+    : { kind: 'category', lockKind: true, label: n.label, categories: [n.path], articles: [] });
+
+  const renderNode = (n: MonthCategoryNode): ReactNode => {
+    // Level 4+ exists in the catalogue but never gets a row: `actual` is subtree-inclusive,
+    // so its money is already inside its level-3 ancestor — only the row is folded away.
+    const kids = (childrenOf.get(n.path) ?? []).filter(c => c.level <= 3);
+    // `empties` is computed from `substantial` ALONE, never from what is currently on
+    // screen: the toggle has to keep rendering after it has been used, or unhiding would be
+    // a one-way door (the button that flips `showEmpty` was its own only unmount trigger).
+    const empties = kids.filter(c => !substantial.has(c.path)).length;
+    const revealed = showEmpty.has(n.path);
+    const shown = revealed ? kids : kids.filter(c => substantial.has(c.path));
+    const open = isOpen(n);
+    return (
+      <div key={n.path}>
+        <CategoryRow n={n} t={t} hasKids={kids.length > 0} open={open} scopedToPerson={!isAll}
+          onToggle={() => setToggled(s => flip(s, n.path))}
+          onOpen={() => openPositions(n.label, n.path)}
+          onChart={() => openDrill({ kind: 'category', path: n.path, label: `${n.emoji ?? ''} ${n.label}`.trim() })}
+          onEdit={() => editLimit(n, n.limit)}
+          onEditExtra={l => editLimit(n, l)} />
+        {open && shown.map(renderNode)}
+        {open && empties > 0 && (
+          // Indent = the child rows' own indent ((level+1-1)*12) plus the 28px chevron
+          // gutter, so the row lines up with the labels it unhides.
+          <button onClick={() => setShowEmpty(s => flip(s, n.path))}
+            className="w-full py-1.5 text-left text-[11px] text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+            style={{ paddingLeft: `${n.level * 12 + 28}px` }}>
+            {revealed ? `− ${t('finances.hideEmptyCats', { count: empties })}` : `+ ${t('finances.showEmptyCats', { count: empties })}`}
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  // Search: matching categories (any level, most-spent first) and matching article names.
+  // A category hit opens its positions; an article hit opens ITS purchases, not its
+  // category — asking for "Diesel" should not drill the whole Sonstiges bucket.
+  const searchLc = search.trim().toLowerCase();
+  const catHits = searchLc ? treeNodes.filter(n => n.label.toLowerCase().includes(searchLc)).sort((a, b) => b.actual - a.actual).slice(0, 40) : [];
+  const articleHits = useMemo(() => {
+    if (!searchLc) return [];
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const nm of names) {
+      const cName = (nm.canonical_name ?? '').trim();
+      const key = cName.toLowerCase();
+      if (!cName || seen.has(key) || !key.includes(searchLc)) continue;
+      seen.add(key);
+      out.push(cName);
+      if (out.length >= 40) break;
+    }
+    return out.sort((a, b) => a.localeCompare(b));
+  }, [names, searchLc]);
+  const hasActiveFilters = !isAll || month !== curMonth();
 
   // Deep-link from the Auszüge list (?fx=<id>): open that plan's evidence modal so a
   // statement allocated to a generated one-off income jumps straight to the entry.
@@ -271,11 +533,19 @@ function MonthTab() {
   const fixTotal = fixedCosts.reduce((s, f) => s + (counts(f) ? effEur(f) : 0), 0);
   const oneOffCostTotal = oneOffCosts.reduce((s, f) => s + (counts(f) ? effEur(f) : 0), 0);
   const varActual = variableTotal + oneOffCostTotal;
-  // No top-line "of target": varActual is now the true total spend (incl. spend outside any
-  // budget), while budget targets can overlap (a "Lebensmittel" goal and a nested "Obst"
-  // goal) — summing them and comparing to the total is apples-to-oranges. Each budget tracks
-  // its own goal on its own bar (BudgetRow) instead.
+  // No top-line "of target": varActual is the true total spend (incl. spend outside any
+  // goal), while goals can overlap (a "Lebensmittel" limit and a nested "Obst" limit, and
+  // lenses overlap everything) — summing them and comparing to the total is
+  // apples-to-oranges. Each row tracks its own goal on its own bar instead.
   const net = Math.round((incomeTotal - fixTotal - varActual) * 100) / 100;
+  // Running projection for the CURRENT month, restored from the (absorbed) Statistik page:
+  // "day 12 of 31 → this pace ends the month at X". It projects exactly the number it sits
+  // under, so it is honest about which figure it is extrapolating — unlike a projection of
+  // the category tree shown beneath a total that also carries one-offs and un-receipted
+  // debits. Past/future months elapse fully, so there is nothing to project.
+  const varProjection = data?.isCurrentMonth && data.daysElapsed > 0
+    ? Math.round((varActual * data.daysTotal / data.daysElapsed) * 100) / 100
+    : null;
   // Reconciliation completeness covers EVERY plan that still needs a bank match —
   // recurring AND one-off, income AND cost — except internal transfers that net out
   // (shown struck through / "nicht gezählt"), which mirrors the euro totals above. A
@@ -325,27 +595,6 @@ function MonthTab() {
         </button>
       </div>
 
-      {/* account-holder scope bubbles (person(s) + household; default all) */}
-      {scope.allKeys.length > 1 && (
-        <div className="flex flex-col items-center gap-1.5">
-          <div className="flex flex-wrap justify-center gap-1.5">
-            {scope.members.map(m => (
-              <ScopeBubble key={m.key} active={activeKeys.has(m.key)} onClick={() => toggleGroup(m.key)}>{m.label}</ScopeBubble>
-            ))}
-            {scope.household.length > 0 && (
-              <ScopeBubble active={activeKeys.has('household')} onClick={() => toggleGroup('household')}>{t('finances.household')}</ScopeBubble>
-            )}
-          </div>
-          {soleMember && soleMember.konten.length > 1 && (
-            <div className="flex flex-wrap justify-center gap-1.5">
-              {soleMember.konten.map(k => (
-                <ScopeBubble key={k.id} small active={!exclKonten.has(k.id)} onClick={() => toggleKonto(k.id)}>{k.name}</ScopeBubble>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
       {isLoading && <Spinner />}
       {data && (
         <>
@@ -365,6 +614,11 @@ function MonthTab() {
               <div>
                 <div className="text-xs text-zinc-500 dark:text-zinc-400">{t('finances.varTitle')}</div>
                 <div className="text-lg font-bold">{eur(varActual)}</div>
+                {varProjection != null && data && (
+                  <div className="text-xs text-zinc-400" title={t('stats.projection')}>
+                    → {eur(varProjection)} · {t('stats.day')} {data.daysElapsed}/{data.daysTotal}
+                  </div>
+                )}
               </div>
             </div>
             <div className="flex items-center justify-between border-t border-zinc-100 pt-2 dark:border-zinc-800">
@@ -384,32 +638,234 @@ function MonthTab() {
               </div>
             )}
           </Card>
+        </>
+      )}
 
-          {/* 2×2, all collapsed by default: Fixed/Variable income, Fixed/Variable costs */}
-          {/* Fixed income — recurring income plans (salary, Kindergeld, Beiträge) */}
-          <Section title={t('finances.fixedIncomeTitle')} count={fixedIncome.length} defaultOpen={false}>
-            {!fixedIncome.length && <Card className="p-3 text-xs text-zinc-400">{t('finances.noIncomePlans')}</Card>}
-            {fixedIncome.map(fixRow)}
-          </Section>
+      {/* Search + ✨ assistant + filter — under the summary, above the lists. It replaces
+          the old person/household bubble row: the same scope now lives in the filter
+          panel together with the month, so there is ONE place that narrows the view. */}
+      <div className="flex gap-2">
+        <div className="relative min-w-0 flex-1">
+          <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+          <Input
+            className="pl-9 pr-16"
+            placeholder={t('stats.searchPlaceholder')}
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void askAI(); } }}
+          />
+          <div className="absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
+            {search && !asking && <button onClick={() => setSearch('')} title={t('common.clear')} className="p-1 text-zinc-400 hover:text-zinc-600"><X size={16} /></button>}
+            <button onClick={() => void askAI()} disabled={!search.trim() || asking} title={t('stats.askAi')}
+              className="p-1 text-emerald-600 hover:text-emerald-700 disabled:text-zinc-300 dark:text-emerald-500 dark:disabled:text-zinc-700">
+              {asking ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+            </button>
+          </div>
+        </div>
+        <button type="button" onClick={() => setFiltersOpen(o => !o)} aria-pressed={filtersOpen} title={t('stats.filters')}
+          className={cn('relative flex shrink-0 items-center rounded-xl border px-2.5 transition',
+            filtersOpen ? 'border-emerald-500 bg-emerald-50 text-emerald-600 dark:border-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400' : 'border-zinc-200 text-zinc-400 hover:text-zinc-600 dark:border-zinc-800')}>
+          <SlidersHorizontal size={16} />
+          {hasActiveFilters && !filtersOpen && <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-zinc-950" />}
+        </button>
+      </div>
 
-          {/* Variable income — one-off incomes (generated single-month, e.g. "…Spesen") */}
-          <Section title={t('finances.varIncomeTitle')} count={varIncome.length} defaultOpen={false}>
-            {!varIncome.length && <Card className="p-3 text-xs text-zinc-400">{t('finances.noVarIncome')}</Card>}
-            {varIncome.map(fixRow)}
-          </Section>
+      {/* Filter panel: month + the account-holder scope. Picking a single person reveals
+          that person's accounts as subtractive chips (unchanged behaviour, new home). */}
+      {filtersOpen && (
+        <div className="flex flex-col gap-3 rounded-xl border border-zinc-200 p-3 dark:border-zinc-800">
+          <div>
+            <div className="mb-1.5 text-[11px] font-medium text-zinc-400">{t('finances.filterMonth')}</div>
+            <div className="flex items-center gap-2">
+              <Input type="month" className="min-w-0 flex-1" value={month} onChange={e => e.target.value && setMonth(e.target.value)} />
+              <Button variant="ghost" className="shrink-0 px-2.5 py-1.5 text-xs" onClick={() => setMonth(curMonth())}>{t('finances.jumpToday')}</Button>
+            </div>
+          </div>
+          {scope.allKeys.length > 1 && (
+            <div>
+              <div className="mb-1.5 text-[11px] font-medium text-zinc-400">{t('stats.accounts')}</div>
+              <div className="scrollbar-none -mx-1 flex gap-1.5 overflow-x-auto px-1 py-0.5">
+                <ScopeBubble active={isAll} onClick={() => { setSelKeys(null); setExclKonten(new Set()); }}>{t('stats.allAccounts')}</ScopeBubble>
+                {scope.members.map(m => (
+                  <ScopeBubble key={m.key} active={activeKeys.has(m.key)} onClick={() => toggleGroup(m.key)}>{m.label}</ScopeBubble>
+                ))}
+                {scope.household.length > 0 && (
+                  <ScopeBubble active={activeKeys.has('household')} onClick={() => toggleGroup('household')}>{t('finances.household')}</ScopeBubble>
+                )}
+              </div>
+              {soleMember && soleMember.konten.length > 1 && (
+                <div className="scrollbar-none -mx-1 mt-1.5 flex gap-1.5 overflow-x-auto px-1 py-0.5">
+                  {soleMember.konten.map(k => (
+                    <ScopeBubble key={k.id} small active={!exclKonten.has(k.id)} onClick={() => toggleKonto(k.id)}>{k.name}</ScopeBubble>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
-          {/* Fixed costs — recurring expense plans (rent, internet, subscriptions) */}
-          <Section title={t('finances.fixTitle')} count={fixedCosts.length} defaultOpen={false}>
-            {!fixedCosts.length && <Card className="p-3 text-xs text-zinc-400">{t('finances.noFixThisMonth')}</Card>}
-            {fixedCosts.map(fixRow)}
-          </Section>
+      {/* The assistant restated the question and set the filters above. Every figure in
+          here is read from the deterministic endpoints, never from the model. */}
+      {aiAnswer && (
+        <Card className="flex flex-col gap-2 border-emerald-200 bg-emerald-50/60 p-3 dark:border-emerald-900 dark:bg-emerald-950/20">
+          <div className="flex items-start gap-2">
+            <Sparkles size={16} className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+            <p className="min-w-0 flex-1 text-sm text-zinc-700 dark:text-zinc-200">
+              {aiAnswer.clarify ?? aiAnswer.answer ?? t('stats.aiApplied')}
+            </p>
+            <button onClick={() => setAiAnswer(null)} title={t('common.close')} className="shrink-0 text-zinc-400 hover:text-zinc-600"><X size={16} /></button>
+          </div>
+          {(aiAnswer.category_label || aiAnswer.canonicals.length > 0 || (aiAnswer.from && aiAnswer.to) || aiAnswer.konto_ids.length > 0) && (
+            <div className="flex flex-wrap gap-1.5 pl-6">
+              {aiAnswer.category_label && <span className="rounded-full bg-white px-2 py-0.5 text-xs text-zinc-600 ring-1 ring-emerald-200 dark:bg-zinc-900 dark:text-zinc-300 dark:ring-emerald-900">{aiAnswer.category_label}</span>}
+              {/* One chip per article so it stays transparent which articles were grouped. */}
+              {aiAnswer.canonicals.map(c => <span key={c} className="rounded-full bg-white px-2 py-0.5 text-xs text-zinc-600 ring-1 ring-emerald-200 dark:bg-zinc-900 dark:text-zinc-300 dark:ring-emerald-900">{c}</span>)}
+              {aiAnswer.from && aiAnswer.to && <span className="rounded-full bg-white px-2 py-0.5 text-xs text-zinc-600 ring-1 ring-emerald-200 dark:bg-zinc-900 dark:text-zinc-300 dark:ring-emerald-900">{fmtDate(aiAnswer.from, i18n.language)} – {fmtDate(aiAnswer.to, i18n.language)}</span>}
+              {aiAnswer.konto_ids.map(id => {
+                const k = (konten ?? []).find(x => x.id === id);
+                return k ? <span key={id} className="rounded-full bg-white px-2 py-0.5 text-xs text-zinc-600 ring-1 ring-emerald-200 dark:bg-zinc-900 dark:text-zinc-300 dark:ring-emerald-900">{k.name}</span> : null;
+              })}
+            </div>
+          )}
+          {/* An account the model named that this page's person/household bubbles cannot
+              express (cash, or an account linked to no member). Named out loud, because the
+              alternative — quietly widening the view to every account — answers a different
+              question than the one that was asked. */}
+          {aiAnswer.droppedKonten.length > 0 && (
+            <p className="pl-6 text-xs text-amber-700 dark:text-amber-400">
+              {t('finances.aiKontoNote', { konten: aiAnswer.droppedKonten.map(id => (konten ?? []).find(x => x.id === id)?.name ?? `#${id}`).join(', ') })}
+            </p>
+          )}
+          {/* Plans and goals are monthly, so the LISTS below stay on one month — but the
+              answer card underneath covers the whole period that was asked for. */}
+          {aiRange && (
+            <p className="pl-6 text-xs text-amber-700 dark:text-amber-400">{t('finances.aiRangeNote', { month: monthNameOf(Number(month.slice(0, 4)), Number(month.slice(5, 7)), i18n.language) })}</p>
+          )}
+          {aiAnswer.category_path && (() => {
+            const node = nodeByPath.get(aiAnswer.category_path!);
+            if (!node) return null;
+            return (
+              <AiCategoryCard node={node} range={aiRange} month={month} kParam={kontenParam}
+                onOpen={() => aiRange
+                  ? openDrill({ kind: 'category', path: node.path, label: `${node.emoji ?? ''} ${node.label}`.trim() }, aiRange)
+                  : openPositions(node.label, node.path)} />
+            );
+          })()}
+          {aiAnswer.canonicals.length > 0 && (() => {
+            const label = aiAnswer.group_label ?? aiAnswer.canonicals.join(', ');
+            return (
+              <AiArticleCard canonicals={aiAnswer.canonicals} label={label} month={month} range={aiRange} kParam={kontenParam}
+                onOpen={() => openDrill({ kind: 'article', canonicals: aiAnswer.canonicals, label }, aiRange)} />
+            );
+          })()}
+        </Card>
+      )}
 
-          {/* Variable costs — category budgets + one-off (single-month) expenses */}
-          <Section title={t('finances.varTitle')} count={budgets.length + oneOffCosts.length + (unbudgeted > 0 ? 1 : 0) + (categoryMissing > 0 ? 1 : 0) + (receiptMissing > 0 ? 1 : 0)} defaultOpen={false}
-            right={<Button variant="secondary" className="px-2.5 py-1.5 text-xs" onClick={() => setBudgetModal({})}><Plus size={14} /> {t('finances.addBudget')}</Button>}>
+      {/* Live search results: matching categories (→ their positions) and matching
+          articles (→ their own purchases, not their whole category). */}
+      {searchLc && (
+        <Card className="flex flex-col p-2">
+          {catHits.length > 0 && (
+            <>
+              <div className="px-2 pb-1 pt-1 text-[11px] font-medium text-zinc-400">{t('stats.categories')}</div>
+              {catHits.map(n => (
+                <button key={n.path} onClick={() => openPositions(n.label, n.path)}
+                  className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-900">
+                  {n.emoji && <span>{n.emoji}</span>}
+                  <span className="min-w-0 flex-1 truncate">{n.label}</span>
+                  <span className="tabular shrink-0 text-sm">{eur(n.actual)}</span>
+                </button>
+              ))}
+            </>
+          )}
+          {articleHits.length > 0 && (
+            <>
+              <div className="px-2 pb-1 pt-2 text-[11px] font-medium text-zinc-400">{t('stats.articles')}</div>
+              {articleHits.map(a => (
+                <button key={a} onClick={() => openDrill({ kind: 'article', canonicals: [a], label: a })}
+                  className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-900">
+                  <span className="min-w-0 flex-1 truncate text-sm">{a}</span>
+                  <BarChart3 size={14} className="shrink-0 text-zinc-400" />
+                </button>
+              ))}
+            </>
+          )}
+          {!catHits.length && !articleHits.length && <EmptyState>{t('stats.noData')}</EmptyState>}
+        </Card>
+      )}
+
+      {data && (
+        <>
+          {/* Section order = how often you look: the variable side is the living part of
+              the month (open), the plans below it get ticked off once and stay folded. */}
+          <Section title={t('finances.varTitle')}>
             {oneOffCosts.map(fixRow)}
-            {!budgets.length && !oneOffCosts.length && !unbudgeted && !categoryMissing && !receiptMissing && <Card className="p-3 text-xs text-zinc-400">{t('finances.noBudgets')}</Card>}
-            {budgets.map(b => <BudgetRow key={b.id} b={b} t={t} hideTarget={!isAll && b.konto_id == null} onEdit={() => setBudgetModal(b)} onOpen={() => setPosBudget(b)} />)}
+
+            {/* The DERIVED category tree. Nothing here is stored except the optional
+                limits: every category shows up with its real spend, and deleting a goal
+                never makes a category (or its spend) disappear. divide-y separates the
+                top-level groups only — inside a group the indentation carries the
+                structure, exactly as it did on the Statistik page. */}
+            <Card className="flex flex-col divide-y divide-zinc-100 px-1.5 py-1 dark:divide-zinc-800/70">
+              {(childrenOf.get(null) ?? []).map(renderNode)}
+              {!treeNodes.length && <EmptyState>{t('stats.noData')}</EmptyState>}
+            </Card>
+
+            {/* Lenses: budgets over several categories and/or single articles. They
+                OVERLAP the tree on purpose, so they get their own block and are not
+                counted a second time in Variable Kosten. */}
+            {lenses.length > 0 && (
+              <Card className="flex flex-col gap-2 border-violet-200 bg-violet-50/40 p-3 dark:border-violet-900/60 dark:bg-violet-950/20">
+                <div>
+                  <div className="text-sm font-semibold">{t('finances.lensTitle')}</div>
+                  <div className="text-[11px] text-zinc-500 dark:text-zinc-400">{t('finances.lensHint')}</div>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  {lenses.map(l => (
+                    <LensRow key={l.id} l={l} t={t} scopedToPerson={!isAll}
+                      onOpen={() => setPosTarget({ label: l.label, q: `budget=${l.id}`, bases: l.categories })}
+                      onChart={() => openDrill(l.articles.length
+                        ? { kind: 'article', canonicals: l.articles, label: l.label }
+                        : { kind: 'category', path: l.categories[0], label: l.label })}
+                      onEdit={() => setBudgetModal({ id: l.id, kind: 'lens', lockKind: true, label: l.label, monthly_target: l.monthly_target, konto_id: l.konto_id, categories: l.categories, articles: l.articles })} />
+                  ))}
+                </div>
+              </Card>
+            )}
+
+            {/* Limits whose category was renamed/removed by a category redesign. They keep
+                working (the prefix still matches whatever artikel still carry that path)
+                but they have no row in the tree, so they need re-pointing. */}
+            {orphanLimits.length > 0 && (
+              <Card className="flex flex-col gap-2 border-amber-200 bg-amber-50/50 p-3 dark:border-amber-900/60 dark:bg-amber-950/20">
+                <div>
+                  <div className="text-sm font-semibold text-amber-800 dark:text-amber-300">{t('finances.orphanTitle')}</div>
+                  <div className="text-[11px] text-zinc-500 dark:text-zinc-400">{t('finances.orphanHint')}</div>
+                </div>
+                {orphanLimits.map(o => (
+                  <div key={o.id} className="flex items-center gap-2">
+                    <button onClick={() => setPosTarget({ label: o.label, q: `budget=${o.id}`, bases: [o.category_path] })}
+                      className="flex min-w-0 flex-1 flex-col text-left">
+                      <span className="truncate text-sm font-medium">{o.label}</span>
+                      <span className="truncate text-[11px] text-zinc-400">{o.category_path}</span>
+                    </button>
+                    <span className="shrink-0 text-sm font-semibold tabular-nums">{eur(o.actual)}</span>
+                    <button onClick={() => setBudgetModal({ id: o.id, kind: 'category', lockKind: true, label: o.label, monthly_target: o.monthly_target, konto_id: o.konto_id, categories: [o.category_path], articles: [] })}
+                      title={t('finances.reattach')}
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800">
+                      <Pencil size={15} />
+                    </button>
+                  </div>
+                ))}
+              </Card>
+            )}
+
+            {/* Three of the tiles below complete the tree into the month's total:
+                  variableTotal = tree total + Kategorie fehlt + Unbekannte Kategorie + Beleg fehlt
+                Unbudgetiert is NOT part of that identity — it is a slice OF the tree
+                (spend in categories that carry no limit), shown so a goal-less corner of
+                the month stays visible. */}
             {unbudgeted > 0 && (() => {
               const [yy, mm] = month.split('-').map(Number);
               const last = String(new Date(yy, mm, 0).getDate()).padStart(2, '0');
@@ -444,6 +900,19 @@ function MonthTab() {
                 </Card>
               );
             })()}
+            {/* Spend on a category_path that is no longer in the catalogue. It cannot sit
+                in any tree row, so without this tile the tree would silently fail to add
+                up to Variable Kosten. Not tappable: there is no filter for "dangling
+                category" — the fix is a recategorize run, not a positions list. */}
+            {unknownCategory > 0 && (
+              <Card className="flex items-center justify-between gap-2 p-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-amber-700 dark:text-amber-400">{t('finances.unknownCategory')}</div>
+                  <div className="text-xs text-zinc-400">{t('finances.unknownCategoryHint')}</div>
+                </div>
+                <span className="shrink-0 text-sm font-semibold tabular-nums text-zinc-700 dark:text-zinc-200">{eur(unknownCategory)}</span>
+              </Card>
+            )}
             {receiptMissing > 0 && (
               <Card onClick={() => navigate(`/finanzen?tab=bank&bs=open&bm=${month}`)}
                 className="flex items-center justify-between gap-2 p-3">
@@ -457,6 +926,31 @@ function MonthTab() {
                 </div>
               </Card>
             )}
+
+            {/* Bottom of the list, not the section header: a category goal is set on its
+                own row now, so this button is for the overlapping kind you add rarely. */}
+            <Button variant="secondary" className="w-full justify-center py-2 text-xs"
+              onClick={() => setBudgetModal({ kind: 'lens', categories: [], articles: [] })}>
+              <Plus size={14} /> {t('finances.addBudget')}
+            </Button>
+          </Section>
+
+          {/* Fixed costs — recurring expense plans (rent, internet, subscriptions) */}
+          <Section title={t('finances.fixTitle')} count={fixedCosts.length} defaultOpen={false}>
+            {!fixedCosts.length && <Card className="p-3 text-xs text-zinc-400">{t('finances.noFixThisMonth')}</Card>}
+            {fixedCosts.map(fixRow)}
+          </Section>
+
+          {/* Variable income — one-off incomes (generated single-month, e.g. "…Spesen") */}
+          <Section title={t('finances.varIncomeTitle')} count={varIncome.length} defaultOpen={false}>
+            {!varIncome.length && <Card className="p-3 text-xs text-zinc-400">{t('finances.noVarIncome')}</Card>}
+            {varIncome.map(fixRow)}
+          </Section>
+
+          {/* Fixed income — recurring income plans (salary, Kindergeld, Beiträge) */}
+          <Section title={t('finances.fixedIncomeTitle')} count={fixedIncome.length} defaultOpen={false}>
+            {!fixedIncome.length && <Card className="p-3 text-xs text-zinc-400">{t('finances.noIncomePlans')}</Card>}
+            {fixedIncome.map(fixRow)}
           </Section>
         </>
       )}
@@ -472,7 +966,13 @@ function MonthTab() {
           }} />
       )}
       {budgetModal && <BudgetModal initial={budgetModal} onClose={() => setBudgetModal(null)} onSaved={invalidate} />}
-      {posBudget && <BudgetPositions budget={posBudget} month={month} konten={kontenParam} onClose={() => setPosBudget(null)} />}
+      {posTarget && <PositionsModal target={posTarget} month={month} konten={kontenParam} onClose={() => setPosTarget(null)} />}
+      {/* Keyed on scope+range: opening a DIFFERENT drill-down while one is on screen (the
+          assistant's answer card can do that) must remount, or the modal would keep the
+          period state of the target it no longer shows. */}
+      {drill && <SpendingDrilldown key={`${spendScopeKey(drill.target)}|${drill.range?.from ?? ''}|${drill.range?.to ?? ''}`}
+        target={drill.target} month={month} initialRange={drill.range} kParam={kontenParam}
+        onClose={() => setDrill(null)} onPickMonth={ym => setMonth(ym)} />}
       {evidence && <FixedEvidenceModal id={evidence.id} label={evidence.label} kind={evidence.kind} month={month} t={t}
         expectReceipt={evidence.expectReceipt}
         onClose={() => setEvidence(null)}
@@ -718,44 +1218,154 @@ function FixCheckRow({ f, t, excluded, onConfirmSuggestion, onClear, onShowEvide
   );
 }
 
-function BudgetRow({ b, t, hideTarget, onEdit, onOpen }: { b: MonthBudget; t: (k: string, o?: Record<string, unknown>) => string; hideTarget?: boolean; onEdit: () => void; onOpen: () => void }) {
-  // hideTarget: a household budget viewed under a single-person scope has no per-person
-  // target, so we show its (person-scoped) actual + forecast but drop the target line
-  // and the progress bar — comparing a person's spend to the household target is apples
-  // to oranges.
-  const pct = !hideTarget && b.monthly_target > 0 ? (b.actual / b.monthly_target) * 100 : null;
-  const barColor = pct == null ? 'bg-zinc-300' : pct > 100 ? 'bg-red-500' : pct >= 80 ? 'bg-amber-500' : 'bg-emerald-500';
+/** Spend-against-goal bar. Only ever rendered when a goal actually exists — a category
+ *  without one shows the words "kein Ziel" instead, never an empty bar at 0,00. */
+function TargetBar({ actual, target, className }: { actual: number; target: number; className?: string }) {
+  const pct = (actual / target) * 100;
   return (
-    <Card
-      onClick={onOpen}
-      role="button"
-      tabIndex={0}
-      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } }}
-      title={t('finances.showPositions')}
-      className="flex cursor-pointer flex-col gap-1.5 p-3 transition-colors hover:border-emerald-300 hover:bg-emerald-50/40 dark:hover:border-emerald-800 dark:hover:bg-emerald-950/20"
-    >
-      <div className="flex items-center gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-2">
-            <span className="truncate text-sm font-medium">{b.label}</span>
-            <span className="shrink-0 text-xs text-zinc-400">{b.konto_id ? scopeLabelOf(t, b) : t('finances.wholeHousehold')}</span>
-          </div>
-          <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-            {t('finances.forecast')}: {b.forecast != null ? eur(b.forecast) : '–'}
-            {!hideTarget && <> · {t('finances.target')}: {eur(b.monthly_target)}</>}
-          </div>
-        </div>
-        <span className={cn('shrink-0 text-sm font-semibold', pct != null && pct > 100 && 'text-red-600 dark:text-red-400')}>{eur(b.actual)}</span>
-        <button onClick={e => { e.stopPropagation(); onEdit(); }} className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800" title={t('common.edit')}>
-          <Pencil size={15} />
+    <div className={cn('h-1.5 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800', className)}>
+      <div className={cn('h-full rounded-full transition-all', pct > 100 ? 'bg-red-500' : pct >= 80 ? 'bg-amber-500' : 'bg-emerald-500')}
+        style={{ width: `${Math.min(100, pct)}%` }} />
+    </div>
+  );
+}
+
+/** Icon hit area. 36×36 so the three targets on one tree row (positions / chart / goal)
+ *  stay comfortably apart under a thumb. */
+const iconBtn = 'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-300';
+
+/** One row of the derived category tree. Three separate hit areas: the row itself opens
+ *  the positions list, 📊 opens spending-over-time, ✏️ edits the (optional) limit — plus
+ *  the chevron when the node has children. */
+function CategoryRow({ n, t, hasKids, open, scopedToPerson, onToggle, onOpen, onChart, onEdit, onEditExtra }: {
+  n: MonthCategoryNode; t: (k: string, o?: Record<string, unknown>) => string;
+  hasKids: boolean; open: boolean; scopedToPerson: boolean;
+  onToggle: () => void; onOpen: () => void; onChart: () => void; onEdit: () => void;
+  onEditExtra: (l: BudgetLimit) => void;
+}) {
+  const limit = n.limit;
+  // A household-wide goal viewed under a single-person scope has no per-person target, so
+  // the goal is shown for context but the bar is dropped: comparing one person's spend to
+  // the household goal is apples to oranges (the rule the old budget tiles used too).
+  const scopedOut = scopedToPerson && limit != null && limit.konto_id == null;
+  const target = limit?.monthly_target ?? null;
+  // A limit tied to ONE account tracks that account's spend (the backend narrows it), so
+  // its bar must measure `limit.actual`, not the node's — otherwise a personal 50 € goal
+  // looks blown the moment the household spends 200 € in that category.
+  const personal = limit != null && limit.konto_id != null;
+  const limitActual = personal ? limit!.actual : n.actual;
+  const pct = target != null && target > 0 && !scopedOut ? (limitActual / target) * 100 : null;
+  // …and for the same reason the headline € (the node's own number) only turns red when
+  // the goal it is being measured against is the household-wide one.
+  const headlineOver = pct != null && pct > 100 && !personal;
+
+  // Second line, assembled from whatever is true for this node.
+  const bits: string[] = [];
+  if (n.is_meta) bits.push(t('finances.metaHint'));
+  else if (!limit || target == null) bits.push(t('finances.noTarget'));
+  else {
+    bits.push(`${t('finances.target')}: ${eur(target)}`);
+    // Name the person AND their number — the headline shows the whole scope's spend.
+    if (personal) bits.push(`${scopeLabelOf(t, limit)}: ${eur(limit.actual)}`);
+    else if (scopedToPerson) bits.push(t('finances.wholeHousehold'));
+  }
+  // The forecast has to be measured the same way as the target and the Ist standing next to
+  // it: a personal limit gets the backend's konto-narrowed `limit.forecast`, not the node's
+  // household-wide one — otherwise a row reading "Ziel 80 · Martin 62" would end in the
+  // whole household's 610 and look like a goal about to be blown by half a grand.
+  const forecast = personal ? limit!.forecast : n.forecast;
+  if (forecast != null) bits.push(`${t('finances.forecast')}: ${eur(forecast)}`);
+
+  return (
+    <div className="rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-900/60" style={{ paddingLeft: `${(n.level - 1) * 12}px` }}>
+      <div className="flex items-center gap-0.5">
+        {hasKids ? (
+          <button onClick={onToggle} aria-expanded={open} title={t('finances.toggleSub')}
+            className="flex h-9 w-7 shrink-0 items-center justify-center text-zinc-400">
+            <ChevronDown size={15} className={cn('transition-transform', !open && '-rotate-90')} />
+          </button>
+        ) : <span className="h-9 w-7 shrink-0" />}
+        <button onClick={onOpen} title={t('finances.showPositions')} className="flex min-w-0 flex-1 flex-col py-1.5 text-left">
+          <span className="flex items-baseline gap-1.5">
+            {n.emoji && <span className="shrink-0">{n.emoji}</span>}
+            <span className={cn('truncate text-sm', n.level === 1 && 'font-semibold')}>{n.label}</span>
+          </span>
+          <span className="mt-0.5 truncate text-[11px] text-zinc-400">{bits.join(' · ')}</span>
         </button>
+        <span className={cn('shrink-0 px-1 text-sm font-semibold tabular-nums', headlineOver && 'text-red-600 dark:text-red-400')}>{eur(n.actual)}</span>
+        <button onClick={onChart} title={t('stats.history')} className={iconBtn}><BarChart3 size={15} /></button>
+        {/* Pfand & Rabatt are bookkeeping counter-entries that make the total equal what
+            was actually paid — a spending goal on them is meaningless, so no ✏️ there. */}
+        {!n.is_meta && (
+          <button onClick={onEdit} title={t(limit ? 'common.edit' : 'finances.setTarget')} className={iconBtn}>
+            <Pencil size={15} />
+          </button>
+        )}
       </div>
-      {pct != null && (
-        <div className="h-1.5 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
-          <div className={cn('h-full rounded-full transition-all', barColor)} style={{ width: `${Math.min(100, pct)}%` }} />
+      {pct != null && <TargetBar actual={limitActual} target={target!} className="mb-1.5 ml-7 mr-1" />}
+      {/* Legacy duplicates: a household-wide AND a personal limit on the same path. The
+          backend keeps both on purpose (100 adds no UNIQUE index, which could have failed
+          on live data) and POST refuses to recreate one (409), so each needs its own ✏️ —
+          a bare "+1 weiteres Ziel" would name a row nobody could open, edit or delete. */}
+      {!!n.extra_limits?.length && (
+        <div className="mb-1.5 ml-7 mr-1 flex flex-col">
+          <span className="text-[10px] font-medium uppercase tracking-wide text-zinc-400">
+            {t('finances.extraLimits', { count: n.extra_limits.length })}
+          </span>
+          {n.extra_limits.map(x => (
+            <div key={x.id} className="flex items-center gap-1">
+              <span className="min-w-0 flex-1 truncate text-[11px] text-zinc-500 dark:text-zinc-400">
+                {x.label} · {x.konto_id != null ? scopeLabelOf(t, x) : t('finances.wholeHousehold')}
+                {x.monthly_target != null && ` · ${t('finances.target')}: ${eur(x.monthly_target)}`}
+                {` · ${eur(x.actual)}`}
+              </span>
+              <button onClick={() => onEditExtra(x)} title={t('common.edit')}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800">
+                <Pencil size={13} />
+              </button>
+            </div>
+          ))}
         </div>
       )}
-    </Card>
+    </div>
+  );
+}
+
+/** One overlapping budget (several categories and/or single articles). Same three hit
+ *  areas as a tree row, minus the goal-less case: a lens may have no target on purpose
+ *  ("what do I actually spend on Energydrinks?"). */
+function LensRow({ l, t, scopedToPerson, onOpen, onChart, onEdit }: {
+  l: BudgetLens; t: (k: string, o?: Record<string, unknown>) => string; scopedToPerson: boolean;
+  onOpen: () => void; onChart: () => void; onEdit: () => void;
+}) {
+  const scopedOut = scopedToPerson && l.konto_id == null;
+  const pct = l.monthly_target != null && l.monthly_target > 0 && !scopedOut ? (l.actual / l.monthly_target) * 100 : null;
+  // /api/spending/history takes ONE category path or a set of canonicals, so a lens is
+  // chartable only when it is purely articles or exactly one category. A mixed lens has
+  // no history endpoint that expresses it — better no button than a wrong chart.
+  const chartable = l.articles.length > 0 ? l.categories.length === 0 : l.categories.length === 1;
+  const bits: string[] = [];
+  if (l.monthly_target == null) bits.push(t('finances.noTarget'));
+  else {
+    bits.push(`${t('finances.target')}: ${eur(l.monthly_target)}`);
+    if (l.konto_id != null) bits.push(scopeLabelOf(t, l));
+    else if (scopedToPerson) bits.push(t('finances.wholeHousehold'));
+  }
+  if (l.categories.length) bits.push(l.categories.map(c => c.split('/').pop()).join(', '));
+  if (l.articles.length) bits.push(`${t('finances.lensArticles')}: ${l.articles.join(', ')}`);
+  return (
+    <div className="flex flex-col">
+      <div className="flex items-center gap-0.5">
+        <button onClick={onOpen} title={t('finances.showPositions')} className="flex min-w-0 flex-1 flex-col py-1 text-left">
+          <span className="truncate text-sm font-medium">{l.label}</span>
+          <span className="mt-0.5 truncate text-[11px] text-zinc-500 dark:text-zinc-400">{bits.join(' · ')}</span>
+        </button>
+        <span className={cn('shrink-0 px-1 text-sm font-semibold tabular-nums', pct != null && pct > 100 && 'text-red-600 dark:text-red-400')}>{eur(l.actual)}</span>
+        {chartable && <button onClick={onChart} title={t('stats.history')} className={iconBtn}><BarChart3 size={15} /></button>}
+        <button onClick={onEdit} title={t('common.edit')} className={iconBtn}><Pencil size={15} /></button>
+      </div>
+      {pct != null && <TargetBar actual={l.actual} target={l.monthly_target!} className="mb-1 mr-1" />}
+    </div>
   );
 }
 
@@ -836,25 +1446,26 @@ function CatGroup({ g, t, onOpen }: { g: { key: string; label: string; total: nu
   );
 }
 
-/** Drill-down modal: every article position that makes up this budget's actual
- *  (Ist) for the month. The list total equals the Ist shown on the budget tile —
- *  the backend reuses the same query. Positions can be sorted (date / price) and
- *  grouped into the budget's sub-categories with per-group totals. */
-function BudgetPositions({ budget, month, konten, onClose }: { budget: MonthBudget; month: string; konten: string; onClose: () => void }) {
+/** Drill-down modal: every article position behind the tapped row's Ist for the month —
+ *  a category subtree (`path=…`) or a stored limit/lens (`budget=…`). One endpoint for
+ *  both, so the list total always equals the figure on the row that was tapped (same
+ *  konto scoping, same fixed-cost exclusion, same privacy masking). Positions can be
+ *  sorted (date / price) and grouped into sub-categories with per-group totals. */
+function PositionsModal({ target, month, konten, onClose }: { target: PosTarget; month: string; konten: string; onClose: () => void }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [sort, setSort] = useState<PosSort>('date_desc');
   const [grouped, setGrouped] = useState(false);
   const { data, isLoading } = useQuery({
-    queryKey: ['budget-positions', budget.id, month, konten],   // refetch when the person/household scope changes
-    queryFn: () => api<{ positions: BudgetPos[]; total: number }>(`/api/finances/budget/${budget.id}/positions?month=${month}${konten}`),
+    queryKey: ['fin-positions', target.q, month, konten],   // refetch when the person/household scope changes
+    queryFn: () => api<{ positions: BudgetPos[]; total: number }>(`/api/finances/positions?month=${month}&${target.q}${konten}`),
   });
   const rows = data?.positions ?? [];
   // Masked (private) positions carry no einkauf_id → not navigable.
   const openReceipt = (p: BudgetPos) => { if (p.private || !p.einkauf_id) return; onClose(); navigate(`/receipts/${p.einkauf_id}?highlight=${p.id}`); };
   const sorted = useMemo(() => sortPositions(rows, sort), [rows, sort]);
   const groups = useMemo(() => {
-    const bases = budget.categories ?? [];
+    const bases = target.bases ?? [];
     const map = new Map<string, { label: string; items: BudgetPos[]; total: number }>();
     for (const p of rows) {
       // Private positions have no category → collect them in one "Privater Einkauf" group.
@@ -866,10 +1477,10 @@ function BudgetPositions({ budget, month, konten, onClose }: { budget: MonthBudg
     return [...map.entries()]
       .map(([key, v]) => ({ key, label: v.label, total: Math.round(v.total * 100) / 100, items: sortPositions(v.items, sort) }))
       .sort((a, b) => b.total - a.total);
-  }, [rows, sort, budget.categories]);
+  }, [rows, sort, target.bases]);
 
   return (
-    <Modal open onClose={onClose} title={budget.label}>
+    <Modal open onClose={onClose} title={target.label}>
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between text-sm">
           <span className="text-zinc-500 dark:text-zinc-400">{t('finances.positionsCount', { count: rows.length })}</span>
@@ -903,6 +1514,175 @@ function BudgetPositions({ budget, month, konten, onClose }: { budget: MonthBudg
         )}
       </div>
     </Modal>
+  );
+}
+
+interface HistoryPoint { ym: string; spend: number }
+interface SpendItem {
+  id: number; name: string | null; canonical_name: string | null; preis: string | null;
+  einkauf_id: number; datum: string; roh_ladenname: string | null; member_share?: number;
+}
+/** Repeated `canonical=` params (never a comma list) so article names containing a comma
+ *  survive; a category is one `path=`. Same shape the two /api/spending endpoints want. */
+const spendScope = (target: DrillTarget) => target.kind === 'article'
+  ? target.canonicals.map(c => `canonical=${encodeURIComponent(c)}`).join('&')
+  : `path=${encodeURIComponent(target.path)}`;
+const spendScopeKey = (target: DrillTarget) => target.kind === 'article' ? `a:${target.canonicals.join('\n')}` : `c:${target.path}`;
+/** The period half of an /api/spending/items call: an explicit date range (both endpoints
+ *  have supported from/to all along — it is what makes "wie viel habe ich 2026 für Diesel
+ *  ausgegeben" answerable) or the calendar month the page is on. */
+const spendPeriod = (month: string, range: DateRange | null) => range
+  ? `from=${range.from}&to=${range.to}`
+  : `year=${Number(month.slice(0, 4))}&month=${Number(month.slice(5, 7))}`;
+/** …and its cache key. Kept identical everywhere so an answer card and the drill-down it
+ *  opens share one query instead of fetching the same rows twice. */
+const spendPeriodKey = (month: string, range: DateRange | null) => range ? `r:${range.from}:${range.to}` : `m:${month}`;
+
+/** Spending over time — the view a category click opens in the (now absorbed) Statistik
+ *  page: 12-month history plus this month's items. It is deliberately the SAME
+ *  /api/spending endpoints, so the chart matches Statistik's numbers rather than the
+ *  month view's: /api/spending does not subtract receipts already tied to a fixed cost,
+ *  which is why the total here can differ from the row's Ist for a category that fixed
+ *  costs land in (rent, insurance …). Clicking a month jumps the whole page to it. */
+function SpendingDrilldown({ target, month, initialRange, kParam, onClose, onPickMonth }: {
+  target: DrillTarget; month: string; initialRange: DateRange | null; kParam: string;
+  onClose: () => void; onPickMonth: (ym: string) => void;
+}) {
+  const { t, i18n } = useTranslation();
+  // The PERIOD lives here, not on the page: the month view outside is month-scoped by
+  // construction (plans and limits are monthly), while an arbitrary date range is exactly
+  // what this view is for — "wie viel habe ich 2026 für Kraftstoff ausgegeben". The
+  // assistant pre-fills it when the question spanned several months; otherwise it starts
+  // empty and the drill-down follows the page's month, as before.
+  const [range, setRange] = useState<DateRange | null>(initialRange);
+  const [draft, setDraft] = useState<DateRange>(initialRange ?? { from: '', to: '' });
+  const year = Number(month.slice(0, 4));
+  const mon = Number(month.slice(5, 7));
+  const scope = spendScope(target);
+  const scopeKey = spendScopeKey(target);
+  const periodLabel = range
+    ? `${fmtDate(range.from, i18n.language)} – ${fmtDate(range.to, i18n.language)}`
+    : monthNameOf(year, mon, i18n.language);
+
+  const { data: history } = useQuery({
+    queryKey: ['spending-history', scopeKey, kParam],
+    queryFn: () => api<HistoryPoint[]>(`/api/spending/history?${scope}&months=12${kParam}`),
+  });
+  const { data: items } = useQuery({
+    queryKey: ['spending-items', scopeKey, spendPeriodKey(month, range), kParam],
+    queryFn: () => api<SpendItem[]>(`/api/spending/items?${scope}&${spendPeriod(month, range)}${kParam}`),
+  });
+  const total = (items ?? []).reduce((sum, it) => sum + Number(it.member_share ?? it.preis ?? 0), 0);
+  // A complete pair switches to range mode; clearing either falls back to the page's month.
+  const setBoth = (next: DateRange) => { setDraft(next); setRange(next.from && next.to ? next : null); };
+
+  return (
+    <Modal open onClose={onClose} title={target.label} wide>
+      <div className="flex flex-col gap-5">
+        <div className="flex items-baseline justify-between border-b border-zinc-100 pb-3 dark:border-zinc-800">
+          <span className="text-sm text-zinc-500">{periodLabel}</span>
+          <span className="tabular text-2xl font-bold">{eur(total)}</span>
+        </div>
+        <div>
+          <div className="mb-1.5 text-[11px] font-medium text-zinc-400">{t('stats.dateRange')}</div>
+          <div className="flex items-center gap-2">
+            <Input type="date" className="min-w-0 flex-1" value={draft.from} onChange={e => setBoth({ ...draft, from: e.target.value })} />
+            <span className="shrink-0 text-zinc-400">–</span>
+            <Input type="date" className="min-w-0 flex-1" value={draft.to} onChange={e => setBoth({ ...draft, to: e.target.value })} />
+            {range && (
+              <button onClick={() => { setDraft({ from: '', to: '' }); setRange(null); }} title={t('stats.monthReset')}
+                className="shrink-0 rounded-lg p-1 text-zinc-400 hover:text-zinc-600"><X size={16} /></button>
+            )}
+          </div>
+        </div>
+        <div>
+          <h3 className="mb-2 text-sm font-medium text-zinc-500">{t('stats.history')}</h3>
+          <div className="h-44">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart
+                data={history ?? []}
+                margin={{ top: 4, right: 8, bottom: 0, left: 0 }}
+                // Picking a month has to LEAVE range mode, or the page would jump to a month
+                // this modal then refuses to show because a range is still pinned.
+                onClick={(e: { activeLabel?: string }) => { if (e?.activeLabel) { setDraft({ from: '', to: '' }); setRange(null); onPickMonth(e.activeLabel); } }}
+                className="cursor-pointer"
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="currentColor" className="text-zinc-200 dark:text-zinc-800" />
+                <XAxis dataKey="ym" tick={{ fontSize: 10 }} tickFormatter={(ym: string) => ym.slice(5)} />
+                <YAxis tick={{ fontSize: 10 }} width={45} tickFormatter={(v: number) => `${v}€`} />
+                <Tooltip formatter={(v: number | string) => eur(Number(v))} labelFormatter={l => String(l)} />
+                <Line type="monotone" dataKey="spend" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} isAnimationActive={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+          <p className="mt-1 text-center text-xs text-zinc-400">{t('stats.tapMonthHint')}</p>
+        </div>
+        <div>
+          <h3 className="mb-2 text-sm font-medium text-zinc-500">{t('stats.items')} ({periodLabel})</h3>
+          <div className="flex max-h-72 flex-col gap-1 overflow-y-auto">
+            {items?.map(it => (
+              <Link key={it.id} to={`/receipts/${it.einkauf_id}`} onClick={onClose}
+                className="flex items-center justify-between rounded-lg px-2 py-1.5 text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800/60">
+                <span className="min-w-0">
+                  <span className="block truncate">{it.canonical_name ?? it.name}</span>
+                  <span className="text-xs text-zinc-400">{fmtDate(it.datum, i18n.language)} · {it.roh_ladenname}</span>
+                </span>
+                <span className="tabular ml-2 shrink-0 font-medium">{eur(it.member_share ?? it.preis)}</span>
+              </Link>
+            ))}
+            {!items?.length && <EmptyState>{t('stats.noData')}</EmptyState>}
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/** € sum for a scope over the assistant's period, straight from the deterministic items
+ *  endpoint (never from the model). The query key is the one SpendingDrilldown uses, so
+ *  opening the drill-down from an answer card is an instant cache hit. `enabled` keeps it
+ *  from firing when the caller already has the number it needs. */
+function useSpendTotal(target: DrillTarget, month: string, range: DateRange | null, kParam: string, enabled: boolean) {
+  const { data } = useQuery({
+    queryKey: ['spending-items', spendScopeKey(target), spendPeriodKey(month, range), kParam],
+    queryFn: () => api<SpendItem[]>(`/api/spending/items?${spendScope(target)}&${spendPeriod(month, range)}${kParam}`),
+    enabled,
+  });
+  return (data ?? []).reduce((s, it) => s + Number(it.member_share ?? it.preis ?? 0), 0);
+}
+
+/** The assistant's answer card for an article group, over the month or the whole range
+ *  the question asked for. */
+function AiArticleCard({ canonicals, label, month, range, kParam, onOpen }: {
+  canonicals: string[]; label: string; month: string; range: DateRange | null; kParam: string; onOpen: () => void;
+}) {
+  const total = useSpendTotal({ kind: 'article', canonicals, label }, month, range, kParam, canonicals.length > 0);
+  return (
+    <button onClick={onOpen}
+      className="mt-1 flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-left ring-1 ring-emerald-200 hover:bg-emerald-50 dark:bg-zinc-900 dark:ring-emerald-900 dark:hover:bg-zinc-800">
+      <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
+      <span className="tabular shrink-0 text-lg font-bold">{eur(total)}</span>
+    </button>
+  );
+}
+
+/** The assistant's answer card for a CATEGORY. Without a range it shows the month view's
+ *  own figure (`node.actual`) — the number every row below it is measured with, which
+ *  /api/spending would answer slightly differently because it does not subtract receipts
+ *  tied to a fixed cost. With a range there is no month-view figure to show, so it falls
+ *  back to the deterministic items endpoint over that period. */
+function AiCategoryCard({ node, range, month, kParam, onOpen }: {
+  node: MonthCategoryNode; range: DateRange | null; month: string; kParam: string; onOpen: () => void;
+}) {
+  const target: DrillTarget = { kind: 'category', path: node.path, label: node.label };
+  const rangeTotal = useSpendTotal(target, month, range, kParam, !!range);
+  return (
+    <button onClick={onOpen}
+      className="mt-1 flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-left ring-1 ring-emerald-200 hover:bg-emerald-50 dark:bg-zinc-900 dark:ring-emerald-900 dark:hover:bg-zinc-800">
+      {node.emoji && <span>{node.emoji}</span>}
+      <span className="min-w-0 flex-1 truncate font-medium">{node.label}</span>
+      <span className="tabular shrink-0 text-lg font-bold">{eur(range ? rangeTotal : node.actual)}</span>
+    </button>
   );
 }
 
@@ -1032,37 +1812,108 @@ function ReceiptPicker({ month, fix, onClose, onPick }: {
   );
 }
 
-/** Create/edit a budget: label, monthly target, optional konto scope, 1..n categories. */
+/** Create/edit a budget — either a category LIMIT (a goal on exactly one tree node) or a
+ *  LENS (several categories and/or single articles, deliberately overlapping the tree).
+ *  `kind` is immutable once stored, and a limit reached from a category row has its node
+ *  fixed, so the switcher only appears when creating a free-standing budget. */
 function BudgetModal({ initial, onClose, onSaved }: {
-  initial: Partial<MonthBudget>; onClose: () => void; onSaved: () => void;
+  initial: BudgetDraft; onClose: () => void; onSaved: () => void;
 }) {
   const { t } = useTranslation();
   const { data: konten } = useKonten();
   const scopeKonten = useMemo(() => (konten ?? []).filter(k => !k.is_cash), [konten]);
+  const [kind, setKind] = useState<'category' | 'lens'>(initial.kind);
   const [label, setLabel] = useState(initial.label ?? '');
   const [target, setTarget] = useState(initial.monthly_target != null ? String(initial.monthly_target).replace('.', ',') : '');
   const [kontoId, setKontoId] = useState(initial.konto_id ? String(initial.konto_id) : '');
   const [cats, setCats] = useState<string[]>(initial.categories ?? []);
+  const [articles, setArticles] = useState<string[]>(initial.articles ?? []);
+  const [artQ, setArtQ] = useState('');
+  const lockKind = initial.lockKind || initial.id != null;
+
+  // Article picker source: the canonical names actually bought (same list the search box
+  // uses). No FK ties a lens to them, so a name that later disappears simply counts 0.
+  const { data: names = [] } = useQuery({
+    queryKey: ['names'],
+    queryFn: () => api<{ canonical_name: string }[]>('/api/names'),
+    enabled: kind === 'lens',
+  });
+  const artHits = useMemo(() => {
+    const q = artQ.trim().toLowerCase();
+    if (!q) return [];
+    const seen = new Set(articles.map(a => a.toLowerCase()));
+    const out: string[] = [];
+    for (const n of names) {
+      const nm = (n.canonical_name ?? '').trim();
+      if (!nm || seen.has(nm.toLowerCase()) || !nm.toLowerCase().includes(q)) continue;
+      seen.add(nm.toLowerCase());
+      out.push(nm);
+      if (out.length >= 12) break;
+    }
+    return out;
+  }, [artQ, names, articles]);
+
+  // A limit needs a goal; a lens may have none at all (pure observation → "kein Ziel").
+  const targetOk = kind === 'lens' ? true : !!target.trim();
+  const membersOk = kind === 'category' ? cats.length === 1 : (cats.length > 0 || articles.length > 0);
+  const canSave = !!label.trim() && targetOk && membersOk;
 
   const save = useMutation({
     mutationFn: () => {
-      const body = { label: label.trim(), monthly_target: target, konto_id: kontoId ? Number(kontoId) : null, categories: cats };
+      const body = {
+        kind,
+        label: label.trim(),
+        // Empty target is only meaningful for a lens; sent as null so the row renders
+        // "kein Ziel" rather than a 0,00 goal it would instantly blow past.
+        monthly_target: target.trim() ? target : null,
+        konto_id: kontoId ? Number(kontoId) : null,
+        categories: kind === 'category' ? cats.slice(0, 1) : cats,
+        articles: kind === 'category' ? [] : articles,
+      };
       return initial.id
         ? api(`/api/budgets/${initial.id}`, { method: 'PATCH', body })
         : api('/api/budgets', { method: 'POST', body });
     },
     onSuccess: () => { onSaved(); onClose(); },
-    onError: (e: Error) => toast(e.message, 'error'),
+    // The API — not the schema — enforces one limit per (category, konto): a UNIQUE index
+    // could have failed on live data, so a duplicate answers 409 instead.
+    onError: (e: Error) => toast(e.message === 'limit_exists' ? t('finances.limitExists') : e.message, 'error'),
   });
   const remove = useMutation({
     mutationFn: () => api(`/api/budgets/${initial.id}`, { method: 'DELETE' }),
     onSuccess: () => { onSaved(); onClose(); },
     onError: (e: Error) => toast(e.message, 'error'),
   });
+  // Deleting a limit removes ONLY the goal — the category keeps its row and its spend.
+  // That is the payoff of a derived tracker, so the dialog says it out loud.
+  const askDelete = async () => {
+    const ok = await confirm({
+      title: t('common.delete'),
+      message: t(kind === 'category' ? 'finances.deleteLimitConfirm' : 'finances.deleteLensConfirm', { label: label.trim() || initial.label }),
+      confirmLabel: t('common.delete'), cancelLabel: t('common.cancel'), danger: true,
+    });
+    if (ok) remove.mutate();
+  };
+
+  const title = initial.id
+    ? t(kind === 'category' ? 'finances.editLimit' : 'finances.editLens')
+    : t(kind === 'category' ? 'finances.addLimitTitle' : 'finances.addLensTitle');
 
   return (
-    <Modal open onClose={onClose} title={initial.id ? t('finances.editBudget') : t('finances.addBudgetTitle')}>
-      <form className="flex flex-col gap-3" onSubmit={e => { e.preventDefault(); if (label.trim() && target && cats.length) save.mutate(); }}>
+    <Modal open onClose={onClose} title={title}>
+      <form className="flex flex-col gap-3" onSubmit={e => { e.preventDefault(); if (canSave) save.mutate(); }}>
+        {!lockKind && (
+          <div className="flex rounded-xl bg-zinc-100 p-1 dark:bg-zinc-800/60">
+            {([['category', 'finances.kindCategory'], ['lens', 'finances.kindLens']] as const).map(([k, key]) => (
+              <button key={k} type="button" onClick={() => setKind(k)}
+                className={cn('flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
+                  kind === k ? 'bg-white text-zinc-900 shadow-sm dark:bg-zinc-900 dark:text-zinc-100' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300')}>
+                {t(key)}
+              </button>
+            ))}
+          </div>
+        )}
+        <p className="text-xs text-zinc-400">{t(kind === 'category' ? 'finances.kindCategoryHint' : 'finances.kindLensHint')}</p>
         <div>
           <Label>{t('finances.budgetLabel')}</Label>
           <Input autoFocus value={label} onChange={e => setLabel(e.target.value)} placeholder={t('finances.budgetLabelPlaceholder')} />
@@ -1070,7 +1921,8 @@ function BudgetModal({ initial, onClose, onSaved }: {
         <div className="grid grid-cols-2 gap-3">
           <div>
             <Label>{t('finances.target')}</Label>
-            <Input inputMode="decimal" value={target} onChange={e => setTarget(e.target.value)} placeholder="0,00" />
+            <Input inputMode="decimal" value={target} onChange={e => setTarget(e.target.value)} placeholder={kind === 'lens' ? t('finances.noTarget') : '0,00'} />
+            {kind === 'lens' && <p className="mt-1 text-[11px] text-zinc-400">{t('finances.targetOptional')}</p>}
           </div>
           <div>
             <Label>{t('finances.scope')}</Label>
@@ -1094,22 +1946,54 @@ function BudgetModal({ initial, onClose, onSaved }: {
               ))}
             </div>
           )}
-          {/* Keep picks non-overlapping: a parent+child pair would double-count an
-              article that falls under both. Skip a pick already covered by an ancestor;
-              adding a parent drops the now-redundant descendants. */}
-          <CategoryPicker value={null} onChange={p => {
+          {/* A limit is keyed to exactly ONE path (that is what makes it attachable to a
+              tree node), so picking another replaces it. A lens keeps picks
+              non-overlapping instead: a parent+child pair would double-count an article
+              that falls under both, so a pick already covered by an ancestor is skipped
+              and adding a parent drops the now-redundant descendants. */}
+          <CategoryPicker value={kind === 'category' ? (cats[0] ?? null) : null} onChange={p => {
             if (!p) return;
+            if (kind === 'category') { setCats([p]); return; }
             setCats(prev => prev.some(c => c === p || p.startsWith(c + '/')) ? prev : [...prev.filter(c => !c.startsWith(p + '/')), p]);
           }} />
           <p className="mt-1 text-xs text-zinc-400">{t('finances.categoriesHint')}</p>
         </div>
+        {kind === 'lens' && (
+          <div>
+            <Label>{t('finances.articlesLabel')}</Label>
+            {articles.length > 0 && (
+              <div className="mb-1.5 flex flex-wrap gap-1.5">
+                {articles.map(a => (
+                  <Badge key={a} className="inline-flex items-center gap-1">
+                    {a}
+                    <button type="button" onClick={() => setArticles(articles.filter(x => x !== a))} className="text-zinc-400 hover:text-red-500" aria-label="×">
+                      <X size={12} />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+            )}
+            <Input value={artQ} onChange={e => setArtQ(e.target.value)} placeholder={t('finances.articleSearch')} />
+            {artHits.length > 0 && (
+              <div className="mt-1 flex flex-col rounded-xl border border-zinc-200 dark:border-zinc-800">
+                {artHits.map(a => (
+                  <button key={a} type="button" onClick={() => { setArticles(prev => [...prev, a]); setArtQ(''); }}
+                    className="px-3 py-1.5 text-left text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800">
+                    {a}
+                  </button>
+                ))}
+              </div>
+            )}
+            <p className="mt-1 text-xs text-zinc-400">{t('finances.articlesHint')}</p>
+          </div>
+        )}
         <div className="mt-1 flex items-center justify-between gap-2">
           {initial.id
-            ? <Button type="button" variant="ghost" className="text-red-500" onClick={() => remove.mutate()}><Trash2 size={14} /> {t('common.delete')}</Button>
+            ? <Button type="button" variant="ghost" className="text-red-500" onClick={() => void askDelete()}><Trash2 size={14} /> {t('common.delete')}</Button>
             : <span />}
           <div className="flex gap-2">
             <Button type="button" variant="secondary" onClick={onClose}>{t('common.cancel')}</Button>
-            <Button type="submit" disabled={!label.trim() || !target || !cats.length || save.isPending}>{t('common.save')}</Button>
+            <Button type="submit" disabled={!canSave || save.isPending}>{t('common.save')}</Button>
           </div>
         </div>
       </form>

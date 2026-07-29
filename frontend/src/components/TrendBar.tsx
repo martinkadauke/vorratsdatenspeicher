@@ -98,7 +98,7 @@ export function TrendBar({ member }: { member: number | null }) {
           {overspend.map(o => (
             <Link
               key={o.path}
-              to="/stats"
+              to="/finanzen"
               className="shrink-0 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-700 hover:border-amber-300 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-400"
               title={`${eur(o.spend)} vs Ø ${eur(o.avg3)}`}
             >
