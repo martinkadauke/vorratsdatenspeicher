@@ -12,6 +12,10 @@ export interface User {
   preferred_lang: string;
   emoji?: string | null;
   has_seen_tour?: boolean;
+  /** Demo build only: has this household ever scanned a receipt itself (household.ocr_count > 0)?
+   *  Drives the first-run example-receipt preload in CreatePurchaseModal. Always undefined
+   *  off-demo — the counter column only exists in the demo schema. */
+  demo_scanned?: boolean;
   onboarding_done?: boolean;
   created_at?: string;
   invite_pending?: boolean;

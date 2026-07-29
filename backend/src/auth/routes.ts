@@ -51,10 +51,12 @@ export function authRoutes(app: FastifyInstance): void {
 
     // Demo: email is the global login identity + carries household/super-admin fields (uses the
     // owner connection to bootstrap before a tenant context exists). Non-demo: original lookup.
+    // demo_scanned must be derived EXACTLY like in the request decorator (auth/plugin.ts), or a
+    // fresh login and a page reload would disagree about whether the scanner preloads.
     const rows = DEMO_MODE
       ? await adminSql`
           SELECT u.id, u.username, u.password_hash, u.is_admin, u.sees_all_konten, u.is_super_admin, u.household_id, u.can_write, u.prefers_dark, u.preferred_lang, u.email, u.has_seen_tour, u.pinned_chains, u.emoji,
-                 h.onboarding_done,
+                 h.onboarding_done, (COALESCE(h.ocr_count, 0) > 0) AS demo_scanned,
                  (SELECT emoji FROM family_member WHERE user_id = u.id AND emoji IS NOT NULL ORDER BY sort_order LIMIT 1) AS member_emoji
           FROM users u LEFT JOIN household h ON h.id = u.household_id
           WHERE LOWER(u.email) = LOWER(${username})`
@@ -85,7 +87,7 @@ export function authRoutes(app: FastifyInstance): void {
         emoji: resolvedEmoji(u.emoji, u.member_emoji),
         pinned_chains: u.pinned_chains,
         ...(DEMO_MODE
-          ? { is_super_admin: u.is_super_admin, household_id: u.household_id, onboarding_done: u.onboarding_done ?? false }
+          ? { is_super_admin: u.is_super_admin, household_id: u.household_id, onboarding_done: u.onboarding_done ?? false, demo_scanned: u.demo_scanned ?? false }
           : { onboarding_done: await getConfig('onboarding.done') }),
       },
     };

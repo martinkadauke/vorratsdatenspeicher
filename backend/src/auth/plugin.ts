@@ -35,11 +35,18 @@ export function registerAuth(app: FastifyInstance): void {
       const payload = jwt.verify(token, JWT_SECRET) as unknown as { sub: number };
       // Demo: load the user on the OWNER connection (bypasses RLS to bootstrap the request)
       // and pull the household/super-admin fields. Non-demo: the original single-household load.
+      // `demo_scanned` answers "has this household ever scanned a receipt of its own?" for the
+      // first-run scanner preload: household.ocr_count is the exact signal, since it is bumped
+      // whenever a vision-OCR run is claimed (demo/limits.ts). The column exists ONLY in the
+      // demo schema (migrations/demo/098_demo_limits.sql), hence demo branch only. household
+      // carries no RLS, so the join is safe on the owner connection (same as the login query).
       const rows = DEMO_MODE
         ? await adminSql`
             SELECT u.id, u.username, u.email, u.is_admin, u.sees_all_konten, u.is_super_admin, u.household_id, u.can_write, u.prefers_dark, u.preferred_lang, u.has_seen_tour, u.pinned_chains, u.emoji,
+                   (COALESCE(h.ocr_count, 0) > 0) AS demo_scanned,
                    (SELECT emoji FROM family_member WHERE user_id = u.id AND emoji IS NOT NULL ORDER BY sort_order LIMIT 1) AS member_emoji
-            FROM users u WHERE u.id = ${payload.sub}`
+            FROM users u LEFT JOIN household h ON h.id = u.household_id
+            WHERE u.id = ${payload.sub}`
         : await sql`
             SELECT u.id, u.username, u.email, u.is_admin, u.sees_all_konten, u.can_write, u.prefers_dark, u.preferred_lang, u.has_seen_tour, u.pinned_chains, u.emoji,
                    (SELECT emoji FROM family_member WHERE user_id = u.id AND emoji IS NOT NULL ORDER BY sort_order LIMIT 1) AS member_emoji

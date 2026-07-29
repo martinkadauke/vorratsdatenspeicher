@@ -10,6 +10,7 @@ import { StoreIcon } from '../components/IconPicker';
 import { PdfPreview } from '../components/PdfPreview';
 import { CreatePurchaseModal } from '../components/CreatePurchaseModal';
 import { FirstVisitHint } from '../components/FirstVisitHint';
+import { takePendingScan } from '../components/Tour';
 import { useAuth } from '../context/auth';
 import { cn, eur, fmtDate, monthLabel } from '../lib/utils';
 
@@ -76,15 +77,20 @@ export function Receipts() {
   const kontoInit = useRef(false); // have we applied the default account scope yet?
 
   const [createOpen, setCreateOpen] = useState(false);
-  // The first-run "scan your first receipt" step (Tour.tsx) opens this scanner via a window
-  // event, since its open-state lives here (mirrors the vds:open-tour bus).
-  const [createSample, setCreateSample] = useState(false);   // tour asked for the bundled demo receipt
+  // The first-run "scan your first receipt" step (Tour.tsx) opens this scanner, whose open-state
+  // lives here. Two hand-offs, because the tour can fire from anywhere: coming from another page
+  // it leaves a pending intent that we consume while mounting (deterministic — a window event
+  // dispatched before this listener exists is simply lost), and from this very page it uses the
+  // window bus (mirrors the vds:open-tour bus).
+  const [createSample, setCreateSample] = useState(false);   // tour FORCES the bundled demo receipt
   useEffect(() => {
     const open = (e: Event) => {
       setCreateSample(!!(e as CustomEvent<{ sample?: boolean }>).detail?.sample);
       setCreateOpen(true);
     };
     window.addEventListener('vds:new-purchase', open);
+    const pending = takePendingScan();
+    if (pending) { setCreateSample(pending.sample); setCreateOpen(true); }
     return () => window.removeEventListener('vds:new-purchase', open);
   }, []);
   const [filtersOpen, setFiltersOpen] = useState(false); // collapse the filter chips behind a toggle

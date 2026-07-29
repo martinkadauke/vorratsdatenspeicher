@@ -18,12 +18,13 @@ interface Konto { id: number; name: string; is_shared: boolean; is_cash: boolean
 /** Quick manual purchase entry (cash or card) with an optional photo. Nothing
  *  is required; if a photo is added it's OCR'd in the background server-side.
  *
- *  `sample` (demo build only): pre-load the bundled example receipt so the first-run tour
- *  is a single tap — the user presses Speichern and watches the real OCR fill in the items,
- *  instead of having to find a receipt photo on their phone before seeing anything work. */
+ *  Demo build only: the bundled example receipt is pre-loaded so the first scan is a single
+ *  tap — the user presses Speichern and watches the real OCR fill in the items, instead of
+ *  having to find a receipt photo on their phone before seeing anything work.
+ *  `sample` FORCES that preload (the tour CTA); without it the rule below decides. */
 export function CreatePurchaseModal({ open, sample = false, onClose }: { open: boolean; sample?: boolean; onClose: () => void }) {
   const { t } = useTranslation();
-  const { demo } = useAuth();
+  const { demo, user, refreshUser } = useAuth();
   const qc = useQueryClient();
   const navigate = useNavigate();
   const today = () => new Date().toISOString().slice(0, 10);
@@ -70,17 +71,26 @@ export function CreatePurchaseModal({ open, sample = false, onClose }: { open: b
     setKontoId(String(fallback.id));
   }, [open, kontenForMethod, quelle, kontoId]);
 
+  // WHICH openings preload the example receipt: every one of them — the tour CTA and the "+"
+  // FAB alike — until this household has scanned a receipt of its own. Deciding here instead
+  // of at the call sites is the point: a user who skips or dismisses the tour reaches the
+  // scanner through the FAB, and that door used to open an empty dialogue, so the example was
+  // never seen. After the first real scan demo_scanned flips and openings are empty as normal.
+  const preloadSample = demo && (sample || !user?.demo_scanned);
+
   // Demo first-run: fetch the bundled receipt and drop it in as if the user had picked it,
   // so "Speichern" is the only step left. Silently does nothing if the fetch fails — the
   // dialog then behaves exactly like the normal one.
   //
-  // The deps deliberately exclude photo/photoBusy/t: this effect WRITES photoBusy, so
+  // The deps deliberately exclude photo/photoBusy: this effect WRITES photoBusy, so
   // depending on it made the effect re-run, which ran the previous cleanup (cancelled = true)
   // while the fetch was still in flight — the photo never landed and photoBusy stuck on,
   // disabling Speichern forever. A ref latch replaces the state read for "already ran".
+  // For the same reason the dep is the derived BOOLEAN and not the `user` object: an unrelated
+  // auth refresh (has_seen_tour, theme, …) hands back a new object but the same decision.
   const sampleTried = useRef(false);
   useEffect(() => {
-    if (!open || !sample || !demo || sampleTried.current) return;
+    if (!open || !preloadSample || sampleTried.current) return;
     sampleTried.current = true;
     let cancelled = false;
     setPhotoBusy(true);
@@ -105,7 +115,7 @@ export function CreatePurchaseModal({ open, sample = false, onClose }: { open: b
       finally { setPhotoBusy(false); }
     })();
     return () => { cancelled = true; };
-  }, [open, sample, demo, t]);
+  }, [open, preloadSample, t]);
 
   const reset = () => {
     setQuelle('zettel'); setLaden(''); setDatum(today()); setBetrag('');
@@ -132,6 +142,11 @@ export function CreatePurchaseModal({ open, sample = false, onClose }: { open: b
       void qc.invalidateQueries({ queryKey: ['stores'] });
       toast(photo ? t('createPurchase.createdOcr') : t('createPurchase.created'), 'success');
       reset(); onClose();
+      // Demo: a photo means the server just claimed an OCR run, so household.ocr_count left 0.
+      // Pull the fresh auth user right away — otherwise demo_scanned stays stale until the next
+      // reload and the example receipt would be preloaded again over the user's own scan.
+      // (`photo` is this render's value; reset() above only schedules the state change.)
+      if (demo && photo) void refreshUser();
       navigate(`/receipts/${r.id}`); // shows the photo immediately; items fill in via OCR
     },
     onError: (e) => toast((e as Error).message, 'error'),

@@ -1,22 +1,40 @@
 import { useMutation } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { ScanLine, X } from 'lucide-react';
 import { api } from '../api/client';
 import { Button } from './ui';
 import { useAuth } from '../context/auth';
 
+/** Pending "open the scanner" intent, handed to the Receipts page across a navigation.
+ *
+ *  navigate() only SCHEDULES a render, so dispatching the window event straight after it raced
+ *  the Receipts listener mounting: the old code guessed 60ms, and whenever the page needed
+ *  longer the event landed on nobody and the CTA opened NOTHING. A module-level flag cannot be
+ *  missed — the page reads it while mounting, however long that takes. */
+let pendingScan: { sample: boolean } | null = null;
+
+/** Read-and-clear, so one intent opens the scanner exactly once (a leftover flag would make a
+ *  later visit to Receipts pop the scanner out of nowhere). */
+export function takePendingScan(): { sample: boolean } | null {
+  const intent = pendingScan;
+  pendingScan = null;
+  return intent;
+}
+
 /**
  * After the setup wizard, ONE hands-on nudge: scan your first receipt. A receipt is the seed
  * of everything VDS does — only from a scan does it learn where you shop and what you buy.
  * The CTA opens the exact same scanner the Receipts "+" FAB opens; that modal's open-state
- * lives on the Receipts page, so we trigger it via the same window-event bus the "replay tour"
- * button already uses. Dismissal persists via has_seen_tour so it shows only once.
+ * lives on the Receipts page, so we hand it either a pending intent (when we navigate there)
+ * or the window-event bus the "replay tour" button already uses (when we are already there).
+ * Dismissal persists via has_seen_tour so it shows only once.
  */
 export function Tour({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { t } = useTranslation();
   const { user, refreshUser } = useAuth();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const canWrite = user?.can_write !== false;
 
   const markSeen = useMutation({
@@ -29,12 +47,17 @@ export function Tour({ open, onClose }: { open: boolean; onClose: () => void }) 
   const dismiss = () => { markSeen.mutate(); onClose(); };
   const scanNow = () => {
     dismiss();
-    navigate('/receipts');
-    // Open the scanner via the window-event bus (its state is local to the Receipts page).
-    // A tick after navigation so the Receipts listener is mounted. `sample` asks the modal
-    // to pre-load the bundled demo receipt (demo build only) so the user can watch a real
-    // OCR run in one tap instead of hunting for a receipt photo on their phone.
-    setTimeout(() => window.dispatchEvent(new CustomEvent('vds:new-purchase', { detail: { sample: true } })), 60);
+    // `sample` asks the modal to pre-load the bundled demo receipt (demo build only) so the
+    // user can watch a real OCR run in one tap instead of hunting for a receipt photo on
+    // their phone. Exactly one of the two hand-offs applies, so the scanner opens once:
+    if (pathname === '/receipts') {
+      // Already there — no remount happens, so nothing would ever consume a pending intent.
+      // The window bus reaches the listener synchronously; no timing assumption involved.
+      window.dispatchEvent(new CustomEvent('vds:new-purchase', { detail: { sample: true } }));
+    } else {
+      pendingScan = { sample: true };  // consumed by the Receipts page on mount
+      navigate('/receipts');
+    }
   };
 
   return (
