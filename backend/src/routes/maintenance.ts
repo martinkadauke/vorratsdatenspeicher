@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import sql, { DEMO_MODE, withHousehold } from '../db.js';
-import { requireAdmin, requireOperator } from '../auth/plugin.js';
+import { requireOperator } from '../auth/plugin.js';
 import { runChurn, isChurnRunning, requestChurnStop, runIconFetch } from '../churner/index.js';
 import { runRecategorize, isRecategorizeRunning, recategorizeOne } from '../maintenance/recategorize.js';
 import { runSeedBaseUnits, isSeedUnitsRunning } from '../maintenance/seedUnits.js';
@@ -52,15 +52,19 @@ export function maintenanceRoutes(app: FastifyInstance): void {
     }
   });
 
-  /** One-time: AI-assign a base_unit (Stück/Packung/kg/l) to every product. */
-  app.post('/api/maintenance/seed-base-units', { preHandler: requireAdmin }, async (req, reply) => {
+  /** One-time: AI-assign a base_unit (Stück/Packung/kg/l) to every product.
+   *  requireOperator, like its churn/icons/recategorize siblings above: this starts a detached AI
+   *  batch over the WHOLE product list on the operator's LLM budget and keys, and the product
+   *  list is visitor-controlled (receipt upload + manual articles). requireAdmin made it a
+   *  one-request purchase of an unbounded batch on the demo. Free off-demo (is_admin). */
+  app.post('/api/maintenance/seed-base-units', { preHandler: requireOperator }, async (req, reply) => {
     const { only_missing } = (req.body ?? {}) as { only_missing?: boolean };
     if (isSeedUnitsRunning()) return reply.code(409).send({ error: 'Einheiten-Zuordnung läuft bereits' });
-    // Demo only: unlike its siblings this job is behind requireAdmin, which on demo every
-    // visitor satisfies for their own household — so it is a visitor-startable AI batch over the
-    // whole product list. Charge the shared AI bucket. (The detached job re-opens the caller's
-    // household scope itself — see runSeedBaseUnits — so it really does run; the cap is the only
-    // thing bounding it, not RLS starvation.)
+    // Belt-and-braces behind the guard swap: the demo super-admin is exempt from the quota
+    // (household 1), so this costs the operator nothing, but it keeps the batch bounded if the
+    // guard is ever loosened again. (The detached job re-opens the caller's household scope
+    // itself — see runSeedBaseUnits — so it really does run; the cap is what bounds it, not RLS
+    // starvation.)
     if (DEMO_MODE) {
       const claim = await claimDemoAi(req.user?.household_id);
       if (!claim.ok) return reply.code(429).send({ error: aiLimitMessage(claim.max) });
@@ -76,17 +80,20 @@ export function maintenanceRoutes(app: FastifyInstance): void {
   /** Fetch supermarket info for all branches now: opening hours via OSM AND — at the end of the
    *  same job — a full offer search plus the digest mails (supermarket/info.ts). The name only
    *  describes the first half. */
-  app.post('/api/maintenance/supermarket-info', { preHandler: requireAdmin }, async (_req, reply) => {
+  // requireOperator, matching its three siblings in this file and /api/offers/search: this job is
+  // NOT "OSM opening hours only" — runSupermarketInfo() ends with `runOfferSearch()` +
+  // `sendOfferDigests()`, i.e. exactly the per-product LLM burst and the digest mails that
+  // /api/offers/refresh prices per block of 10 products. Behind requireAdmin it was a one-request
+  // bypass of that cap with a different button, for a flat 1 unit and no product-count pre-flight.
+  // Free off-demo (is_admin).
+  app.post('/api/maintenance/supermarket-info', { preHandler: requireOperator }, async (_req, reply) => {
     if (isSupermarketRunning()) return reply.code(409).send({ error: 'Supermarkt-Infos laufen bereits' });
-    // Demo only: requireAdmin is satisfied by every visitor for their own household, and this job
-    // is NOT "OSM opening hours only" — runSupermarketInfo() ends with `runOfferSearch()` +
-    // `sendOfferDigests()`, i.e. exactly the per-product LLM burst and the digest mail that
-    // /api/offers/refresh is charged for. Uncapped it is a one-request bypass of that cap with a
-    // different button. The burst used to be mostly inert because the detached job carried no
-    // household scope and RLS handed it an empty subscription list — an accident, not a control
-    // (same reasoning as seed-base-units above). That accident is gone as of the withHousehold
-    // scoping below, which is exactly why this charge has to stand on the shape of the code
-    // rather than on yesterday's luck.
+    // Kept behind the guard swap for the same belt-and-braces reason as seed-base-units: the demo
+    // super-admin is quota-exempt (household 1), so the charge is inert for the operator today and
+    // still bounds the burst if the guard is ever loosened. The burst used to be mostly inert
+    // because the detached job carried no household scope and RLS handed it an empty subscription
+    // list — an accident, not a control. That accident is gone as of the withHousehold scoping
+    // below, which is why this has to stand on the shape of the code rather than yesterday's luck.
     if (DEMO_MODE) {
       const claim = await claimDemoAi(_req.user?.household_id);
       if (!claim.ok) return reply.code(429).send({ error: aiLimitMessage(claim.max) });

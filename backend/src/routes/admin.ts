@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import sql, { DEMO_MODE } from '../db.js';
 import { requireAdmin, requireOperator } from '../auth/plugin.js';
-import { getAllConfig, setConfig, getConfig, isProtectedConfigKey, redactConfig } from '../config.js';
+import { getAllConfig, setConfig, getConfig, isHouseholdConfigKey, scopeConfigForHousehold } from '../config.js';
 import { rescheduleChurner } from '../churner/scheduler.js';
 import { rescheduleSupermarket } from '../supermarket/scheduler.js';
 import { rescheduleModelReview } from '../maintenance/modelReview.js';
@@ -18,6 +18,7 @@ import { inviteEmail, resetEmail, noticeEmail, setEmailBaseUrl } from '../email/
 import { createAuthToken } from '../auth/routes.js';
 import { listModelsForProvider, listVisionModelsForProvider, healthForProvider, setTaskAi, type ProviderName, type AiTask } from '../llm/provider.js';
 import { matchExistingCanonical } from '../lib/canonicalMatch.js';
+import { claimDemoAi, aiLimitMessage } from '../demo/limits.js';
 
 const VALID_PROVIDERS: ProviderName[] = ['ollama', 'deepseek', 'anthropic', 'openai'];
 
@@ -128,18 +129,28 @@ export function adminRoutes(app: FastifyInstance): void {
   });
 
   // ── app config ──────────────────────────────────────────────────────────
+  // requireAdmin stays (off-demo it is the only admin there is), but on the demo it buys nothing:
+  // app_config is platform-global, so every key outside HOUSEHOLD_CONFIG_KEYS — today, every key
+  // there is — is the operator's and is omitted rather than masked. A household admin therefore
+  // gets `{}` here and 403 below; their own settings live on their `household` row instead
+  // (PUT /api/onboarding/profile). See the allow-list comment in config.ts for why it is empty.
   app.get('/api/config', { preHandler: requireAdmin }, async (req) => {
     const cfg = await getAllConfig();
-    // Demo: mask the operator's secrets from non-super-admin household admins.
-    return DEMO_MODE && !req.user?.is_super_admin ? redactConfig(cfg) : cfg;
+    return DEMO_MODE && !req.user?.is_super_admin ? scopeConfigForHousehold(cfg) : cfg;
   });
 
   app.put('/api/config/:key', { preHandler: requireAdmin }, async (req, reply) => {
     const key = (req.params as { key: string }).key;
     const { value } = (req.body ?? {}) as { value?: unknown };
+    // Demo: the SAME allow-list that scopes the read above — one predicate, so the two gates can
+    // never drift apart again. With the list empty this is "super-admin only", which is the
+    // honest gate for a table whose every row is shared by all tenants: `app.base_url` is the
+    // link host in every invite/reset mail (a visitor who could set it would have the platform
+    // hand-deliver live tokens to their domain), `offers.*`/`shopping.*` are the platform-wide
+    // notification kill-switches, and `categories.detail` steers every household's category
+    // prompt. Checked before anything else so the route fails closed.
+    if (DEMO_MODE && !isHouseholdConfigKey(key) && !req.user?.is_super_admin) return reply.code(403).send({ error: 'forbidden' });
     if (value === undefined) return reply.code(400).send({ error: 'value required' });
-    // Demo: API keys + AI/provider + infra config are platform-only (household admins can't set them).
-    if (DEMO_MODE && isProtectedConfigKey(key) && !req.user?.is_super_admin) return reply.code(403).send({ error: 'forbidden' });
     await setConfig(key, value, req.user!.id);
     if (key === 'app.base_url') setEmailBaseUrl(value as string);
     if (key.startsWith('churner.')) await rescheduleChurner();
@@ -185,6 +196,18 @@ export function adminRoutes(app: FastifyInstance): void {
   app.post('/api/users/invite', { preHandler: requireAdmin }, async (req, reply) => {
     const { email, is_admin, can_write } = (req.body ?? {}) as { email?: string; is_admin?: boolean; can_write?: boolean };
     if (!email || !email.includes('@')) return reply.code(400).send({ error: 'valid email required' });
+
+    // requireAdmin is RIGHT here — inviting into your own household is household business, and
+    // the new users row lands in the caller's household via the GUC default. What is NOT
+    // household business is the side effect: `email` is arbitrary, so on the demo this is an
+    // uncapped VDS-branded mail blast over the operator's relay. Charge the shared demo bucket
+    // like /api/analytics/report does — the operator's sending reputation burns as fast as their
+    // tokens. Claimed BEFORE the insert so an exhausted bucket leaves no orphan users either.
+    // Off-demo claimDemoQuota returns ok without touching the DB — a strict no-op.
+    if (DEMO_MODE) {
+      const claim = await claimDemoAi(req.user?.household_id);
+      if (!claim.ok) return reply.code(429).send({ error: aiLimitMessage(claim.max) });
+    }
 
     const cleaned = email.trim().toLowerCase();
     const base = cleaned.split('@')[0].replace(/[^a-z0-9._-]/gi, '') || 'user';
@@ -259,6 +282,14 @@ export function adminRoutes(app: FastifyInstance): void {
     const rows = await sql`SELECT username, email FROM users WHERE id = ${id}`;
     if (!rows.length) return reply.code(404).send({ error: 'not found' });
     if (!rows[0].email) return reply.code(400).send({ error: 'user has no email' });
+    // The recipient IS constrained here (the lookup is RLS-scoped to the caller's household), so
+    // this is not an arbitrary-recipient relay — but it mints a token and sends a mail on every
+    // call with no cap, so one throwaway address of your own is still an unbounded send loop on
+    // the operator's SMTP. Same shared bucket as the invite above.
+    if (DEMO_MODE) {
+      const claim = await claimDemoAi(req.user?.household_id);
+      if (!claim.ok) return reply.code(429).send({ error: aiLimitMessage(claim.max) });
+    }
     const token = await createAuthToken(id, 'invite', 7 * 24);
     const baseUrl = await getConfig('app.base_url');
     const link = `${baseUrl}/reset?token=${token}`;
@@ -278,6 +309,13 @@ export function adminRoutes(app: FastifyInstance): void {
     const id = parseInt((req.params as { id: string }).id, 10);
     const rows = await sql`SELECT username, email FROM users WHERE id = ${id}`;
     if (!rows.length) return reply.code(404).send({ error: 'not found' });
+    // Target is RLS-scoped to the caller's household (they can already set that password via
+    // PATCH /api/users/:id), so the link grants nothing new — the uncapped send on the operator's
+    // relay is the cost. Meter it like the two invite sends above.
+    if (DEMO_MODE) {
+      const claim = await claimDemoAi(req.user?.household_id);
+      if (!claim.ok) return reply.code(429).send({ error: aiLimitMessage(claim.max) });
+    }
     const token = await createAuthToken(id, 'reset', 24);
     const base = await getConfig('app.base_url');
     const link = `${base}/reset?token=${token}`;
@@ -295,7 +333,14 @@ export function adminRoutes(app: FastifyInstance): void {
   });
 
   // ── smtp test ───────────────────────────────────────────────────────────
-  app.post('/api/smtp/test', { preHandler: requireAdmin }, async (req, reply) => {
+  /** requireOperator, not requireAdmin: `to` is fully caller-supplied and the mail goes out over
+   *  the OPERATOR's relay under their smtp.from — on the demo requireAdmin is satisfied by every
+   *  visitor, which makes this a fixed-body open relay and the fastest way to get the operator's
+   *  sending domain blocklisted. The 502 body below (the raw transport error, which names the
+   *  SMTP host and whether the credentials are valid) is why this is the guard rather than a
+   *  quota: with requireOperator only the operator ever sees it, and they need the detail to
+   *  debug. Off-demo requireOperator IS is_admin — byte-identical for self-hosters. */
+  app.post('/api/smtp/test', { preHandler: requireOperator }, async (req, reply) => {
     const { to } = (req.body ?? {}) as { to?: string };
     if (!to) return reply.code(400).send({ error: 'to required' });
     try {
@@ -327,7 +372,12 @@ export function adminRoutes(app: FastifyInstance): void {
   });
 
   // ── ollama / searxng helpers ────────────────────────────────────────────
-  app.get('/api/ollama/models', { preHandler: requireAdmin }, async (req, reply) => {
+  // All three are requireOperator, not requireAdmin: they probe the operator's INTERNAL hosts
+  // (ollama.url / searxng.url) and hand back the model inventory, the server version and — on
+  // failure — the raw fetch error, which names the LAN host and port. Nothing here is a household
+  // feature; these predate the operator split and their /api/ai/* siblings below are already
+  // requireOperator, as is the AiProvidersSection that calls them. Free off-demo (is_admin).
+  app.get('/api/ollama/models', { preHandler: requireOperator }, async (req, reply) => {
     try {
       return { models: await listOllamaModels() };
     } catch (e) {
@@ -335,8 +385,8 @@ export function adminRoutes(app: FastifyInstance): void {
     }
   });
 
-  app.get('/api/ollama/health', { preHandler: requireAdmin }, async () => ollamaHealth());
-  app.get('/api/searxng/health', { preHandler: requireAdmin }, async () => searxngHealth());
+  app.get('/api/ollama/health', { preHandler: requireOperator }, async () => ollamaHealth());
+  app.get('/api/searxng/health', { preHandler: requireOperator }, async () => searxngHealth());
 
   // ── AI providers (Ollama + DeepSeek) ────────────────────────────────────
   app.get('/api/ai/providers', { preHandler: requireOperator }, async () => ({
@@ -436,8 +486,11 @@ export function adminRoutes(app: FastifyInstance): void {
 
   /** Validation: run the deterministic canonical matcher against every article
    *  that already has a canonical name (using its OCR/name/guess texts) and
-   *  report how often the matcher reproduces the assigned canonical. */
-  app.get('/api/admin/canonical-match-test', { preHandler: requireAdmin }, async () => {
+   *  report how often the matcher reproduces the assigned canonical.
+   *  requireOperator: a diagnostics harness with no UI caller, and an unpaginated
+   *  O(articles × distinct canonicals) scan — on the demo requireAdmin made it a
+   *  free CPU sink on the shared container for anyone who bulk-created articles. */
+  app.get('/api/admin/canonical-match-test', { preHandler: requireOperator }, async () => {
     const rows = await sql`SELECT original_text, name, ai_guess, canonical_name FROM artikel WHERE canonical_name IS NOT NULL`;
     const existing = [...new Set(rows.map(r => r.canonical_name as string))];
     let hit = 0, missNull = 0, diff = 0;

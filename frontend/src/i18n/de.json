@@ -16,7 +16,6 @@
     "admin": "Admin",
     "households": "Haushalte",
     "profile": "Profil",
-    "more": "Mehr",
     "logout": "Abmelden"
   },
   "finances": {
@@ -937,6 +936,7 @@
     "backupHint": "Lädt EIN Archiv (.tar.gz) mit einem kompletten Datenbank-Abzug UND allen Belegfotos herunter — enthält wirklich alles. Sicher aufbewahren. Bei vielen Belegen kann die Datei groß werden.",
     "backupBtn": "Backup erstellen & herunterladen",
     "backupBusy": "Backup wird erstellt…",
+    "householdsHint": "Alle Haushalte der Plattform ansehen, einzelne Haushalte samt Daten und Belegfotos löschen — nur Super-Admin.",
     "maintenance": "Nächtliche Wartung",
     "maintenanceHint": "Im Hintergrund laufende KI-Aufgaben: Kategorisierung neuer Artikel, Bereinigung kanonischer Namen, automatisches Holen von Laden-Logos.",
     "maintenanceEnabled": "Wartung nachts aktiv",
@@ -1021,6 +1021,8 @@
     "reviewStatus_rejected": "Abgelehnt",
     "householdAddress": "Haushalts-Adresse",
     "householdAddressPlaceholder": "Straße Nr., PLZ Ort",
+    "householdAddressHint": "Wird in deinem Haushalt gespeichert und nur genutzt, um Läden und Angebote in deiner Nähe zu finden.",
+    "householdAddressSaved": "Adresse gespeichert.",
     "offerRadius": "Angebote im Umkreis suchen",
     "offerRadiusKm": "Radius",
     "offerRadiusHint": "Sucht später automatisch Angebotsprospekte von Läden in diesem Umkreis — auch von Läden, in denen du nie einkaufst.",

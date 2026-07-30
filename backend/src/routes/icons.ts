@@ -4,6 +4,38 @@ import { getConfig } from '../config.js';
 
 interface SearxImage { thumbnail_src?: string; img_src?: string; url?: string; title?: string; source?: string }
 
+/** Demo-only brake on the icon search below, which proxies into the operator's PRIVATE SearXNG.
+ *
+ *  Deliberately NOT requireOperator, unlike /api/offers/debug and /api/searxng/health: those are
+ *  operator diagnostics with no UI caller, while this one IS the household feature — the icon
+ *  picker in Artikel / Namen / Läden (components/IconPicker.tsx) — so a guard there would only
+ *  break the demo. What must not be free is LOOPING it: every hit spends the operator's IP with
+ *  the upstream engines SearXNG queries, and getting that IP throttled takes the offer web-search
+ *  down with it.
+ *
+ *  In memory rather than a household counter column: this costs no AI tokens, so it does not
+ *  belong in the shared ai_count bucket (a visitor picking icons must not exhaust the budget the
+ *  assistant needs), and a dedicated column would need a migration for something a process-local
+ *  window bounds just as well. Losing the window on restart is acceptable — the goal is to stop a
+ *  loop, not to account for spend. */
+const DEMO_ICON_SEARCHES_PER_HOUR = 30;
+const HOUR_MS = 60 * 60 * 1000;
+const iconSearchWindow = new Map<number, { start: number; n: number }>();
+
+/** Count one search for this household and report whether it just went over the hourly ceiling. */
+function iconSearchOverLimit(householdId: number): boolean {
+  const now = Date.now();
+  const w = iconSearchWindow.get(householdId);
+  if (w && now - w.start <= HOUR_MS) { w.n++; return w.n > DEMO_ICON_SEARCHES_PER_HOUR; }
+  // New window. Demo households are ephemeral (wiped nightly), so sweep stale entries here
+  // instead of letting one map entry per household ever created accumulate for the process life.
+  if (iconSearchWindow.size > 500) {
+    for (const [k, v] of iconSearchWindow) if (now - v.start > HOUR_MS) iconSearchWindow.delete(k);
+  }
+  iconSearchWindow.set(householdId, { start: now, n: 1 });
+  return false;
+}
+
 export function iconRoutes(app: FastifyInstance): void {
   /** Get current icon for a canonical name. */
   app.get('/api/canonical/:name/icon', async (req) => {
@@ -53,12 +85,23 @@ export function iconRoutes(app: FastifyInstance): void {
     return { ok: true };
   });
 
-  /** Image search via SearXNG — returns up to 24 candidates. */
+  /** Image search via SearXNG — returns up to 24 candidates. Every authenticated user may call
+   *  it (it backs the icon picker), so it is capped on the demo and never echoes the transport
+   *  error — see iconSearchOverLimit above. */
   app.get('/api/icons/search', async (req, reply) => {
-    const q = ((req.query as { q?: string }).q ?? '').trim();
+    // Bound the caller-supplied query too: it is forwarded verbatim into the operator's SearXNG,
+    // and an icon search is a product/store name, never a kilobyte.
+    const q = ((req.query as { q?: string }).q ?? '').trim().slice(0, 100);
     if (!q) return reply.code(400).send({ error: 'q required' });
+    // The operator is exempt, exactly like every quota in demo/limits.ts — it is their SearXNG.
+    if (DEMO_MODE && !req.user?.is_super_admin && iconSearchOverLimit(req.user?.household_id ?? 1)) {
+      return reply.code(429).send({ error: 'Zu viele Bildsuchen — bitte später erneut versuchen.' });
+    }
 
     const base = await getConfig('searxng.url');
+    // No SearXNG configured (fresh self-host install): say so instead of fetching '/search?…'
+    // against the app itself and reporting a confusing transport error.
+    if (!base) return reply.code(503).send({ error: 'Bildsuche ist nicht konfiguriert.' });
     const params = new URLSearchParams({
       q,
       format: 'json',
@@ -68,7 +111,10 @@ export function iconRoutes(app: FastifyInstance): void {
     });
     try {
       const res = await fetch(`${base}/search?${params}`, { signal: AbortSignal.timeout(20_000) });
-      if (!res.ok) return reply.code(502).send({ error: `SearXNG HTTP ${res.status}` });
+      if (!res.ok) {
+        req.log.error(`icon search: SearXNG HTTP ${res.status}`);
+        return reply.code(502).send({ error: 'Bildsuche nicht erreichbar.' });
+      }
       const data = (await res.json()) as { results?: SearxImage[] };
       // Prefer thumbnail when present (smaller payload), fall back to img_src
       const hits = (data.results ?? [])
@@ -83,7 +129,11 @@ export function iconRoutes(app: FastifyInstance): void {
         .filter(r => r.src);
       return { results: hits };
     } catch (e) {
-      return reply.code(502).send({ error: (e as Error).message });
+      // Never hand the raw fetch error back: it names the operator's internal SearXNG host and
+      // port, and this route is reachable by every user of every household. Log it for the
+      // operator, return a flat message.
+      req.log.error(`icon search failed: ${(e as Error).message}`);
+      return reply.code(502).send({ error: 'Bildsuche nicht erreichbar.' });
     }
   });
 

@@ -200,20 +200,50 @@ export async function setConfig(key: string, value: unknown, userId?: number): P
   `;
 }
 
-// ── Platform-secret protection (multi-tenant demo) ──────────────────────────
-// In the demo, app_config is platform-wide: these are the operator's secrets — never shown
-// to or writable by household admins; only the platform super-admin sees/sets them.
-export const SECRET_CONFIG_KEYS = ['anthropic.api_key', 'deepseek.api_key', 'openai.api_key', 'smtp.pass', 'push.vapid_private'];
+// ── Platform vs. household config (multi-tenant demo) ───────────────────────
+// app_config has NO household_id column and no policy in migrations/demo/089_household_rls.sql,
+// so RLS does not scope it: on the demo every row is platform-global and belongs to the operator.
+// The read and write gates used to be two separate lists — a 5-key mask on GET and a ~14-prefix
+// deny-pattern on PUT — and they drifted: 23 keys were write-protected but readable (ollama.url,
+// searxng.url, smtp.host/port/user/from, dropfolder.path …), and more were neither, including
+// `app.base_url`, the link host in every invite and reset mail the platform sends.
+//
+// A deny-pattern is the wrong polarity for a global table: every key nobody thought to name is
+// exposed by default, which is exactly how `app.`, `household.`, `offers.` and `categories.`
+// ended up open. Hence ONE allow-list governing BOTH directions — a new key now defaults to
+// hidden instead of defaulting to leaked, and the two gates can no longer disagree.
+//
+// The list is EMPTY, and that is the point: because there is no household_id here, a
+// household-scoped write to this table does not exist. A demo household admin who flips
+// `offers.email_enabled` is not muting their own digest — they are muting the single global row
+// that sendOfferDigests() reads for EVERY tenant (offers/index.ts), exactly as `shopping.*` is
+// the global switch in routes/pantry.ts, `categories.detail` steers the category-designer prompt
+// for every household (routes/categories.ts) and `offers.radius_km` sets the operator's nightly
+// crawl radius (supermarket/info.ts). Same defect class as the cross-tenant INSERT on the
+// household-less `unit` catalogue (routes/units.ts).
+//
+// What a demo household DOES own is persisted per household elsewhere and needs nothing from
+// here: PUT /api/onboarding/profile writes address + categories_detail to their own `household`
+// row (routes/demo.ts), the language pick is a FULL_STEPS-only wizard step, and the Admin page
+// keeps the global switches behind `operatorOnly`. So: on the demo a household admin neither
+// reads nor writes app_config, and every key is the operator's in both directions.
+//
+// Do NOT lengthen this list to make a section work — that trades a UI convenience for a
+// cross-tenant write. The durable fix, if per-household settings are ever wanted here, is a
+// household_id column + a tenant_isolation policy like every other tenant table has.
+export const HOUSEHOLD_CONFIG_KEYS: readonly string[] = [];
 
-/** Keys only the platform super-admin may write: API keys + AI/provider + infra config. */
-export function isProtectedConfigKey(key: string): boolean {
-  return /(_key|\.pass|vapid_private)$/.test(key)
-    || /^(ai|anthropic|openai|deepseek|ollama|searxng|smtp|churner|model_review|demo_sweep|supermarket|mailimport|dropfolder|push)\./.test(key);
+/** May a demo household admin see/set this key? The single source of truth for both gates. */
+export function isHouseholdConfigKey(key: string): boolean {
+  return HOUSEHOLD_CONFIG_KEYS.includes(key);
 }
 
-/** Mask secret values for non-super-admin readers. */
-export function redactConfig(cfg: Record<string, unknown>): Record<string, unknown> {
-  const out = { ...cfg };
-  for (const k of SECRET_CONFIG_KEYS) if (out[k]) out[k] = '***';
+/** The slice of the config a demo household admin may read — `{}` while the allow-list is empty.
+ *  Operator keys are OMITTED, not masked: a '***' placeholder still confirms that a key exists
+ *  and is set, and the old mask covered only 5 of them anyway. Callers must therefore treat every
+ *  key as possibly absent (the Admin page hides the operator sections instead of rendering blanks). */
+export function scopeConfigForHousehold(cfg: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const k of HOUSEHOLD_CONFIG_KEYS) if (k in cfg) out[k] = cfg[k];
   return out;
 }

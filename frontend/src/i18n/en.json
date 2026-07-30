@@ -16,7 +16,6 @@
     "admin": "Admin",
     "households": "Households",
     "profile": "Profile",
-    "more": "More",
     "logout": "Log out"
   },
   "finances": {
@@ -935,6 +934,7 @@
     "backupHint": "Downloads ONE archive (.tar.gz) with a full database dump AND every receipt photo — really everything. Keep it safe. With many receipts the file can get large.",
     "backupBtn": "Create & download backup",
     "backupBusy": "Creating backup…",
+    "householdsHint": "View every household on the platform, delete a household with all its data and receipt photos — super-admin only.",
     "maintenance": "Nightly maintenance",
     "maintenanceHint": "Background AI jobs: categorize new items, clean up canonical names, fetch store logos.",
     "maintenanceEnabled": "Maintenance runs nightly",
@@ -1019,6 +1019,8 @@
     "reviewStatus_rejected": "Rejected",
     "householdAddress": "Household address",
     "householdAddressPlaceholder": "Street No., ZIP City",
+    "householdAddressHint": "Saved to your household and used only to find stores and offers near you.",
+    "householdAddressSaved": "Address saved.",
     "offerRadius": "Search offers nearby",
     "offerRadiusKm": "Radius",
     "offerRadiusHint": "Will later auto-search offer leaflets from stores within this radius — even stores you never shop at.",

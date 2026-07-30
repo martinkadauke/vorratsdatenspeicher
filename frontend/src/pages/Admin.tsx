@@ -84,23 +84,37 @@ export function Admin() {
     { id: 'categories', title: t('categoriesAdmin.title'), keywords: 'kategorien categories artikelkategorien warengruppen baum tree', el: <CategoriesLinkSection /> },
     { id: 'data', title: t('admin.data'), keywords: 'daten data export import backup loeschen delete zuruecksetzen reset csv download', el: <DataManagementSection />, show: platformAdmin },
     { id: 'backup', title: t('admin.backup'), keywords: 'backup sicherung archiv download datenbank dump belege fotos wiederherstellung restore tar gz alles everything', el: <BackupSection />, show: platformAdmin },
+    // Super-admin only, so off-demo (where nobody is super-admin) this section never renders.
+    { id: 'households', title: t('nav.households'), keywords: 'haushalte households haushalt tenant mandant demo plattform platform loeschen delete wipe nutzer', el: <HouseholdsLinkSection />, show: isSuper },
     { id: 'maintenance-log', title: t('admin.maintenance'), keywords: 'wartung maintenance protokoll log verlauf history ereignisse events lauf run nightly', el: <MaintenanceSection />, show: operatorOnly },
     { id: 'konten', title: t('admin.konten'), keywords: 'konten accounts konto gkk haushalt budget sichtbarkeit', el: <KontenSection /> },
     { id: 'offers', title: t('admin.offersTitle'), keywords: 'angebote offers prospekt deals umkreis radius adresse abonnement subscription haushalt marktguru', el: <OffersSection /> },
     { id: 'family', title: t('admin.family'), keywords: 'familie family mitglieder members verbraucher consumer haushalt personen', el: <FamilySection /> },
     { id: 'users', title: t('admin.users'), keywords: 'benutzer users nutzer einladen invite admin rolle role zugang access passwort', el: <UsersSection /> },
-    { id: 'smtp', title: 'SMTP / E-Mail', keywords: 'smtp email e-mail mail benachrichtigung notification versand digest server port', el: <SmtpSection /> },
-    { id: 'dropfolder', title: t('admin.dropfolderTitle'), keywords: 'rechnung invoice ordner folder drop watch scan strato pdf upload import automatisch', el: <DropfolderSection /> },
-    { id: 'notifications', title: t('admin.notifTitle'), keywords: 'benachrichtigung notification push email e-mail angebote offers einkaufsliste shopping kanal channel global', el: <NotificationsSection /> },
+    // The last three are operatorOnly because every field in them is a platform-global
+    // app_config row: the operator's relay credentials, the drop-folder path + cron, and the
+    // notification kill-switches that offers/index.ts and routes/pantry.ts read for EVERY
+    // household. A demo household admin gets `{}` from GET /api/config and 403 on PUT, so
+    // rendering them there would only produce blank fields and dead switches.
+    { id: 'smtp', title: 'SMTP / E-Mail', keywords: 'smtp email e-mail mail benachrichtigung notification versand digest server port', el: <SmtpSection />, show: operatorOnly },
+    { id: 'dropfolder', title: t('admin.dropfolderTitle'), keywords: 'rechnung invoice ordner folder drop watch scan strato pdf upload import automatisch', el: <DropfolderSection />, show: operatorOnly },
+    { id: 'notifications', title: t('admin.notifTitle'), keywords: 'benachrichtigung notification push email e-mail angebote offers einkaufsliste shopping kanal channel global', el: <NotificationsSection />, show: operatorOnly },
   ];
   const byId = new Map(sections.filter(s => s.show !== false).map(s => [s.id, s] as const));
 
+  // EVERY id in `sections` must appear in exactly one group: the browse view is built strictly
+  // from these member lists, so a section that is missing here renders nowhere and is reachable
+  // only by guessing a keyword in the search box (which filters `sections`, not `groups`).
+  // `dropfolder` and `notifications` were invisible that way.
   const groups: { id: string; title: string; members: string[] }[] = [
     { id: 'ai', title: t('admin.groupAi'), members: ['ai-providers', 'ai-tasks', 'model-review', 'token-usage'] },
-    { id: 'data', title: t('admin.groupData'), members: ['churner', 'categories', 'data', 'backup', 'maintenance-log'] },
+    // Haushalte sits with the other platform-level, destructive data tools (Datenverwaltung, Backup);
+    // Rechnungs-Ordner is the other way data gets IN, so it belongs in the same group.
+    { id: 'data', title: t('admin.groupData'), members: ['churner', 'categories', 'dropfolder', 'data', 'backup', 'households', 'maintenance-log'] },
     { id: 'household', title: t('admin.groupHousehold'), members: ['konten', 'offers', 'family'] },
     { id: 'access', title: t('admin.groupAccess'), members: ['users'] },
-    { id: 'system', title: t('admin.groupSystem'), members: ['smtp'] },
+    // "System & Benachrichtigungen" — the mail transport plus the global channel switches.
+    { id: 'system', title: t('admin.groupSystem'), members: ['smtp', 'notifications'] },
   ];
 
   const allOpen = groups.every(g => openGroups.has(g.id));
@@ -913,6 +927,25 @@ function ChurnerSection() {
   );
 }
 
+// ── Households link card (platform super-admin) ──────────────────────────
+/** Haushalte lost its nav entry — every tenant on the demo, plus the destructive
+ *  per-household delete and wipe-all, now live behind this card. Kept as a link (not
+ *  inlined) so the page stays behind its own SuperAdminOnly route guard. */
+function HouseholdsLinkSection() {
+  const { t } = useTranslation();
+  return (
+    <Card className="min-w-0 p-3 sm:p-4">
+      <RouterLink to="/admin/households" className="group flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-base font-semibold group-hover:text-emerald-600">{t('nav.households')}</h2>
+          <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{t('admin.householdsHint')}</p>
+        </div>
+        <ChevronRight size={20} className="shrink-0 text-zinc-400 group-hover:text-emerald-600" />
+      </RouterLink>
+    </Card>
+  );
+}
+
 // ── Categories link card ─────────────────────────────────────────────────
 function CategoriesLinkSection() {
   const { t } = useTranslation();
@@ -1335,9 +1368,19 @@ function NotificationsSection() {
   );
 }
 
+/** Angebote: the household's address plus the operator's global offer knobs.
+ *
+ *  This section is the one in the `household` group that a demo household admin really does
+ *  see, so it has to work for BOTH audiences. The split follows where the data actually lives:
+ *  the address is per household (their own `household` row on the demo, app_config off-demo),
+ *  while the radius, the offer-only categories and the supermarket crawler are platform-global
+ *  — one app_config row and one job shared by every tenant — so they stay operator-only rather
+ *  than rendering as controls that 403. */
 function OffersSection() {
   const { t } = useTranslation();
   const qc = useQueryClient();
+  const { user, demo } = useAuth();
+  const operatorOnly = !demo || !!user?.is_super_admin;
   const { data: config } = useQuery({
     queryKey: ['config'],
     queryFn: () => api<Record<string, unknown>>('/api/config'),
@@ -1346,23 +1389,40 @@ function OffersSection() {
     mutationFn: ({ key, value }: { key: string; value: unknown }) =>
       api(`/api/config/${key}`, { method: 'PUT', body: { value } }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['config'] }),
+    onError: (e: Error) => toast(e.message, 'error'),
+  });
+  // Demo household admins write their address to their OWN household row — the same route the
+  // slim onboarding wizard uses (routes/demo.ts). Writing 'household.address' would hit the
+  // operator's global config, which is why it is not in HOUSEHOLD_CONFIG_KEYS.
+  const saveProfile = useMutation({
+    mutationFn: (address: string) => api('/api/onboarding/profile', { method: 'PUT', body: { address } }),
+    onSuccess: () => toast(t('admin.householdAddressSaved'), 'success'),
+    onError: (e: Error) => toast(e.message, 'error'),
   });
   const { data: events } = useQuery({
     queryKey: ['maintenance-events'],
     queryFn: () => api<{ id: number; kind: string; ended_at: string | null; status: string; summary: Record<string, unknown> | null }[]>('/api/maintenance/events?limit=100'),
     refetchInterval: 15_000,
+    enabled: operatorOnly,
   });
   const lastInfo = events?.find(e => e.kind === 'supermarket.info');
   const fetchInfo = useMutation({
     mutationFn: () => api('/api/maintenance/supermarket-info', { method: 'POST' }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['maintenance-events'] }),
+    onError: (e: Error) => toast(e.message, 'error'),
   });
 
   const [newCat, setNewCat] = useState('');
 
   if (!config) return <Section title={t('admin.offersTitle')}><Spinner /></Section>;
 
-  const address = (config['household.address'] as string) ?? '';
+  // Off-demo (and for the operator) the address is a config row; for a demo household admin it
+  // is on their household row, which this page has no read endpoint for — so the field starts
+  // empty and saving it is what counts, exactly like the wizard's address step.
+  const address = operatorOnly ? ((config['household.address'] as string) ?? '') : '';
+  const saveAddress = (v: string) => operatorOnly
+    ? setCfg.mutate({ key: 'household.address', value: v })
+    : saveProfile.mutate(v);
   const radiusEnabled = !!config['offers.radius_enabled'];
   const radiusKm = (config['offers.radius_km'] as number) ?? 10;
   const extra = (config['offers.extra_categories'] as string[]) ?? [];
@@ -1379,81 +1439,91 @@ function OffersSection() {
   return (
     <Section title={t('admin.offersTitle')}>
       <div className="flex flex-col gap-4">
-        <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('admin.offersHint')}</p>
+        {/* The hint enumerates radius + offer categories, which only the operator sees — a
+            household admin gets the address-specific hint below instead. */}
+        {operatorOnly && <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('admin.offersHint')}</p>}
 
-        {/* household address */}
+        {/* household address — the one field here that is genuinely per household */}
         <div>
           <Label>{t('admin.householdAddress')}</Label>
           <Input
             defaultValue={address}
             placeholder={t('admin.householdAddressPlaceholder')}
-            onBlur={e => e.target.value !== address && setCfg.mutate({ key: 'household.address', value: e.target.value })}
+            onBlur={e => e.target.value !== address && saveAddress(e.target.value)}
           />
+          {!operatorOnly && <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{t('admin.householdAddressHint')}</p>}
         </div>
 
-        {/* radius toggle + km */}
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-medium">{t('admin.offerRadius')}</span>
-            <Switch checked={radiusEnabled} onChange={v => setCfg.mutate({ key: 'offers.radius_enabled', value: v })} />
-          </div>
-          {radiusEnabled && (
-            <div className="flex items-center gap-2">
-              <Label className="mb-0">{t('admin.offerRadiusKm')}</Label>
-              <Select
-                className="w-auto"
-                value={String(radiusKm)}
-                onChange={e => setCfg.mutate({ key: 'offers.radius_km', value: parseInt(e.target.value, 10) })}
-              >
-                {RADII.map(r => <option key={r} value={r}>{r} km</option>)}
-              </Select>
+        {/* Everything below is platform-global: ONE app_config row and ONE crawler run shared by
+            every household, so only the operator gets it. (Off-demo operatorOnly is always true,
+            so a self-hosting admin sees the section exactly as before.) */}
+        {operatorOnly && <>
+          {/* radius toggle + km */}
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium">{t('admin.offerRadius')}</span>
+              <Switch checked={radiusEnabled} onChange={v => setCfg.mutate({ key: 'offers.radius_enabled', value: v })} />
             </div>
-          )}
-          <p className="text-xs text-zinc-400">{t('admin.offerRadiusHint')}</p>
-        </div>
-
-        {/* offer-only warengruppen */}
-        <div className="flex flex-col gap-2">
-          <Label className="mb-0">{t('admin.offerCategories')}</Label>
-          <p className="text-xs text-zinc-400">{t('admin.offerCategoriesHint')}</p>
-          <div className="flex flex-wrap gap-1.5">
-            {extra.map(c => (
-              <span key={c} className="inline-flex items-center gap-1 rounded-lg bg-zinc-100 px-2 py-1 text-xs font-medium dark:bg-zinc-800">
-                {c}
-                <button type="button" onClick={() => removeCat(c)} className="text-zinc-400 hover:text-red-500">✕</button>
-              </span>
-            ))}
-            {!extra.length && <span className="text-xs text-zinc-400">{t('admin.offerCategoriesEmpty')}</span>}
-          </div>
-          <div className="flex gap-2">
-            <Input
-              value={newCat}
-              placeholder={t('admin.offerCategoriesPlaceholder')}
-              onChange={e => setNewCat(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCat(); } }}
-            />
-            <Button variant="secondary" onClick={addCat} disabled={!newCat.trim()}>{t('common.add')}</Button>
-          </div>
-        </div>
-
-        {/* supermarket info crawler (opening hours via OSM, nightly) */}
-        <div className="flex flex-col gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
-          <Label className="mb-0">{t('admin.supermarketInfo')}</Label>
-          <p className="text-xs text-zinc-400">{t('admin.supermarketInfoHint')}</p>
-          <div className="flex items-center gap-2">
-            <Button variant="secondary" onClick={() => fetchInfo.mutate()} disabled={fetchInfo.isPending || lastInfo?.status === 'running'}>
-              <Store size={14} /> {lastInfo?.status === 'running' || fetchInfo.isPending ? t('admin.supermarketInfoRunning') : t('admin.supermarketInfoBtn')}
-            </Button>
-            {lastInfo && lastInfo.status !== 'running' && (
-              <span className="text-xs text-zinc-400">
-                {t('admin.supermarketInfoLast', {
-                  updated: (lastInfo.summary?.updated as number) ?? 0,
-                  checked: (lastInfo.summary?.checked as number) ?? 0,
-                })}
-              </span>
+            {radiusEnabled && (
+              <div className="flex items-center gap-2">
+                <Label className="mb-0">{t('admin.offerRadiusKm')}</Label>
+                <Select
+                  className="w-auto"
+                  value={String(radiusKm)}
+                  onChange={e => setCfg.mutate({ key: 'offers.radius_km', value: parseInt(e.target.value, 10) })}
+                >
+                  {RADII.map(r => <option key={r} value={r}>{r} km</option>)}
+                </Select>
+              </div>
             )}
+            <p className="text-xs text-zinc-400">{t('admin.offerRadiusHint')}</p>
           </div>
-        </div>
+
+          {/* offer-only warengruppen */}
+          <div className="flex flex-col gap-2">
+            <Label className="mb-0">{t('admin.offerCategories')}</Label>
+            <p className="text-xs text-zinc-400">{t('admin.offerCategoriesHint')}</p>
+            <div className="flex flex-wrap gap-1.5">
+              {extra.map(c => (
+                <span key={c} className="inline-flex items-center gap-1 rounded-lg bg-zinc-100 px-2 py-1 text-xs font-medium dark:bg-zinc-800">
+                  {c}
+                  <button type="button" onClick={() => removeCat(c)} className="text-zinc-400 hover:text-red-500">✕</button>
+                </span>
+              ))}
+              {!extra.length && <span className="text-xs text-zinc-400">{t('admin.offerCategoriesEmpty')}</span>}
+            </div>
+            <div className="flex gap-2">
+              <Input
+                value={newCat}
+                placeholder={t('admin.offerCategoriesPlaceholder')}
+                onChange={e => setNewCat(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCat(); } }}
+              />
+              <Button variant="secondary" onClick={addCat} disabled={!newCat.trim()}>{t('common.add')}</Button>
+            </div>
+          </div>
+
+          {/* supermarket info crawler (opening hours via OSM, nightly) — the button posts to
+              /api/maintenance/supermarket-info, which is requireOperator: the job ends in a
+              per-product LLM burst plus the digest mails for everyone. */}
+          <div className="flex flex-col gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+            <Label className="mb-0">{t('admin.supermarketInfo')}</Label>
+            <p className="text-xs text-zinc-400">{t('admin.supermarketInfoHint')}</p>
+            <div className="flex items-center gap-2">
+              <Button variant="secondary" onClick={() => fetchInfo.mutate()} disabled={fetchInfo.isPending || lastInfo?.status === 'running'}>
+                <Store size={14} /> {lastInfo?.status === 'running' || fetchInfo.isPending ? t('admin.supermarketInfoRunning') : t('admin.supermarketInfoBtn')}
+              </Button>
+              {lastInfo && lastInfo.status !== 'running' && (
+                <span className="text-xs text-zinc-400">
+                  {t('admin.supermarketInfoLast', {
+                    updated: (lastInfo.summary?.updated as number) ?? 0,
+                    checked: (lastInfo.summary?.checked as number) ?? 0,
+                  })}
+                </span>
+              )}
+            </div>
+          </div>
+        </>}
 
         <p className="rounded-lg bg-zinc-100 px-2 py-1.5 text-xs text-zinc-500 dark:bg-zinc-800/60 dark:text-zinc-400">
           {t('admin.offersNote')}

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
-import { ReceiptText, UserCircle, LogOut, MoreHorizontal, Eye } from 'lucide-react';
+import { ReceiptText, UserCircle, LogOut, Eye, Settings } from 'lucide-react';
 import { useAuth } from '../context/auth';
 import { api } from '../api/client';
 import { NotificationBell } from './NotificationBell';
@@ -11,7 +11,7 @@ import { Onboarding } from './Onboarding';
 import { Toaster } from './Toast';
 import { ConfirmHost } from './Confirm';
 import { cn } from '../lib/utils';
-import { NAV, MOBILE_PRIMARY, navExtras } from '../lib/nav';
+import { NAV, MOBILE_PRIMARY, navExtras, mobileTail } from '../lib/nav';
 import { BugReportButton } from './BugReportButton';
 import { InstallButton } from './InstallButton';
 import { UpdateBanner } from './UpdateBanner';
@@ -66,6 +66,18 @@ export function Layout() {
     return () => window.removeEventListener('vds:open-tour', open);
   }, []);
 
+  // Is this the platform operator? Same predicate as the backend's requireOperator and the
+  // Admin page's `operatorOnly`: on the demo every visitor is is_admin of their own household,
+  // so only is_super_admin distinguishes the operator there.
+  const isOperator = demo ? !!user?.is_super_admin : !!user?.is_admin;
+  // Fifth bottom-bar slot — Admin for the operator, Profil for everyone else.
+  const tail = mobileTail(isOperator);
+  // A demo household admin gets Profil in the bar (above) but still has real household
+  // settings on /admin — Konten, Familie, Nutzer, Kategorien. The sidebar that carries that
+  // link is md:flex, so on a phone the page would have no entry point at all: give them a
+  // gear in the header. Hidden for the operator, whose bottom bar already leads there.
+  const showAdminShortcut = !!user?.is_admin && !isOperator;
+
   const navItem = (to: string, Icon: typeof ReceiptText, label: string, mobile = false, badge = 0) => (
     <NavLink
       key={to}
@@ -111,6 +123,14 @@ export function Layout() {
         <div className="flex items-center gap-1">
           <BugReportButton variant="header" />
           <NotificationBell />
+          {showAdminShortcut && (
+            <NavLink
+              to="/admin" title={t('nav.admin')} aria-label={t('nav.admin')}
+              className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800 md:hidden"
+            >
+              <Settings size={20} />
+            </NavLink>
+          )}
           <NavLink
             to="/profile" title={user?.username}
             className="flex h-9 w-9 items-center justify-center rounded-xl text-xl leading-none text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
@@ -124,7 +144,7 @@ export function Layout() {
         {/* Desktop sidebar */}
         <aside className="sticky top-[53px] hidden h-[calc(100dvh-53px)] w-52 shrink-0 flex-col gap-1 overflow-y-auto p-3 md:flex">
           {NAV.map(n => navItem(n.to, n.icon, t(n.key), false, n.to === '/warenstamm' ? pruefenCount : 0))}
-          {navExtras(!!user?.is_admin, !!user?.is_super_admin).map(n => navItem(n.to, n.icon, t(n.key)))}
+          {navExtras(!!user?.is_admin).map(n => navItem(n.to, n.icon, t(n.key)))}
           <div className="mt-auto">
             <button
               onClick={() => { logout(); navigate('/login'); }}
@@ -149,10 +169,12 @@ export function Layout() {
         </main>
       </div>
 
-      {/* Mobile bottom nav */}
+      {/* Mobile bottom nav: the four NAV items + one tail slot (Admin for the operator,
+          otherwise Profil). The operator reaches Profil via the header avatar; a demo
+          household admin reaches Admin via the header gear. */}
       <nav className="fixed inset-x-0 bottom-0 z-30 flex border-t border-zinc-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/95 md:hidden">
         {NAV.slice(0, MOBILE_PRIMARY).map(n => navItem(n.to, n.icon, t(n.key), true, n.to === '/warenstamm' ? pruefenCount : 0))}
-        {navItem('/more', MoreHorizontal, t('nav.more'), true)}
+        {navItem(tail.to, tail.icon, t(tail.key), true)}
       </nav>
 
       {/* Demo-only floating CTAs: "Get VDS" install guide + a bug-report button on every page. */}

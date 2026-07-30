@@ -29,6 +29,24 @@ const MIME_BY_EXT: Record<string, string> = {
  *  ready-made WHERE fragment to a shared query builder. */
 type Frag = ReturnType<typeof sql>;
 
+/** Storage key for a learned bank-CSV mapping.
+ *
+ *  `bank_csv_format` (migrations/097) is PLATFORM-GLOBAL — no household_id, no RLS policy — and
+ *  is reached through the RLS-bypassing owner connection (adminSql). Its migration argues a CSV
+ *  layout "is not sensitive and is reusable across households", which holds for the READ but not
+ *  for the WRITE: on the demo one visitor's `save_mapping` overwrites the row every other tenant
+ *  (and the operator) matches on, via ON CONFLICT (fingerprint) DO UPDATE. A poisoned mapping is
+ *  not cosmetic — it re-points the amount column, and the `learned` branch in /analyze imports on
+ *  it with no AI step and no confirm prompt, so the next household silently books wrong money.
+ *  The stored `label` + `spec` also come back out to whoever guesses the fingerprint.
+ *
+ *  Until the table gets a household_id + tenant_isolation policy like the other tenant tables,
+ *  namespace the key per household on the demo: each tenant then only ever reads and writes its
+ *  own row, and learning a format still works within a household. Off-demo the key is the bare
+ *  fingerprint, so every row a self-hoster has already learned keeps matching. */
+const csvFormatKey = (fingerprint: string, householdId: number | null | undefined): string =>
+  DEMO_MODE ? `h${householdId ?? 1}:${fingerprint}` : fingerprint;
+
 /** Fixed costs (recurring monthly expenses) CRUD — the manual-entry UI the
  *  analytics foundation (mig 040 `fixed_cost` → `v_transactions`) always expected.
  *  Scope is encoded by konto_id: a SHARED konto = household cost (rent, loan…), a
@@ -1852,7 +1870,11 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
       return { recognized: true, source: 'builtin', label: 'comdirect', spec: null, total: p.rows.length, preview: preview(p.rows) };
     }
     const fingerprint = fingerprintHeader(sn.headerLine, sn.delimiter);
-    const [stored] = await adminSql`SELECT label, spec FROM bank_csv_format WHERE fingerprint = ${fingerprint}`;
+    // Look up only THIS household's learned formats (see csvFormatKey) — a global lookup handed
+    // back another tenant's label + full mapping spec to anyone who could reproduce their header.
+    const [stored] = await adminSql`
+      SELECT label, spec FROM bank_csv_format
+      WHERE fingerprint = ${csvFormatKey(fingerprint, req.user?.household_id)}`;
     if (stored) {
       const spec: CsvMappingSpec = { ...(stored.spec as CsvMappingSpec), encoding: sn.encoding };
       const p = applyCsvMapping(spec, spec.encoding === 'latin1' ? buf.toString('latin1') : sn.text);
@@ -1880,6 +1902,8 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
    *  so re-importing an overlapping/full-year export never duplicates. Runs auto-matching after.
    *  With save_mapping, remembers the AI mapping so the next CSV of this bank imports automatically. */
   app.post('/api/finances/bank/upload', { bodyLimit: 25 * 1024 * 1024 }, async (req, reply) => {
+    // `fingerprint` is accepted (the /analyze response round-trips through the client) but
+    // deliberately IGNORED — see the derive-it-here comment at the save below.
     const bdy = (req.body ?? {}) as { konto_id?: number; filename?: string; data_b64?: string; spec?: CsvMappingSpec; save_mapping?: boolean; fingerprint?: string; label?: string };
     const kontoId = bdy.konto_id != null ? parseInt(String(bdy.konto_id), 10) : null;
     if (!kontoId) return reply.code(400).send({ error: 'konto_id required' });
@@ -1893,10 +1917,17 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
     if (bdy.spec) {
       const spec = bdy.spec;
       parsed = applyCsvMapping(spec, spec.encoding === 'latin1' ? buf.toString('latin1') : buf.toString('utf-8'));
-      if (bdy.save_mapping && bdy.fingerprint && parsed.rows.length) {
+      if (bdy.save_mapping && parsed.rows.length) {
+        // Derive the key from THIS upload's own header instead of trusting the request: a
+        // caller-supplied fingerprint let anyone address — and, with ON CONFLICT DO UPDATE,
+        // overwrite — any row in a table that carries no household_id. Same file the client
+        // just sent, so the value matches what /analyze computed.
+        const sn = sniffCsv(buf);
+        const key = csvFormatKey(fingerprintHeader(sn.headerLine, sn.delimiter), req.user?.household_id);
+        const label = (bdy.label ?? '').trim().slice(0, 80) || null;
         await adminSql`
           INSERT INTO bank_csv_format (fingerprint, label, spec, created_by)
-          VALUES (${bdy.fingerprint}, ${bdy.label ?? null}, ${adminSql.json(spec as never)}, ${req.user?.id ?? null})
+          VALUES (${key}, ${label}, ${adminSql.json(spec as never)}, ${req.user?.id ?? null})
           ON CONFLICT (fingerprint) DO UPDATE SET spec = EXCLUDED.spec, label = COALESCE(EXCLUDED.label, bank_csv_format.label)`;
       }
     } else {

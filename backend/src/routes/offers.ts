@@ -179,13 +179,16 @@ export function offerRoutes(app: FastifyInstance): void {
     `;
   });
 
-  /** Debug: see the raw SearXNG hits + LLM extraction for one product. */
-  app.get('/api/offers/debug', { preHandler: requireAdmin }, async (req, reply) => {
+  /** Debug: see the raw SearXNG hits + LLM extraction for one product.
+   *  requireOperator, not requireAdmin: an operator tool with no frontend caller that sends a
+   *  caller-supplied `q` to the operator's PRIVATE SearXNG instance and returns the raw hit list
+   *  plus the unparsed LLM output — i.e. an outbound-fetch and prompt channel into the operator's
+   *  LAN, echoed verbatim, one demo signup away. Free off-demo (is_admin). */
+  app.get('/api/offers/debug', { preHandler: requireOperator }, async (req, reply) => {
     const q = ((req.query as { q?: string }).q ?? '').trim();
     if (!q) return { error: 'q required' };
-    // Demo only: requireAdmin means "admin of your own household", so on demo this operator
-    // debug tool is one signup away — and it is a one-request LLM call with a caller-supplied
-    // product string. Charge the shared AI bucket.
+    // Charge kept behind the guard swap: the demo super-admin is quota-exempt (household 1), so
+    // this costs the operator nothing and still bounds the call if the guard is ever loosened.
     if (DEMO_MODE) {
       const claim = await claimDemoAi(req.user?.household_id);
       if (!claim.ok) return reply.code(429).send({ error: aiLimitMessage(claim.max) });

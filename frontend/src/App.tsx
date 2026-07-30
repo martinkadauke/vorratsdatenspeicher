@@ -21,7 +21,6 @@ import { Admin } from './pages/Admin';
 import { CategoriesAdmin } from './pages/CategoriesAdmin';
 import { Households } from './pages/Households';
 import { Profile } from './pages/Profile';
-import { More } from './pages/More';
 import { Spinner } from './components/ui';
 
 function Protected({ children }: { children: React.ReactNode }) {
@@ -91,9 +90,12 @@ export function App() {
           <Route path="/finanzen" element={<Finanzen />} />
           <Route path="/admin" element={<AdminOnly><Admin /></AdminOnly>} />
           <Route path="/admin/categories" element={<AdminOnly><CategoriesAdmin /></AdminOnly>} />
+          {/* No nav entry any more — reached from the Haushalte section on the Admin page.
+              The guard is what protects it, not the absence of a link. */}
           <Route path="/admin/households" element={<SuperAdminOnly><Households /></SuperAdminOnly>} />
           <Route path="/profile" element={<Profile />} />
-          <Route path="/more" element={<More />} />
+          {/* /more is gone: the bottom bar holds all five entries now. Stale bookmarks
+              fall through to the catch-all below and land on /receipts. */}
           <Route path="*" element={<Navigate to="/receipts" replace />} />
         </Route>
       </Routes>

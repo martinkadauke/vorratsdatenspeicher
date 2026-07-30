@@ -1,6 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { api } from '../api/client';
+import { useAuth } from '../context/auth';
+import { toast } from './Toast';
 import { Select } from './ui';
 
 interface Unit { name: string; dimension: string; to_base: number; sort_order: number; builtin: boolean }
@@ -17,6 +19,7 @@ export function UnitSelect({ value, onChange, allowEmpty = true, className }: {
 }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
+  const { user, demo } = useAuth();
   const { data: units } = useQuery({
     queryKey: ['units'],
     queryFn: () => api<Unit[]>('/api/units'),
@@ -25,6 +28,11 @@ export function UnitSelect({ value, onChange, allowEmpty = true, className }: {
   const list = units ?? [];
   const v = value ?? '';
   const knownValue = !v || list.some(u => u.name === v);
+  // `unit` is a PLATFORM-GLOBAL catalogue (no household_id), so POST /api/units is
+  // requireOperator — mirror that predicate here instead of offering everyone an option that
+  // can only 403. Off-demo it is plain is_admin, so a self-hoster's admin still sees it and a
+  // read-only member (who could never add one anyway) no longer does.
+  const canAddUnit = demo ? !!user?.is_super_admin : !!user?.is_admin;
 
   const addNew = async () => {
     const name = (window.prompt(t('units.addPrompt')) ?? '').trim();
@@ -33,7 +41,11 @@ export function UnitSelect({ value, onChange, allowEmpty = true, className }: {
       await api('/api/units', { method: 'POST', body: { name } });
       await qc.invalidateQueries({ queryKey: ['units'] });
       onChange(name);
-    } catch { /* ignore (e.g. not admin) */ }
+    } catch (e) {
+      // Never swallow this: the select snaps back to its old value, so without a message the
+      // app just looks broken (the old empty catch was written for the 403 now gated above).
+      toast((e as Error).message, 'error');
+    }
   };
 
   return (
@@ -48,7 +60,7 @@ export function UnitSelect({ value, onChange, allowEmpty = true, className }: {
       {allowEmpty && <option value="">—</option>}
       {!knownValue && <option value={v}>{v}</option>}
       {list.map(u => <option key={u.name} value={u.name}>{u.name}</option>)}
-      <option value="__new__">{t('units.addNew')}</option>
+      {canAddUnit && <option value="__new__">{t('units.addNew')}</option>}
     </Select>
   );
 }

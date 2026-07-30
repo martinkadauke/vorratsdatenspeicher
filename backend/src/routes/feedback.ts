@@ -4,6 +4,22 @@ import { requirePlatformAdmin } from '../auth/plugin.js';
 import { sendMail, type MailAttachment } from '../mailer.js';
 import { feedbackEmail, feedbackThanksEmail } from '../email/templates.js';
 
+/** Demo-only ceiling on how often ONE user may file a report. Every call sends TWO mails over
+ *  the operator's relay — their copy with the ≤12 MB screenshot attached, plus the thank-you to
+ *  the caller's own address — from a route that needs no admin rights at all, so uncapped this
+ *  is the cheapest way for one signup to burn the operator's sending reputation (the same reason
+ *  the invite/reset sends in routes/admin.ts are metered).
+ *
+ *  A sliding hour window rather than one of the cumulative household counters in demo/limits.ts:
+ *  those are lifetime spend caps with a column per quota, and a bug report is neither tokens nor
+ *  something a visitor should permanently run out of — the person who just hit a bug is exactly
+ *  who we want writing in. bug_report already stores created_at, so the window costs one COUNT
+ *  and no migration. Off-demo NOTHING is sent (the forward below is DEMO_MODE-gated), so
+ *  self-hosters stay unlimited like every other demo limit. */
+const DEMO_MAX_REPORTS_PER_HOUR = 5;
+const reportLimitMessage = (max: number) =>
+  `Demo-Limit erreicht: maximal ${max} Fehlerberichte pro Stunde. Bitte später erneut versuchen — in der selbst gehosteten Version gibt es keine Begrenzung.`;
+
 /** Bug report / feedback — available in ALL builds (the header "Feedback" button, plus the
  *  demo's floating button). Reports are stored in the global (no-RLS) bug_report table and
  *  best-effort forwarded to the operator by e-mail. Reading is platform-admin only
@@ -13,6 +29,18 @@ export function feedbackRoutes(app: FastifyInstance): void {
   app.post('/api/bug-reports', { bodyLimit: 12 * 1024 * 1024 }, async (req, reply) => {
     const { message, page, screenshot_base64 } = (req.body ?? {}) as { message?: string; page?: string; screenshot_base64?: string };
     if (!message || !message.trim()) return reply.code(400).send({ error: 'message required' });
+    // Metered per user; the route sits behind the global JWT gate (auth/plugin.ts), so an
+    // authenticated id is always present — the null branch is only there to keep an anonymous
+    // caller from being counted as "user NULL" and sharing one bucket with everyone.
+    const uid = req.user?.id ?? null;
+    if (DEMO_MODE && uid != null) {
+      const [{ n }] = await sql`
+        SELECT count(*)::int AS n FROM bug_report
+        WHERE user_id = ${uid} AND created_at > NOW() - INTERVAL '1 hour'`;
+      if ((n as number) >= DEMO_MAX_REPORTS_PER_HOUR) {
+        return reply.code(429).send({ error: reportLimitMessage(DEMO_MAX_REPORTS_PER_HOUR) });
+      }
+    }
     // Screenshot the user drew on: a data-URL. Turned into a mail attachment, not stored in the row.
     const shot = typeof screenshot_base64 === 'string' && screenshot_base64.startsWith('data:image/') ? screenshot_base64 : null;
     const ctx = {
@@ -22,7 +50,7 @@ export function feedbackRoutes(app: FastifyInstance): void {
       ua: String(req.headers['user-agent'] ?? '').slice(0, 300),
     };
     // bug_report is global (no RLS) → the ambient connection inserts fine regardless of scope.
-    await sql`INSERT INTO bug_report (user_id, message, context) VALUES (${req.user?.id ?? null}, ${message.trim().slice(0, 5000)}, ${sql.json(ctx)})`;
+    await sql`INSERT INTO bug_report (user_id, message, context) VALUES (${uid}, ${message.trim().slice(0, 5000)}, ${sql.json(ctx)})`;
     // On the demo, resolve the household NAME so the operator knows who reported it.
     let householdName: string | null = null;
     if (DEMO_MODE && req.user?.household_id != null) {
