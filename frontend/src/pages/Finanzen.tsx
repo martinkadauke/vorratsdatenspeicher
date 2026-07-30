@@ -16,7 +16,7 @@ import { toast } from '../components/Toast';
 import { confirm } from '../components/Confirm';
 // monthNameOf is the shared "Juli 2026" formatter; MonthTab keeps a local `monthLabel`
 // string for the header, hence the rename on import.
-import { eur, cn, fmtDate, monthLabel as monthNameOf } from '../lib/utils';
+import { cn, eur, fmtDate, monthLabel as monthNameOf, todayLocal } from '../lib/utils';
 import { useUrlState } from '../hooks/useUrlState';
 
 // ── shared types ────────────────────────────────────────────────────────────
@@ -88,15 +88,35 @@ interface MonthData {
   receiptMissing: number; receiptMissingCount: number;
   // Where in the month we are — drives the running projection ("Tag 12/31").
   isCurrentMonth: boolean; daysElapsed: number; daysTotal: number;
+  // Set when the response covers an explicit from/to window instead of one calendar
+  // month. The monthly halves (incomes, fixed, targets, forecasts) then come back empty
+  // or null because they have no defined meaning over an arbitrary period — a monthly
+  // goal over 47 days, or per-month recurring rows summed over a window ending mid-month.
+  ranged?: boolean;
 }
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => todayLocal();
 const curMonth = () => new Date().toISOString().slice(0, 7);
 const ddmmyyyy = (d: string) => `${d.slice(8, 10)}.${d.slice(5, 7)}.${d.slice(0, 4)}`;
 const shiftMonth = (m: string, d: number) => {
   const [y, mo] = m.split('-').map(Number);
   return new Date(Date.UTC(y, mo - 1 + d, 1)).toISOString().slice(0, 7);
 };
+/** Last calendar day of a YYYY-MM as YYYY-MM-DD (day 0 of the next month). */
+const lastDayOf = (m: string) => {
+  const [y, mo] = m.split('-').map(Number);
+  return `${m}-${String(new Date(y, mo, 0).getDate()).padStart(2, '0')}`;
+};
+/** Shape check for one half of the Zeitraum. A native date input cannot hold 31.02., but
+ *  the value can also arrive from elsewhere (the assistant's answer), and the backend
+ *  answers anything that is not a real calendar day with 400 — see `isoDay` in
+ *  backend/src/routes/finances.ts. */
+const isDay = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+/** A from/to pair that happens to be exactly one whole calendar month. Such a window is
+ *  better shown AS that month — the full page, plans, goals and forecast included — than
+ *  as a range, which by design has to hide all of that. */
+const isWholeMonth = (from: string, to: string) =>
+  from.slice(0, 7) === to.slice(0, 7) && from.endsWith('-01') && to === lastDayOf(to.slice(0, 7));
 
 function useKonten() {
   return useQuery({ queryKey: ['konten'], queryFn: () => api<KontoLite[]>('/api/konten') });
@@ -215,15 +235,51 @@ function MonthTab() {
   const { t, i18n } = useTranslation();
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const [month, setMonth] = useUrlState('m', curMonth());
+  const [month, setMonthUrl] = useUrlState('m', curMonth());
   const [fx, setFx] = useUrlState('fx', '');   // deep-link from Auszüge: open this plan's evidence
+
+  // An explicit from/to window — the date-range filter restored from the Statistik page
+  // this one absorbed. It REPLACES the month rather than narrowing it: plans, goals and
+  // the 3-month-median forecast are monthly by construction, so over an arbitrary window
+  // the page shows only the half that survives it — the variable spend (see `rangeMode`
+  // branches below). Deliberately plain state, not useUrlState: two useUrlState setters
+  // fired in one tick read the same stale params and would clobber each other.
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  // Two independent date pickers make an inverted window ("20.07. – 05.07.") one fat finger
+  // away, and that is exactly what /api/finances/month answers with 400 — while every
+  // branch of this page renders off the fetched `data`, so the rejected request used to
+  // leave a header with nothing under it. An unusable pair is therefore NOT a period: the
+  // page keeps showing the month it was already on and the filter says why, right at the
+  // field that broke. Only a pair the backend would accept becomes range mode.
+  const rangeBroken = !!(from && to) && (!isDay(from) || !isDay(to) || from > to);
+  // Exactly one date filled — still being entered, not an error. The month stays in effect
+  // (the request needs both halves), which the panel states so the numbers on screen are
+  // never silently read as "since the 20th".
+  const rangeHalf = !!from !== !!to;
+  const rangeMode = !!(from && to) && !rangeBroken;
+  // The page's own period, in the shape the /api/spending endpoints want it.
+  const pageRange: DateRange | null = rangeMode ? { from, to } : null;
+  const [aiAnswer, setAiAnswer] = useState<AiState | null>(null);
+  // The assistant's banner asserts a period and an account scope, while every € under it
+  // is recomputed the moment either changes — so a surviving banner would keep stating an
+  // answer that no longer matches the numbers on screen. Any period/scope change drops it;
+  // askAI sets the fresh answer AFTER its own changes, so it is unaffected.
+  const dropAi = () => setAiAnswer(null);
+  const setMonth = (m: string) => { dropAi(); setMonthUrl(m); };
+  const setFromDate = (v: string) => { dropAi(); setFrom(v); };
+  const setToDate = (v: string) => { dropAi(); setTo(v); };
+  const clearRange = () => { dropAi(); setFrom(''); setTo(''); };
+
   const [picker, setPicker] = useState<MonthFix | null>(null);
   const [budgetModal, setBudgetModal] = useState<BudgetDraft | null>(null);
   const [posTarget, setPosTarget] = useState<PosTarget | null>(null);
-  // The drill-down carries its own period: normally the page's month, but an answer card
-  // for a multi-month question opens it on that whole range.
+  // The drill-down carries its own period (null = follow the page's month), and can be
+  // re-pointed from inside the modal without moving the page.
   const [drill, setDrill] = useState<{ target: DrillTarget; range: DateRange | null } | null>(null);
-  const openDrill = (target: DrillTarget, range: DateRange | null = null) => setDrill({ target, range });
+  // Default period = whatever the page is showing, so in range mode every drill-down
+  // opens on that window instead of silently falling back to the (hidden) month.
+  const openDrill = (target: DrillTarget, range: DateRange | null = pageRange) => setDrill({ target, range });
   const [evidence, setEvidence] = useState<{ id: number; label: string; kind: 'expense' | 'income'; expectReceipt: boolean } | null>(null);
   // Tree folding. We store DEVIATIONS from the default (level 1 open, everything below
   // it closed) rather than the open set itself: 84 categories expanded at once is
@@ -238,7 +294,6 @@ function MonthTab() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [asking, setAsking] = useState(false);
-  const [aiAnswer, setAiAnswer] = useState<AiState | null>(null);
 
   // Account-holder scope: one bubble per person + one for the household account;
   // default = all (Gesamthaushalt). Selecting a single person reveals sub-bubbles
@@ -274,10 +329,11 @@ function MonthTab() {
   const toggleGroup = (key: string) => {
     const next = new Set(activeKeys);
     if (next.has(key)) next.delete(key); else next.add(key);
+    dropAi();
     setExclKonten(new Set());
     setSelKeys(next.size === 0 || next.size === scope.allKeys.length ? null : next);
   };
-  const toggleKonto = (id: number) => setExclKonten(s => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const toggleKonto = (id: number) => { dropAi(); setExclKonten(s => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; }); };
   const kontenParam = isAll ? '' : `&konten=${effKonten.join(',')}`;
   // Every konto the bubble scope can actually express. `scope` above is built from
   // non-cash, user-linked accounts ONLY, while the assistant grounds its answer on the full
@@ -314,26 +370,40 @@ function MonthTab() {
     return usable;
   };
 
-  const { data, isLoading } = useQuery({
+  // month=… is always sent (the endpoint requires it); from/to override it when set.
+  const rangeParam = rangeMode ? `&from=${from}&to=${to}` : '';
+  const { data, isLoading, isError, error, refetch } = useQuery({
     // lang picks category display vs display_en on the tree — part of the key or a
-    // language switch would keep serving the other language's labels from cache.
-    queryKey: ['fin-month', month, isAll ? 'all' : effKonten.join(','), i18n.language],
-    queryFn: () => api<MonthData>(`/api/finances/month?month=${month}${kontenParam}&lang=${i18n.language}`),
+    // language switch would keep serving the other language's labels from cache. The key
+    // holds `rangeParam`, not raw from/to, for the same reason AND so it varies with what
+    // is actually requested: while a half-typed or inverted window is on screen the month
+    // is what gets fetched, so it must hit the month's own cache entry instead of emptying
+    // the page into a spinner on every keystroke.
+    queryKey: ['fin-month', month, rangeParam, isAll ? 'all' : effKonten.join(','), i18n.language],
+    queryFn: () => api<MonthData>(`/api/finances/month?month=${month}${rangeParam}${kontenParam}&lang=${i18n.language}`),
   });
   const invalidate = () => void qc.invalidateQueries({ queryKey: ['fin-month'] });
 
   // Enter (or the ✨ button) hands the question to the assistant, which answers with THIS
-  // page's filters. The month view is inherently month-scoped (fixed costs and goals are
-  // monthly), so the LISTS below jump to the month the range starts in — but the answer
-  // itself is computed over the FULL range the question asked for (aiRange, below), so
-  // "wie viel habe ich 2026 für Kraftstoff ausgegeben" gets the year, not January.
+  // page's filters — and we APPLY them, so the page really shows the period that was asked
+  // about. A question whose period is not one whole calendar month ("wie viel habe ich 2026
+  // für Kraftstoff ausgegeben") switches the page into range mode over that window; a
+  // question about one month stays in month mode, where the full page still has meaning.
   const askAI = async () => {
     const q = search.trim();
     if (!q || asking) return;
     setAsking(true);
     try {
       const res = await api<AiAnswer>('/api/spending/ask', { method: 'POST', body: { q, lang: i18n.language } });
+      // The month is set either way: it is what the page falls back to once the range is
+      // cleared, so clearing lands on the question's own month, not on today.
       if (res.from) setMonth(res.from.slice(0, 7));
+      // Everything that is NOT one whole calendar month becomes a real range — a
+      // multi-month span AND a sub-month window ("vom 5. bis 20. März"). Rendering the
+      // date chip without applying it is what made the old banner claim a period the
+      // numbers underneath were never computed for.
+      if (res.from && res.to && !isWholeMonth(res.from, res.to)) { setFrom(res.from); setTo(res.to); }
+      else clearRange();
       const applied = applyKonten(res.konto_ids ?? []);
       const dropped = (res.konto_ids ?? []).filter(id => !applied.includes(id));
       setAiAnswer({ ...res, konto_ids: applied, droppedKonten: dropped });
@@ -344,12 +414,6 @@ function MonthTab() {
       setAsking(false);
     }
   };
-  // The period the ANSWER covers: only a genuine multi-month span becomes a range — a
-  // question about one month is already what the page shows, and re-fetching it from
-  // /api/spending would answer it with slightly different arithmetic (that endpoint does
-  // not subtract receipts tied to a fixed cost) than the row right below.
-  const aiRange: DateRange | null = aiAnswer?.from && aiAnswer.to && aiAnswer.from.slice(0, 7) !== aiAnswer.to.slice(0, 7)
-    ? { from: aiAnswer.from, to: aiAnswer.to } : null;
 
   // Article names → their category, for the search box (an article jumps to its purchases).
   const { data: names = [] } = useQuery({
@@ -449,7 +513,7 @@ function MonthTab() {
     const open = isOpen(n);
     return (
       <div key={n.path}>
-        <CategoryRow n={n} t={t} hasKids={kids.length > 0} open={open} scopedToPerson={!isAll}
+        <CategoryRow n={n} t={t} hasKids={kids.length > 0} open={open} scopedToPerson={!isAll} ranged={rangeMode}
           onToggle={() => setToggled(s => flip(s, n.path))}
           onOpen={() => openPositions(n.label, n.path)}
           onChart={() => openDrill({ kind: 'category', path: n.path, label: `${n.emoji ?? ''} ${n.label}`.trim() })}
@@ -488,7 +552,14 @@ function MonthTab() {
     }
     return out.sort((a, b) => a.localeCompare(b));
   }, [names, searchLc]);
-  const hasActiveFilters = !isAll || month !== curMonth();
+  // The dot also lights for dates that are NOT in effect (half-entered or inverted): they
+  // are still sitting in the panel, and once it is closed the dot is the only way back to
+  // the message that explains why the month is still what you are looking at.
+  const hasActiveFilters = !isAll || !!from || !!to || month !== curMonth();
+  // The window the numbers on this page were computed for, as plain dates — what the
+  // bucket tiles deep-link into (Positionen takes from/to, not a month).
+  const periodFrom = rangeMode ? from : `${month}-01`;
+  const periodTo = rangeMode ? to : lastDayOf(month);
 
   // Deep-link from the Auszüge list (?fx=<id>): open that plan's evidence modal so a
   // statement allocated to a generated one-off income jumps straight to the entry.
@@ -542,8 +613,9 @@ function MonthTab() {
   // "day 12 of 31 → this pace ends the month at X". It projects exactly the number it sits
   // under, so it is honest about which figure it is extrapolating — unlike a projection of
   // the category tree shown beneath a total that also carries one-offs and un-receipted
-  // debits. Past/future months elapse fully, so there is nothing to project.
-  const varProjection = data?.isCurrentMonth && data.daysElapsed > 0
+  // debits. Past/future months elapse fully, so there is nothing to project — and an
+  // arbitrary window has no "rest of the period" to extrapolate into either.
+  const varProjection = !rangeMode && data?.isCurrentMonth && data.daysElapsed > 0
     ? Math.round((varActual * data.daysTotal / data.daysElapsed) * 100) / 100
     : null;
   // Reconciliation completeness covers EVERY plan that still needs a bank match —
@@ -582,21 +654,63 @@ function MonthTab() {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* month navigation */}
+      {/* month navigation — or, in range mode, the active window. The arrows are not just
+          disabled but gone: shifting a month is meaningless while a from/to window is what
+          every number below was computed for. */}
       <div className="flex items-center justify-center gap-3">
-        <button onClick={() => setMonth(shiftMonth(month, -1))} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800" aria-label="◄">
-          <ChevronLeft size={18} />
-        </button>
-        <button onClick={() => setMonth(curMonth())} className="min-w-[10rem] text-center text-base font-semibold" title={t('finances.jumpToday')}>
-          {monthLabel}
-        </button>
-        <button onClick={() => setMonth(shiftMonth(month, 1))} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800" aria-label="►">
-          <ChevronRight size={18} />
-        </button>
+        {rangeMode ? (
+          <>
+            <span className="text-base font-semibold">{fmtDate(from, i18n.language)} – {fmtDate(to, i18n.language)}</span>
+            <button onClick={clearRange} title={t('stats.monthReset')}
+              className="rounded-lg px-2 py-1 text-xs font-medium text-emerald-600 hover:bg-emerald-50 dark:text-emerald-500 dark:hover:bg-emerald-950/40">
+              {t('stats.monthReset')}
+            </button>
+          </>
+        ) : (
+          <>
+            <button onClick={() => setMonth(shiftMonth(month, -1))} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800" aria-label="◄">
+              <ChevronLeft size={18} />
+            </button>
+            <button onClick={() => setMonth(curMonth())} className="min-w-[10rem] text-center text-base font-semibold" title={t('finances.jumpToday')}>
+              {monthLabel}
+            </button>
+            <button onClick={() => setMonth(shiftMonth(month, 1))} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800" aria-label="►">
+              <ChevronRight size={18} />
+            </button>
+          </>
+        )}
       </div>
 
       {isLoading && <Spinner />}
-      {data && (
+      {/* A failed request (a period the backend rejects, a 500, no network) used to leave
+          this page as a bare header: everything under it renders off `data`, and there is
+          no global query-error handler (main.tsx). Say it out loud instead — the search and
+          filter bar below stay mounted, so the period that caused it can be corrected. */}
+      {isError && (
+        <Card className="flex flex-col items-start gap-2 border-red-200 p-4 dark:border-red-900/60">
+          <div className="flex items-center gap-2 text-sm font-medium text-red-600 dark:text-red-400">
+            <AlertCircle size={16} className="shrink-0" />
+            {t('finances.loadError')}
+          </div>
+          {error instanceof Error && error.message && (
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">{error.message}</p>
+          )}
+          <Button variant="secondary" className="px-2.5 py-1.5 text-xs" onClick={() => void refetch()}>
+            <RefreshCw size={14} /> {t('finances.retry')}
+          </Button>
+        </Card>
+      )}
+      {/* Range mode summarises only what a window can defend: the variable spend. No
+          Einnahmen/Fixkosten tiles (per-MONTH recurring rows, wrong the moment a window
+          ends mid-month), hence no Netto and no reconciliation meter either. */}
+      {data && rangeMode && (
+        <Card className="flex flex-col gap-1 p-4">
+          <div className="text-xs text-zinc-500 dark:text-zinc-400">{t('finances.varTitle')}</div>
+          <div className="text-2xl font-bold">{eur(varActual)}</div>
+          <div className="text-xs text-zinc-400">{t('finances.rangeVariableOnly')}</div>
+        </Card>
+      )}
+      {data && !rangeMode && (
         <>
           <Card className="flex flex-col gap-3 p-4">
             <div className="grid grid-cols-3 gap-3">
@@ -670,22 +784,54 @@ function MonthTab() {
         </button>
       </div>
 
-      {/* Filter panel: month + the account-holder scope. Picking a single person reveals
-          that person's accounts as subtractive chips (unchanged behaviour, new home). */}
+      {/* Filter panel: period (range OR month) + the account-holder scope. Picking a single
+          person reveals that person's accounts as subtractive chips (unchanged behaviour,
+          new home). */}
       {filtersOpen && (
         <div className="flex flex-col gap-3 rounded-xl border border-zinc-200 p-3 dark:border-zinc-800">
           <div>
-            <div className="mb-1.5 text-[11px] font-medium text-zinc-400">{t('finances.filterMonth')}</div>
+            <div className="mb-1.5 text-[11px] font-medium text-zinc-400">{t('stats.dateRange')}</div>
             <div className="flex items-center gap-2">
-              <Input type="month" className="min-w-0 flex-1" value={month} onChange={e => e.target.value && setMonth(e.target.value)} />
-              <Button variant="ghost" className="shrink-0 px-2.5 py-1.5 text-xs" onClick={() => setMonth(curMonth())}>{t('finances.jumpToday')}</Button>
+              {/* Each field bounds the other, so the picker itself cannot produce an
+                  inverted window. Typing can still get past it (min/max only mark the
+                  value out-of-range) — `rangeBroken` is the guard that actually holds. */}
+              <Input type="date" className="min-w-0 flex-1" max={to || undefined} value={from} onChange={e => setFromDate(e.target.value)} />
+              <span className="shrink-0 text-zinc-400">–</span>
+              <Input type="date" className="min-w-0 flex-1" min={from || undefined} value={to} onChange={e => setToDate(e.target.value)} />
+              {/* Also offered for a half-entered or inverted window: that is precisely when
+                  starting over is what you want, and it was the only state with no way out. */}
+              {(from || to) && (
+                <button onClick={clearRange} title={t('stats.monthReset')} className="shrink-0 rounded-lg p-1 text-zinc-400 hover:text-zinc-600"><X size={16} /></button>
+              )}
             </div>
+            {/* Name the actual reason: "end before start" would be a lie about a value that
+                is not a calendar day at all (only reachable if a date arrives from outside
+                these two pickers). */}
+            {rangeBroken && (
+              <p className="mt-1.5 text-[11px] text-red-500">
+                {isDay(from) && isDay(to) ? t('finances.rangeInverted') : t('finances.rangeBadDate')}
+              </p>
+            )}
+            {rangeHalf && <p className="mt-1.5 text-[11px] text-zinc-400">{t('finances.rangeHalf')}</p>}
           </div>
+          {/* One period control at a time: a complete, USABLE range replaces the month, so
+              leaving a month picker next to it would offer a control that changes nothing.
+              While the range is half-entered or inverted the month is what the page is
+              actually showing, so the picker comes back — and the hint above says why. */}
+          {!rangeMode && (
+            <div>
+              <div className="mb-1.5 text-[11px] font-medium text-zinc-400">{t('finances.filterMonth')}</div>
+              <div className="flex items-center gap-2">
+                <Input type="month" className="min-w-0 flex-1" value={month} onChange={e => e.target.value && setMonth(e.target.value)} />
+                <Button variant="ghost" className="shrink-0 px-2.5 py-1.5 text-xs" onClick={() => setMonth(curMonth())}>{t('finances.jumpToday')}</Button>
+              </div>
+            </div>
+          )}
           {scope.allKeys.length > 1 && (
             <div>
               <div className="mb-1.5 text-[11px] font-medium text-zinc-400">{t('stats.accounts')}</div>
               <div className="scrollbar-none -mx-1 flex gap-1.5 overflow-x-auto px-1 py-0.5">
-                <ScopeBubble active={isAll} onClick={() => { setSelKeys(null); setExclKonten(new Set()); }}>{t('stats.allAccounts')}</ScopeBubble>
+                <ScopeBubble active={isAll} onClick={() => { dropAi(); setSelKeys(null); setExclKonten(new Set()); }}>{t('stats.allAccounts')}</ScopeBubble>
                 {scope.members.map(m => (
                   <ScopeBubble key={m.key} active={activeKeys.has(m.key)} onClick={() => toggleGroup(m.key)}>{m.label}</ScopeBubble>
                 ))}
@@ -737,26 +883,19 @@ function MonthTab() {
               {t('finances.aiKontoNote', { konten: aiAnswer.droppedKonten.map(id => (konten ?? []).find(x => x.id === id)?.name ?? `#${id}`).join(', ') })}
             </p>
           )}
-          {/* Plans and goals are monthly, so the LISTS below stay on one month — but the
-              answer card underneath covers the whole period that was asked for. */}
-          {aiRange && (
-            <p className="pl-6 text-xs text-amber-700 dark:text-amber-400">{t('finances.aiRangeNote', { month: monthNameOf(Number(month.slice(0, 4)), Number(month.slice(5, 7)), i18n.language) })}</p>
-          )}
+          {/* No "the lists below show another period" note any more: a multi-month answer
+              now switches the whole page to that window, so the card and everything under
+              it are one period. */}
           {aiAnswer.category_path && (() => {
             const node = nodeByPath.get(aiAnswer.category_path!);
             if (!node) return null;
-            return (
-              <AiCategoryCard node={node} range={aiRange} month={month} kParam={kontenParam}
-                onOpen={() => aiRange
-                  ? openDrill({ kind: 'category', path: node.path, label: `${node.emoji ?? ''} ${node.label}`.trim() }, aiRange)
-                  : openPositions(node.label, node.path)} />
-            );
+            return <AiCategoryCard node={node} onOpen={() => openPositions(node.label, node.path)} />;
           })()}
           {aiAnswer.canonicals.length > 0 && (() => {
             const label = aiAnswer.group_label ?? aiAnswer.canonicals.join(', ');
             return (
-              <AiArticleCard canonicals={aiAnswer.canonicals} label={label} month={month} range={aiRange} kParam={kontenParam}
-                onOpen={() => openDrill({ kind: 'article', canonicals: aiAnswer.canonicals, label }, aiRange)} />
+              <AiArticleCard canonicals={aiAnswer.canonicals} label={label} month={month} range={pageRange} kParam={kontenParam}
+                onOpen={() => openDrill({ kind: 'article', canonicals: aiAnswer.canonicals, label })} />
             );
           })()}
         </Card>
@@ -800,7 +939,9 @@ function MonthTab() {
           {/* Section order = how often you look: the variable side is the living part of
               the month (open), the plans below it get ticked off once and stay folded. */}
           <Section title={t('finances.varTitle')}>
-            {oneOffCosts.map(fixRow)}
+            {/* One-offs are single-MONTH entries with a per-month check state, so they only
+                exist in month mode (the backend returns none for a range anyway). */}
+            {!rangeMode && oneOffCosts.map(fixRow)}
 
             {/* The DERIVED category tree. Nothing here is stored except the optional
                 limits: every category shows up with its real spend, and deleting a goal
@@ -823,11 +964,9 @@ function MonthTab() {
                 </div>
                 <div className="flex flex-col gap-1.5">
                   {lenses.map(l => (
-                    <LensRow key={l.id} l={l} t={t} scopedToPerson={!isAll}
+                    <LensRow key={l.id} l={l} t={t} scopedToPerson={!isAll} ranged={rangeMode}
                       onOpen={() => setPosTarget({ label: l.label, q: `budget=${l.id}`, bases: l.categories })}
-                      onChart={() => openDrill(l.articles.length
-                        ? { kind: 'article', canonicals: l.articles, label: l.label }
-                        : { kind: 'category', path: l.categories[0], label: l.label })}
+                      onChart={() => openDrill(lensTarget(l))}
                       onEdit={() => setBudgetModal({ id: l.id, kind: 'lens', lockKind: true, label: l.label, monthly_target: l.monthly_target, konto_id: l.konto_id, categories: l.categories, articles: l.articles })} />
                   ))}
                 </div>
@@ -836,8 +975,9 @@ function MonthTab() {
 
             {/* Limits whose category was renamed/removed by a category redesign. They keep
                 working (the prefix still matches whatever artikel still carry that path)
-                but they have no row in the tree, so they need re-pointing. */}
-            {orphanLimits.length > 0 && (
+                but they have no row in the tree, so they need re-pointing. A stored monthly
+                limit is target-shaped, so this maintenance card sits out range mode. */}
+            {!rangeMode && orphanLimits.length > 0 && (
               <Card className="flex flex-col gap-2 border-amber-200 bg-amber-50/50 p-3 dark:border-amber-900/60 dark:bg-amber-950/20">
                 <div>
                   <div className="text-sm font-semibold text-amber-800 dark:text-amber-300">{t('finances.orphanTitle')}</div>
@@ -861,45 +1001,38 @@ function MonthTab() {
               </Card>
             )}
 
-            {/* Three of the tiles below complete the tree into the month's total:
+            {/* Three of the tiles below complete the tree into the period's total:
                   variableTotal = tree total + Kategorie fehlt + Unbekannte Kategorie + Beleg fehlt
                 Unbudgetiert is NOT part of that identity — it is a slice OF the tree
                 (spend in categories that carry no limit), shown so a goal-less corner of
-                the month stays visible. */}
-            {unbudgeted > 0 && (() => {
-              const [yy, mm] = month.split('-').map(Number);
-              const last = String(new Date(yy, mm, 0).getDate()).padStart(2, '0');
-              return (
-                <Card onClick={() => navigate(`/warenstamm/positionen?nobudget=1&from=${month}-01&to=${month}-${last}`)}
-                  className="flex items-center justify-between gap-2 p-3">
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium text-zinc-500 dark:text-zinc-400">{t('finances.unbudgeted')}</div>
-                    <div className="text-xs text-zinc-400">{t('finances.unbudgetedHint')}</div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <span className="text-sm font-semibold tabular-nums text-zinc-700 dark:text-zinc-200">{eur(unbudgeted)}</span>
-                    <ChevronRight size={16} className="text-zinc-400" />
-                  </div>
-                </Card>
-              );
-            })()}
-            {categoryMissing > 0 && (() => {
-              const [yy, mm] = month.split('-').map(Number);
-              const last = String(new Date(yy, mm, 0).getDate()).padStart(2, '0');
-              return (
-                <Card onClick={() => navigate(`/warenstamm/positionen?uncat=1&from=${month}-01&to=${month}-${last}`)}
-                  className="flex items-center justify-between gap-2 p-3">
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium text-amber-700 dark:text-amber-400">{t('finances.categoryMissing')}</div>
-                    <div className="text-xs text-zinc-400">{t('finances.categoryMissingHint')}</div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <span className="text-sm font-semibold tabular-nums text-zinc-700 dark:text-zinc-200">{eur(categoryMissing)}</span>
-                    <ChevronRight size={16} className="text-zinc-400" />
-                  </div>
-                </Card>
-              );
-            })()}
+                the period stays visible. The deep links carry the window the tile was
+                computed for (periodFrom/periodTo), which in range mode is that range. */}
+            {unbudgeted > 0 && (
+              <Card onClick={() => navigate(`/warenstamm/positionen?nobudget=1&from=${periodFrom}&to=${periodTo}`)}
+                className="flex items-center justify-between gap-2 p-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-zinc-500 dark:text-zinc-400">{t('finances.unbudgeted')}</div>
+                  <div className="text-xs text-zinc-400">{t('finances.unbudgetedHint')}</div>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <span className="text-sm font-semibold tabular-nums text-zinc-700 dark:text-zinc-200">{eur(unbudgeted)}</span>
+                  <ChevronRight size={16} className="text-zinc-400" />
+                </div>
+              </Card>
+            )}
+            {categoryMissing > 0 && (
+              <Card onClick={() => navigate(`/warenstamm/positionen?uncat=1&from=${periodFrom}&to=${periodTo}`)}
+                className="flex items-center justify-between gap-2 p-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-amber-700 dark:text-amber-400">{t('finances.categoryMissing')}</div>
+                  <div className="text-xs text-zinc-400">{t('finances.categoryMissingHint')}</div>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <span className="text-sm font-semibold tabular-nums text-zinc-700 dark:text-zinc-200">{eur(categoryMissing)}</span>
+                  <ChevronRight size={16} className="text-zinc-400" />
+                </div>
+              </Card>
+            )}
             {/* Spend on a category_path that is no longer in the catalogue. It cannot sit
                 in any tree row, so without this tile the tree would silently fail to add
                 up to Variable Kosten. Not tappable: there is no filter for "dangling
@@ -913,8 +1046,11 @@ function MonthTab() {
                 <span className="shrink-0 text-sm font-semibold tabular-nums text-zinc-700 dark:text-zinc-200">{eur(unknownCategory)}</span>
               </Card>
             )}
+            {/* The Auszüge deep-link filters by MONTH (bm=YYYY-MM), so over a window there
+                is no link that would land on the same set of debits — the tile then states
+                its number and nothing more, like Unbekannte Kategorie above. */}
             {receiptMissing > 0 && (
-              <Card onClick={() => navigate(`/finanzen?tab=bank&bs=open&bm=${month}`)}
+              <Card onClick={rangeMode ? undefined : () => navigate(`/finanzen?tab=bank&bs=open&bm=${month}`)}
                 className="flex items-center justify-between gap-2 p-3">
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-amber-700 dark:text-amber-400">{t('finances.receiptMissing')}</div>
@@ -922,36 +1058,46 @@ function MonthTab() {
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
                   <span className="text-sm font-semibold tabular-nums text-zinc-700 dark:text-zinc-200">{eur(receiptMissing)}</span>
-                  <ChevronRight size={16} className="text-zinc-400" />
+                  {!rangeMode && <ChevronRight size={16} className="text-zinc-400" />}
                 </div>
               </Card>
             )}
 
             {/* Bottom of the list, not the section header: a category goal is set on its
-                own row now, so this button is for the overlapping kind you add rarely. */}
-            <Button variant="secondary" className="w-full justify-center py-2 text-xs"
-              onClick={() => setBudgetModal({ kind: 'lens', categories: [], articles: [] })}>
-              <Plus size={14} /> {t('finances.addBudget')}
-            </Button>
+                own row now, so this button is for the overlapping kind you add rarely. It
+                creates a MONTHLY target, so it belongs to month mode. */}
+            {!rangeMode && (
+              <Button variant="secondary" className="w-full justify-center py-2 text-xs"
+                onClick={() => setBudgetModal({ kind: 'lens', categories: [], articles: [] })}>
+                <Plus size={14} /> {t('finances.addBudget')}
+              </Button>
+            )}
           </Section>
 
-          {/* Fixed costs — recurring expense plans (rent, internet, subscriptions) */}
-          <Section title={t('finances.fixTitle')} count={fixedCosts.length} defaultOpen={false}>
-            {!fixedCosts.length && <Card className="p-3 text-xs text-zinc-400">{t('finances.noFixThisMonth')}</Card>}
-            {fixedCosts.map(fixRow)}
-          </Section>
+          {/* The three plan sections are per-MONTH recurring rows with a per-month check
+              state; summing them over a window that ends mid-month would invent a number
+              nobody could defend, so a range simply does not show them. */}
+          {!rangeMode && (
+            <>
+              {/* Fixed costs — recurring expense plans (rent, internet, subscriptions) */}
+              <Section title={t('finances.fixTitle')} count={fixedCosts.length} defaultOpen={false}>
+                {!fixedCosts.length && <Card className="p-3 text-xs text-zinc-400">{t('finances.noFixThisMonth')}</Card>}
+                {fixedCosts.map(fixRow)}
+              </Section>
 
-          {/* Variable income — one-off incomes (generated single-month, e.g. "…Spesen") */}
-          <Section title={t('finances.varIncomeTitle')} count={varIncome.length} defaultOpen={false}>
-            {!varIncome.length && <Card className="p-3 text-xs text-zinc-400">{t('finances.noVarIncome')}</Card>}
-            {varIncome.map(fixRow)}
-          </Section>
+              {/* Variable income — one-off incomes (generated single-month, e.g. "…Spesen") */}
+              <Section title={t('finances.varIncomeTitle')} count={varIncome.length} defaultOpen={false}>
+                {!varIncome.length && <Card className="p-3 text-xs text-zinc-400">{t('finances.noVarIncome')}</Card>}
+                {varIncome.map(fixRow)}
+              </Section>
 
-          {/* Fixed income — recurring income plans (salary, Kindergeld, Beiträge) */}
-          <Section title={t('finances.fixedIncomeTitle')} count={fixedIncome.length} defaultOpen={false}>
-            {!fixedIncome.length && <Card className="p-3 text-xs text-zinc-400">{t('finances.noIncomePlans')}</Card>}
-            {fixedIncome.map(fixRow)}
-          </Section>
+              {/* Fixed income — recurring income plans (salary, Kindergeld, Beiträge) */}
+              <Section title={t('finances.fixedIncomeTitle')} count={fixedIncome.length} defaultOpen={false}>
+                {!fixedIncome.length && <Card className="p-3 text-xs text-zinc-400">{t('finances.noIncomePlans')}</Card>}
+                {fixedIncome.map(fixRow)}
+              </Section>
+            </>
+          )}
         </>
       )}
 
@@ -966,13 +1112,16 @@ function MonthTab() {
           }} />
       )}
       {budgetModal && <BudgetModal initial={budgetModal} onClose={() => setBudgetModal(null)} onSaved={invalidate} />}
-      {posTarget && <PositionsModal target={posTarget} month={month} konten={kontenParam} onClose={() => setPosTarget(null)} />}
+      {posTarget && <PositionsModal target={posTarget} month={month} range={pageRange} konten={kontenParam} onClose={() => setPosTarget(null)} />}
       {/* Keyed on scope+range: opening a DIFFERENT drill-down while one is on screen (the
           assistant's answer card can do that) must remount, or the modal would keep the
-          period state of the target it no longer shows. */}
+          period state of the target it no longer shows.
+          Tapping a month in its chart jumps the WHOLE page there, which means leaving range
+          mode too — otherwise the page would stay pinned to a window that the month it just
+          jumped to is nowhere in. */}
       {drill && <SpendingDrilldown key={`${spendScopeKey(drill.target)}|${drill.range?.from ?? ''}|${drill.range?.to ?? ''}`}
         target={drill.target} month={month} initialRange={drill.range} kParam={kontenParam}
-        onClose={() => setDrill(null)} onPickMonth={ym => setMonth(ym)} />}
+        onClose={() => setDrill(null)} onPickMonth={ym => { clearRange(); setMonth(ym); }} />}
       {evidence && <FixedEvidenceModal id={evidence.id} label={evidence.label} kind={evidence.kind} month={month} t={t}
         expectReceipt={evidence.expectReceipt}
         onClose={() => setEvidence(null)}
@@ -1236,10 +1385,15 @@ const iconBtn = 'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg te
 
 /** One row of the derived category tree. Three separate hit areas: the row itself opens
  *  the positions list, 📊 opens spending-over-time, ✏️ edits the (optional) limit — plus
- *  the chevron when the node has children. */
-function CategoryRow({ n, t, hasKids, open, scopedToPerson, onToggle, onOpen, onChart, onEdit, onEditExtra }: {
+ *  the chevron when the node has children.
+ *  `ranged` = the page is on a from/to window instead of a month. Everything target-shaped
+ *  then goes away — a monthly goal, its bar, the "median of the 3 prior months" forecast
+ *  and the ✏️ that sets them all describe a MONTH, and pro-rating any of them onto an
+ *  arbitrary window would be an invented number. The row keeps what it can prove: the
+ *  category, its spend for the window, and the drill-down. */
+function CategoryRow({ n, t, hasKids, open, scopedToPerson, ranged, onToggle, onOpen, onChart, onEdit, onEditExtra }: {
   n: MonthCategoryNode; t: (k: string, o?: Record<string, unknown>) => string;
-  hasKids: boolean; open: boolean; scopedToPerson: boolean;
+  hasKids: boolean; open: boolean; scopedToPerson: boolean; ranged: boolean;
   onToggle: () => void; onOpen: () => void; onChart: () => void; onEdit: () => void;
   onEditExtra: (l: BudgetLimit) => void;
 }) {
@@ -1254,27 +1408,30 @@ function CategoryRow({ n, t, hasKids, open, scopedToPerson, onToggle, onOpen, on
   // looks blown the moment the household spends 200 € in that category.
   const personal = limit != null && limit.konto_id != null;
   const limitActual = personal ? limit!.actual : n.actual;
-  const pct = target != null && target > 0 && !scopedOut ? (limitActual / target) * 100 : null;
+  const pct = !ranged && target != null && target > 0 && !scopedOut ? (limitActual / target) * 100 : null;
   // …and for the same reason the headline € (the node's own number) only turns red when
   // the goal it is being measured against is the household-wide one.
   const headlineOver = pct != null && pct > 100 && !personal;
 
-  // Second line, assembled from whatever is true for this node.
+  // Second line, assembled from whatever is true for this node. In range mode only the
+  // meta hint qualifies — everything else on this line describes a month.
   const bits: string[] = [];
-  if (n.is_meta) bits.push(t('finances.metaHint'));
-  else if (!limit || target == null) bits.push(t('finances.noTarget'));
-  else {
-    bits.push(`${t('finances.target')}: ${eur(target)}`);
-    // Name the person AND their number — the headline shows the whole scope's spend.
-    if (personal) bits.push(`${scopeLabelOf(t, limit)}: ${eur(limit.actual)}`);
-    else if (scopedToPerson) bits.push(t('finances.wholeHousehold'));
+  if (n.is_meta) bits.push(t('finances.metaHint'));   // true over any period
+  else if (!ranged) {
+    if (!limit || target == null) bits.push(t('finances.noTarget'));
+    else {
+      bits.push(`${t('finances.target')}: ${eur(target)}`);
+      // Name the person AND their number — the headline shows the whole scope's spend.
+      if (personal) bits.push(`${scopeLabelOf(t, limit)}: ${eur(limit.actual)}`);
+      else if (scopedToPerson) bits.push(t('finances.wholeHousehold'));
+    }
+    // The forecast has to be measured the same way as the target and the Ist standing next
+    // to it: a personal limit gets the backend's konto-narrowed `limit.forecast`, not the
+    // node's household-wide one — otherwise a row reading "Ziel 80 · Martin 62" would end
+    // in the whole household's 610 and look like a goal about to be blown by half a grand.
+    const forecast = personal ? limit!.forecast : n.forecast;
+    if (forecast != null) bits.push(`${t('finances.forecast')}: ${eur(forecast)}`);
   }
-  // The forecast has to be measured the same way as the target and the Ist standing next to
-  // it: a personal limit gets the backend's konto-narrowed `limit.forecast`, not the node's
-  // household-wide one — otherwise a row reading "Ziel 80 · Martin 62" would end in the
-  // whole household's 610 and look like a goal about to be blown by half a grand.
-  const forecast = personal ? limit!.forecast : n.forecast;
-  if (forecast != null) bits.push(`${t('finances.forecast')}: ${eur(forecast)}`);
 
   return (
     <div className="rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-900/60" style={{ paddingLeft: `${(n.level - 1) * 12}px` }}>
@@ -1290,13 +1447,13 @@ function CategoryRow({ n, t, hasKids, open, scopedToPerson, onToggle, onOpen, on
             {n.emoji && <span className="shrink-0">{n.emoji}</span>}
             <span className={cn('truncate text-sm', n.level === 1 && 'font-semibold')}>{n.label}</span>
           </span>
-          <span className="mt-0.5 truncate text-[11px] text-zinc-400">{bits.join(' · ')}</span>
+          {bits.length > 0 && <span className="mt-0.5 truncate text-[11px] text-zinc-400">{bits.join(' · ')}</span>}
         </button>
         <span className={cn('shrink-0 px-1 text-sm font-semibold tabular-nums', headlineOver && 'text-red-600 dark:text-red-400')}>{eur(n.actual)}</span>
         <button onClick={onChart} title={t('stats.history')} className={iconBtn}><BarChart3 size={15} /></button>
         {/* Pfand & Rabatt are bookkeeping counter-entries that make the total equal what
             was actually paid — a spending goal on them is meaningless, so no ✏️ there. */}
-        {!n.is_meta && (
+        {!n.is_meta && !ranged && (
           <button onClick={onEdit} title={t(limit ? 'common.edit' : 'finances.setTarget')} className={iconBtn}>
             <Pencil size={15} />
           </button>
@@ -1307,7 +1464,7 @@ function CategoryRow({ n, t, hasKids, open, scopedToPerson, onToggle, onOpen, on
           backend keeps both on purpose (100 adds no UNIQUE index, which could have failed
           on live data) and POST refuses to recreate one (409), so each needs its own ✏️ —
           a bare "+1 weiteres Ziel" would name a row nobody could open, edit or delete. */}
-      {!!n.extra_limits?.length && (
+      {!ranged && !!n.extra_limits?.length && (
         <div className="mb-1.5 ml-7 mr-1 flex flex-col">
           <span className="text-[10px] font-medium uppercase tracking-wide text-zinc-400">
             {t('finances.extraLimits', { count: n.extra_limits.length })}
@@ -1331,25 +1488,33 @@ function CategoryRow({ n, t, hasKids, open, scopedToPerson, onToggle, onOpen, on
   );
 }
 
+/** /api/spending/history takes ONE category path or a set of canonicals, so a lens is
+ *  chartable only when it is purely articles or exactly one category. A mixed lens has
+ *  no endpoint that expresses it — better no button than a wrong chart. */
+const lensChartable = (l: BudgetLens) => l.articles.length > 0 ? l.categories.length === 0 : l.categories.length === 1;
+const lensTarget = (l: BudgetLens): DrillTarget => l.articles.length
+  ? { kind: 'article', canonicals: l.articles, label: l.label }
+  : { kind: 'category', path: l.categories[0], label: l.label };
+
 /** One overlapping budget (several categories and/or single articles). Same three hit
  *  areas as a tree row, minus the goal-less case: a lens may have no target on purpose
- *  ("what do I actually spend on Energydrinks?"). */
-function LensRow({ l, t, scopedToPerson, onOpen, onChart, onEdit }: {
-  l: BudgetLens; t: (k: string, o?: Record<string, unknown>) => string; scopedToPerson: boolean;
+ *  ("what do I actually spend on Energydrinks?"). `ranged` strips it down to label +
+ *  spend: over an arbitrary window a monthly target has nothing to measure. */
+function LensRow({ l, t, scopedToPerson, ranged, onOpen, onChart, onEdit }: {
+  l: BudgetLens; t: (k: string, o?: Record<string, unknown>) => string; scopedToPerson: boolean; ranged: boolean;
   onOpen: () => void; onChart: () => void; onEdit: () => void;
 }) {
   const scopedOut = scopedToPerson && l.konto_id == null;
-  const pct = l.monthly_target != null && l.monthly_target > 0 && !scopedOut ? (l.actual / l.monthly_target) * 100 : null;
-  // /api/spending/history takes ONE category path or a set of canonicals, so a lens is
-  // chartable only when it is purely articles or exactly one category. A mixed lens has
-  // no history endpoint that expresses it — better no button than a wrong chart.
-  const chartable = l.articles.length > 0 ? l.categories.length === 0 : l.categories.length === 1;
+  const pct = !ranged && l.monthly_target != null && l.monthly_target > 0 && !scopedOut ? (l.actual / l.monthly_target) * 100 : null;
+  const chartable = lensChartable(l);
   const bits: string[] = [];
-  if (l.monthly_target == null) bits.push(t('finances.noTarget'));
-  else {
-    bits.push(`${t('finances.target')}: ${eur(l.monthly_target)}`);
-    if (l.konto_id != null) bits.push(scopeLabelOf(t, l));
-    else if (scopedToPerson) bits.push(t('finances.wholeHousehold'));
+  if (!ranged) {
+    if (l.monthly_target == null) bits.push(t('finances.noTarget'));
+    else {
+      bits.push(`${t('finances.target')}: ${eur(l.monthly_target)}`);
+      if (l.konto_id != null) bits.push(scopeLabelOf(t, l));
+      else if (scopedToPerson) bits.push(t('finances.wholeHousehold'));
+    }
   }
   if (l.categories.length) bits.push(l.categories.map(c => c.split('/').pop()).join(', '));
   if (l.articles.length) bits.push(`${t('finances.lensArticles')}: ${l.articles.join(', ')}`);
@@ -1362,7 +1527,7 @@ function LensRow({ l, t, scopedToPerson, onOpen, onChart, onEdit }: {
         </button>
         <span className={cn('shrink-0 px-1 text-sm font-semibold tabular-nums', pct != null && pct > 100 && 'text-red-600 dark:text-red-400')}>{eur(l.actual)}</span>
         {chartable && <button onClick={onChart} title={t('stats.history')} className={iconBtn}><BarChart3 size={15} /></button>}
-        <button onClick={onEdit} title={t('common.edit')} className={iconBtn}><Pencil size={15} /></button>
+        {!ranged && <button onClick={onEdit} title={t('common.edit')} className={iconBtn}><Pencil size={15} /></button>}
       </div>
       {pct != null && <TargetBar actual={l.actual} target={l.monthly_target!} className="mb-1 mr-1" />}
     </div>
@@ -1446,19 +1611,26 @@ function CatGroup({ g, t, onOpen }: { g: { key: string; label: string; total: nu
   );
 }
 
-/** Drill-down modal: every article position behind the tapped row's Ist for the month —
+/** Drill-down modal: every article position behind the tapped row's Ist for the period —
  *  a category subtree (`path=…`) or a stored limit/lens (`budget=…`). One endpoint for
  *  both, so the list total always equals the figure on the row that was tapped (same
  *  konto scoping, same fixed-cost exclusion, same privacy masking). Positions can be
- *  sorted (date / price) and grouped into sub-categories with per-group totals. */
-function PositionsModal({ target, month, konten, onClose }: { target: PosTarget; month: string; konten: string; onClose: () => void }) {
+ *  sorted (date / price) and grouped into sub-categories with per-group totals.
+ *  `range` is the page's Zeitraum: /api/finances/positions resolves its window exactly the
+ *  way /api/finances/month does, so passing it keeps that equality true over a range too. */
+function PositionsModal({ target, month, range, konten, onClose }: {
+  target: PosTarget; month: string; range: DateRange | null; konten: string; onClose: () => void;
+}) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [sort, setSort] = useState<PosSort>('date_desc');
   const [grouped, setGrouped] = useState(false);
+  // Both halves or neither — the endpoint reads a lone `from` as a malformed range (400).
+  const rangeParam = range ? `&from=${range.from}&to=${range.to}` : '';
   const { data, isLoading } = useQuery({
-    queryKey: ['fin-positions', target.q, month, konten],   // refetch when the person/household scope changes
-    queryFn: () => api<{ positions: BudgetPos[]; total: number }>(`/api/finances/positions?month=${month}&${target.q}${konten}`),
+    // Keyed on the window as well as the scope, or a range would be served the month's rows.
+    queryKey: ['fin-positions', target.q, month, rangeParam, konten],
+    queryFn: () => api<{ positions: BudgetPos[]; total: number }>(`/api/finances/positions?month=${month}${rangeParam}&${target.q}${konten}`),
   });
   const rows = data?.positions ?? [];
   // Masked (private) positions carry no einkauf_id → not navigable.
@@ -1666,22 +1838,19 @@ function AiArticleCard({ canonicals, label, month, range, kParam, onOpen }: {
   );
 }
 
-/** The assistant's answer card for a CATEGORY. Without a range it shows the month view's
- *  own figure (`node.actual`) — the number every row below it is measured with, which
- *  /api/spending would answer slightly differently because it does not subtract receipts
- *  tied to a fixed cost. With a range there is no month-view figure to show, so it falls
- *  back to the deterministic items endpoint over that period. */
-function AiCategoryCard({ node, range, month, kParam, onOpen }: {
-  node: MonthCategoryNode; range: DateRange | null; month: string; kParam: string; onOpen: () => void;
-}) {
-  const target: DrillTarget = { kind: 'category', path: node.path, label: node.label };
-  const rangeTotal = useSpendTotal(target, month, range, kParam, !!range);
+/** The assistant's answer card for a CATEGORY. It shows the page's own figure
+ *  (`node.actual`) — which now covers whatever period the page is on, month or range,
+ *  because a multi-month answer switches the page to that window. That is deliberately
+ *  NOT a second fetch from /api/spending: that endpoint answers slightly differently
+ *  (it does not subtract receipts tied to a fixed cost), so the card would contradict
+ *  the tree row a few pixels below it. */
+function AiCategoryCard({ node, onOpen }: { node: MonthCategoryNode; onOpen: () => void }) {
   return (
     <button onClick={onOpen}
       className="mt-1 flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-left ring-1 ring-emerald-200 hover:bg-emerald-50 dark:bg-zinc-900 dark:ring-emerald-900 dark:hover:bg-zinc-800">
       {node.emoji && <span>{node.emoji}</span>}
       <span className="min-w-0 flex-1 truncate font-medium">{node.label}</span>
-      <span className="tabular shrink-0 text-lg font-bold">{eur(range ? rangeTotal : node.actual)}</span>
+      <span className="tabular shrink-0 text-lg font-bold">{eur(node.actual)}</span>
     </button>
   );
 }

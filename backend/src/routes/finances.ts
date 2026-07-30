@@ -14,6 +14,7 @@ import { parseLlmJson } from '../llm/ollama.js';
 import { parseComdirectCsv } from '../finances/bankCsv.js';
 import { sniffCsv, fingerprintHeader, applyCsvMapping, generateCsvMapping, type CsvMappingSpec } from '../finances/csvMapping.js';
 import { normMerchant, alignInvoiceToBank } from '../lib/merchant.js';
+import { todayLocal } from '../lib/localDate.js';
 
 /** Pay-slip files live in a NON-static subdir of the receipts volume (the static
  *  /receipts/:file route rejects any name containing '/'), so they're reachable
@@ -93,7 +94,7 @@ export function financeRoutes(app: FastifyInstance): void {
     const label = (b.label ?? '').toString().trim();
     const monthly = toNum(b.monthly_eur);
     const kontoId = b.konto_id != null ? parseInt(String(b.konto_id), 10) : null;
-    const start = toDate(b.start_date) ?? new Date().toISOString().slice(0, 10);
+    const start = toDate(b.start_date) ?? todayLocal();
     const end = toDate(b.end_date);
     const category = (b.category_path ?? '').toString().trim() || null;
     if (!label) return reply.code(400).send({ error: 'label required' });
@@ -279,6 +280,31 @@ export function financeRoutes(app: FastifyInstance): void {
     const last = new Date(Date.UTC(y, mo, 0)).toISOString().slice(0, 10); // day 0 of next month
     return { first, last };
   };
+  /** A strict calendar day for the Zeitraum filter. The regex alone would wave through
+   *  2026-02-31, which Date silently rolls forward to 2026-03-03 — a window that quietly
+   *  covers three days the user never asked for is worse than a 400. */
+  const isoDay = (s: string): string | null => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+    const d = new Date(`${s}T00:00:00Z`);
+    return Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== s ? null : s;
+  };
+  /** The analysis window: an explicit from/to Zeitraum (the filter Statistik had, restored
+   *  when it was absorbed into Finanzen), else the calendar month. ONE resolver for the month
+   *  view and its drill-downs, so a tile and the list behind it can never cover different
+   *  periods. Either half of a range present means a range was INTENDED — silently falling
+   *  back to the month on a typo would show figures for a period nobody asked for, so that
+   *  is a 400, not a default. `to` is inclusive, matching /api/spending/tree's range mode. */
+  const windowBounds = (q: { month?: string; from?: string; to?: string }):
+    { b: { first: string; last: string }; ranged: boolean } | { error: string } => {
+    const rawFrom = (q.from ?? '').trim(), rawTo = (q.to ?? '').trim();
+    if (rawFrom || rawTo) {
+      const from = isoDay(rawFrom), to = isoDay(rawTo);
+      if (!from || !to || from > to) return { error: 'from and to must be YYYY-MM-DD with from <= to' };
+      return { b: { first: from, last: to }, ranged: true };
+    }
+    const mb = monthBounds((q.month ?? '').trim());
+    return mb ? { b: mb, ranged: false } : { error: 'month must be YYYY-MM' };
+  };
   // Check "anchor" month: monthly costs are checked per month; quarterly costs
   // share one check across their quarter, yearly across their year — so a single
   // quarterly/yearly invoice, confirmed once, covers every month of that period.
@@ -307,8 +333,21 @@ export function financeRoutes(app: FastifyInstance): void {
    *  as a second evidence source, they slot in as additional candidates. */
   app.get('/api/finances/month', async (req, reply) => {
     const m = ((req.query as { month?: string }).month ?? '').trim();
-    const b = monthBounds(m);
-    if (!b) return reply.code(400).send({ error: 'month must be YYYY-MM' });
+    // ZEITRAUM (range) mode, restored from the absorbed Statistik page: from+to replace the
+    // month and flow through the very same `b` bounds, so the single artikel scan and every
+    // figure derived from it cover the window instead of a calendar month. Deliberately
+    // NARROW: things that are only defined per MONTH (a monthly_target, the 3-prior-month
+    // forecast median, the recurring Fixkosten/Einnahmen rows) are withheld rather than
+    // pro-rated — inventing "your 300 € target over 47 days" would be a number the user
+    // cannot check. See `ranged` in the response.
+    const w = windowBounds(req.query as { month?: string; from?: string; to?: string });
+    if ('error' in w) return reply.code(400).send({ error: w.error });
+    const { b, ranged } = w;
+    // Range mode returns no recurring plans at all, so the plan query and its three
+    // year-wide evidence pools have no consumer — empty them at the source rather than
+    // paying for four scans whose rows are thrown away. In month mode this is `sql``,
+    // i.e. the emitted SQL is unchanged.
+    const rangedNone = ranged ? sql`AND FALSE` : sql``;
 
     // Optional account scope (holder/household views): a comma list of konto_ids.
     // Absent → whole household (all accounts). This is what makes internal
@@ -355,7 +394,7 @@ export function financeRoutes(app: FastifyInstance): void {
       LEFT JOIN bank_tx bce ON bce.id = c.bank_tx_id
       LEFT JOIN income ice ON ice.id = c.income_id
       WHERE f.active AND f.start_date <= ${b.last} AND (f.end_date IS NULL OR f.end_date >= ${b.first})
-        ${fixKonto}
+        ${fixKonto} ${rangedNone}
       ORDER BY k.is_shared DESC NULLS LAST, u.username NULLS FIRST, f.label
     `;
 
@@ -377,7 +416,7 @@ export function financeRoutes(app: FastifyInstance): void {
       FROM einkauf e
       WHERE e.datum BETWEEN ${yLo} AND ${yHi} AND e.gesamt_betrag IS NOT NULL
         AND e.quelle IN ('email', 'upload')
-        ${kontoScope(req.user, sql`e`)}
+        ${kontoScope(req.user, sql`e`)} ${rangedNone}
     `;
     // Bank transactions of the year (both signs) + actual income rows (pay slips)
     // — the evidence for income plans. Expense plans match invoices + bank debits;
@@ -386,7 +425,7 @@ export function financeRoutes(app: FastifyInstance): void {
       SELECT bt.id, bt.booking_date::text AS datum, bt.counterparty, bt.description, bt.amount::float8 AS amount,
              (bt.einkauf_id IS NOT NULL OR EXISTS(SELECT 1 FROM einkauf e WHERE e.bank_tx_id = bt.id)) AS receipt_linked
       FROM bank_tx bt
-      WHERE bt.booking_date BETWEEN ${yLo} AND ${yHi}
+      WHERE bt.booking_date BETWEEN ${yLo} AND ${yHi} ${rangedNone}
     `;
     const income = await sql`
       SELECT i.id, i.datum::text AS datum, i.amount::float8 AS amount, i.source, i.description,
@@ -394,7 +433,7 @@ export function financeRoutes(app: FastifyInstance): void {
       FROM income i
       LEFT JOIN konto k ON k.id = i.konto_id
       LEFT JOIN users u ON u.id = k.user_id
-      WHERE i.datum BETWEEN ${yLo} AND ${yHi}
+      WHERE i.datum BETWEEN ${yLo} AND ${yHi} ${rangedNone}
       ORDER BY i.amount DESC, i.id DESC`;
     // Two evidence pools; a candidate is keyed "<source>:<id>" so one piece of
     // evidence never serves two positions and a confirmed one is never re-suggested.
@@ -421,8 +460,10 @@ export function financeRoutes(app: FastifyInstance): void {
       if (f.check_income_id) usedKeys.add(`income:${f.check_income_id}`);
     }
     // Evidence already confirmed for ANY month/position never gets re-suggested.
+    // (Range mode has no plans to suggest for, so the whole scan is dead weight — skipped.
+    //  The OR-chain in the WHERE can't take an `AND FALSE` without parens, hence the if.)
     const confirmedElsewhere = new Set<string>();
-    for (const r of await sql`SELECT einkauf_id, bank_tx_id, income_id FROM fixed_cost_check WHERE einkauf_id IS NOT NULL OR bank_tx_id IS NOT NULL OR income_id IS NOT NULL`) {
+    if (!ranged) for (const r of await sql`SELECT einkauf_id, bank_tx_id, income_id FROM fixed_cost_check WHERE einkauf_id IS NOT NULL OR bank_tx_id IS NOT NULL OR income_id IS NOT NULL`) {
       if (r.einkauf_id) confirmedElsewhere.add(`receipt:${r.einkauf_id}`);
       if (r.bank_tx_id) confirmedElsewhere.add(`bank:${r.bank_tx_id}`);
       if (r.income_id) confirmedElsewhere.add(`income:${r.income_id}`);
@@ -527,9 +568,13 @@ export function financeRoutes(app: FastifyInstance): void {
     // The 3 calendar months before the current one (for the forecast median). Kept as
     // explicit keys so a month with NO spend enters the median as 0 (a real €0 month),
     // instead of being silently dropped and biasing the forecast upward.
+    // Range mode has NO forecast (there is no defensible "3 months before an arbitrary
+    // 47-day window"), so it needs no history at all: the keys stay empty — which is also
+    // what makes every `forecast` fall out as null below — and both scans below start at
+    // the window's own first day instead of three months earlier.
     const priorKeys: string[] = [];
-    for (let k = 3; k >= 1; k--) priorKeys.push(new Date(Date.UTC(Number(m.slice(0, 4)), Number(m.slice(5, 7)) - 1 - k, 1)).toISOString().slice(0, 10));
-    const prevFirst = priorKeys[0];
+    if (!ranged) for (let k = 3; k >= 1; k--) priorKeys.push(new Date(Date.UTC(Number(m.slice(0, 4)), Number(m.slice(5, 7)) - 1 - k, 1)).toISOString().slice(0, 10));
+    const prevFirst = ranged ? b.first : priorKeys[0];
     const sums = await sql`
       SELECT bu.id AS budget_id, date_trunc('month', e.datum)::date::text AS mon, SUM(a.preis)::float8 AS total
       FROM budget bu
@@ -559,7 +604,11 @@ export function financeRoutes(app: FastifyInstance): void {
     const histByMonth = new Map<number, Map<string, number>>();
     for (const s of sums) {
       const mon = String(s.mon);
-      if (mon === b.first) actualBy.set(s.budget_id as number, s.total as number);
+      // Range mode: the query window IS the range (prevFirst = b.first), so every month
+      // bucket it returns lies inside the window — accumulate them all into one figure.
+      // History stays empty, so these rows keep a null forecast.
+      if (ranged) actualBy.set(s.budget_id as number, (actualBy.get(s.budget_id as number) ?? 0) + (s.total as number));
+      else if (mon === b.first) actualBy.set(s.budget_id as number, s.total as number);
       else {
         let mm = histByMonth.get(s.budget_id as number);
         if (!mm) { mm = new Map<string, number>(); histByMonth.set(s.budget_id as number, mm); }
@@ -733,8 +782,11 @@ export function financeRoutes(app: FastifyInstance): void {
       const mon = String(r.mon);
       const cp = (r.category_path as string | null) || '';
       const kid = r.konto_id as number | null;
-      const thisMonth = mon === b.first;
-      if (thisMonth) receiptSpend += eur;
+      // "Counts toward the figures on screen". In month mode that is the ONE month bucket
+      // (the scan also carries the 3 prior months, which only feed the forecast); in range
+      // mode the scan window is exactly the range, so every row it returned counts.
+      const inWindow = ranged || mon === b.first;
+      if (inWindow) receiptSpend += eur;
 
       // THREE DISJOINT homes for a priced line, so the tree plus the two buckets partition
       // the month's receipt spend exactly:
@@ -745,9 +797,9 @@ export function financeRoutes(app: FastifyInstance): void {
       //     dangling LEAF keeps its money inside the parent it always belonged to.
       const home = cp ? homeChain(cp) : null;
       if (!cp) {
-        if (thisMonth) categoryMissingAmt += eur;
+        if (inWindow) categoryMissingAmt += eur;
       } else if (!home) {
-        if (thisMonth) unknownCategoryAmt += eur;
+        if (inWindow) unknownCategoryAmt += eur;
       } else {
         const kt = kid != null ? kontoTree.get(kid) : undefined;
         for (const p of home) {
@@ -775,8 +827,22 @@ export function financeRoutes(app: FastifyInstance): void {
     // Same forecast rule as the legacy budget rows: median of the 3 prior months with a
     // month that had no spend counted as a real €0 — but null when there is NO prior month
     // at all, because "no history" must read as "–", not as a confident €0.
+    // …and null throughout range mode: a median of "the 3 months before" is undefined for an
+    // arbitrary window, and a scaled-up guess is exactly the invented number this endpoint
+    // refuses to print. (priorKeys is empty there anyway; the guard says so out loud.)
     const seriesForecast = (s: Series | undefined): number | null =>
-      s && priorKeys.some(k => s.has(k)) ? median(priorKeys.map(k => s.get(k) ?? 0)) : null;
+      !ranged && s && priorKeys.some(k => s.has(k)) ? median(priorKeys.map(k => s.get(k) ?? 0)) : null;
+
+    // The one figure every actual is read through. Month mode picks the single month bucket
+    // (unchanged); range mode adds up every bucket of the series, all of which lie inside
+    // the window — a SUM over the window, never an extrapolation of it.
+    const winSum = (s: Series | undefined): number => {
+      if (!s) return 0;
+      if (!ranged) return s.get(b.first) ?? 0;
+      let t = 0;
+      for (const v of s.values()) t += v;
+      return t;
+    };
 
     // Nothing in the schema stops two ACTIVE budgets from claiming the same category path
     // (one household-wide + one for a person), and 100 deliberately adds no UNIQUE index —
@@ -795,7 +861,7 @@ export function financeRoutes(app: FastifyInstance): void {
         monthly_target: l.monthly_target as number | null,
         konto_id: l.konto_id as number | null, konto_name: l.konto_name as string | null,
         is_shared: l.is_shared as boolean | null, owner: l.owner as string | null,
-        actual: eur2(s?.get(b.first) ?? 0),
+        actual: eur2(winSum(s)),
         forecast: seriesForecast(s),
       };
     };
@@ -819,7 +885,7 @@ export function financeRoutes(app: FastifyInstance): void {
 
     const nodeNums = (p: string) => {
       const s = treeSums.get(p);
-      return { actual: eur2(s?.get(b.first) ?? 0), forecast: seriesForecast(s) };
+      return { actual: eur2(winSum(s)), forecast: seriesForecast(s) };
     };
     const categoryTree = {
       total: {
@@ -855,7 +921,7 @@ export function financeRoutes(app: FastifyInstance): void {
         is_shared: l.is_shared as boolean | null, owner: l.owner as string | null,
         categories: (l.categories as string[] | null) ?? [],
         articles: (l.articles as string[] | null) ?? [],
-        actual: eur2(s?.get(b.first) ?? 0),
+        actual: eur2(winSum(s)),
         forecast: seriesForecast(s),
       };
     });
@@ -872,7 +938,7 @@ export function financeRoutes(app: FastifyInstance): void {
           konto_id: l.konto_id as number | null, konto_name: l.konto_name as string | null,
           is_shared: l.is_shared as boolean | null, owner: l.owner as string | null,
           category_path: l.category_path as string,
-          actual: eur2(s?.get(b.first) ?? 0),
+          actual: eur2(winSum(s)),
         };
       });
 
@@ -946,9 +1012,14 @@ export function financeRoutes(app: FastifyInstance): void {
     // anything, and both surfaces must agree on which day of the month it is.
     const nowLocal = new Date();
     const curYm = `${nowLocal.getFullYear()}-${String(nowLocal.getMonth() + 1).padStart(2, '0')}`;
-    const isCurrentMonth = m === curYm;
-    const daysTotal = Number(b.last.slice(8, 10));
-    const daysElapsed = isCurrentMonth ? nowLocal.getDate() : daysTotal;
+    // A range is never "the current month": there is no month-end to project to, so the
+    // window reports its REAL length with all of it elapsed — a ratio of 1, which leaves the
+    // running projection equal to the actual and stops the UI extrapolating a partial month.
+    const isCurrentMonth = !ranged && m === curYm;
+    const daysTotal = ranged
+      ? Math.round((Date.parse(`${b.last}T00:00:00Z`) - Date.parse(`${b.first}T00:00:00Z`)) / 86400000) + 1
+      : Number(b.last.slice(8, 10));
+    const daysElapsed = ranged ? daysTotal : (isCurrentMonth ? nowLocal.getDate() : daysTotal);
 
     // Map a plan row (expense or income) to its month-view shape (check + suggestion).
     const mapPlan = (f: typeof fixed[number]) => ({
@@ -970,11 +1041,22 @@ export function financeRoutes(app: FastifyInstance): void {
 
     return {
       month: m,
+      // Which mode answered. `ranged` is the frontend's licence to hide the sections below
+      // that are month-only — it must never have to infer "empty" from an empty array,
+      // because "no Fixkosten this month" and "Fixkosten are undefined for a window" look
+      // identical on the wire and mean opposite things.
+      ranged,
+      from: ranged ? b.first : null,
+      to: ranged ? b.last : null,
       // recurring income PLANS (Einnahmen-Soll), matched vs actual income/bank credits.
       // (The raw actual-income rows are consumed only as evidence candidates above;
       // the month view sums the PLANS, so they are not returned.)
-      incomes: fixed.filter(f => f.kind === 'income').map(mapPlan),
-      fixed: fixed.filter(f => f.kind !== 'income').map(mapPlan),
+      // EMPTY in range mode, on purpose: these are per-MONTH recurring amounts, and summing
+      // "300 €/month" over a window that ends on the 17th is arithmetic nobody defined.
+      // (The plan query is already emptied at the source; this is the contract, stated where
+      // it is read.)
+      incomes: ranged ? [] : fixed.filter(f => f.kind === 'income').map(mapPlan),
+      fixed: ranged ? [] : fixed.filter(f => f.kind !== 'income').map(mapPlan),
       // @deprecated legacy flat budget list — kept only so nothing 500s mid-rollout. The
       // Variable-Kosten section MUST read categoryTree/lenses/orphanLimits instead.
       budgets: budgets.map(bu => ({
@@ -1293,7 +1375,7 @@ export function financeRoutes(app: FastifyInstance): void {
     if ((ex.confidence ?? 0) < 0.3 || ex.netto == null || !(ex.netto > 0)) {
       return { ok: false, filename: bdy.filename ?? null, extracted: ex, reason: 'no readable pay-slip data (net amount not found)' };
     }
-    const datum = /^\d{4}-\d{2}$/.test(ex.monat ?? '') ? `${ex.monat}-01` : new Date().toISOString().slice(0, 10);
+    const datum = /^\d{4}-\d{2}$/.test(ex.monat ?? '') ? `${ex.monat}-01` : todayLocal();
     const descr = [ex.arbeitgeber?.trim() || 'Gehalt', ex.brutto != null ? `Brutto ${ex.brutto.toFixed(2)} €` : null]
       .filter(Boolean).join(' · ');
     const [row] = await sql`
@@ -2626,9 +2708,13 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
    *    ?budget=<id>           → that limit's/lens's own membership + its konto narrowing.
    *  Response is byte-identical to the deprecated /api/finances/budget/:id/positions. */
   app.get('/api/finances/positions', async (req, reply) => {
-    const q = req.query as { month?: string; konten?: string; path?: string; budget?: string };
-    const b = monthBounds((q.month ?? '').trim());
-    if (!b) return reply.code(400).send({ error: 'month must be YYYY-MM' });
+    const q = req.query as { month?: string; konten?: string; path?: string; budget?: string; from?: string; to?: string };
+    // Same window resolver as the view that owns these tiles: tapping a node in Zeitraum
+    // mode must list the window's positions, not the month's. Both helpers below already
+    // treat `b` as a plain date window, so nothing else here changes.
+    const w = windowBounds(q);
+    if ('error' in w) return reply.code(400).send({ error: w.error });
+    const b = w.b;
     const hasPath = typeof q.path === 'string';
     const hasBudget = typeof q.budget === 'string' && q.budget.trim() !== '';
     // Exactly one — two selectors would silently intersect and produce a total that matches
