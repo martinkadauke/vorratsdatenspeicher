@@ -8,6 +8,7 @@ import { decryptSecret } from '../lib/crypto.js';
 import { ocrFromText, type OcrResult } from '../llm/ocr.js';
 import { ocrAndStore, storeOcrResult } from '../routes/receipts.js';
 import { applyLearnedKonto } from '../lib/merchant.js';
+import { todayLocal, localDay } from '../lib/localDate.js';
 
 /** Local mount where receipt photos/PDFs are persisted (shared with receipts.ts;
  *  the host path is mapped here via the docker volume in deploy/stack.yml). */
@@ -35,7 +36,7 @@ interface ConnectCfg {
   imap_host: string; imap_port: number; imap_secure: boolean; imap_user: string; pass: string;
 }
 
-function todayISO(): string { return new Date().toISOString().slice(0, 10); }
+function todayISO(): string { return todayLocal(); }
 
 /** Cheap HTML→text for invoices delivered as an HTML body with no plain-text part. */
 function stripHtml(html: string): string {
@@ -190,7 +191,7 @@ async function processMessage(mb: MailboxRow, kontoId: number | null, raw: Buffe
   if (!claim.length) return false;
   const ledgerId = claim[0].id as number;
 
-  const datum = parsed.date ? parsed.date.toISOString().slice(0, 10) : null;
+  const datum = parsed.date ? localDay(parsed.date) : null;
   const privateFor = mb.make_private ? mb.user_id : null;
   // Attribute the receipt to the mailbox owner's household member — the inbox belongs to
   // exactly one member, so e-mail invoices are member-scoped WITHOUT any manual picking

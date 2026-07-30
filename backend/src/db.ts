@@ -19,7 +19,19 @@ export const DEMO_MODE = process.env.DEMO_MODE === 'true';
 const DATABASE_URL = process.env.DATABASE_URL ?? 'postgres://postgres:postgres@localhost:5432/vorratsdatenspeicher';
 // Owner/admin connection (demo: migrations + cross-household ops; single-URL → same conn).
 const ADMIN_DATABASE_URL = process.env.ADMIN_DATABASE_URL ?? DATABASE_URL;
-const PG_OPTS = { onnotice: () => {}, transform: { undefined: null } } as const;
+// TimeZone is pinned per CONNECTION, not left to the server. The box this app happens to
+// land on decides `SHOW TimeZone` otherwise — the owner's own Postgres reports
+// America/Los_Angeles, so NOW() ran nine hours behind the household using it, and a
+// self-hoster's server could say anything at all. Pinning it here makes every install
+// deterministic and travels with the code instead of living in someone's postgresql.conf.
+// Matches the container's TZ (see Dockerfile) so JS and SQL agree on when "today" ends.
+// Only affects how TIMESTAMPTZ is rendered and what NOW() returns; nothing stored is rewritten.
+const PG_TZ = process.env.PGTZ ?? 'Europe/Berlin';
+const PG_OPTS = {
+  onnotice: () => {},
+  transform: { undefined: null },
+  connection: { TimeZone: PG_TZ },
+} as const;
 
 // Off-demo defaults to postgres.js's original max (10) — byte-equivalent to the pre-demo app.
 // Demo runs larger: openHousehold() reserves a connection per in-flight request.

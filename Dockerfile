@@ -18,8 +18,16 @@ RUN npm run build
 FROM node:20-alpine
 WORKDIR /app
 ENV NODE_ENV=production
-# pg_dump (super-admin backup) + GNU tar for the backup archive stream
-RUN apk add --no-cache postgresql-client tar
+# pg_dump (super-admin backup) + GNU tar for the backup archive stream + zoneinfo for TZ below
+# (alpine ships no tzdata: without it Node silently ignores TZ and stays on UTC).
+RUN apk add --no-cache postgresql-client tar tzdata
+# VDS is a German/DACH household app and its date arithmetic is LOCAL, not UTC: `new Date()`
+# rolls the day over, seedHousehold clamps to the first of the month, the demo sweep runs at
+# midnight, and a receipt scanned at 23:30 must belong to THAT day. On UTC (the alpine default)
+# the day flips at 02:00 Berlin in summer, so a late-evening receipt lands on tomorrow.
+# DACH is one offset — Berlin, Vienna and Zurich share CET/CEST and the same DST rules — so a
+# single zone is correct for every user. Overridable at runtime (`-e TZ=…`) for anyone elsewhere.
+ENV TZ=Europe/Berlin
 COPY backend/package*.json ./
 RUN npm ci --omit=dev
 COPY --from=backend-build /app/backend/dist ./dist

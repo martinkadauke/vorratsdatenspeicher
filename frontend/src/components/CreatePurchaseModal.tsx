@@ -6,7 +6,7 @@ import { Camera, ImagePlus, Banknote, CreditCard, Lock, FileText } from 'lucide-
 import { api } from '../api/client';
 import { Modal, Button, Input, Label, Select } from './ui';
 import { toast } from './Toast';
-import { cn, fileToResizedDataUrl, fileToDataUrl } from '../lib/utils';
+import { cn, fileToDataUrl, fileToResizedDataUrl, todayLocal } from '../lib/utils';
 import { useAuth } from '../context/auth';
 
 /** Bundled example receipt for the demo's first-run scan (frontend/public/demo-receipts). */
@@ -27,7 +27,7 @@ export function CreatePurchaseModal({ open, sample = false, onClose }: { open: b
   const { demo, user, refreshUser } = useAuth();
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const today = () => new Date().toISOString().slice(0, 10);
+  const today = () => todayLocal();
 
   const { data: stores } = useQuery({ queryKey: ['stores'], queryFn: () => api<StoreRow[]>('/api/stores'), enabled: open });
   const { data: konten } = useQuery({ queryKey: ['konten'], queryFn: () => api<Konto[]>('/api/konten'), enabled: open });

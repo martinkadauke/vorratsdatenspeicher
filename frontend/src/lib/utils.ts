@@ -74,6 +74,21 @@ export function eur(n: number | string | null | undefined): string {
   return eurFmt.format(Number(n));
 }
 
+/** A Date → "YYYY-MM-DD" in the BROWSER's timezone, which is the only calendar the user has.
+ *
+ *  `d.toISOString().slice(0, 10)` is the tempting one-liner and it is wrong here, because
+ *  toISOString is always UTC. Every Date in this app is built from LOCAL parts —
+ *  `new Date(y, m, 1)` is local midnight — so formatting it as UTC moves it backwards for any
+ *  zone east of Greenwich. In Berlin (UTC+2 in summer) `new Date(2026, 6, 1)` is 30 June 22:00
+ *  UTC, so "1 July" came out as `2026-06-30`: the month and year presets have been starting a
+ *  day early all year round, not merely at midnight.
+ *
+ *  'sv-SE' purely because Swedish formats as YYYY-MM-DD — a formatting trick, not a locale. */
+export const isoLocal = (d: Date): string => d.toLocaleDateString('sv-SE');
+
+/** Today in the user's own timezone. See isoLocal for why not toISOString. */
+export const todayLocal = (): string => isoLocal(new Date());
+
 export function fmtDate(d: string | null | undefined, lang = 'de'): string {
   if (!d) return '–';
   return new Date(d).toLocaleDateString(lang === 'en' ? 'en-GB' : 'de-DE', {

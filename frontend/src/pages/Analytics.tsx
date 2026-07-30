@@ -6,7 +6,7 @@ import { api } from '../api/client';
 import { Card, Button, Input, Spinner, Select } from '../components/ui';
 import { AnalyticsTile, type TileType, type TileData, type AnalyticsResult } from '../components/AnalyticsTile';
 import { toast } from '../components/Toast';
-import { cn } from '../lib/utils';
+import { cn, isoLocal } from '../lib/utils';
 
 interface AskResult { clarify?: string | null; options?: string[]; chip?: string; title?: string; summary?: string; tiles: TileData[]; dropped: number }
 interface RecentQuery { q: string; chip: string }
@@ -31,7 +31,7 @@ const PRESETS = [
 
 function presetRange(key: string): { from?: string; to?: string } {
   const today = new Date();
-  const iso = (d: Date) => d.toISOString().slice(0, 10);
+  const iso = (d: Date) => isoLocal(d);
   if (key === 'all') return {};
   if (key === 'month') return { from: iso(new Date(today.getFullYear(), today.getMonth(), 1)), to: iso(today) };
   const months = key === '3m' ? 3 : key === '6m' ? 6 : 12;

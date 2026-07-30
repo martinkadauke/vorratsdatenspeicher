@@ -14,6 +14,7 @@ import { kontoScope } from '../auth/konto.js';
 import { providerForTask } from '../llm/provider.js';
 import { parseLlmJson } from '../llm/ollama.js';
 import type { User } from '../types.js';
+import { todayLocal } from '../lib/localDate.js';
 
 export interface StatsAskResult {
   category_path: string | null;
@@ -92,7 +93,7 @@ export async function askStats(question: string, user: User | undefined, lang = 
   const [range] = await sql`
     SELECT to_char(MIN(datum), 'YYYY-MM-DD') AS lo, to_char(MAX(datum), 'YYYY-MM-DD') AS hi
     FROM v_transactions t WHERE TRUE ${ks}`;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayLocal();
 
   const labelOf = new Map(cats.map(c => [c.path as string, (lang === 'en' && c.display_en ? c.display_en : c.display) as string]));
   const validPaths = new Set(cats.map(c => c.path as string));

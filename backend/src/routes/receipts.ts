@@ -13,6 +13,7 @@ import { cleanMatch } from '../lib/canonicalMatch.js';
 import { claimDemoOcr, ocrLimitMessage } from '../demo/limits.js';
 import { ocrKey, loadAliasMap, loadUserAliasKeys, recordAliases } from '../lib/canonicalAlias.js';
 import { triggerChurnAfterOcr } from '../churner/index.js';
+import { todayLocal } from '../lib/localDate.js';
 
 /** Search config for the receipts list/nav: free text hits the store name or
  *  any of the receipt's items; supports laden:/kategorie: and preis> filters.
@@ -304,7 +305,8 @@ export function receiptRoutes(app: FastifyInstance): void {
       if (!claim.ok) return reply.code(429).send({ error: ocrLimitMessage(claim.max) });
     }
     const quelle = b.quelle === 'bar' ? 'bar' : 'zettel'; // cash → bar; card → normal store receipt
-    const datum = (b.datum && /^\d{4}-\d{2}-\d{2}$/.test(b.datum)) ? b.datum : new Date().toISOString().slice(0, 10);
+    // todayLocal, not toISOString: a receipt entered at 00:30 belongs to THAT day, not yesterday.
+    const datum = (b.datum && /^\d{4}-\d{2}-\d{2}$/.test(b.datum)) ? b.datum : todayLocal();
     const laden = (b.roh_ladenname ?? '').toString().trim() || null;
     const gesamtRaw = b.gesamt_betrag;
     const gesamt = gesamtRaw != null && gesamtRaw !== ''

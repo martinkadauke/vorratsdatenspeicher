@@ -20,7 +20,7 @@ import { Card, Spinner, EmptyState, Badge, Input, Button, Select, Label } from '
 import { CanonicalIcon } from '../components/IconPicker';
 import { CategoryPicker } from '../components/CategoryPicker';
 import { toast } from '../components/Toast';
-import { cn, fmtDate } from '../lib/utils';
+import { cn, fmtDate, isoLocal, todayLocal } from '../lib/utils';
 
 interface ReserveCharge { id: number; gekauft_am: string | null; ablauf_am: string | null; menge: number | null; einheit: string | null; notiz: string | null }
 
@@ -364,8 +364,8 @@ function ReservePanel({ canonical, baseUnit, reserveMin, t, lang, onChanged }: {
   });
   const delCharge = useMutation({ mutationFn: (id: number) => api(`/api/reserve/${id}`, { method: 'DELETE' }), onSuccess: refresh });
 
-  const today = new Date().toISOString().slice(0, 10);
-  const soonCut = new Date(Date.now() + 14 * 86_400_000).toISOString().slice(0, 10);
+  const today = todayLocal();
+  const soonCut = isoLocal(new Date(Date.now() + 14 * 86_400_000));
 
   return (
     <div className="mt-2 flex flex-col gap-2 rounded-xl border border-violet-200 bg-violet-50/50 p-2.5 dark:border-violet-900/50 dark:bg-violet-950/20">

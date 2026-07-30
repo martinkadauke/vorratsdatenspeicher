@@ -1,3 +1,4 @@
+import { todayLocal } from '../lib/localDate.js';
 import type { FastifyInstance } from 'fastify';
 import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -62,7 +63,7 @@ export function exportRoutes(app: FastifyInstance): void {
 
     reply
       .header('Content-Type', 'text/csv; charset=utf-8')
-      .header('Content-Disposition', `attachment; filename="vds-artikel-${new Date().toISOString().slice(0, 10)}.csv"`);
+      .header('Content-Disposition', `attachment; filename="vds-artikel-${todayLocal()}.csv"`);
 
     let out = '﻿'; // BOM for Excel to detect UTF-8
     out += csvRow([
@@ -99,7 +100,7 @@ export function exportRoutes(app: FastifyInstance): void {
 
     reply
       .header('Content-Type', 'text/csv; charset=utf-8')
-      .header('Content-Disposition', `attachment; filename="vds-belege-${new Date().toISOString().slice(0, 10)}.csv"`);
+      .header('Content-Disposition', `attachment; filename="vds-belege-${todayLocal()}.csv"`);
 
     let out = '﻿';
     out += csvRow(['id', 'datum', 'laden', 'gesamt_eur', 'artikel_count']);
@@ -127,7 +128,7 @@ export function exportRoutes(app: FastifyInstance): void {
 
     reply
       .header('Content-Type', 'text/csv; charset=utf-8')
-      .header('Content-Disposition', `attachment; filename="vds-monthly-${new Date().toISOString().slice(0, 10)}.csv"`);
+      .header('Content-Disposition', `attachment; filename="vds-monthly-${todayLocal()}.csv"`);
 
     let out = '﻿';
     out += csvRow(['ym', 'category_path', 'spend_eur', 'items']);

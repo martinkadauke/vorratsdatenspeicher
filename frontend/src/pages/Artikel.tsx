@@ -13,7 +13,7 @@ import { CanonicalIcon } from '../components/IconPicker';
 import { ConsumerChips } from '../components/ConsumerChips';
 import { toast } from '../components/Toast';
 import { NameEditModal } from './Names';
-import { cn, eur, fmtDate } from '../lib/utils';
+import { cn, eur, fmtDate, isoLocal } from '../lib/utils';
 import { useUrlState } from '../hooks/useUrlState';
 
 interface ArtikelGroup {
@@ -45,7 +45,7 @@ type SortMode = 'alpha' | 'date' | 'category' | 'count';
 // Card size is fixed at the largest step (the zoom slider was removed).
 const CARD_SIZE = { min: 380, icon: 44 };
 
-const iso = (d: Date) => d.toISOString().slice(0, 10);
+const iso = (d: Date) => isoLocal(d);
 const DATE_PRESETS = [
   { key: '3w', i18n: 'artikel.preset3w', from: () => iso(new Date(Date.now() - 21 * 864e5)), to: () => iso(new Date()) },
   { key: 'month', i18n: 'artikel.presetMonth', from: () => iso(new Date(new Date().getFullYear(), new Date().getMonth(), 1)), to: () => iso(new Date()) },

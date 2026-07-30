@@ -1,3 +1,4 @@
+import { todayLocal } from '../lib/localDate.js';
 import { readFile } from 'node:fs/promises';
 import { getConfig } from '../config.js';
 import { parseLlmJson } from './ollama.js';
@@ -75,7 +76,7 @@ export interface OcrResult {
 // guessed as the model's training year; (2) spell out that `preis` is the LINE total
 // (qty×unit) as printed. Images only — Ollama can't read PDFs (those still need Anthropic).
 function ollamaOcrHints(): string {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayLocal();
   return `\n\nZUSATZ-HINWEISE (WICHTIG):
 - Heutiges Datum: ${today}. Belege sind meist aktuell (heute oder wenige Tage/Wochen alt). Lies das Datum GENAU vom Beleg ab und gib es als YYYY-MM-DD aus. Eine zweistellige Jahreszahl (z.B. "26") gehört ins aktuelle Jahrhundert (20XX) — rate das Jahr NIEMALS aus deinem Vorwissen.
 - preis ist IMMER der ZEILEN-Gesamtpreis der Position (Menge × Einzelpreis), so wie er rechts auf dem Bon steht — NICHT der Einzelpreis. Beispiel "2 St × 1,50" ergibt preis 3.00. Pfand ist eine eigene Position mit ihrem Zeilenbetrag.`;

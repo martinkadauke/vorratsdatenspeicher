@@ -5,6 +5,7 @@ import sql from '../db.js';
 import { getConfig } from '../config.js';
 import { ocrAndStore } from '../routes/receipts.js';
 import { applyLearnedKonto } from '../lib/merchant.js';
+import { todayLocal } from '../lib/localDate.js';
 
 // Same store dir the whole app uses; a dropped file is COPIED here (as vds-<uuid>.<ext>)
 // so it's servable at /receipts/<name> and reachable by ocrAndStore, which resolves
@@ -16,7 +17,7 @@ const MIN_AGE_MS = 15_000;           // ignore files touched in the last 15s (st
 const MAX_ATTEMPTS = 3;              // stop re-OCR'ing a file that keeps failing
 const ALLOWED = /\.(pdf|jpe?g|png|webp|gif|heic|heif)$/i;
 
-function todayISO(): string { return new Date().toISOString().slice(0, 10); }
+function todayISO(): string { return todayLocal(); }
 
 /** A drop-folder invoice has no user context → attribute it to the shared,
  *  non-cash household account (same "prefer shared non-cash" rule the mail

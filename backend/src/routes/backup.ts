@@ -1,3 +1,4 @@
+import { todayLocal } from '../lib/localDate.js';
 import type { FastifyInstance } from 'fastify';
 import { spawn } from 'node:child_process';
 import { createWriteStream, existsSync } from 'node:fs';
@@ -56,7 +57,7 @@ export function backupRoutes(app: FastifyInstance): void {
 
       // 2) stream a gzipped tar of database.sql + the receipts dir → the response
       const label = (process.env.VDS_ENV || process.env.GIT_REF || 'vds').replace(/[^a-z0-9]/gi, '') || 'vds';
-      const stamp = new Date().toISOString().slice(0, 10);
+      const stamp = todayLocal();
       reply.header('Content-Type', 'application/gzip');
       reply.header('Content-Disposition', `attachment; filename="vds-backup-${label}-${stamp}.tar.gz"`);
 

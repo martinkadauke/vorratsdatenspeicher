@@ -1,3 +1,4 @@
+import { todayLocal } from '../lib/localDate.js';
 // The NL analytics agent. The LLM's ONLY job is to translate a question into a
 // dashboard SPEC made of catalog keys — it never writes SQL and never emits a
 // number. The backend validates every tile against the catalog, executes it on
@@ -121,7 +122,7 @@ async function loadContext(user: User | undefined): Promise<Ctx> {
   const konten = await sql`SELECT name FROM konto ORDER BY sort_order, id`;
   const members = await sql`SELECT name FROM family_member ORDER BY sort_order, name`;
   return {
-    today: new Date().toISOString().slice(0, 10),
+    today: todayLocal(),
     lo: (range?.lo as string | null) ?? null,
     hi: (range?.hi as string | null) ?? null,
     categories: cats.map(c => c.display as string),
