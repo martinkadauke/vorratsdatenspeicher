@@ -3,6 +3,8 @@ import { adminSql, DEMO_MODE } from '../db.js';
 import { requireAdmin, requirePlatformAdmin } from '../auth/plugin.js';
 import { runDemoSweep } from '../maintenance/demoSweep.js';
 import { applyDemoTree, asTreeKey } from '../demo/seedHousehold.js';
+import { sendMail } from '../mailer.js';
+import { ctaClickEmail } from '../email/templates.js';
 
 /** Demo-only routes: onboarding profile + platform super-admin household management.
  *  (Bug-report routes moved to routes/feedback.ts so they exist in all builds.) */
@@ -50,6 +52,44 @@ export function demoRoutes(app: FastifyInstance): void {
   /** Wipe ALL user-generated (ephemeral, is_demo) households NOW — every row + every
    *  file (receipt photos + pay-slips). Same op as the nightly sweep, on demand. */
   app.post('/api/households/wipe-all', { preHandler: requirePlatformAdmin }, async () => runDemoSweep());
+
+  // ── self-host CTA interest signal ────────────────────────────────────────
+  /** A visitor clicked "Jetzt holen" or "Auf GitHub ansehen". Answers exactly one question for
+   *  the operator — does anyone actually want their own copy — and answers it with a COUNT.
+   *
+   *  Nothing identifying is stored or mailed: no address, no household name, no IP, no UA. That
+   *  is a deliberate design choice, not an oversight. The count fully serves the purpose, so
+   *  attaching an identity would be collecting personal data for something already answered —
+   *  and it is what keeps this out of consent-and-privacy-notice territory.
+   *
+   *  Abuse: mailing the operator on an unauthenticated-ish trigger is a denial-of-service waiting
+   *  to happen, so the UNIQUE index carries the cap. One row per household per target per Berlin
+   *  day; a duplicate INSERT is swallowed and NO mail is sent. Holding the button down therefore
+   *  costs one mail, not a thousand. Errors never surface to the caller — this is telemetry, and
+   *  a broken SMTP config must not break the button it hangs off. */
+  app.post('/api/demo/cta', async (req, reply) => {
+    const target = (req.body as { target?: string } | undefined)?.target;
+    if (target !== 'install' && target !== 'github') return reply.code(400).send({ error: 'bad target' });
+    // adminSql: demo_cta_click is operator telemetry, deliberately NOT a tenant table with RLS.
+    const ins = await adminSql`
+      INSERT INTO demo_cta_click (target, household_id)
+      VALUES (${target}, ${req.user?.household_id ?? null})
+      ON CONFLICT DO NOTHING
+      RETURNING id`.catch(() => [] as { id: number }[]);
+    if (!ins.length) return { ok: true, counted: false };   // already counted today → no mail
+
+    void (async () => {
+      try {
+        const [t] = await adminSql`
+          SELECT COUNT(*) FILTER (WHERE target = 'install')::int AS install,
+                 COUNT(*) FILTER (WHERE target = 'github')::int  AS github
+          FROM demo_cta_click WHERE day = CURRENT_DATE`;
+        const mail = ctaClickEmail({ target, todayInstall: t?.install ?? 0, todayGithub: t?.github ?? 0 });
+        await sendMail('webmaster@vorratsdatenspeicher.com', mail.subject, mail.text, mail.html);
+      } catch (err) { req.log.error(`cta notify failed: ${(err as Error).message}`); }
+    })();
+    return { ok: true, counted: true };
+  });
 
   /** Delete a household and ALL its data. Household 1 (the platform/super-admin household)
    *  is protected. Uses session_replication_role=replica (owner is superuser) to delete

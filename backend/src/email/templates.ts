@@ -390,3 +390,23 @@ export function shoppingListEmail(opts: { by: string; items: { title: string; me
     </td></tr></table>`;
   return { subject, text, html: layout({ preheader: `${opts.by} hat die Einkaufsliste geteilt (${n} Artikel).`, heading: subject, inner }) };
 }
+
+/** Demo-only: someone clicked a self-host CTA. Deliberately CONTENTLESS about the person —
+ *  no address, no household name, no IP. The operator's question is "does anyone actually want
+ *  this", which a count answers; anything identifying would be personal data collected for a
+ *  purpose the count already serves, and would need a lawful basis and a privacy-notice line
+ *  that this way does not. */
+export function ctaClickEmail(opts: { target: 'install' | 'github'; todayInstall: number; todayGithub: number }): { subject: string; text: string; html: string } {
+  const label = opts.target === 'install' ? '„Jetzt holen"' : '„Auf GitHub ansehen"';
+  const subject = `Demo: ${label} geklickt`;
+  const tally = `Heute: ${opts.todayInstall}× Jetzt holen · ${opts.todayGithub}× GitHub`;
+  const text = `In der Demo wurde ${label} geklickt.\n\n${tally}\n\nGezählt wird pro Haushalt und Tag einmal — mehrfaches Klicken löst keine weitere Mail aus.\nEs werden keine personenbezogenen Daten erfasst.\n`;
+  const inner = `
+    <p style="margin:0 0 12px;">In der Demo wurde ${label} geklickt.</p>
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 12px;"><tr><td
+      style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:10px;padding:10px 14px;font-weight:600;color:#065f46;">
+      ${tally}
+    </td></tr></table>
+    <p style="margin:0;color:#71717a;font-size:13px;">Einmal pro Haushalt und Tag — mehrfaches Klicken löst keine weitere Mail aus. Es werden keine personenbezogenen Daten erfasst.</p>`;
+  return { subject, text, html: layout({ preheader: tally, heading: subject, inner }) };
+}

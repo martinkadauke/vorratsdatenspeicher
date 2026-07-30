@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Download, X, Github } from 'lucide-react';
+import { api } from '../api/client';
 
 const COMPOSE = `services:
   vds:
@@ -45,6 +46,13 @@ export function InstallButton() {
   const de = i18n.language.startsWith('de');
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  /** Tell the operator someone is interested. Fire-and-forget and fully ignored on failure: this
+   *  is a signal, not a feature, and it must never delay or block the button it hangs off. The
+   *  backend counts one per household per day and mails a COUNT — nothing identifying is sent. */
+  const ping = (target: 'install' | 'github') => {
+    void api('/api/demo/cta', { method: 'POST', body: { target } }).catch(() => { /* never surface */ });
+  };
   const copy = async () => {
     try { await navigator.clipboard.writeText(COMPOSE); setCopied(true); setTimeout(() => setCopied(false), 1600); } catch { /* clipboard blocked */ }
   };
@@ -52,7 +60,7 @@ export function InstallButton() {
   return (
     <>
       <button
-        onClick={() => setOpen(true)}
+        onClick={() => { ping('install'); setOpen(true); }}
         title={de ? 'Vorratsdatenspeicher selbst hosten' : 'Self-host Vorratsdatenspeicher'}
         className="fixed bottom-32 left-3 z-40 flex items-center gap-1.5 rounded-full border border-emerald-500 bg-emerald-600 px-3 py-2 text-xs font-semibold text-white shadow-lg backdrop-blur transition-colors hover:bg-emerald-700 md:bottom-16"
       >
@@ -89,7 +97,7 @@ export function InstallButton() {
               <li className="flex gap-2"><span className="font-bold text-emerald-600">4.</span><span>{de ? 'Als App installieren: iPhone → Safari → Teilen → „Zum Home-Bildschirm". Android → Chrome → „App installieren".' : 'Install as an app: iPhone → Safari → Share → "Add to Home Screen". Android → Chrome → "Install app".'}</span></li>
             </ol>
 
-            <a href={REPO} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-xl bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white">
+            <a href={REPO} target="_blank" rel="noreferrer" onClick={() => ping('github')} className="inline-flex items-center gap-2 rounded-xl bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white">
               <Github size={16} /> {de ? 'Auf GitHub ansehen' : 'View on GitHub'}
             </a>
           </div>
