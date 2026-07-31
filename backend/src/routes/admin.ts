@@ -13,7 +13,7 @@ import { rescheduleDropfolder } from '../dropfolder/scheduler.js';
 import { runDropfolderImport, isDropfolderRunning } from '../dropfolder/importer.js';
 import { listOllamaModels, ollamaHealth } from '../llm/ollama.js';
 import { searxngHealth } from '../llm/searxng.js';
-import { sendMail } from '../mailer.js';
+import { sendMail, sendMailWith, invalidateSmtpCheck, type SmtpSettings } from '../mailer.js';
 import { inviteEmail, resetEmail, noticeEmail, setEmailBaseUrl } from '../email/templates.js';
 import { createAuthToken } from '../auth/routes.js';
 import { listModelsForProvider, listVisionModelsForProvider, healthForProvider, setTaskAi, type ProviderName, type AiTask } from '../llm/provider.js';
@@ -153,6 +153,10 @@ export function adminRoutes(app: FastifyInstance): void {
     if (value === undefined) return reply.code(400).send({ error: 'value required' });
     await setConfig(key, value, req.user!.id);
     if (key === 'app.base_url') setEmailBaseUrl(value as string);
+    // The bug-report dialog asks /api/bug-reports/mail-status whether mail can go out, and that
+    // verdict is cached for a minute — an operator who just fixed SMTP would otherwise keep being
+    // told it is broken (and vice versa) while testing.
+    if (key.startsWith('smtp.')) invalidateSmtpCheck();
     if (key.startsWith('churner.')) await rescheduleChurner();
     if (key.startsWith('supermarket.')) await rescheduleSupermarket();
     if (key.startsWith('model_review.')) await rescheduleModelReview();
@@ -341,18 +345,31 @@ export function adminRoutes(app: FastifyInstance): void {
    *  quota: with requireOperator only the operator ever sees it, and they need the detail to
    *  debug. Off-demo requireOperator IS is_admin — byte-identical for self-hosters. */
   app.post('/api/smtp/test', { preHandler: requireOperator }, async (req, reply) => {
-    const { to } = (req.body ?? {}) as { to?: string };
+    const { to, settings } = (req.body ?? {}) as { to?: string; settings?: SmtpSettings };
     if (!to) return reply.code(400).send({ error: 'to required' });
+    // `settings` = the fields as they stand in the dialog, unsaved. Testing them WITHOUT writing
+    // them first is the whole point: the SMTP dialog is opened out of a half-written bug report
+    // and promises that "Abbrechen" leaves the instance's mail server alone. Saving first (what
+    // the client used to do) meant one trial run with a typo'd host silently broke invites,
+    // password resets and the offer digest for everyone.
+    const trial = settings?.host ? settings : null;
     try {
       const mail = noticeEmail({
         subject: 'Vorratsdatenspeicher – SMTP-Test',
         heading: 'SMTP funktioniert 🎉',
         body: 'Diese Test-E-Mail bestätigt, dass der E-Mail-Versand korrekt eingerichtet ist.',
       });
-      await sendMail(to, mail.subject, mail.text, mail.html);
+      if (trial) await sendMailWith(trial, to, mail.subject, mail.text, mail.html);
+      else await sendMail(to, mail.subject, mail.text, mail.html);
       return { ok: true };
     } catch (e) {
       return reply.code(502).send({ error: (e as Error).message });
+    } finally {
+      // A test of the STORED config is the freshest evidence there is about this box's relay — in
+      // both directions — so drop the cached verdict behind /api/bug-reports/mail-status. A trial
+      // run of unsaved fields says nothing about the relay actually in use, and must not make the
+      // bug-report dialog announce someone else's typo to every logged-in user.
+      if (!trial) invalidateSmtpCheck();
     }
   });
 

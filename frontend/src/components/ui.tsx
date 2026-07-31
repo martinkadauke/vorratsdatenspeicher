@@ -2,6 +2,7 @@ import { type ReactNode, type ButtonHTMLAttributes, type InputHTMLAttributes, ty
 import { useTranslation } from 'react-i18next';
 import { Bug, X } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { useAuth } from '../context/auth';
 
 // ── Button ─────────────────────────────────────────────────────────────────
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
@@ -156,6 +157,15 @@ export function useScrollLock(active: boolean) {
   }, [active]);
 }
 
+/** May this account file a bug report at all? Read-only accounts (can_write = false, non-admin)
+ *  are turned away by the backend's global write gate (auth/plugin.ts) before POST
+ *  /api/bug-reports ever runs, so every feedback trigger stays hidden for them: a Senden that can
+ *  only ever 403 is a broken button, not a feature. One predicate for all of them — the header
+ *  icon, the demo pill and the overlay chrome below must never disagree. */
+export function canFileReport(user: { is_admin?: boolean; can_write?: boolean } | null | undefined): boolean {
+  return !!user?.is_admin || user?.can_write !== false;
+}
+
 /** Feedback trigger for an overlay's own chrome. Any full-screen overlay covers BOTH
  *  app-wide triggers (header icon, demo pill) — i.e. feedback is unreachable exactly when
  *  the user wants to report what the overlay is showing. Fires the same window bus as
@@ -163,6 +173,8 @@ export function useScrollLock(active: boolean) {
  *  while this button (data-html2canvas-ignore) is not. */
 export function FeedbackIconButton({ className }: { className?: string }) {
   const { t } = useTranslation();
+  const { user } = useAuth();
+  if (!canFileReport(user)) return null;
   return (
     <button
       type="button"
@@ -171,7 +183,9 @@ export function FeedbackIconButton({ className }: { className?: string }) {
       title={t('common.feedback')}
       aria-label={t('common.feedback')}
       className={cn(
-        'rounded-lg p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-emerald-600 dark:hover:bg-zinc-800 dark:hover:text-emerald-400',
+        // Red, not grey: this is the one control on the page that means "something here is wrong",
+        // and it has to be findable at a glance on a dialog full of other buttons.
+        'rounded-lg p-1 text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:text-red-400 dark:hover:bg-red-950/40 dark:hover:text-red-300',
         className,
       )}
     >

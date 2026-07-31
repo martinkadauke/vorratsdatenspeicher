@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -93,6 +93,10 @@ interface MonthData {
   // or null because they have no defined meaning over an arbitrary period — a monthly
   // goal over 47 days, or per-month recurring rows summed over a window ending mid-month.
   ranged?: boolean;
+  // The window this payload actually covers — sent only in range mode (null for a month).
+  // Read instead of the pickers wherever a deep link has to describe the € standing next
+  // to it, so the link cannot drift from the number while a new period is in flight.
+  from?: string | null; to?: string | null;
 }
 
 const today = () => todayLocal();
@@ -107,11 +111,21 @@ const lastDayOf = (m: string) => {
   const [y, mo] = m.split('-').map(Number);
   return `${m}-${String(new Date(y, mo, 0).getDate()).padStart(2, '0')}`;
 };
-/** Shape check for one half of the Zeitraum. A native date input cannot hold 31.02., but
- *  the value can also arrive from elsewhere (the assistant's answer), and the backend
- *  answers anything that is not a real calendar day with 400 — see `isoDay` in
- *  backend/src/routes/finances.ts. */
-const isDay = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+/** A REAL calendar day, one half of the Zeitraum. The shape alone is not enough: the regex
+ *  waves through 2026-02-31, which Date silently rolls forward to 2026-03-03 — the header
+ *  would then assert a window neither the URL nor the request names, while the backend
+ *  answers that same request with 400 and the page collapses into the error card with no
+ *  hint at the field that broke (a native date input renders a day it cannot represent as
+ *  EMPTY). Hence the round trip, the exact one `isoDay` does in
+ *  backend/src/routes/finances.ts: a day only this side accepts is a period the page can
+ *  never show. The pickers cannot produce such a value, but a hand-edited or truncated link
+ *  and the assistant's answer can. */
+const isDay = (s: string) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const d = new Date(`${s}T00:00:00Z`);
+  // NaN first: toISOString() THROWS on an invalid date (2026-13-01), it does not return ''.
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+};
 /** A from/to pair that happens to be exactly one whole calendar month. Such a window is
  *  better shown AS that month — the full page, plans, goals and forecast included — than
  *  as a range, which by design has to hide all of that. */
@@ -235,41 +249,85 @@ function MonthTab() {
   const { t, i18n } = useTranslation();
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const [month, setMonthUrl] = useUrlState('m', curMonth());
   const [fx, setFx] = useUrlState('fx', '');   // deep-link from Auszüge: open this plan's evidence
 
-  // An explicit from/to window — the date-range filter restored from the Statistik page
-  // this one absorbed. It REPLACES the month rather than narrowing it: plans, goals and
-  // the 3-month-median forecast are monthly by construction, so over an arbitrary window
-  // the page shows only the half that survives it — the variable spend (see `rangeMode`
-  // branches below). Deliberately plain state, not useUrlState: two useUrlState setters
-  // fired in one tick read the same stale params and would clobber each other.
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
-  // Two independent date pickers make an inverted window ("20.07. – 05.07.") one fat finger
-  // away, and that is exactly what /api/finances/month answers with 400 — while every
-  // branch of this page renders off the fetched `data`, so the rejected request used to
-  // leave a header with nothing under it. An unusable pair is therefore NOT a period: the
-  // page keeps showing the month it was already on and the filter says why, right at the
-  // field that broke. Only a pair the backend would accept becomes range mode.
-  const rangeBroken = !!(from && to) && (!isDay(from) || !isDay(to) || from > to);
-  // Exactly one date filled — still being entered, not an error. The month stays in effect
-  // (the request needs both halves), which the panel states so the numbers on screen are
-  // never silently read as "since the 20th".
-  const rangeHalf = !!from !== !!to;
-  const rangeMode = !!(from && to) && !rangeBroken;
-  // The page's own period, in the shape the /api/spending endpoints want it.
-  const pageRange: DateRange | null = rangeMode ? { from, to } : null;
+  // ── the period, entirely in the URL ──────────────────────────────────────
+  // The month AND the from/to window, so a reload comes back on the period the numbers
+  // were computed for and the address bar is a shareable link to exactly this view.
+  //
+  // NOT three useUrlState slots, and this is the whole reason for the hand-rolled writer
+  // below: that hook's setter builds its update from the params of the render it was
+  // created in, so two setters fired in the SAME tick both write onto the same stale
+  // snapshot and the second silently drops the first's key. Every period change here moves
+  // at least two keys at once — the assistant sets month+from+to, tapping a month in a
+  // drill-down chart clears the window AND jumps the month — so there is exactly one writer
+  // and it does exactly one setParams.
+  const [params, setParams] = useSearchParams();
+  const month = params.get('m') || curMonth();
+  const from = params.get('from') ?? '';
+  const to = params.get('to') ?? '';
   const [aiAnswer, setAiAnswer] = useState<AiState | null>(null);
   // The assistant's banner asserts a period and an account scope, while every € under it
   // is recomputed the moment either changes — so a surviving banner would keep stating an
   // answer that no longer matches the numbers on screen. Any period/scope change drops it;
   // askAI sets the fresh answer AFTER its own changes, so it is unaffected.
   const dropAi = () => setAiAnswer(null);
-  const setMonth = (m: string) => { dropAi(); setMonthUrl(m); };
-  const setFromDate = (v: string) => { dropAi(); setFrom(v); };
-  const setToDate = (v: string) => { dropAi(); setTo(v); };
-  const clearRange = () => { dropAi(); setFrom(''); setTo(''); };
+  // Is this tab still on screen? The ✨ answer lands after a multi-second LLM round trip,
+  // and picking another tab UNMOUNTS this one (Finanzen renders exactly one of the three),
+  // while react-router's navigate keeps navigating from an unmounted component — it never
+  // clears its activeRef — so a late answer would rewrite the URL of, and yank the user
+  // back to, a view they had already left. Re-armed in the effect BODY, not only cleared in
+  // the cleanup: StrictMode mounts, unmounts and remounts every component in dev.
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  /** The single period writer. Keys absent from `patch` keep their current value; a `''`
+   *  DELETES its key, which is what makes clearing the Zeitraum drop both halves instead of
+   *  leaving an orphan `?from=` behind. The current month is elided rather than written,
+   *  exactly as useUrlState treats its default, so a bare /finanzen link keeps following
+   *  "today" instead of freezing on whichever month it was copied in. `replace` matches
+   *  useUrlState too — paging months must not pile up history entries. */
+  const setPeriod = (patch: { m?: string; from?: string; to?: string }) => {
+    if (!alive.current) return;
+    dropAi();
+    // Merged onto the query string that is live RIGHT NOW — deliberately not onto the
+    // `params` of the render this closure was created in. askAI writes its period AFTER an
+    // await, so whatever reached the URL meanwhile (another tab, that tab's own filters)
+    // would be silently dropped by a rebuild from the render's snapshot. react-router's
+    // functional form is no way out: setSearchParams(prev => …) hands back that very same
+    // render-scoped snapshot (react-router-dom 6.30, useSearchParams). BrowserRouter pushes
+    // through the History API synchronously, so this also reads back what a write earlier
+    // in the same tick left behind.
+    const np = new URLSearchParams(window.location.search);
+    for (const [k, v] of Object.entries(patch)) {
+      if (v && !(k === 'm' && v === curMonth())) np.set(k, v); else np.delete(k);
+    }
+    setParams(np, { replace: true });
+  };
+  const setMonth = (m: string) => setPeriod({ m });
+  const clearRange = () => setPeriod({ from: '', to: '' });
+
+  // An explicit from/to window — the date-range filter restored from the Statistik page
+  // this one absorbed. It REPLACES the month rather than narrowing it: plans, goals and
+  // the 3-month-median forecast are monthly by construction, so over an arbitrary window
+  // the page shows only the half that survives it — the variable spend (see `rangeMode`
+  // branches below).
+  //
+  // Two independent date pickers make an inverted window ("20.07. – 05.07.") one fat finger
+  // away, and that is exactly what /api/finances/month answers with 400 — while every
+  // branch of this page renders off the fetched `data`, so the rejected request used to
+  // leave a header with nothing under it. An unusable pair is therefore NOT a period: the
+  // page keeps showing the month it was already on and the filter says why, right at the
+  // field that broke. Only a pair the backend would accept becomes range mode. Now that the
+  // pair is URL-borne this also guards a hand-edited or truncated link, not just a typo.
+  const rangeBroken = !!(from && to) && (!isDay(from) || !isDay(to) || from > to);
+  // Exactly ONE half present — the pair still being typed, or a link that arrived carrying
+  // only one key. Neither is a period: the backend answers a lone half with 400, so
+  // `rangeMode` demands both and a half leaves the month in effect. The panel states that,
+  // so the numbers on screen are never silently read as "since the 20th".
+  const rangeHalf = !!from !== !!to;
+  const rangeMode = !!(from && to) && !rangeBroken;
+  // The page's own period, in the shape the /api/spending endpoints want it.
+  const pageRange: DateRange | null = rangeMode ? { from, to } : null;
 
   const [picker, setPicker] = useState<MonthFix | null>(null);
   const [budgetModal, setBudgetModal] = useState<BudgetDraft | null>(null);
@@ -395,15 +453,21 @@ function MonthTab() {
     setAsking(true);
     try {
       const res = await api<AiAnswer>('/api/spending/ask', { method: 'POST', body: { q, lang: i18n.language } });
-      // The month is set either way: it is what the page falls back to once the range is
-      // cleared, so clearing lands on the question's own month, not on today.
-      if (res.from) setMonth(res.from.slice(0, 7));
+      // The month is set whenever the ANSWER carries one: it is what the page falls back to
+      // once the range is cleared, so clearing lands on the question's own month, not on
+      // today. Month and window still travel in ONE setPeriod call — one logical period
+      // change should be one navigation and one re-render, not two.
       // Everything that is NOT one whole calendar month becomes a real range — a
       // multi-month span AND a sub-month window ("vom 5. bis 20. März"). Rendering the
       // date chip without applying it is what made the old banner claim a period the
       // numbers underneath were never computed for.
-      if (res.from && res.to && !isWholeMonth(res.from, res.to)) { setFrom(res.from); setTo(res.to); }
-      else clearRange();
+      // A date-less answer ("was gebe ich für Kraftstoff aus") writes NO month: the only
+      // value on offer would be `month` as it stood before the await, which would undo a
+      // month the user paged to while the assistant was thinking. Leaving the key alone
+      // keeps the period that is actually in effect — the same one the answer describes.
+      if (res.from && res.to && !isWholeMonth(res.from, res.to)) setPeriod({ m: res.from.slice(0, 7), from: res.from, to: res.to });
+      else if (res.from) setPeriod({ m: res.from.slice(0, 7), from: '', to: '' });
+      else setPeriod({ from: '', to: '' });
       const applied = applyKonten(res.konto_ids ?? []);
       const dropped = (res.konto_ids ?? []).filter(id => !applied.includes(id));
       setAiAnswer({ ...res, konto_ids: applied, droppedKonten: dropped });
@@ -454,6 +518,17 @@ function MonthTab() {
 
   const monthLabel = new Date(`${month}-01T00:00:00Z`).toLocaleDateString(
     i18n.language === 'en' ? 'en-GB' : 'de-DE', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+
+  // What the payload ON SCREEN actually is, in the server's own words (`ranged` in the
+  // /api/finances/month contract). `rangeMode` says what the FILTER asks for; the two are
+  // different questions and only one of them can answer "may I draw this?". A ranged
+  // payload carries no incomes/fixed at all and its category actuals are window sums, so
+  // rendering the month summary or a monthly target bar over it would print 0,00 € twice
+  // and measure a 47-day sum against a per-month goal. Falls back to the local intent only
+  // while there is NO payload, so the page comes up in the mode that was asked for instead
+  // of flashing the other layout — and once data is here the whole block below switches on
+  // one boolean, so the section can never render half in one mode and half in the other.
+  const dataRanged = data?.ranged ?? rangeMode;
 
   const incomes = data?.incomes ?? [];   // recurring income PLANS (Einnahmen-Soll)
   const fixed = data?.fixed ?? [];
@@ -513,7 +588,7 @@ function MonthTab() {
     const open = isOpen(n);
     return (
       <div key={n.path}>
-        <CategoryRow n={n} t={t} hasKids={kids.length > 0} open={open} scopedToPerson={!isAll} ranged={rangeMode}
+        <CategoryRow n={n} t={t} hasKids={kids.length > 0} open={open} scopedToPerson={!isAll} ranged={dataRanged}
           onToggle={() => setToggled(s => flip(s, n.path))}
           onOpen={() => openPositions(n.label, n.path)}
           onChart={() => openDrill({ kind: 'category', path: n.path, label: `${n.emoji ?? ''} ${n.label}`.trim() })}
@@ -552,14 +627,22 @@ function MonthTab() {
     }
     return out.sort((a, b) => a.localeCompare(b));
   }, [names, searchLc]);
-  // The dot also lights for dates that are NOT in effect (half-entered or inverted): they
-  // are still sitting in the panel, and once it is closed the dot is the only way back to
-  // the message that explains why the month is still what you are looking at.
-  const hasActiveFilters = !isAll || !!from || !!to || month !== curMonth();
+  // The dot means "something set INSIDE this panel is narrowing the view" — the account
+  // scope, or a Zeitraum. Deliberately not the month: the header arrows page months from
+  // outside the panel, so counting that lit the dot on the single most ordinary action on
+  // the page and drowned out the one thing it now has to carry, namely that the person
+  // bubbles (which moved INTO the panel) have scoped the view to one account holder.
+  // Dates that are not in effect (half-entered or inverted) still count: they are sitting
+  // in the panel, and once it is closed the dot is the only way back to the message that
+  // explains why the month is still what you are looking at.
+  const hasActiveFilters = !isAll || !!from || !!to;
   // The window the numbers on this page were computed for, as plain dates — what the
-  // bucket tiles deep-link into (Positionen takes from/to, not a month).
-  const periodFrom = rangeMode ? from : `${month}-01`;
-  const periodTo = rangeMode ? to : lastDayOf(month);
+  // bucket tiles deep-link into (Positionen takes from/to, not a month). Taken from the
+  // PAYLOAD's own window, because these links sit next to a € from that same payload: a
+  // link built from the pickers would describe a period the number beside it was never
+  // computed for the moment a new period is in flight.
+  const periodFrom = dataRanged ? (data?.from ?? from) : `${month}-01`;
+  const periodTo = dataRanged ? (data?.to ?? to) : lastDayOf(month);
 
   // Deep-link from the Auszüge list (?fx=<id>): open that plan's evidence modal so a
   // statement allocated to a generated one-off income jumps straight to the entry.
@@ -615,7 +698,7 @@ function MonthTab() {
   // the category tree shown beneath a total that also carries one-offs and un-receipted
   // debits. Past/future months elapse fully, so there is nothing to project — and an
   // arbitrary window has no "rest of the period" to extrapolate into either.
-  const varProjection = !rangeMode && data?.isCurrentMonth && data.daysElapsed > 0
+  const varProjection = !dataRanged && data?.isCurrentMonth && data.daysElapsed > 0
     ? Math.round((varActual * data.daysTotal / data.daysElapsed) * 100) / 100
     : null;
   // Reconciliation completeness covers EVERY plan that still needs a bank match —
@@ -702,15 +785,19 @@ function MonthTab() {
       )}
       {/* Range mode summarises only what a window can defend: the variable spend. No
           Einnahmen/Fixkosten tiles (per-MONTH recurring rows, wrong the moment a window
-          ends mid-month), hence no Netto and no reconciliation meter either. */}
-      {data && rangeMode && (
+          ends mid-month), hence no Netto and no reconciliation meter either. Which card
+          shows is decided by the PAYLOAD (`dataRanged`), not by the filter: the month card
+          reads data.incomes/data.fixed, and a ranged payload returns those empty by
+          contract — pairing it with the month card would print 0,00 € Einnahmen and a
+          0/0 reconciliation meter as if they were facts. */}
+      {data && dataRanged && (
         <Card className="flex flex-col gap-1 p-4">
           <div className="text-xs text-zinc-500 dark:text-zinc-400">{t('finances.varTitle')}</div>
           <div className="text-2xl font-bold">{eur(varActual)}</div>
           <div className="text-xs text-zinc-400">{t('finances.rangeVariableOnly')}</div>
         </Card>
       )}
-      {data && !rangeMode && (
+      {data && !dataRanged && (
         <>
           <Card className="flex flex-col gap-3 p-4">
             <div className="grid grid-cols-3 gap-3">
@@ -795,9 +882,9 @@ function MonthTab() {
               {/* Each field bounds the other, so the picker itself cannot produce an
                   inverted window. Typing can still get past it (min/max only mark the
                   value out-of-range) — `rangeBroken` is the guard that actually holds. */}
-              <Input type="date" className="min-w-0 flex-1" max={to || undefined} value={from} onChange={e => setFromDate(e.target.value)} />
+              <Input type="date" className="min-w-0 flex-1" max={to || undefined} value={from} onChange={e => setPeriod({ from: e.target.value })} />
               <span className="shrink-0 text-zinc-400">–</span>
-              <Input type="date" className="min-w-0 flex-1" min={from || undefined} value={to} onChange={e => setToDate(e.target.value)} />
+              <Input type="date" className="min-w-0 flex-1" min={from || undefined} value={to} onChange={e => setPeriod({ to: e.target.value })} />
               {/* Also offered for a half-entered or inverted window: that is precisely when
                   starting over is what you want, and it was the only state with no way out. */}
               {(from || to) && (
@@ -941,7 +1028,7 @@ function MonthTab() {
           <Section title={t('finances.varTitle')}>
             {/* One-offs are single-MONTH entries with a per-month check state, so they only
                 exist in month mode (the backend returns none for a range anyway). */}
-            {!rangeMode && oneOffCosts.map(fixRow)}
+            {!dataRanged && oneOffCosts.map(fixRow)}
 
             {/* The DERIVED category tree. Nothing here is stored except the optional
                 limits: every category shows up with its real spend, and deleting a goal
@@ -964,7 +1051,7 @@ function MonthTab() {
                 </div>
                 <div className="flex flex-col gap-1.5">
                   {lenses.map(l => (
-                    <LensRow key={l.id} l={l} t={t} scopedToPerson={!isAll} ranged={rangeMode}
+                    <LensRow key={l.id} l={l} t={t} scopedToPerson={!isAll} ranged={dataRanged}
                       onOpen={() => setPosTarget({ label: l.label, q: `budget=${l.id}`, bases: l.categories })}
                       onChart={() => openDrill(lensTarget(l))}
                       onEdit={() => setBudgetModal({ id: l.id, kind: 'lens', lockKind: true, label: l.label, monthly_target: l.monthly_target, konto_id: l.konto_id, categories: l.categories, articles: l.articles })} />
@@ -977,7 +1064,7 @@ function MonthTab() {
                 working (the prefix still matches whatever artikel still carry that path)
                 but they have no row in the tree, so they need re-pointing. A stored monthly
                 limit is target-shaped, so this maintenance card sits out range mode. */}
-            {!rangeMode && orphanLimits.length > 0 && (
+            {!dataRanged && orphanLimits.length > 0 && (
               <Card className="flex flex-col gap-2 border-amber-200 bg-amber-50/50 p-3 dark:border-amber-900/60 dark:bg-amber-950/20">
                 <div>
                   <div className="text-sm font-semibold text-amber-800 dark:text-amber-300">{t('finances.orphanTitle')}</div>
@@ -1048,17 +1135,23 @@ function MonthTab() {
             )}
             {/* The Auszüge deep-link filters by MONTH (bm=YYYY-MM), so over a window there
                 is no link that would land on the same set of debits — the tile then states
-                its number and nothing more, like Unbekannte Kategorie above. */}
+                its number and nothing more, like Unbekannte Kategorie above. The hint has
+                to drop its "tippen zum Ansehen" with it: the chevron and the click handler
+                are gone, so leaving the invitation would be advertising a tap that does
+                nothing. Keyed on the payload, like the link it describes — `bm=${month}`
+                only names the right debits when this payload IS that month's. */}
             {receiptMissing > 0 && (
-              <Card onClick={rangeMode ? undefined : () => navigate(`/finanzen?tab=bank&bs=open&bm=${month}`)}
+              <Card onClick={dataRanged ? undefined : () => navigate(`/finanzen?tab=bank&bs=open&bm=${month}`)}
                 className="flex items-center justify-between gap-2 p-3">
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-amber-700 dark:text-amber-400">{t('finances.receiptMissing')}</div>
-                  <div className="text-xs text-zinc-400">{t('finances.receiptMissingHint', { count: receiptMissingCount })}</div>
+                  <div className="text-xs text-zinc-400">
+                    {t(dataRanged ? 'finances.receiptMissingHintRange' : 'finances.receiptMissingHint', { count: receiptMissingCount })}
+                  </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
                   <span className="text-sm font-semibold tabular-nums text-zinc-700 dark:text-zinc-200">{eur(receiptMissing)}</span>
-                  {!rangeMode && <ChevronRight size={16} className="text-zinc-400" />}
+                  {!dataRanged && <ChevronRight size={16} className="text-zinc-400" />}
                 </div>
               </Card>
             )}
@@ -1066,7 +1159,7 @@ function MonthTab() {
             {/* Bottom of the list, not the section header: a category goal is set on its
                 own row now, so this button is for the overlapping kind you add rarely. It
                 creates a MONTHLY target, so it belongs to month mode. */}
-            {!rangeMode && (
+            {!dataRanged && (
               <Button variant="secondary" className="w-full justify-center py-2 text-xs"
                 onClick={() => setBudgetModal({ kind: 'lens', categories: [], articles: [] })}>
                 <Plus size={14} /> {t('finances.addBudget')}
@@ -1077,7 +1170,7 @@ function MonthTab() {
           {/* The three plan sections are per-MONTH recurring rows with a per-month check
               state; summing them over a window that ends mid-month would invent a number
               nobody could defend, so a range simply does not show them. */}
-          {!rangeMode && (
+          {!dataRanged && (
             <>
               {/* Fixed costs — recurring expense plans (rent, internet, subscriptions) */}
               <Section title={t('finances.fixTitle')} count={fixedCosts.length} defaultOpen={false}>
@@ -1118,10 +1211,12 @@ function MonthTab() {
           period state of the target it no longer shows.
           Tapping a month in its chart jumps the WHOLE page there, which means leaving range
           mode too — otherwise the page would stay pinned to a window that the month it just
-          jumped to is nowhere in. */}
+          jumped to is nowhere in. One setPeriod, not clearRange()+setMonth(): as two URL
+          writes in one tick the second would rebuild from the pre-clear params and hand the
+          window straight back. */}
       {drill && <SpendingDrilldown key={`${spendScopeKey(drill.target)}|${drill.range?.from ?? ''}|${drill.range?.to ?? ''}`}
         target={drill.target} month={month} initialRange={drill.range} kParam={kontenParam}
-        onClose={() => setDrill(null)} onPickMonth={ym => { clearRange(); setMonth(ym); }} />}
+        onClose={() => setDrill(null)} onPickMonth={ym => setPeriod({ m: ym, from: '', to: '' })} />}
       {evidence && <FixedEvidenceModal id={evidence.id} label={evidence.label} kind={evidence.kind} month={month} t={t}
         expectReceipt={evidence.expectReceipt}
         onClose={() => setEvidence(null)}
