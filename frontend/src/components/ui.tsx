@@ -1,5 +1,6 @@
-import { type ReactNode, type ButtonHTMLAttributes, type InputHTMLAttributes, type SelectHTMLAttributes, type HTMLAttributes, useEffect, forwardRef } from 'react';
-import { X } from 'lucide-react';
+import { type ReactNode, type ButtonHTMLAttributes, type InputHTMLAttributes, type SelectHTMLAttributes, type HTMLAttributes, useEffect, useRef, forwardRef } from 'react';
+import { useTranslation } from 'react-i18next';
+import { Bug, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 // ── Button ─────────────────────────────────────────────────────────────────
@@ -112,6 +113,73 @@ export function Switch({ checked, onChange, disabled }: { checked: boolean; onCh
   );
 }
 
+// ── Overlay plumbing (Escape order + scroll lock) ──────────────────────────
+/** Overlays stack: the feedback dialog deliberately opens ON TOP of an open Modal so the
+ *  user can report what that dialog is showing, and modals nest (article → icon picker).
+ *  Each of them listens for Escape on `document`, so without a shared order one Escape
+ *  closed them ALL — most painfully the Modal *underneath*, discarding the edits the user
+ *  had not saved yet. Every open overlay pushes a token here; only the topmost reacts. */
+const escLayers: object[] = [];
+
+export function useEscapeLayer(open: boolean, onClose: () => void) {
+  // onClose is almost always a fresh inline arrow. Keep it in a ref and depend on `open`
+  // alone: re-running the effect would re-push the token, silently promoting this layer to
+  // topmost on any parent re-render — the exact bug the stack exists to prevent.
+  const cb = useRef(onClose);
+  cb.current = onClose;
+  useEffect(() => {
+    if (!open) return;
+    const token = {};
+    escLayers.push(token);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && escLayers[escLayers.length - 1] === token) cb.current();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      const i = escLayers.indexOf(token);
+      if (i >= 0) escLayers.splice(i, 1);   // never splice(-1) — that would drop the wrong layer
+    };
+  }, [open]);
+}
+
+/** Body scroll lock, refcounted: a stacked overlay closing must not unlock the page while
+ *  an outer one is still open (plain assignment did exactly that once Escape started
+ *  closing only the topmost layer). */
+let scrollLocks = 0;
+export function useScrollLock(active: boolean) {
+  useEffect(() => {
+    if (!active) return;
+    scrollLocks++;
+    document.body.style.overflow = 'hidden';   // idempotent, so no need to read the old value
+    return () => { if (--scrollLocks <= 0) { scrollLocks = 0; document.body.style.overflow = ''; } };
+  }, [active]);
+}
+
+/** Feedback trigger for an overlay's own chrome. Any full-screen overlay covers BOTH
+ *  app-wide triggers (header icon, demo pill) — i.e. feedback is unreachable exactly when
+ *  the user wants to report what the overlay is showing. Fires the same window bus as
+ *  'vds:open-tour'; BugReportButton screenshots FIRST, so the overlay is still in the shot
+ *  while this button (data-html2canvas-ignore) is not. */
+export function FeedbackIconButton({ className }: { className?: string }) {
+  const { t } = useTranslation();
+  return (
+    <button
+      type="button"
+      data-html2canvas-ignore
+      onClick={() => window.dispatchEvent(new Event('vds:open-report'))}
+      title={t('common.feedback')}
+      aria-label={t('common.feedback')}
+      className={cn(
+        'rounded-lg p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-emerald-600 dark:hover:bg-zinc-800 dark:hover:text-emerald-400',
+        className,
+      )}
+    >
+      <Bug size={17} />
+    </button>
+  );
+}
+
 // ── Modal ──────────────────────────────────────────────────────────────────
 export function Modal({ open, onClose, title, children, wide }: {
   open: boolean;
@@ -120,16 +188,8 @@ export function Modal({ open, onClose, title, children, wide }: {
   children: ReactNode;
   wide?: boolean;
 }) {
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    document.addEventListener('keydown', onKey);
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = '';
-    };
-  }, [open, onClose]);
+  useEscapeLayer(open, onClose);
+  useScrollLock(open);
 
   if (!open) return null;
   return (
@@ -143,9 +203,12 @@ export function Modal({ open, onClose, title, children, wide }: {
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold">{title}</h2>
-          <button onClick={onClose} className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
-            <X size={20} />
-          </button>
+          <div className="flex items-center gap-0.5">
+            <FeedbackIconButton />
+            <button onClick={onClose} className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
+              <X size={20} />
+            </button>
+          </div>
         </div>
         {children}
       </div>

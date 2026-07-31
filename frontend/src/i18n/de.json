@@ -1372,7 +1372,9 @@
     "confirm": "Wirklich?",
     "clear": "Löschen",
     "close": "Schließen",
+    "suggestions": "Vorschläge",
     "scrollLeft": "Nach links",
-    "scrollRight": "Nach rechts"
+    "scrollRight": "Nach rechts",
+    "feedback": "Fehler / Feedback melden"
   }
 }

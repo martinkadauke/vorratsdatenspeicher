@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Download, X, Github } from 'lucide-react';
 import { api } from '../api/client';
+import { FeedbackIconButton } from './ui';
 
 const COMPOSE = `services:
   vds:
@@ -72,7 +73,11 @@ export function InstallButton() {
           <div className="max-h-[88dvh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-xl dark:bg-zinc-900" onClick={e => e.stopPropagation()}>
             <div className="mb-3 flex items-center justify-between">
               <h2 className="flex items-center gap-2 text-base font-bold">🗄️ {de ? 'Vorratsdatenspeicher selbst hosten' : 'Self-host Vorratsdatenspeicher'}</h2>
-              <button onClick={() => setOpen(false)} className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"><X size={18} /></button>
+              <div className="flex items-center gap-0.5">
+                {/* This guide's own z-50 backdrop covers the pill below it. */}
+                <FeedbackIconButton />
+                <button onClick={() => setOpen(false)} className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"><X size={18} /></button>
+              </div>
             </div>
 
             <p className="mb-4 text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">

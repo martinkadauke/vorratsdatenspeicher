@@ -5,7 +5,7 @@ import type { TFunction } from 'i18next';
 import { useNavigate } from 'react-router-dom';
 import { Sparkles, Bot, Cpu, Tags, Home, Users, Wallet, Mail, Inbox, PartyPopper, Languages, Plus, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { api } from '../api/client';
-import { Button, Input, Select, Label, Switch } from './ui';
+import { Button, Input, Select, Label, Switch, FeedbackIconButton } from './ui';
 import { EmojiSelect } from './EmojiPicker';
 import { useAuth } from '../context/auth';
 import { toast } from './Toast';
@@ -176,6 +176,9 @@ export function Onboarding() {
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-3 backdrop-blur-sm">
       <div className="relative flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-zinc-900">
+        {/* First-run wizard: a broken key/model list here is exactly what we want reported,
+            but this z-[60] overlay buries both app-wide feedback triggers. */}
+        <FeedbackIconButton className="absolute right-3 top-3 z-10" />
         <div className="flex h-24 shrink-0 items-center justify-center bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-950 dark:to-emerald-900">
           <div className="text-5xl">{cur.emoji}</div>
         </div>

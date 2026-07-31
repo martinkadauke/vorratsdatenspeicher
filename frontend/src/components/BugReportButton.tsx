@@ -4,6 +4,7 @@ import { useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Bug, X, Pencil, Square, Undo2, Trash2, Loader2 } from 'lucide-react';
 import { api } from '../api/client';
+import { useEscapeLayer, useScrollLock } from './ui';
 
 type Shape =
   | { type: 'pen'; color: string; points: [number, number][] }
@@ -154,10 +155,27 @@ export function BugReportButton({ variant = 'floating' }: { variant?: 'floating'
     setOpen(true);
   };
 
+  // Full-screen overlays (Modal, Tour, Onboarding, …) paint over both triggers, so from
+  // inside one neither is clickable. Their chrome carries a FeedbackIconButton that fires
+  // this bus instead — same pattern as 'vds:open-tour'. Only the header variant listens: it
+  // exists in every build, while on the demo BOTH variants are mounted and two listeners
+  // would capture twice and stack two report modals on one click.
+  useEffect(() => {
+    if (variant !== 'header') return;
+    const onBus = () => { if (!open) void openReport(); };
+    window.addEventListener('vds:open-report', onBus);
+    return () => window.removeEventListener('vds:open-report', onBus);
+  }, [variant, open, capturing]);
+
   const close = () => {
     if (sentTimer.current) clearTimeout(sentTimer.current);
     setOpen(false); setShot(null); setMsg(''); setSent(false);
   };
+
+  // This dialog is opened ON TOP of whatever it is reporting, so Escape must dismiss IT and
+  // leave the overlay underneath (and its unsaved form state) alone.
+  useEscapeLayer(open, close);
+  useScrollLock(open);
 
   const submit = async () => {
     if (!msg.trim() || sending) return;
@@ -192,8 +210,11 @@ export function BugReportButton({ variant = 'floating' }: { variant?: 'floating'
         </button>
       )}
 
+      {/* Above EVERY other layer (toast 100, emoji picker 70, tour/onboarding 60, modal 50):
+          it is opened from inside those, and the toast stack in particular sits exactly on
+          the Senden/Abbrechen row on a phone and swallowed the tap. */}
       {open && createPortal(
-        <div data-html2canvas-ignore className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center" onClick={close}>
+        <div data-html2canvas-ignore className="fixed inset-0 z-[110] flex items-end justify-center bg-black/40 p-4 sm:items-center" onClick={close}>
           <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5 shadow-xl dark:bg-zinc-900" onClick={e => e.stopPropagation()}>
             <div className="mb-3 flex items-center justify-between">
               <h2 className="flex items-center gap-2 text-base font-bold"><Bug size={18} /> {title}</h2>

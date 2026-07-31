@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type TouchEvent as ReactTouchEvent } from 'react';
+import { useEffect, useRef, useState, type TouchEvent as ReactTouchEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
@@ -16,6 +16,7 @@ import { GripVertical, Minus, Plus, Trash2, Search, Sparkles, Send, TrendingDown
 import { api } from '../api/client';
 import type { ShoppingItem, ShoppingList } from '../api/types';
 import { Card, Spinner, EmptyState, Button, Input, Badge, Modal, Select, Label } from '../components/ui';
+import { CanonicalCombo, useCanonicalNames } from '../components/CanonicalCombo';
 import { toast } from '../components/Toast';
 import { cn, eur } from '../lib/utils';
 import { useUrlState } from '../hooks/useUrlState';
@@ -52,21 +53,13 @@ export function Shopping() {
     queryFn: () => api<ShoppingItem[]>(`/api/shopping-list?list_id=${activeListId}`),
     enabled: activeListId != null,
   });
-  // Canonical names → typeahead suggestions (free text is still allowed).
-  const { data: names } = useQuery({
-    queryKey: ['names-mini'],
-    queryFn: () => api<{ canonical_name: string; artikel_count: number }[]>('/api/names'),
-    staleTime: 60_000,
-  });
+  // Canonical names → typeahead suggestions (free text is still allowed). Same
+  // cache the CanonicalCombo below reads; here it only decides whether a typed
+  // title IS an existing canonical name.
+  const { data: names } = useCanonicalNames();
   const nameSet = new Set((names ?? []).map(n => n.canonical_name));
-  // Add-item suggestions ordered by how often it's actually bought (most-bought
-  // first), so e.g. Katzennassfutter beats 3D-printer filament.
-  const nameOptions = useMemo(() => (names ?? []).slice().sort((a, b) =>
-    (b.artikel_count ?? 0) - (a.artikel_count ?? 0) || a.canonical_name.localeCompare(b.canonical_name)), [names]);
 
   const [title, setTitle] = useState('');
-  const [showSug, setShowSug] = useState(false);   // custom suggestion dropdown (replaces native <datalist>, which renders inconsistently across phone keyboards)
-  const [hi, setHi] = useState(-1);                 // keyboard-highlighted suggestion index
   // Local order preserved across refetches (so a drag isn't undone by a refresh).
   const [items, setItems] = useState<ShoppingItem[]>([]);
   useEffect(() => {
@@ -96,29 +89,11 @@ export function Shopping() {
         body: { canonical_name: nameSet.has(ti) ? ti : null, title: ti, list_id: activeListId },
       });
     },
-    onSuccess: () => { setTitle(''); setShowSug(false); setHi(-1); invalidate(); },
+    // The combo clears its own open/highlight state on pick, so clearing the
+    // title is all that's left here.
+    onSuccess: () => { setTitle(''); invalidate(); },
     onError: (e: Error) => toast(e.message, 'error'),
   });
-  // Filtered typeahead: prefix matches first, then substring, most-bought order within each group.
-  const suggestions = useMemo(() => {
-    const q = title.trim().toLowerCase();
-    if (!q) return [] as typeof nameOptions;
-    const pre: typeof nameOptions = [], sub: typeof nameOptions = [];
-    for (const n of nameOptions) {
-      const lc = n.canonical_name.toLowerCase();
-      if (lc === q) continue;                              // no point suggesting an exact match
-      if (lc.startsWith(q)) pre.push(n); else if (lc.includes(q)) sub.push(n);
-    }
-    return [...pre, ...sub].slice(0, 8);
-  }, [title, nameOptions]);
-  const pickSuggestion = (name: string) => add.mutate(name);
-  const onAddKey = (e: ReactKeyboardEvent<HTMLInputElement>) => {
-    if (!suggestions.length) return;                       // nothing to navigate — let Enter submit free text
-    if (e.key === 'ArrowDown') { e.preventDefault(); setShowSug(true); setHi(h => Math.min(h + 1, suggestions.length - 1)); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); setHi(h => Math.max(h - 1, -1)); }
-    else if (e.key === 'Enter' && hi >= 0) { e.preventDefault(); pickSuggestion(suggestions[hi].canonical_name); }
-    else if (e.key === 'Escape') { setShowSug(false); setHi(-1); }
-  };
 
   const patchMenge = useMutation({
     mutationFn: ({ id, menge }: { id: number; menge: number | null }) =>
@@ -355,39 +330,18 @@ export function Shopping() {
           onSubmit={e => { e.preventDefault(); if (canAdd) add.mutate(undefined); }}
           className="flex gap-2 rounded-xl border border-zinc-200 p-2.5 dark:border-zinc-800"
         >
-          <div className="relative flex-1">
-            <Search size={15} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
-            <Input
-              value={title}
-              onChange={e => { setTitle(e.target.value); setShowSug(true); setHi(-1); }}
-              onFocus={() => setShowSug(true)}
-              onBlur={() => setTimeout(() => setShowSug(false), 150)}   // delay so a tap on a suggestion registers first
-              onKeyDown={onAddKey}
-              placeholder={t('shopping.addPlaceholder')}
-              className="pl-8"
-              autoComplete="off"
-              role="combobox"
-              aria-expanded={showSug && suggestions.length > 0}
-            />
-            {/* Custom suggestion list — identical on every phone/keyboard. The native <datalist>
-                rendered inconsistently (showed in Samsung's keyboard strip but not on other phones). */}
-            {showSug && suggestions.length > 0 && (
-              <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-64 overflow-y-auto rounded-xl border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
-                {suggestions.map((n, i) => (
-                  <button
-                    key={n.canonical_name}
-                    type="button"
-                    onMouseDown={e => e.preventDefault()}   // keep the input focused so onClick fires before blur
-                    onClick={() => pickSuggestion(n.canonical_name)}
-                    className={cn('flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800', i === hi && 'bg-zinc-100 dark:bg-zinc-800')}
-                  >
-                    <span className="truncate">{n.canonical_name}</span>
-                    {n.artikel_count > 0 && <span className="shrink-0 text-xs text-zinc-400">{n.artikel_count}×</span>}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          {/* Picking a suggestion adds the item straight away — `add.mutate(name)`
+              passes the name as an override so it doesn't wait on the async
+              title state. Free text still goes through the submit button/Enter. */}
+          <CanonicalCombo
+            className="flex-1"
+            value={title}
+            onChange={setTitle}
+            onPick={name => add.mutate(name)}
+            placeholder={t('shopping.addPlaceholder')}
+            icon={<Search size={15} />}
+            inputClassName="pl-8"
+          />
           <Button type="submit" disabled={!canAdd} className="shrink-0"><Plus size={16} /></Button>
         </form>
       )}

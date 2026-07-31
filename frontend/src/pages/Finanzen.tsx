@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { api, getToken } from '../api/client';
-import { Card, Spinner, Button, Input, Label, Select, Switch, Modal, EmptyState, Badge } from '../components/ui';
+import { Card, Spinner, Button, Input, Label, Select, Switch, Modal, EmptyState, Badge, FeedbackIconButton } from '../components/ui';
 import { CategoryPicker } from '../components/CategoryPicker';
 import { toast } from '../components/Toast';
 import { confirm } from '../components/Confirm';
@@ -2697,7 +2697,13 @@ function BankUpload({ scopeKonten, embedded }: { scopeKonten: KontoLite[]; embed
       {confirm && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center" onClick={() => !busy && setConfirm(null)}>
           <div className="max-h-[85dvh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-xl dark:bg-zinc-900" onClick={e => e.stopPropagation()}>
-            <div className="mb-1 flex items-center gap-2 text-base font-bold"><Sparkles size={18} className="text-emerald-600" /> {t('finances.bank.aiTitle')}</div>
+            {/* A mis-mapped AI column guess is THE thing to report from here, but this
+                overlay covers the header icon, the demo pill and — when BankUpload is
+                embedded in a Modal — that modal's feedback icon too. */}
+            <div className="mb-1 flex items-center gap-2">
+              <div className="flex min-w-0 flex-1 items-center gap-2 text-base font-bold"><Sparkles size={18} className="shrink-0 text-emerald-600" /> {t('finances.bank.aiTitle')}</div>
+              <FeedbackIconButton />
+            </div>
             <p className="mb-3 text-xs text-zinc-500">{t('finances.bank.aiHint', { total: confirm.total })}</p>
             <div className="overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
               <table className="w-full text-left text-xs">

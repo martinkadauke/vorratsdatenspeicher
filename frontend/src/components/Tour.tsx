@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ScanLine, X } from 'lucide-react';
 import { api } from '../api/client';
-import { Button } from './ui';
+import { Button, FeedbackIconButton } from './ui';
 import { useAuth } from '../context/auth';
 
 /** Pending "open the scanner" intent, handed to the Receipts page across a navigation.
@@ -63,9 +63,13 @@ export function Tour({ open, onClose }: { open: boolean; onClose: () => void }) 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-3 backdrop-blur-sm">
       <div className="relative w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-zinc-900">
-        <button onClick={dismiss} className="absolute right-3 top-3 z-10 rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800" aria-label={t('tour.later')}>
-          <X size={18} />
-        </button>
+        {/* z-[60] overlay → both app-wide feedback triggers are buried; carry our own. */}
+        <div className="absolute right-3 top-3 z-10 flex items-center gap-0.5">
+          <FeedbackIconButton />
+          <button onClick={dismiss} className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800" aria-label={t('tour.later')}>
+            <X size={18} />
+          </button>
+        </div>
 
         <div className="flex h-32 items-center justify-center bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-950 dark:to-emerald-900">
           <div className="text-6xl">🧾</div>

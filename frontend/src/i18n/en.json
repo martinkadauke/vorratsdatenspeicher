@@ -1370,7 +1370,9 @@
     "confirm": "Are you sure?",
     "clear": "Clear",
     "close": "Close",
+    "suggestions": "Suggestions",
     "scrollLeft": "Scroll left",
-    "scrollRight": "Scroll right"
+    "scrollRight": "Scroll right",
+    "feedback": "Report a bug / feedback"
   }
 }

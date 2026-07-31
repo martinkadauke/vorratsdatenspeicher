@@ -6,6 +6,7 @@ import { ReceiptText, Search, X, CheckSquare, Square, Check, Ban, ArrowRight } f
 import { api } from '../api/client';
 import type { PruefenGroup, UnitPruefenRow, MixedUnitRow } from '../api/types';
 import { Card, Spinner, EmptyState, Button, Input, Select } from '../components/ui';
+import { CanonicalCombo } from '../components/CanonicalCombo';
 import { UnitSelect } from '../components/UnitSelect';
 import { CanonicalIcon } from '../components/IconPicker';
 import { FirstVisitHint } from '../components/FirstVisitHint';
@@ -215,7 +216,19 @@ function NameReview() {
                   </div>
                 );
               })()}
-              <Input value={value} onChange={e => setEdits(prev => ({ ...prev, [g.grp]: e.target.value }))} placeholder={t('queue.proposed')} />
+              {/* Typeahead over the existing canonical names: a mangled OCR line
+                  ("Grützen Johannes" for Griechischer Joghurt) is unfixable from
+                  the chips alone — typing "Gri…" has to offer the name that's
+                  already in the Warenstamm. Picking only FILLS the field; the
+                  approve below stays the one place that merges + teaches the
+                  alias. `inline` keeps Übernehmen/Verwerfen out from under the
+                  list on a phone. */}
+              <CanonicalCombo
+                value={value}
+                onChange={v => setEdits(prev => ({ ...prev, [g.grp]: v }))}
+                placeholder={t('queue.proposed')}
+                layout="inline"
+              />
               <div className="flex flex-wrap gap-2">
                 <Button className="min-w-[6rem] flex-1" disabled={!value.trim()} onClick={() => decide.mutate({ artikel_ids: g.artikel_ids, canonical: value.trim(), action: 'approve' })}>{t('queue.approve')}</Button>
                 <Button variant="ghost" className="min-w-[5rem]" onClick={() => decide.mutate({ artikel_ids: g.artikel_ids, action: 'reject' })}>{t('queue.reject')}</Button>
