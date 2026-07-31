@@ -47,6 +47,20 @@ type Frag = ReturnType<typeof sql>;
 const csvFormatKey = (fingerprint: string, householdId: number | null | undefined): string =>
   DEMO_MODE ? `h${householdId ?? 1}:${fingerprint}` : fingerprint;
 
+/** Bank-statement CSV import is switched OFF on the public demo (operator's decision, 2026-07-31).
+ *
+ *  A bank export is the most sensitive thing a visitor could hand this app — every counterparty
+ *  they pay, every amount, for months. The demo is an anonymous one-click sign-up wiped within
+ *  24h, which is precisely the context in which nobody should be uploading their real statement,
+ *  and the AI format reader forwards the header plus sample rows to a third-country provider on
+ *  top of that. The feature demos poorly anyway: it needs a real statement to show anything.
+ *
+ *  Enforced in the ROUTES, not just by hiding the button — on the demo every visitor is is_admin
+ *  of their own household, so there is no role that gates this, and a hidden control is no
+ *  control at all against anyone willing to POST directly. Self-hosted, dev, stage and prod are
+ *  untouched: this is the one deployment where the uploader is a stranger. */
+const BANK_CSV_OFF_DEMO = 'bank CSV import is disabled on the public demo';
+
 /** Fixed costs (recurring monthly expenses) CRUD — the manual-entry UI the
  *  analytics foundation (mig 040 `fixed_cost` → `v_transactions`) always expected.
  *  Scope is encoded by konto_id: a SHARED konto = household cost (rent, loan…), a
@@ -1853,6 +1867,7 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
    *  a previously-learned mapping by header fingerprint, or a fresh AI-generated mapping) and
    *  return a preview of the first rows so the user can confirm before it's trusted/stored. */
   app.post('/api/finances/bank/analyze', { bodyLimit: 25 * 1024 * 1024 }, async (req, reply) => {
+    if (DEMO_MODE) return reply.code(403).send({ error: BANK_CSV_OFF_DEMO });
     const bdy = (req.body ?? {}) as { data_b64?: string };
     if (!bdy.data_b64) return reply.code(400).send({ error: 'data_b64 required' });
     let buf: Buffer;
@@ -1881,14 +1896,9 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
       return { recognized: true, source: 'learned', label: (stored.label as string | null), spec, fingerprint, total: p.rows.length, preview: preview(p.rows) };
     }
     // New format → AI generates a mapping; the user must confirm before it's trusted + stored.
-    // Demo only: the claim sits HERE, not at the top of the route — the built-in comdirect and
-    // learned-fingerprint paths above cost nothing and must stay free. The fingerprint is
-    // derived from the uploaded header line, so a visitor who renames one column misses the
-    // cache on every request; only the bucket bounds that.
-    if (DEMO_MODE) {
-      const claim = await claimDemoAi(req.user?.household_id);
-      if (!claim.ok) return reply.code(429).send({ error: aiLimitMessage(claim.max) });
-    }
+    // (There used to be a demo AI-quota claim here, guarding the spend of this one LLM call.
+    //  It is gone with the route-level 403 above: the whole route is now unreachable on demo,
+    //  so the claim could never fire and its comment described a check that had moved.)
     let spec: CsvMappingSpec;
     try { spec = await generateCsvMapping(sn.headerLine, sn.sampleRows); }
     catch (e) { return { recognized: false, error: `AI-Zuordnung fehlgeschlagen: ${(e as Error).message}`, header: sn.headerLine }; }
@@ -1902,6 +1912,7 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
    *  so re-importing an overlapping/full-year export never duplicates. Runs auto-matching after.
    *  With save_mapping, remembers the AI mapping so the next CSV of this bank imports automatically. */
   app.post('/api/finances/bank/upload', { bodyLimit: 25 * 1024 * 1024 }, async (req, reply) => {
+    if (DEMO_MODE) return reply.code(403).send({ error: BANK_CSV_OFF_DEMO });
     // `fingerprint` is accepted (the /analyze response round-trips through the client) but
     // deliberately IGNORED — see the derive-it-here comment at the save below.
     const bdy = (req.body ?? {}) as { konto_id?: number; filename?: string; data_b64?: string; spec?: CsvMappingSpec; save_mapping?: boolean; fingerprint?: string; label?: string };

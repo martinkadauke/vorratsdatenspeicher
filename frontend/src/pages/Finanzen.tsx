@@ -16,6 +16,7 @@ import { toast } from '../components/Toast';
 import { confirm } from '../components/Confirm';
 // monthNameOf is the shared "Juli 2026" formatter; MonthTab keeps a local `monthLabel`
 // string for the header, hence the rename on import.
+import { useAuth } from '../context/auth';
 import { cn, eur, fmtDate, monthLabel as monthNameOf, todayLocal } from '../lib/utils';
 import { useUrlState } from '../hooks/useUrlState';
 
@@ -180,6 +181,11 @@ function ScopeBubble({ active, small, onClick, children }: { active: boolean; sm
 export function Finanzen() {
   const { t } = useTranslation();
   const [tab, setTab] = useUrlState('tab', 'monat');
+  const { demo: demoUser } = useAuth();
+  // ?tab=bank is a real URL a demo visitor can arrive at (shared link, bookmark, back button)
+  // and the tab button is gone there, so fold it to the month view rather than render a tab
+  // with no way back to it.
+  const activeTab = demoUser && tab === 'bank' ? 'monat' : tab;
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between gap-2">
@@ -188,17 +194,25 @@ export function Finanzen() {
           <h1 className="text-lg font-bold">{t('finances.title')}</h1>
         </div>
         <div className="flex rounded-xl bg-zinc-100 p-1 dark:bg-zinc-800/60">
-          {([['monat', 'finances.monthTab'], ['bank', 'finances.bankTab'], ['verwaltung', 'finances.manageTab']] as const).map(([tb, key]) => (
+          {/* Auszüge is dropped on the demo: bank CSV import is refused there, so bank_tx can
+              never fill and the tab's only reachable state is an empty state telling the visitor
+              to upload a CSV — pointing at a button that isn't offered. Dropping the whole tab
+              also removes the konto/month filters, status chips, import-batch card and rematch
+              button, all equally inert for the same reason. */}
+          {(demoUser
+            ? ([['monat', 'finances.monthTab'], ['verwaltung', 'finances.manageTab']] as const)
+            : ([['monat', 'finances.monthTab'], ['bank', 'finances.bankTab'], ['verwaltung', 'finances.manageTab']] as const)
+          ).map(([tb, key]) => (
             <button key={tb} onClick={() => setTab(tb)}
               className={cn('rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
-                tab === tb ? 'bg-white text-zinc-900 shadow-sm dark:bg-zinc-900 dark:text-zinc-100' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300')}
+                activeTab === tb ? 'bg-white text-zinc-900 shadow-sm dark:bg-zinc-900 dark:text-zinc-100' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300')}
             >
               {t(key)}
             </button>
           ))}
         </div>
       </div>
-      {tab === 'verwaltung' ? <ManageTab /> : tab === 'bank' ? <BankTab /> : <MonthTab />}
+      {activeTab === 'verwaltung' ? <ManageTab /> : activeTab === 'bank' ? <BankTab /> : <MonthTab />}
     </div>
   );
 }
@@ -3523,6 +3537,10 @@ function ManageTab() {
   const [showInfo, setShowInfo] = useState(false); // Fixkosten info text collapsed behind the (i)
   const [csvOpen, setCsvOpen] = useState(false); // bank-statement CSV upload popup
   const [pdfOpen, setPdfOpen] = useState(false); // salary pay-slip PDF upload popup
+  // Bank-CSV import is off on the public demo — a statement is the most sensitive file a
+  // visitor could hand an anonymous 24h account. The backend refuses /bank/analyze and
+  // /bank/upload with 403 regardless; this just avoids offering a button that cannot work.
+  const { demo } = useAuth();
 
   const { data: costs, isLoading } = useQuery({ queryKey: ['fixed-costs'], queryFn: () => api<FixedCost[]>('/api/fixed-costs') });
   const { data: konten } = useKonten();
@@ -3641,7 +3659,7 @@ function ManageTab() {
       {/* Import: bank statements (CSV) + salary pay slips (PDF) — the page's main job. */}
       <div className="flex flex-wrap items-center gap-2">
         <span className="mr-1 text-[11px] font-medium text-zinc-400">{t('finances.importLabel')}</span>
-        <Button variant="secondary" onClick={() => setCsvOpen(true)}><Upload size={15} /> {t('finances.bank.heading')}</Button>
+        {!demo && <Button variant="secondary" onClick={() => setCsvOpen(true)}><Upload size={15} /> {t('finances.bank.heading')}</Button>}
         <Button variant="secondary" onClick={() => setPdfOpen(true)}><FileText size={15} /> {t('finances.income.heading')}</Button>
       </div>
 
@@ -3712,7 +3730,7 @@ function ManageTab() {
         </CollapseCard>
       )}
 
-      {csvOpen && (
+      {csvOpen && !demo && (
         <Modal open onClose={() => setCsvOpen(false)} title={t('finances.bank.heading')}>
           <BankUpload scopeKonten={scopeKonten} embedded />
         </Modal>
