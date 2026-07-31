@@ -72,7 +72,7 @@ export function demoRoutes(app: FastifyInstance): void {
     if (target !== 'install' && target !== 'github') return reply.code(400).send({ error: 'bad target' });
     // adminSql: demo_cta_click is operator telemetry, deliberately NOT a tenant table with RLS.
     const ins = await adminSql`
-      INSERT INTO demo_cta_click (target, household_id)
+      INSERT INTO demo_cta_click (target, dedup_household)
       VALUES (${target}, ${req.user?.household_id ?? null})
       ON CONFLICT DO NOTHING
       RETURNING id`.catch(() => [] as { id: number }[]);
