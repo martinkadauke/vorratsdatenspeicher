@@ -183,8 +183,21 @@ export function CreatePurchaseModal({ open, sample = false, onClose }: { open: b
     </button>
   );
 
+  /** The two ways to attach a receipt. `capture` = the camera one, which is deliberately the
+   *  louder of the pair: on a phone this dialog is almost always "snap the receipt in front of
+   *  me", so it gets the same solid emerald treatment the selected Kartenzahlung/Bar button has,
+   *  while the file picker stays a quiet dashed outline. It also sits on the RIGHT — that is the
+   *  thumb's side on a phone held one-handed, and the reason the pair reads camera-first despite
+   *  the file button coming earlier in the DOM. */
   const photoBtn = (icon: React.ReactNode, label: string, capture: boolean) => (
-    <label className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-zinc-300 px-3 py-2.5 text-sm font-medium text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700">
+    <label
+      className={cn(
+        'flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-medium',
+        capture
+          ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
+          : 'border-dashed border-zinc-300 text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700',
+      )}
+    >
       {icon} {label}
       {/* Gallery/file button allows PDFs + images so Android opens the DOCUMENT picker
           (browse Downloads / SMB shares), not just the photo picker. Camera stays image-only. */}
@@ -250,8 +263,10 @@ export function CreatePurchaseModal({ open, sample = false, onClose }: { open: b
             )
           ) : (
             <div className="flex gap-2">
-              {photoBtn(<Camera size={16} />, t('createPurchase.photoCamera'), true)}
+              {/* File LEFT, camera RIGHT — see photoBtn: the camera is the common case on a
+                  phone and belongs under the thumb, not tucked away on the far side. */}
               {photoBtn(<ImagePlus size={16} />, t('createPurchase.photoPick'), false)}
+              {photoBtn(<Camera size={16} />, t('createPurchase.photoCamera'), true)}
             </div>
           )}
           {photo && (
