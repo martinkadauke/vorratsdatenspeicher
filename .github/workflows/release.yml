@@ -23,7 +23,7 @@ on:
         default: true
 
 permissions:
-  contents: read
+  contents: write   # needed to create the GitHub Release below (read is enough for everything else)
   packages: write
 
 jobs:
@@ -69,4 +69,25 @@ jobs:
             APP_VERSION=${{ steps.v.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      # A tag and a GitHub Release are different objects, and the in-app update banner reads the
+      # RELEASES API (routes/admin.ts RELEASES_URL) — not tags. So a tag alone moves :stable while
+      # every self-hoster's banner stays silent about it, and the "what's new since your version"
+      # list, which comes from each release BODY, has nothing to show. That step has always been
+      # manual and undocumented; v1.0.0-1.0.2 were all created by hand.
+      #
+      # DRAFT on purpose. /api/update-check filters `!r.draft`, so a draft is invisible to the
+      # banner: the object always exists (nobody can forget it any more), but nothing nags users
+      # until a human publishes it. --generate-notes gives a commit-derived starting point to edit
+      # rather than shipping auto-prose — release notes are read by someone running VDS at home,
+      # and that is a different audience from the commit log.
+      - name: Draft the GitHub Release (publish by hand once the notes read well)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.v.outputs.tag }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG already exists — leaving it alone"; exit 0
+          fi
+          gh release create "$TAG" --draft --generate-notes --title "VDS $TAG"
+          echo "📝 drafted release $TAG — edit the notes and publish, or the update banner stays quiet"
       - run: echo "✅ published :${{ steps.v.outputs.version }} (stable=${{ steps.v.outputs.stable }}) APP_VERSION=${{ steps.v.outputs.version }}"
