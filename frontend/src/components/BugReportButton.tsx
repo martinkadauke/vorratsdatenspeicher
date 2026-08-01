@@ -362,14 +362,57 @@ export function BugReportButton({ variant = 'floating' }: { variant?: 'floating'
     try {
       const html2canvas = (await import('html2canvas')).default;
       const bg = getComputedStyle(document.body).backgroundColor;
-      const canvas = await html2canvas(document.body, {
+
+      // Pre-decode every image we are allowed to read, keyed by src. Built from the LIVE
+      // document (whose images are already decoded) and never written back to it — the user
+      // must not see their page flicker while a screenshot is taken. Cross-origin product
+      // thumbnails taint the canvas and throw here; they are skipped.
+      const inlined = new Map<string, string>();
+      for (const img of Array.from(document.images)) {
+        if (!img.src || img.src.startsWith('data:') || inlined.has(img.src)) continue;
+        try {
+          const c = document.createElement('canvas');
+          c.width = img.naturalWidth; c.height = img.naturalHeight;
+          if (!c.width || !c.height) continue;
+          c.getContext('2d')?.drawImage(img, 0, 0);
+          inlined.set(img.src, c.toDataURL('image/png'));
+        } catch { /* cross-origin — cannot be read, will simply be absent */ }
+      }
+
+      const opts = {
         x: window.scrollX, y: window.scrollY,
         width: window.innerWidth, height: window.innerHeight,
         backgroundColor: bg && bg !== 'rgba(0, 0, 0, 0)' ? bg : '#ffffff',
         scale: Math.min(1, 1400 / window.innerWidth),   // cap width so the payload stays small
         useCORS: true, logging: false,
-        ignoreElements: el => el.hasAttribute('data-html2canvas-ignore'),
-      });
+        ignoreElements: (el: Element) => el.hasAttribute('data-html2canvas-ignore'),
+        onclone: (doc: Document) => {
+          doc.querySelectorAll('img').forEach(i => {
+            const d = inlined.get(i.src);
+            if (d) i.src = d;
+          });
+        },
+      };
+
+      // foreignObjectRendering hands layout back to the BROWSER instead of html2canvas's own
+      // re-implementation of CSS. That re-implementation gets `overflow:hidden` text boxes
+      // (Tailwind's `truncate`) wrong: the line boxes collapse, so a receipt card drew its
+      // store name, date and price stacked on top of each other — the reported bug. Verified
+      // against a native screenshot of the same page: this mode matches it exactly, including
+      // the ellipsis, while the default mode overlaps.
+      //
+      // The cost is that nothing inside a foreignObject can hit the network, so only the
+      // images inlined above survive. That is a smaller loss than it sounds: most cross-origin
+      // product thumbnails already fail to draw in the default path, and a bug report needs
+      // legible text far more than it needs a thumbnail.
+      let canvas: HTMLCanvasElement;
+      try {
+        canvas = await html2canvas(document.body, { ...opts, foreignObjectRendering: true });
+      } catch {
+        // Some engines refuse the SVG/foreignObject path outright. A screenshot with bad text
+        // beats no screenshot, and the report still sends without one.
+        canvas = await html2canvas(document.body, { ...opts, foreignObjectRendering: false });
+      }
       setShot(canvas.toDataURL('image/jpeg', 0.85));
     } catch { setShot(null); /* degrade to text-only */ }
     setCapturing(false);
