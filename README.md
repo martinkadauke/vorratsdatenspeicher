@@ -37,17 +37,18 @@ It started as a receipt scanner for one family and grew into a whole household f
 
 ## Quick start
 
-You need [Docker](https://docs.docker.com/get-docker/). Save this as `docker-compose.yml`, **change the two secrets**, and run `docker compose up -d`:
+You need [Docker](https://docs.docker.com/get-docker/). Save this as `docker-compose.yml`, **set the two secrets** to real random strings, and run `docker compose up -d`. Generate each one with `openssl rand -hex 32` — the app **refuses to start** if either is left at the placeholder, missing, or otherwise guessable (one of them signs the full-backup download):
 
 ```yaml
 services:
   vds:
     image: ghcr.io/martinkadauke/vorratsdatenspeicher:stable
-    ports: ["8766:80"]                                 # open http://localhost:8766
+    ports: ["8766:80"]                                 # then open http://<your-server-ip>:8766
     environment:
       DATABASE_URL: postgres://vds:vds@db:5432/vds
-      JWT_SECRET: change-me-to-something-secret        # ← change
-      INTERNAL_SECRET: change-me-to-something-else     # ← change
+      JWT_SECRET: REPLACE_ME                           # ← `openssl rand -hex 32`
+      INTERNAL_SECRET: REPLACE_ME                      # ← `openssl rand -hex 32` (a different one)
+      # MAILBOX_ENC_KEY: REPLACE_ME                    # only if you use e-mail import — see below
     volumes: ["vds-receipts:/receipts"]
     depends_on:
       db: { condition: service_healthy }               # wait for Postgres before first boot
@@ -78,7 +79,9 @@ volumes:
 ```
 > SearXNG ships in the stack so the AI's web-search (churn stage 2, store enrichment) works out of the box — it's [AGPL-3.0](https://github.com/searxng/searxng), run unmodified. It's optional: remove the `searxng` service if you don't want it. Point VDS at it in **Setup → SearXNG** with `http://searxng:8080`. Needs Docker Compose ≥ 2.23 for the inline `configs`.
 
-Then open **http://localhost:8766** — the first-run setup wizard walks you through the rest (AI provider, categories, household). First login is `admin` / `vorrat-start-2026` (override with `ADMIN_PASSWORD`, reset with `ADMIN_RESET=true`).
+Then open **http://&lt;your-server-ip&gt;:8766** (`localhost` only if Docker is on the machine you're sitting at) — the first-run setup wizard walks you through the rest (AI provider, categories, household). First login is `admin` / `vorrat-start-2026`; **change it in the wizard.** Override the seed with `ADMIN_PASSWORD`, or recover a lost password by setting `ADMIN_RESET=true` and restarting once — it re-applies only when the credentials change, so it's safe to leave in place (it won't clobber a password you set in-app on every reboot).
+
+> **E-mail import (optional):** if you connect a mailbox to import invoices, also set **`MAILBOX_ENC_KEY`** to its own `openssl rand -hex 32`. Without it, stored mailbox passwords are encrypted with a key derived from `JWT_SECRET` — which means rotating `JWT_SECRET` would make them undecryptable. Setting a dedicated key keeps the two independent.
 
 > **Install it as an app (PWA):** iPhone → Safari → Share → *Add to Home Screen*. Android → Chrome → *Install app*. PWA install needs HTTPS in the cloud (`http://localhost` is fine locally) — put a reverse proxy like Caddy in front.
 

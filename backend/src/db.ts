@@ -2,6 +2,7 @@ import postgres from 'postgres';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 
 /**
@@ -228,10 +229,45 @@ export async function ensureCashKonten(): Promise<void> {
 
 /** Seed/repair the admin user. Demo: the household-less platform super-admin (is_super_admin).
  *  Non-demo: the single-household admin (original behaviour). */
+/** ADMIN_RESET is a one-shot escape hatch, but with the documented `restart: unless-stopped` a
+ *  self-hoster who leaves the variable set had their admin password silently reverted to the
+ *  seeded default on EVERY reboot — including over an in-app password change. This latch makes a
+ *  force-reset fire only when the desired credentials differ from the last ones a reset applied:
+ *  set it, reboot, get back in, and further reboots are a no-op until you actually change
+ *  ADMIN_PASSWORD. The stored marker is a hash of the credentials, never the password itself. */
+const RESET_MARKER_KEY = 'admin.reset_marker';
+
+function resetMarker(username: string, password: string): string {
+  // Local require: bcrypt is already imported; crypto is stdlib. Keeps the marker opaque.
+  return createHash('sha256').update(`${username} ${password}`).digest('hex');
+}
+
+async function readResetMarker(conn: postgres.Sql): Promise<string | null> {
+  try {
+    const rows = await conn`SELECT value FROM app_config WHERE key = ${RESET_MARKER_KEY}`;
+    return rows.length ? (rows[0].value as string) : null;
+  } catch { return null; }   // pre-migration boot: table not there yet → treat as unset
+}
+
+async function writeResetMarker(conn: postgres.Sql, marker: string): Promise<void> {
+  await conn`
+    INSERT INTO app_config (key, value, updated_at)
+    VALUES (${RESET_MARKER_KEY}, ${conn.json(marker)}, NOW())
+    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`;
+}
+
 export async function ensureAdmin(): Promise<void> {
   const username = process.env.ADMIN_USERNAME ?? 'admin';
   const password = process.env.ADMIN_PASSWORD ?? 'vorrat-start-2026';
-  const force = process.env.ADMIN_RESET === 'true';
+  const marker = resetMarker(username, password);
+  // A reset only counts as "forced" the first time these exact credentials are seen. Same creds
+  // on the next reboot → the marker matches → we leave the current (possibly user-changed) hash.
+  const forceRequested = process.env.ADMIN_RESET === 'true';
+  const forceConn = DEMO_MODE ? adminSql : sql;
+  const force = forceRequested && (await readResetMarker(forceConn)) !== marker;
+  if (forceRequested && !force) {
+    console.log('[seed] ADMIN_RESET set but these credentials were already applied — not resetting again');
+  }
 
   if (DEMO_MODE) {
     const email = process.env.ADMIN_EMAIL ?? null;
@@ -240,6 +276,7 @@ export async function ensureAdmin(): Promise<void> {
       if (force) {
         const hash = await bcrypt.hash(password, 12);
         await adminSql`UPDATE users SET password_hash = ${hash} WHERE username = ${username}`;
+        await writeResetMarker(adminSql, marker);
         console.log(`[seed] ADMIN_RESET: password for "${username}" reset`);
       } else {
         console.log('[seed] platform super-admin exists');
@@ -249,6 +286,7 @@ export async function ensureAdmin(): Promise<void> {
     const hash = await bcrypt.hash(password, 12);
     await adminSql`INSERT INTO users (username, email, password_hash, is_admin, sees_all_konten, is_super_admin, household_id)
                    VALUES (${username}, ${email}, ${hash}, TRUE, TRUE, TRUE, 1)`;
+    await writeResetMarker(adminSql, marker);   // so a later ADMIN_RESET with these same creds is a no-op
     console.log(`[seed] created platform super-admin "${username}"`);
     return;
   }
@@ -259,6 +297,7 @@ export async function ensureAdmin(): Promise<void> {
     if (force) {
       const hash = await bcrypt.hash(password, 12);
       await sql`UPDATE users SET password_hash = ${hash}, is_admin = TRUE WHERE username = ${username}`;
+      await writeResetMarker(sql, marker);
       console.log(`[seed] ADMIN_RESET: password for "${username}" has been reset`);
     } else {
       console.log(`[seed] admin user "${username}" exists`);
@@ -272,5 +311,6 @@ export async function ensureAdmin(): Promise<void> {
   }
   const hash = await bcrypt.hash(password, 12);
   await sql`INSERT INTO users (username, password_hash, is_admin, sees_all_konten) VALUES (${username}, ${hash}, TRUE, TRUE)`;
+  await writeResetMarker(sql, marker);   // so a later ADMIN_RESET with these same creds is a no-op
   console.log(`[seed] created admin user "${username}"`);
 }

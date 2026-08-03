@@ -6,6 +6,7 @@ import { existsSync, statSync } from 'node:fs';
 import './types.js';
 import sql, { adminSql, DEMO_MODE, migrate, ensureAdmin, ensureCashKonten, ensureAppRole, assertRlsCoverage, assertDemoDb } from './db.js';
 import { initSearch } from './lib/search.js';
+import { checkSecrets } from './lib/checkSecrets.js';
 import { backfillAliases, backfillArtikelOcrKey } from './lib/canonicalAlias.js';
 import { PORT, getConfig } from './config.js';
 import { setEmailBaseUrl } from './email/templates.js';
@@ -79,6 +80,11 @@ async function waitForDb(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  // Refuse to boot with a world-known secret (production only) BEFORE we touch the DB or bind a
+  // port — a guessable INTERNAL_SECRET turns /api/backup/download into an unauthenticated dump
+  // of the whole database. Cheapest possible failure: never come up insecure.
+  checkSecrets(msg => console.warn(msg));
+
   // The DB container may still be starting (or mid-initdb) — wait before the first query so a
   // slow Postgres doesn't crash-loop the app with "connection refused".
   await waitForDb();

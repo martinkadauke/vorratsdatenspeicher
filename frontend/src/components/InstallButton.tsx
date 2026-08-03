@@ -10,8 +10,8 @@ const COMPOSE = `services:
     ports: ["8766:80"]
     environment:
       DATABASE_URL: postgres://vds:vds@db:5432/vds
-      JWT_SECRET: geheim-eins          # ändern!
-      INTERNAL_SECRET: geheim-zwei     # ändern!
+      JWT_SECRET: REPLACE_ME           # openssl rand -hex 32
+      INTERNAL_SECRET: REPLACE_ME      # openssl rand -hex 32 (anderer Wert)
     volumes: [vds-belege:/receipts]
     depends_on:
       db: { condition: service_healthy }
