@@ -16,7 +16,9 @@ All on **your** server. Not in someone's cloud.
 
 ---
 
-The name is a joke — it's the German term for state-mandated "data retention." The twist: **you** are the only one storing your data. No account with us, no tracking, no cloud. VDS runs as a single Docker container on your server, NAS, or Raspberry Pi.
+The name is a joke — it's the German term for state-mandated "data retention." The twist: **you** are the only one storing your data. No account with us, no tracking, no cloud. VDS runs as a single Docker container on your own server or NAS.
+
+> **Architecture:** the published images are **linux/amd64** (Intel/AMD) only — an ARM box such as a Raspberry Pi can't pull them. Building from source on ARM is untested; see [Quick start](#quick-start).
 
 It started as a receipt scanner for one family and grew into a whole household finance & pantry hub: multi-user, shared and private accounts, per-person spend split, German & English UI.
 
@@ -84,13 +86,16 @@ Prefer to build from source instead of pulling the image? Replace the `image:` l
 
 VDS uses AI to read receipts, categorise, and answer stats questions. You pick a provider **per task** and mix them freely:
 
-| Provider | Good for | Cost |
-|---|---|---|
-| **Anthropic** (Claude) | Reading receipt photos (vision), reasoning | ~1–2 ct / receipt |
-| **DeepSeek** | Cheap text categorisation | fractions of a cent |
-| **Ollama** | Fully local, zero cloud | free (your GPU) |
+| Provider | Good for | Reads receipts? | Cost |
+|---|---|---|---|
+| **Anthropic** (Claude) | Reading receipts, reasoning | ✅ photos **and** PDFs | ~1–2 ct / receipt |
+| **Ollama** | Fully local, zero cloud | ✅ photos only (a vision model) | free (your GPU) |
+| **DeepSeek** | Cheap text categorisation | ❌ | fractions of a cent |
+| **OpenAI** | Text tasks, if you already have a key | ❌ | varies |
 
-Drop your API key(s) in during setup — or run categorisation entirely on a local Ollama and keep even the AI on-prem.
+> **Only Anthropic and Ollama can read a receipt.** DeepSeek and OpenAI are text-only here — with one of those alone the app runs fine but scans nothing. And Ollama handles photos only: a PDF invoice needs Anthropic.
+
+Drop your API key(s) in during setup — or point the receipt-reading task at a local Ollama vision model and the photos never leave your machine.
 
 ## How it's built
 
@@ -98,7 +103,7 @@ Drop your API key(s) in during setup — or run categorisation entirely on a loc
 |---|---|
 | Frontend | React 18 + Vite + TypeScript, Tailwind, React Query, i18next (DE/EN), a PWA |
 | Backend | Fastify 5 + TypeScript, `postgres.js` (plain SQL, no ORM), JWT auth |
-| AI | Pluggable — Anthropic / DeepSeek / Ollama, per-task model choice |
+| AI | Pluggable — Anthropic / OpenAI / DeepSeek / Ollama, per-task model choice |
 | Data | PostgreSQL. SQL migrations run automatically on boot |
 | Infra | **One** Docker image serves the SPA + API + receipt files |
 
