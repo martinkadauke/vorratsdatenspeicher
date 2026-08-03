@@ -89,7 +89,13 @@ export function Login() {
   };
 
   if (version === null) {
-    return <div className="flex min-h-dvh items-center justify-center"><Spinner /></div>;
+    // The very first frame a demo visitor ever sees — worth carrying the mark.
+    return (
+      <div className="flex min-h-dvh flex-col items-center justify-center gap-4">
+        <img src="/icon-192.png" alt="" className="h-16 w-16 rounded-2xl" />
+        <Spinner />
+      </div>
+    );
   }
 
   const versionBadge = version.sha !== 'unknown' && (

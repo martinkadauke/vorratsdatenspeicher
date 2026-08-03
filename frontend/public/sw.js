@@ -6,7 +6,10 @@ self.addEventListener('push', (event) => {
   const options = {
     body: data.body || '',
     icon: '/icon-192.png',
-    badge: '/icon-192.png',
+    // Android draws `badge` as a monochrome ALPHA MASK — it discards the colours and paints
+    // every opaque pixel one flat tint. icon-192 is a fully opaque cream square, so it came
+    // out as a featureless blob in the status bar. badge-72 is the glyph on transparency.
+    badge: '/badge-72.png',
     tag: data.tag || undefined,
     data: { url: data.url || '/' },
   };

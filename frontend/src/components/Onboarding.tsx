@@ -180,7 +180,11 @@ export function Onboarding() {
             but this z-[60] overlay buries both app-wide feedback triggers. */}
         <FeedbackIconButton className="absolute right-3 top-3 z-10" />
         <div className="flex h-24 shrink-0 items-center justify-center bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-950 dark:to-emerald-900">
-          <div className="text-5xl">{cur.emoji}</div>
+          {/* The welcome step is a brand moment; the later steps' emojis are functional
+              step icons (AI, categories, household) and stay as they are. */}
+          {cur.key === 'welcome'
+            ? <img src="/icon-192.png" alt="" className="h-16 w-16 rounded-2xl shadow-sm" />
+            : <div className="text-5xl">{cur.emoji}</div>}
         </div>
 
         {demo && !isSuper && (

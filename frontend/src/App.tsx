@@ -25,7 +25,12 @@ import { Spinner } from './components/ui';
 
 function Protected({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
-  if (loading) return <div className="flex min-h-dvh items-center justify-center"><Spinner /></div>;
+  if (loading) return (
+    <div className="flex min-h-dvh flex-col items-center justify-center gap-4">
+      <img src="/icon-192.png" alt="" className="h-16 w-16 rounded-2xl" />
+      <Spinner />
+    </div>
+  );
   if (!user) return <Navigate to="/login" replace />;
   return <>{children}</>;
 }
