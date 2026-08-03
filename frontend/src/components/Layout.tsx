@@ -112,7 +112,9 @@ export function Layout() {
       {/* Header */}
       <header className="sticky top-0 z-30 flex items-center justify-between border-b border-zinc-200 bg-white/80 px-3 py-2.5 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/80 sm:px-4">
         <NavLink to="/receipts" className="flex items-center gap-2 text-base font-bold tracking-tight">
-          <img src="/icon.png" alt="" className="h-7 w-7 rounded-md" />
+          {/* icon-192, not icon.png: the latter is the same artwork at 512px/33 kB and was
+              being downloaded in full on every page load to fill a 28px box. */}
+          <img src="/icon-192.png" alt="" className="h-7 w-7 rounded-md" />
           <span>Vorratsdatenspeicher</span>
           {envBadge && (
             <span className={cn('rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase leading-none tracking-wide', envBadge.cls)}>

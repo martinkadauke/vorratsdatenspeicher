@@ -72,7 +72,10 @@ export function InstallButton() {
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center" onClick={() => setOpen(false)}>
           <div className="max-h-[88dvh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-xl dark:bg-zinc-900" onClick={e => e.stopPropagation()}>
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="flex items-center gap-2 text-base font-bold">🗄️ {de ? 'Vorratsdatenspeicher selbst hosten' : 'Self-host Vorratsdatenspeicher'}</h2>
+              <h2 className="flex items-center gap-2 text-base font-bold">
+                <img src="/icon-192.png" alt="" className="h-5 w-5 shrink-0 rounded" />
+                {de ? 'Vorratsdatenspeicher selbst hosten' : 'Self-host Vorratsdatenspeicher'}
+              </h2>
               <div className="flex items-center gap-0.5">
                 {/* This guide's own z-50 backdrop covers the pill below it. */}
                 <FeedbackIconButton />

@@ -105,7 +105,7 @@ export function Login() {
         <Card className="relative w-full max-w-sm p-6 sm:p-7">
           {versionBadge}
           <div className="mb-6 text-center">
-            <div className="text-5xl">🗄️</div>
+            <img src="/icon-192.png" alt="" className="mx-auto h-16 w-16 rounded-2xl" />
             <h1 className="mt-3 text-2xl font-bold tracking-tight">{t('login.title')}</h1>
             {mode === 'signup' ? (
               <p className="mx-auto mt-2 max-w-[16rem] text-[15px] leading-snug text-zinc-600 dark:text-zinc-300">
@@ -180,7 +180,7 @@ export function Login() {
       <Card className="relative w-full max-w-sm p-6">
         {versionBadge}
         <div className="mb-6 text-center">
-          <div className="text-4xl">🗄️</div>
+          <img src="/icon-192.png" alt="" className="mx-auto h-14 w-14 rounded-2xl" />
           <h1 className="mt-2 text-xl font-bold tracking-tight">{t('login.title')}</h1>
         </div>
 

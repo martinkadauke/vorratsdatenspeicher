@@ -48,7 +48,7 @@ export function Reset() {
     <div className="flex min-h-dvh items-center justify-center p-4">
       <Card className="w-full max-w-sm p-6">
         <div className="mb-6 text-center">
-          <div className="text-4xl">🗄️</div>
+          <img src="/icon-192.png" alt="" className="mx-auto h-14 w-14 rounded-2xl" />
           <h1 className="mt-2 text-xl font-bold tracking-tight">
             {info.kind === 'invite' ? t('reset.welcomeTitle') : t('reset.title')}
           </h1>

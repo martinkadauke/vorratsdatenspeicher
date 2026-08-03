@@ -1,7 +1,11 @@
 // Beautiful, email-client-safe HTML report rendered from a dashboard's tiles —
 // the very dashboard the user generated (via natural language or the default
-// view). No JS, no external images: KPI cards + CSS bar charts (deterministic
-// px widths) in layout tables, all inline-styled.
+// view). No JS and no HOTLINKED images: KPI cards + CSS bar charts (deterministic
+// px widths) in layout tables, all inline-styled. The brand mark travels with the
+// message as an inline CID attachment (see email/logo.ts), so it renders on a LAN
+// box too; the mailer attaches it whenever this HTML cites the CID.
+
+import { LOGO_CID, hasEmailLogo } from '../email/logo.js';
 
 interface ReportTile { type: string; title: string; unit: 'eur' | 'count'; rows: { label: string; value: number }[] }
 export interface ReportInput {
@@ -93,7 +97,10 @@ export function buildReport(d: ReportInput): { subject: string; text: string; ht
     <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:100%;background:${C.card};border-radius:16px;overflow:hidden;border:1px solid ${C.line};">
 
       <tr><td style="background:${C.brandDark};background:linear-gradient(135deg,${C.brandDark} 0%,${C.brand} 100%);padding:30px 28px;">
-        <div style="font-size:13px;font-weight:600;color:rgba(255,255,255,.8);">🗄️ Vorratsdatenspeicher</div>
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+          ${hasEmailLogo() ? `<td style="padding-right:8px;"><img src="cid:${LOGO_CID}" width="20" height="20" alt="" style="display:block;width:20px;height:20px;border:0;border-radius:5px;"></td>` : ''}
+          <td style="font-size:13px;font-weight:600;color:rgba(255,255,255,.8);">Vorratsdatenspeicher</td>
+        </tr></table>
         <div style="margin-top:6px;font-size:23px;font-weight:800;color:#ffffff;">${esc(title)}</div>
         ${d.periodLabel ? `<div style="margin-top:2px;font-size:14px;color:rgba(255,255,255,.85);">${esc(d.periodLabel)}</div>` : ''}
       </td></tr>

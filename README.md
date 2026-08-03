@@ -1,6 +1,8 @@
 <div align="center">
 
-# 🗄️ Vorratsdatenspeicher
+<img src="frontend/public/icon-192.png" alt="" width="96" height="96">
+
+# Vorratsdatenspeicher
 
 **The mobile-first, self-hosted household app.**
 Snap a receipt at the checkout — AI reads every line item, sorts it, and shows you where your money goes.

@@ -1,12 +1,24 @@
 import nodemailer from 'nodemailer';
 import { getConfig } from './config.js';
+import { LOGO_CID, emailLogoAttachment } from './email/logo.js';
 
 export async function smtpConfigured(): Promise<boolean> {
   const host = await getConfig('smtp.host');
   return !!host;
 }
 
-export interface MailAttachment { filename: string; content: string; encoding?: 'base64'; contentType?: string; }
+export interface MailAttachment { filename: string; content: string; encoding?: 'base64'; contentType?: string; cid?: string; }
+
+/** Inline the brand mark whenever the HTML actually references it. Done here, at the single
+ *  choke point every send passes through, rather than in each of the eleven templates — a
+ *  template that forgets the attachment would mail a broken image, and this makes that
+ *  unrepresentable. Adds nothing to plain-text mail or to HTML that never cites the CID. */
+function withLogo(html: string | undefined, attachments?: MailAttachment[]): MailAttachment[] | undefined {
+  if (!html || !html.includes(`cid:${LOGO_CID}`)) return attachments;
+  const logo = emailLogoAttachment();
+  if (!logo) return attachments;
+  return [...(attachments ?? []), logo];
+}
 
 /** Why mail could not go out, coarse enough to hand to ANY logged-in user: "nobody set it up"
  *  vs "it is set up and the relay said no". Never the host, the account or the transport error —
@@ -51,7 +63,8 @@ export async function sendMail(to: string, subject: string, text: string, html?:
   if (!transporter) throw new Error('SMTP ist nicht konfiguriert (Admin → SMTP)');
   const from = await getConfig('smtp.from');
 
-  await transporter.sendMail({ from, to, subject, text, ...(html ? { html } : {}), ...(replyTo ? { replyTo } : {}), ...(attachments?.length ? { attachments } : {}) });
+  const all = withLogo(html, attachments);
+  await transporter.sendMail({ from, to, subject, text, ...(html ? { html } : {}), ...(replyTo ? { replyTo } : {}), ...(all?.length ? { attachments: all } : {}) });
 }
 
 /** Send through settings the operator has typed but NOT saved — the SMTP dialog's "Test senden".
@@ -64,7 +77,10 @@ export async function sendMailWith(settings: SmtpSettings, to: string, subject: 
   const transporter = await smtpTransport(settings);
   if (!transporter) throw new Error('SMTP ist nicht konfiguriert (Admin → SMTP)');
   const from = settings.from || await getConfig('smtp.from');
-  await transporter.sendMail({ from, to, subject, text, ...(html ? { html } : {}) });
+  // The test mail is built from the same layout(), so it needs the same inline mark —
+  // otherwise the one mail an operator looks at closely is the one with a hole in it.
+  const all = withLogo(html);
+  await transporter.sendMail({ from, to, subject, text, ...(html ? { html } : {}), ...(all?.length ? { attachments: all } : {}) });
 }
 
 // ── live SMTP check ─────────────────────────────────────────────────────────

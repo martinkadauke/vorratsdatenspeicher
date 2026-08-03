@@ -1,6 +1,8 @@
 // VDS-styled transactional emails. Inline styles + table layout only, so they
 // render consistently across Gmail / Outlook / Apple Mail. Palette mirrors the
-// app: zinc surfaces, emerald accent, 🗄️ wordmark.
+// app: zinc surfaces, emerald accent, the VDS basket mark.
+
+import { LOGO_CID, hasEmailLogo } from './logo.js';
 
 const C = {
   bg: '#f4f4f5',          // zinc-100
@@ -19,11 +21,19 @@ const C = {
 const esc = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-// Public base URL for assets referenced in emails (the logo). Set on boot from
-// app.base_url so the hosted icon resolves in external clients like Gmail; falls
-// back to the 🗄️ wordmark when unknown.
+// Public base URL for LINKS in emails. It is deliberately NOT used for the logo any more:
+// hotlinking it broke the mark for every self-hoster whose base_url is a LAN address, because
+// Gmail/Outlook fetch images through their own proxies and never reach RFC1918. See email/logo.ts.
 let EMAIL_BASE = '';
 export function setEmailBaseUrl(url: string): void { EMAIL_BASE = (url || '').replace(/\/$/, ''); }
+
+/** The brand mark as an inline attachment, with a text fallback when the asset is missing
+ *  (backend running from source without a built frontend). */
+function brandMark(size: number): string {
+  return hasEmailLogo()
+    ? `<img src="cid:${LOGO_CID}" width="${size}" height="${size}" alt="" style="display:block;width:${size}px;height:${size}px;border:0;border-radius:${Math.round(size / 4)}px;">`
+    : '';
+}
 
 /** Wraps inner content in the branded card + outer background. */
 function layout(opts: { preheader: string; heading: string; inner: string }): string {
@@ -44,9 +54,7 @@ function layout(opts: { preheader: string; heading: string; inner: string }): st
       <!-- brand -->
       <tr><td style="padding:0 4px 16px;">
         <table role="presentation" cellpadding="0" cellspacing="0"><tr>
-          <td style="padding-right:10px;">${EMAIL_BASE
-            ? `<img src="${EMAIL_BASE}/icon-192.png" width="32" height="32" alt="" style="display:block;width:32px;height:32px;border-radius:8px;">`
-            : '<span style="font-size:24px;line-height:1;">🗄️</span>'}</td>
+          ${hasEmailLogo() ? `<td style="padding-right:10px;">${brandMark(32)}</td>` : ''}
           <td style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:700;color:${C.heading};letter-spacing:-0.01em;">Vorratsdatenspeicher</td>
         </tr></table>
       </td></tr>
@@ -103,7 +111,8 @@ const footerNote = (text: string) => `
 
 /** Invitation email: someone was invited to set their password and join. */
 export function inviteEmail(opts: { username: string; link: string }): { subject: string; text: string; html: string } {
-  const subject = 'Deine Einladung zu Vorratsdatenspeicher 🗄️';
+  // No emoji: a subject line cannot carry the real mark, and the file-cabinet glyph was never it.
+  const subject = 'Deine Einladung zu Vorratsdatenspeicher';
   const text =
     `Du wurdest zu Vorratsdatenspeicher eingeladen – dem gemeinsamen Vorrats- & Ausgaben-Tracker für euren Haushalt.\n\n` +
     `Dein Benutzername: ${opts.username}\n\n` +
