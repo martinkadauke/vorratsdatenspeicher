@@ -2977,6 +2977,12 @@ function BankLinkPicker({ tx, t, onClose, onPick, onApprove }: {
     },
     onError: (e) => toast((e as Error).message, 'error'),
   });
+  // The receipt already has a booked refund (e.g. from the mail flow) → link the credit only.
+  const linkRefundMut = useMutation({
+    mutationFn: (einkaufId: number) => api(`/api/finances/bank/${tx.id}/refund`, { method: 'POST', body: { link_only: true, einkauf_id: einkaufId } }),
+    onSuccess: () => { toast(t('finances.bank.creditLinked'), 'success'); void qc.invalidateQueries(); onClose(); },
+    onError: (e) => toast((e as Error).message, 'error'),
+  });
   // Debit → receipt candidates: offer a "view" (new tab) so the user can inspect the
   // receipt before linking (e.g. tell apart several Amazon orders found by item name).
   const isDebit = tx.amount < 0;
@@ -3007,9 +3013,10 @@ function BankLinkPicker({ tx, t, onClose, onPick, onApprove }: {
         amount={Math.abs(tx.amount)}
         merchant={tx.counterparty}
         candidates={refundCands.data?.candidates ?? []}
-        booking={refundMut.isPending}
+        booking={refundMut.isPending || linkRefundMut.isPending}
         onClose={() => setRefundMode(false)}
         onBook={(p) => refundMut.mutate(p)}
+        onLinkOnly={(eid) => linkRefundMut.mutate(eid)}
       />
     );
   }

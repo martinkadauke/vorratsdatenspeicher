@@ -290,8 +290,18 @@ export async function findRefundCandidates(
            OR EXISTS(SELECT 1 FROM artikel ar WHERE ar.einkauf_id = e.id AND ar.original_text ILIKE ${'%' + ref + '%'}))` : F;
   const itemMatch = itemLike
     ? sql`EXISTS(SELECT 1 FROM artikel ai WHERE ai.einkauf_id = e.id AND NOT ai.is_refund AND (ai.name ILIKE ${itemLike} OR ai.canonical_name ILIKE ${itemLike} OR ai.ai_guess ILIKE ${itemLike} OR ai.original_text ILIKE ${itemLike}))` : F;
-  const vendorMatch = like ? sql`e.roh_ladenname ILIKE ${like}` : F;
-  const amountNear = amtPos ? sql`ABS(COALESCE(e.gesamt_betrag,0) - ${m.amount}::numeric) <= GREATEST(1, ${m.amount}::numeric * 0.01)` : F;
+  // Bidirectional vendor match: the mail flow passes a SHORT merchant ("Amazon") so the receipt
+  // name CONTAINS it; the bank flow passes the LONG bank counterparty ("AMAZON PAYMENTS EUROPE …")
+  // which CONTAINS the receipt's (short) name. Guard the reverse on length ≥ 3 so a 1–2 char store
+  // name can't match everything.
+  const vendorMatch = like
+    ? sql`(e.roh_ladenname ILIKE ${like} OR (LENGTH(COALESCE(e.roh_ladenname,'')) >= 3 AND ${merchant} ILIKE '%' || e.roh_ladenname || '%'))` : F;
+  // Amount matches the receipt TOTAL (full refund) OR a single non-refund POSITION (a PARTIAL
+  // refund — an 89,99 credit against a 179,98 receipt that has an 89,99 line).
+  const amountNear = amtPos
+    ? sql`(ABS(COALESCE(e.gesamt_betrag,0) - ${m.amount}::numeric) <= GREATEST(1, ${m.amount}::numeric * 0.01)
+           OR EXISTS(SELECT 1 FROM artikel ap WHERE ap.einkauf_id = e.id AND NOT ap.is_refund
+                     AND ABS(COALESCE(ap.preis,0) - ${m.amount}::numeric) <= GREATEST(0.5, ${m.amount}::numeric * 0.02)))` : F;
   const anySignal = !!(ref || itemLike || like || amtPos);
   // ORDER BY from PRESENT signals only (a missing signal is the bare constant FALSE, which Postgres
   // rejects in ORDER BY). Innermost tie-breaker first, then prepend by priority.
@@ -319,7 +329,7 @@ export async function findRefundCandidates(
       SELECT id, COALESCE(NULLIF(canonical_name,''), NULLIF(ai_guess,''), name, '?') AS name,
              preis::float8 AS preis, menge::float8 AS menge, einheit
       FROM artikel WHERE einkauf_id = ${c.id as number} AND NOT is_refund
-      ORDER BY (${posItemMatch}) DESC, ABS(COALESCE(preis,0) - ${m.amount}::numeric) ASC, id ASC`;
+      ORDER BY ${itemLike ? sql`(${posItemMatch}) DESC,` : sql``} ABS(COALESCE(preis,0) - ${m.amount}::numeric) ASC, id ASC`;
     candidates.push({
       id: c.id as number, datum: c.datum as string, roh_ladenname: c.roh_ladenname as string | null,
       gesamt_betrag: (c.gesamt_betrag as number | null) ?? null, konto_name: c.konto_name as string | null,

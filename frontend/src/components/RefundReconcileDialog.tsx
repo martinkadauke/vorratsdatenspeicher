@@ -34,6 +34,7 @@ export interface RefundReconcileDialogProps {
   onClose: () => void;
   onBook: (p: RefundBookPayload) => void;
   onViewMail?: () => void;        // paperclip → open the refund mail (caller knows the endpoint)
+  onLinkOnly?: (einkaufId: number) => void; // (bank flow) receipt already has a booked refund → link the credit, don't re-book
 }
 
 /** Reconcile a refund against a receipt: mark which position(s)/quantities came back (a combined
@@ -41,7 +42,7 @@ export interface RefundReconcileDialogProps {
  *  Red-marks positions whose price is a multiple of the refund. Used from the bank-credit assign,
  *  the mail import log, and the receipt detail — the caller supplies onBook + the candidates. */
 export function RefundReconcileDialog({
-  amount, editableAmount, item, merchant, mailPositions, candidates, initialReceiptId, booking, onClose, onBook, onViewMail,
+  amount, editableAmount, item, merchant, mailPositions, candidates, initialReceiptId, booking, onClose, onBook, onViewMail, onLinkOnly,
 }: RefundReconcileDialogProps) {
   const { t } = useTranslation();
   const [receiptId, setReceiptId] = useState<number | null>(initialReceiptId ?? candidates[0]?.id ?? null);
@@ -52,6 +53,7 @@ export function RefundReconcileDialog({
 
   const amt = round2(Number((amtStr || '0').replace(',', '.')) || 0);
   const receipt = useMemo(() => candidates.find(c => c.id === receiptId) ?? null, [candidates, receiptId]);
+  const alreadyRefunded = !!onLinkOnly && receipt?.already_refunded === true; // link-the-credit instead of re-booking
 
   // On receipt switch, pre-select red-marked positions with the quantity the refund covers
   // (amount / unit price, clamped to the line's quantity).
@@ -159,6 +161,12 @@ export function RefundReconcileDialog({
           </p>
         )}
 
+        {alreadyRefunded ? (
+          <div className="rounded-lg border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200">
+            {t('refund.alreadyRefunded', 'Dieser Beleg hat bereits eine gebuchte Erstattung. Die Gutschrift wird nur als Bank-Nachweis zugeordnet — es wird keine zweite Erstattung gebucht.')}
+          </div>
+        ) : (
+        <>
         {/* discount-only toggle */}
         <label className="flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded-lg bg-zinc-50 px-3 py-2 text-sm dark:bg-zinc-800/60">
           <input type="checkbox" checked={discountOnly} onChange={e => setDiscountOnly(e.target.checked)} className="h-4 w-4" />
@@ -264,11 +272,20 @@ export function RefundReconcileDialog({
           </div>
         )}
 
+        </>
+        )}
+
         <div className="flex justify-end gap-2 pt-1">
           <Button variant="secondary" onClick={onClose}>{t('common.cancel', 'Abbrechen')}</Button>
-          <Button onClick={book} disabled={!valid || booking}>
-            {booking ? t('common.saving', 'Speichern…') : t('refund.book', 'Rückerstattung buchen')}
-          </Button>
+          {alreadyRefunded ? (
+            <Button onClick={() => receipt && onLinkOnly!(receipt.id)} disabled={!receipt || booking}>
+              {booking ? t('common.saving', 'Speichern…') : t('refund.linkCredit', 'Gutschrift zuordnen')}
+            </Button>
+          ) : (
+            <Button onClick={book} disabled={!valid || booking}>
+              {booking ? t('common.saving', 'Speichern…') : t('refund.book', 'Rückerstattung buchen')}
+            </Button>
+          )}
         </div>
       </div>
     </Modal>

@@ -2430,12 +2430,21 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
     const [bt] = await sql`SELECT amount::float8 AS amount, counterparty, booking_date::text AS booking FROM bank_tx WHERE id = ${id}`;
     if (!bt) return reply.code(404).send({ error: 'not found' });
     const q = String((req.query as { q?: string }).q ?? '').trim();
+    const amt = Math.abs(bt.amount as number);
     const candidates = await findRefundCandidates(req.user!.id, {
-      amount: Math.abs(bt.amount as number),
-      merchant: q || ((bt.counterparty as string | null) ?? ''),
+      amount: amt, merchant: q || ((bt.counterparty as string | null) ?? ''),
       item: q, order_ref: q, datum: (bt.booking as string | null) ?? null,
     });
-    return { candidates };
+    // Flag candidates that ALREADY carry a booked refund for ~this amount (e.g. the mail refund was
+    // confirmed earlier) — the credit should then just be LINKED (bank evidence), not re-booked.
+    const ids = candidates.map(c => c.id);
+    const refunded = ids.length
+      ? await sql`SELECT DISTINCT einkauf_id FROM artikel
+          WHERE einkauf_id = ANY(${ids}) AND is_refund
+            AND ABS(COALESCE(preis,0) + ${amt}::numeric) <= GREATEST(0.5, ${amt}::numeric * 0.02)`
+      : [];
+    const refundedSet = new Set(refunded.map(r => r.einkauf_id as number));
+    return { candidates: candidates.map(c => ({ ...c, already_refunded: refundedSet.has(c.id) })) };
   });
 
   /** Book a bank CREDIT as a REFUND on an existing receipt (negative position(s)), NOT income —
@@ -2448,7 +2457,28 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
     const [bt] = await sql`SELECT amount::float8 AS amount FROM bank_tx WHERE id = ${id}`;
     if (!bt) return reply.code(404).send({ error: 'not found' });
     if ((bt.amount as number) <= 0) return reply.code(400).send({ error: 'Nur Gutschriften können als Erstattung gebucht werden.' });
-    const body = (req.body ?? {}) as { einkauf_id?: unknown; discount_only?: unknown; amount?: unknown; description?: unknown; lines?: unknown };
+    const body = (req.body ?? {}) as { einkauf_id?: unknown; discount_only?: unknown; amount?: unknown; description?: unknown; lines?: unknown; link_only?: unknown };
+    // link_only: the receipt ALREADY has a booked refund (e.g. via the mail flow) — just consume the
+    // credit as bank-side evidence, NO new position (else it double-books the same money).
+    if (body.link_only === true) {
+      const einkaufId = Number(body.einkauf_id);
+      if (!Number.isInteger(einkaufId)) return reply.code(400).send({ error: 'einkauf_id required' });
+      const [u] = await sql`SELECT sees_all_konten FROM users WHERE id = ${req.user!.id}`;
+      const seesAll = u?.sees_all_konten === true;
+      const [tgt] = await sql`
+        SELECT e.id FROM einkauf e WHERE e.id = ${einkaufId}
+          AND EXISTS (SELECT 1 FROM artikel a WHERE a.einkauf_id = e.id AND a.is_refund)
+          ${seesAll ? sql`` : sql`AND (e.private_for_user_id IS NULL OR e.private_for_user_id = ${req.user!.id})`}`;
+      if (!tgt) return reply.code(404).send({ error: 'Beleg nicht gefunden oder hat keine Erstattung.' });
+      const linked = await sql`
+        UPDATE bank_tx SET einkauf_id = ${einkaufId}
+        WHERE id = ${id} AND einkauf_id IS NULL
+          AND NOT EXISTS (SELECT 1 FROM income i WHERE i.bank_tx_id = bank_tx.id)
+          AND NOT EXISTS (SELECT 1 FROM fixed_cost_check fc WHERE fc.bank_tx_id = bank_tx.id)
+        RETURNING id`;
+      if (!linked.length) return reply.code(400).send({ error: 'Bankbuchung ist bereits zugeordnet.' });
+      return { ok: true, einkauf_id: einkaufId, linked: true };
+    }
     const lines: RefundReturnLine[] | undefined = Array.isArray(body.lines)
       ? body.lines.map((l) => ({ artikel_id: Number((l as { artikel_id?: unknown }).artikel_id), return_qty: Number((l as { return_qty?: unknown }).return_qty) }))
       : undefined;

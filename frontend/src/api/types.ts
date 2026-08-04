@@ -59,6 +59,7 @@ export interface RefundCandidate {
   id: number; datum: string; roh_ladenname: string | null;
   gesamt_betrag: number | null; konto_name: string | null;
   positions: RefundCandidatePosition[];
+  already_refunded?: boolean;   // (bank flow) receipt already carries a booked refund ~this amount → link, don't re-book
 }
 /** What the reconciliation dialog sends to whichever refund endpoint booked it. */
 export interface RefundBookPayload {
