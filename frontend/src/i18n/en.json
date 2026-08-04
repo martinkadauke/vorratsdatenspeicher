@@ -103,6 +103,7 @@
       "tapToLinkIncome": "→ link income",
       "linkTitle": "Link a receipt",
       "linkIncomeTitle": "Link income",
+      "bookRefund": "Book a refund instead",
       "matched": "Bank",
       "noCandidates": "No matching receipts found (amount/date).",
       "unlink": "Unlink",
@@ -476,6 +477,7 @@
     "refunded": "−{{amount}} refunded",
     "refundChip": "Refund",
     "addRefund": "Record refund",
+    "returnedBadge": "returned",
     "refundModalTitle": "Record refund",
     "refundModalHint": "A refund for an item on this receipt. It's booked as a negative position and the item disappears from product statistics.",
     "refundForPosition": "For which item?",
@@ -1159,6 +1161,8 @@
         "refundDescription": "Description",
         "refundBook": "Book refund",
         "refundBooked": "Refund booked on the receipt.",
+        "reconcile": "review",
+        "viewMail": "Mail",
         "noSubject": "(no subject)",
         "status": {
           "imported": "Imported · {{n}} items",
@@ -1168,10 +1172,40 @@
           "processing": "Working…",
           "income": "Income",
           "incomeAmount": "Income · €{{amount}}",
-          "refund": "Refund"
+          "refund": "Refund",
+          "refundSuggested": "Refund? · review"
         }
       }
     }
+  },
+  "refund": {
+    "title": "Assign refund",
+    "amountLabel": "Refund amount",
+    "viewMail": "Refund mail",
+    "receipt": "Receipt",
+    "discountOnly": "discount only",
+    "discountOnlyHint": "price reduction, no item returned",
+    "discountBody": "A negative line of {{amount}} is added to the receipt; the receipt total drops accordingly.",
+    "receiptPositions": "Receipt positions",
+    "matchHint": "matches the refund",
+    "returnQty": "returned:",
+    "of": "of",
+    "wholeLine": "whole line",
+    "noPositions": "No positions on this receipt.",
+    "noCandidates": "No matching receipt found. Open the receipt directly and use \"Record refund\" there.",
+    "mailPositions": "Refund mail",
+    "itemHint": "Refunded item per mail: {{item}}",
+    "noteLabel": "Note (optional)",
+    "notePlaceholder": "e.g. Amazon return",
+    "receiptNet": "Receipt net",
+    "returnedTotal": "Returned total",
+    "mismatch": "differs from {{amount}}",
+    "book": "Book refund",
+    "mailTitle": "Refund mail",
+    "noSubject": "(no subject)",
+    "openPdf": "Open PDF",
+    "hidePdf": "Hide PDF",
+    "noMail": "No refund mail stored."
   },
   "positionen": {
     "search": "Search…",

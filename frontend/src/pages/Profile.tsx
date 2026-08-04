@@ -2,12 +2,15 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Sparkles, Inbox, Bell, ChevronDown, ChevronRight } from 'lucide-react';
+import { LogOut, Sparkles, Inbox, Bell, ChevronDown, ChevronRight, Paperclip, Undo2 } from 'lucide-react';
 import { api } from '../api/client';
 import { useAuth } from '../context/auth';
 import { setLanguage } from '../i18n';
 import { pushSupported, pushStatus, enablePush, disablePush } from '../lib/push';
 import { Card, Button, Input, Label, Select, Switch, Modal } from '../components/ui';
+import { RefundReconcileDialog } from '../components/RefundReconcileDialog';
+import { RefundMailModal, type RefundMailItem } from '../components/RefundMailModal';
+import type { RefundCandidate, RefundBookPayload } from '../api/types';
 import { AppVersion } from '../components/AppVersion';
 import { cn } from '../lib/utils';
 import { EmojiPicker } from '../components/EmojiPicker';
@@ -371,8 +374,6 @@ interface LogEntry {
 
 interface IncomePreview { ledgerId: number; amount: number; datum: string | null; category_path: string; description: string; confidence: number }
 const INCOME_CATEGORIES = ['Gehalt', 'Erstattung', 'Verkauf', 'Geschenk', 'Sonstiges'] as const;
-interface RefundCandidate { id: number; datum: string; roh_ladenname: string | null; gesamt_betrag: number | null; konto_name: string | null; positions: { id: number; name: string; preis: number | null }[] }
-interface RefundState { ledgerId: number; amount: number; description: string; candidates: RefundCandidate[]; einkauf_id: number | null; refund_for_artikel_id: number | null }
 
 /** Pick a coloured badge + label key for an import-log row. An 'imported' row
  *  with zero line items is called out separately — it made a receipt shell but
@@ -380,6 +381,7 @@ interface RefundState { ledgerId: number; amount: number; description: string; c
 function statusMeta(e: LogEntry): { cls: string; key: string } {
   if (e.status === 'income') return { cls: 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300', key: 'income' };
   if (e.status === 'refund') return { cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300', key: 'refund' };
+  if (e.status === 'refund_suggested') return { cls: 'bg-amber-50 text-amber-700 ring-1 ring-amber-300 dark:bg-amber-950/30 dark:text-amber-300 dark:ring-amber-800', key: 'refundSuggested' };
   if (e.status === 'processing') return { cls: 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300', key: 'processing' };
   if (e.status === 'failed') return { cls: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300', key: 'failed' };
   if (e.status === 'skipped') return { cls: 'bg-zinc-200 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300', key: 'skipped' };
@@ -403,7 +405,13 @@ function ImportLog() {
   const entries = data?.entries ?? [];
 
   const [incomePreview, setIncomePreview] = useState<IncomePreview | null>(null);
-  const [refundState, setRefundState] = useState<RefundState | null>(null);
+  const [refundDlg, setRefundDlg] = useState<{ ledgerId: number; amount: number; item?: string | null; merchant?: string | null; candidates: RefundCandidate[] } | null>(null);
+  const [mailView, setMailView] = useState<number | null>(null); // ledger id of a refund_suggested mail to view
+  const mailViewQ = useQuery({
+    queryKey: ['refund-mail-log', mailView],
+    queryFn: () => api<RefundMailItem>(`/api/me/mailbox/log/${mailView}/refund-mail`),
+    enabled: mailView != null,
+  });
 
   type RetryResp = {
     status?: string; einkauf_id?: number | null; error?: string;
@@ -421,9 +429,8 @@ function ImportLog() {
         setIncomePreview({ ledgerId: v.id, amount: r.income.amount, datum: r.income.datum, category_path: r.income.category_path, description: r.income.description, confidence: r.income.confidence });
         return;
       }
-      if (r.status === 'refund_preview' && r.refund) {   // refund proposed — pick the receipt/position, then book
-        const cands = r.candidates ?? [];
-        setRefundState({ ledgerId: v.id, amount: r.refund.amount, description: r.refund.description || r.refund.merchant, candidates: cands, einkauf_id: cands[0]?.id ?? null, refund_for_artikel_id: cands[0]?.positions[0]?.id ?? null });
+      if (r.status === 'refund_preview' && r.refund) {   // refund proposed — reconcile on the receipt, then book
+        setRefundDlg({ ledgerId: v.id, amount: r.refund.amount, merchant: r.refund.merchant, candidates: r.candidates ?? [] });
         return;
       }
       if (r.einkauf_id) toast(t('profile.mailbox.log.retryImported'), 'success');
@@ -434,16 +441,24 @@ function ImportLog() {
   });
 
   const bookRefund = useMutation({
-    mutationFn: (p: RefundState) => api<RetryResp>(`/api/me/mailbox/log/${p.ledgerId}/retry`, {
+    mutationFn: (p: RefundBookPayload & { ledgerId: number }) => api<RetryResp>(`/api/me/mailbox/log/${p.ledgerId}/retry`, {
       method: 'POST',
-      body: { confirmRefund: { einkauf_id: p.einkauf_id, refund_for_artikel_id: p.refund_for_artikel_id, amount: p.amount, description: p.description } },
+      body: { confirmRefund: { einkauf_id: p.einkauf_id, discount_only: p.discount_only, amount: p.amount, description: p.description, lines: p.lines } },
     }),
     onSuccess: (r) => {
       if (r.error) { toast(t('profile.mailbox.log.retryFail', { error: r.error }), 'error'); return; }
       toast(t('profile.mailbox.log.refundBooked'), 'success');
-      setRefundState(null);
+      setRefundDlg(null);
       void qc.invalidateQueries({ queryKey: ['mailbox-log'] });
+      void qc.invalidateQueries({ queryKey: ['receipts'] });
     },
+    onError: (e) => toast(t('profile.mailbox.log.retryFail', { error: (e as Error).message }), 'error'),
+  });
+
+  // Open the reconciliation for an AUTO-DETECTED 'refund_suggested' entry (fetches candidates).
+  const openReconcile = useMutation({
+    mutationFn: (id: number) => api<{ refund: { amount: number; merchant: string | null; item: string | null }; candidates: RefundCandidate[] }>(`/api/me/mailbox/log/${id}/refund-preview`),
+    onSuccess: (r, id) => setRefundDlg({ ledgerId: id, amount: r.refund.amount, merchant: r.refund.merchant, item: r.refund.item, candidates: r.candidates }),
     onError: (e) => toast(t('profile.mailbox.log.retryFail', { error: (e as Error).message }), 'error'),
   });
 
@@ -498,7 +513,9 @@ function ImportLog() {
                   }}
                   onRetry={() => retry.mutate({ id: e.id })}
                   onInstruct={(instruction) => retry.mutate({ id: e.id, instruction })}
-                  busy={retry.isPending && retry.variables?.id === e.id}
+                  onReconcile={() => openReconcile.mutate(e.id)}
+                  onViewMail={() => setMailView(e.id)}
+                  busy={(retry.isPending && retry.variables?.id === e.id) || (openReconcile.isPending && openReconcile.variables === e.id)}
                 />
               ))}
             </ul>
@@ -516,14 +533,20 @@ function ImportLog() {
         />
       )}
 
-      {refundState && (
-        <RefundConfirm
-          state={refundState}
-          onChange={setRefundState}
-          onCancel={() => setRefundState(null)}
-          onBook={() => bookRefund.mutate(refundState)}
+      {refundDlg && (
+        <RefundReconcileDialog
+          amount={refundDlg.amount}
+          item={refundDlg.item}
+          merchant={refundDlg.merchant}
+          candidates={refundDlg.candidates}
           booking={bookRefund.isPending}
+          onClose={() => setRefundDlg(null)}
+          onBook={(p) => bookRefund.mutate({ ...p, ledgerId: refundDlg.ledgerId })}
+          onViewMail={() => setMailView(refundDlg.ledgerId)}
         />
+      )}
+      {mailView != null && (
+        <RefundMailModal mails={mailViewQ.data ? [mailViewQ.data] : []} onClose={() => setMailView(null)} />
       )}
     </div>
   );
@@ -533,71 +556,6 @@ function ImportLog() {
  *  (and the exact position it refunds) so the refunded item vanishes from product statistics, and
  *  confirms the amount before the negative position is booked. Empty candidates → guidance to add
  *  it manually on the receipt. */
-function RefundConfirm({ state, onChange, onCancel, onBook, booking }: {
-  state: RefundState; onChange: (s: RefundState) => void; onCancel: () => void; onBook: () => void; booking: boolean;
-}) {
-  const { t, i18n } = useTranslation();
-  const valid = Number.isFinite(state.amount) && state.amount > 0 && state.einkauf_id != null;
-  const chosen = state.candidates.find(c => c.id === state.einkauf_id) ?? null;
-  const eur = (n: number) => new Intl.NumberFormat(i18n.language, { style: 'currency', currency: 'EUR' }).format(n);
-  return (
-    <Modal open onClose={onCancel} title={t('profile.mailbox.log.refundTitle')}>
-      <div className="flex flex-col gap-3">
-        <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('profile.mailbox.log.refundHint')}</p>
-        {state.candidates.length === 0 ? (
-          <p className="rounded-lg bg-amber-50 p-2 text-sm text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
-            {t('profile.mailbox.log.refundNoCandidates')}
-          </p>
-        ) : (
-          <>
-            <div>
-              <Label>{t('profile.mailbox.log.refundAmount')}</Label>
-              <Input type="number" step="0.01" min="0" value={String(state.amount)}
-                onChange={ev => onChange({ ...state, amount: Number(ev.target.value) })} />
-            </div>
-            <div>
-              <Label>{t('profile.mailbox.log.refundReceipt')}</Label>
-              <Select value={String(state.einkauf_id ?? '')} onChange={ev => {
-                const id = Number(ev.target.value);
-                const c = state.candidates.find(x => x.id === id) ?? null;
-                onChange({ ...state, einkauf_id: id, refund_for_artikel_id: c?.positions[0]?.id ?? null });
-              }}>
-                {state.candidates.map(c => (
-                  <option key={c.id} value={c.id}>
-                    {(c.roh_ladenname || '?')} · {c.datum} · {c.gesamt_betrag != null ? eur(c.gesamt_betrag) : '—'}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            {chosen && chosen.positions.length > 0 && (
-              <div>
-                <Label>{t('profile.mailbox.log.refundPosition')}</Label>
-                <Select value={String(state.refund_for_artikel_id ?? '')} onChange={ev => onChange({ ...state, refund_for_artikel_id: ev.target.value ? Number(ev.target.value) : null })}>
-                  <option value="">{t('profile.mailbox.log.refundWholeReceipt')}</option>
-                  {chosen.positions.map(p => (
-                    <option key={p.id} value={p.id}>{p.name}{p.preis != null ? ` · ${eur(p.preis)}` : ''}</option>
-                  ))}
-                </Select>
-              </div>
-            )}
-            <div>
-              <Label>{t('profile.mailbox.log.refundDescription')}</Label>
-              <Input value={state.description} onChange={ev => onChange({ ...state, description: ev.target.value })} />
-            </div>
-          </>
-        )}
-        <div className="flex justify-end gap-2 pt-1">
-          <Button variant="secondary" onClick={onCancel}>{t('common.cancel')}</Button>
-          {state.candidates.length > 0 && (
-            <Button onClick={onBook} disabled={!valid || booking}>
-              {booking ? t('common.saving') : t('profile.mailbox.log.refundBook')}
-            </Button>
-          )}
-        </div>
-      </div>
-    </Modal>
-  );
-}
 
 /** Confirm dialog for an income the AI proposed from a mail — the amount is shown and editable
  *  BEFORE anything is written to the books (the mail is vendor-authored text, so a human okays
@@ -643,8 +601,9 @@ function IncomeConfirm({ preview, onChange, onCancel, onBook, booking }: {
   );
 }
 
-function LogRow({ e, onOpen, onRetry, onInstruct, busy }: {
-  e: LogEntry; onOpen: () => void; onRetry: () => void; onInstruct: (instruction: string) => void; busy: boolean;
+function LogRow({ e, onOpen, onRetry, onInstruct, onReconcile, onViewMail, busy }: {
+  e: LogEntry; onOpen: () => void; onRetry: () => void; onInstruct: (instruction: string) => void;
+  onReconcile: () => void; onViewMail: () => void; busy: boolean;
 }) {
   const { t, i18n } = useTranslation();
   const [instructOpen, setInstructOpen] = useState(false);
@@ -698,6 +657,15 @@ function LogRow({ e, onOpen, onRetry, onInstruct, busy }: {
             <button onClick={onOpen} className="text-[11px] text-emerald-600 hover:underline">
               {e.income_id ? t('profile.mailbox.log.viewIncome') : t('profile.mailbox.log.view')}
             </button>
+          ) : e.status === 'refund_suggested' ? (
+            <div className="flex flex-col items-end gap-0.5">
+              <button onClick={onReconcile} disabled={busy} className="text-[11px] font-medium text-amber-600 hover:underline disabled:opacity-50">
+                {busy ? t('common.loading') : t('profile.mailbox.log.reconcile', 'prüfen')}
+              </button>
+              <button onClick={onViewMail} className="inline-flex items-center gap-0.5 text-[11px] text-zinc-500 hover:underline">
+                <Paperclip size={11} /> {t('profile.mailbox.log.viewMail', 'Mail')}
+              </button>
+            </div>
           ) : canRetry ? (
             <div className="flex flex-col items-end gap-0.5">
               <button onClick={onRetry} disabled={busy} className="text-[11px] text-sky-600 hover:underline disabled:opacity-50">

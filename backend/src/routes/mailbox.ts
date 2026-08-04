@@ -1,8 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import sql, { DEMO_MODE } from '../db.js';
 import { encryptSecret, decryptSecret } from '../lib/crypto.js';
-import { testMailbox, runMailImportForUser, backfillEmails, retryImportedEmail, reinterpretImportedEmail, confirmMailIncome, confirmMailRefund } from '../mail/importer.js';
-import { ocrAndStore } from './receipts.js';
+import { testMailbox, runMailImportForUser, backfillEmails, retryImportedEmail, reinterpretImportedEmail, confirmMailIncome } from '../mail/importer.js';
+import { ocrAndStore, sanitizeEmailHtml } from './receipts.js';
+import { bookRefundReconciliation, findRefundCandidates, RefundError, type RefundReturnLine } from '../lib/refundReconcile.js';
 
 /** Re-run OCR (with the now invoice-aware prompt) on the given PDF receipts,
  *  one at a time in the background, flagging ocr_pending per receipt. */
@@ -159,14 +160,66 @@ export function mailboxRoutes(app: FastifyInstance): void {
       });
     }
     if (body.confirmRefund && typeof body.confirmRefund === 'object') {
-      const cr = body.confirmRefund;
-      return confirmMailRefund(req.user!.id, id, {
-        einkauf_id: cr.einkauf_id, refund_for_artikel_id: cr.refund_for_artikel_id, amount: cr.amount, description: cr.description,
-      });
+      const cr = body.confirmRefund as { einkauf_id?: unknown; discount_only?: unknown; amount?: unknown; description?: unknown; lines?: unknown };
+      const lines: RefundReturnLine[] | undefined = Array.isArray(cr.lines)
+        ? cr.lines.map((l) => ({ artikel_id: Number((l as { artikel_id?: unknown }).artikel_id), return_qty: Number((l as { return_qty?: unknown }).return_qty) }))
+        : undefined;
+      try {
+        const res = await bookRefundReconciliation({
+          einkauf_id: Number(cr.einkauf_id), user_id: req.user!.id,
+          discount_only: cr.discount_only === true, amount: Number(cr.amount ?? 0),
+          description: cr.description != null ? String(cr.description) : null,
+          lines, ledger_id: id, refund_email: { imported_email_id: id },
+        });
+        return { status: 'refund', einkauf_id: res.einkauf_id, total: res.total };
+      } catch (e) {
+        if (e instanceof RefundError) return reply.code(400).send({ error: e.message, code: e.code });
+        throw e;
+      }
     }
     const instruction = (body.instruction ?? '').toString().trim();
     if (instruction) return reinterpretImportedEmail(req.user!.id, id, instruction);
     return retryImportedEmail(req.user!.id, id);
+  });
+
+  // Open the reconciliation for an AUTO-DETECTED refund ('refund_suggested'): the parsed refund +
+  // candidate original receipts (+ positions with menge/einheit for the split). No write.
+  app.get('/api/me/mailbox/log/:id/refund-preview', async (req, reply) => {
+    const id = Number((req.params as { id: string }).id);
+    if (!Number.isInteger(id)) return reply.code(400).send({ error: 'bad id' });
+    const [re] = await sql`
+      SELECT re.amount::float8 AS amount, re.merchant, re.item, re.order_ref, re.subject, re.from_addr, re.pdf_pfad,
+             (re.html IS NOT NULL OR re.body_text IS NOT NULL) AS has_body
+      FROM refund_email re JOIN imported_email ie ON ie.id = re.imported_email_id
+      WHERE re.imported_email_id = ${id} AND ie.user_id = ${req.user!.id}
+      ORDER BY re.id DESC LIMIT 1`;
+    if (!re) return reply.code(404).send({ error: 'not found' });
+    const candidates = await findRefundCandidates(req.user!.id, {
+      amount: Number(re.amount) || 0, merchant: (re.merchant as string | null) ?? '',
+      item: (re.item as string | null) ?? '', order_ref: (re.order_ref as string | null) ?? '', datum: null,
+    });
+    return {
+      refund: { amount: Number(re.amount) || 0, merchant: re.merchant, item: re.item, order_ref: re.order_ref, subject: re.subject },
+      mail: { subject: re.subject, from: re.from_addr, has_pdf: !!re.pdf_pfad, has_body: re.has_body === true },
+      candidates,
+    };
+  });
+
+  // View the detected refund mail itself (paperclip in the log, before it's booked onto a receipt).
+  app.get('/api/me/mailbox/log/:id/refund-mail', async (req, reply) => {
+    const id = Number((req.params as { id: string }).id);
+    if (!Number.isInteger(id)) return reply.code(400).send({ error: 'bad id' });
+    const [re] = await sql`
+      SELECT re.subject, re.from_addr, re.sent_at::text AS sent_at, re.html, re.body_text, re.pdf_pfad
+      FROM refund_email re JOIN imported_email ie ON ie.id = re.imported_email_id
+      WHERE re.imported_email_id = ${id} AND ie.user_id = ${req.user!.id}
+      ORDER BY re.id DESC LIMIT 1`;
+    if (!re) return reply.code(404).send({ error: 'not found' });
+    return {
+      subject: re.subject, from: re.from_addr, sent_at: re.sent_at,
+      html: re.html ? sanitizeEmailHtml(re.html as string) : null,
+      text: re.body_text, pdf_pfad: re.pdf_pfad,
+    };
   });
 
   // Re-OCR this user's e-mail-imported PDF receipts that ended up with NO line

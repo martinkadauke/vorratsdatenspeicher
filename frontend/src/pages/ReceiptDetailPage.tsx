@@ -2,11 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, ChevronLeft, ChevronRight, RotateCw, Check, Hand, Wallet, X, Search, Ban, Lock, Plus, Camera, ImagePlus, FileText, Mail, Maximize2, Landmark } from 'lucide-react';
+import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, ChevronLeft, ChevronRight, RotateCw, Check, Hand, Wallet, X, Search, Ban, Lock, Plus, Camera, ImagePlus, FileText, Mail, Maximize2, Landmark, Paperclip } from 'lucide-react';
 import { TransformWrapper, TransformComponent, useControls } from 'react-zoom-pan-pinch';
 import { ShareButton } from '../components/ShareButton';
 import { api } from '../api/client';
-import type { Artikel, Receipt, ReceiptDetail } from '../api/types';
+import type { Artikel, Receipt, ReceiptDetail, RefundBookPayload } from '../api/types';
+import { RefundReconcileDialog } from '../components/RefundReconcileDialog';
+import { RefundMailModal, type RefundMailItem } from '../components/RefundMailModal';
 import { Spinner, Modal, Input, Label, Button, ProgressBar, Select } from '../components/ui';
 import { ArticleEditModal } from '../components/ArticleEditModal';
 import { FirstVisitHint } from '../components/FirstVisitHint';
@@ -35,6 +37,22 @@ export function ReceiptDetailPage() {
   const [editReceipt, setEditReceipt] = useState(false);
   const [adding, setAdding] = useState(false);
   const [refundOpen, setRefundOpen] = useState(false);
+  const [mailOpen, setMailOpen] = useState(false); // refund-mail paperclip viewer
+  const refundMut = useMutation({
+    mutationFn: (p: RefundBookPayload) => api(`/api/receipts/${id}/refund`, { method: 'POST', body: p }),
+    onSuccess: () => {
+      toast(t('profile.mailbox.log.refundBooked'), 'success');
+      setRefundOpen(false);
+      void qc.invalidateQueries({ queryKey: ['receipt', id] });
+      void qc.invalidateQueries({ queryKey: ['receipts'] });
+    },
+    onError: (e) => toast((e as Error).message, 'error'),
+  });
+  const refundMails = useQuery({
+    queryKey: ['refund-emails', id],
+    queryFn: () => api<{ mails: RefundMailItem[] }>(`/api/receipts/${id}/refund-emails`),
+    enabled: mailOpen,
+  });
   const [imgVersion, setImgVersion] = useState(0); // cache-buster after rotate
   const [panEnabled, setPanEnabled] = useState(false); // mobile: image pan active?
 
@@ -262,6 +280,20 @@ export function ReceiptDetailPage() {
   const totalKnown = Number.isFinite(printedTotal);
   const netTotal = (totalKnown ? printedTotal : itemSum) + refundTotal;
   const hasRefund = refundTotal < 0;
+  // Returned positions: a full refund line paired 1:1 with an original → strike the original
+  // ("zurückgegeben") and fold the refund line out of the list (its effect is already in the net).
+  const returnedIds = new Set<number>();
+  const foldedRefundIds = new Set<number>();
+  for (const a of data.artikel) {
+    if (a.is_refund && a.refund_for_artikel_id != null) {
+      const tgt = data.artikel.find(x => x.id === a.refund_for_artikel_id);
+      if (tgt && Math.abs(Math.abs(artPreis(a)) - Math.abs(artPreis(tgt))) <= 0.02) {
+        returnedIds.add(tgt.id);
+        foldedRefundIds.add(a.id);
+      }
+    }
+  }
+  const listArtikel = data.artikel.filter(a => !foldedRefundIds.has(a.id));
   const diff = totalKnown ? itemSum - printedTotal : 0;
   const mismatch = totalKnown && Math.abs(diff) > 0.01;
 
@@ -333,6 +365,12 @@ export function ReceiptDetailPage() {
             text={t('share.receiptText', { store: data.roh_ladenname ?? '', total: eur(data.gesamt_betrag) })}
             iconSize={18}
           />
+          {data.has_refund_email && (
+            <button type="button" onClick={() => setMailOpen(true)} title={t('refund.viewMail', 'Erstattungsmail')}
+              className="shrink-0 rounded-xl p-2 text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-950/30">
+              <Paperclip size={18} />
+            </button>
+          )}
           <span className="tabular shrink-0 text-xs font-medium text-zinc-400 dark:text-zinc-500">#{data.id}</span>
         </div>
 
@@ -651,9 +689,10 @@ export function ReceiptDetailPage() {
           )}
           <SortableArticleList
             receiptId={data.id}
-            artikel={data.artikel}
+            artikel={listArtikel}
             onEdit={(a, focus) => { setEditFocus(focus ?? 'name'); setEditing(a); }}
             highlightIds={matchIds}
+            returnedIds={returnedIds}
             scrollToId={scrollToId}
             keyboardNav={editable && !editing && !adding && !editReceipt}
             readOnly={!editable}
@@ -716,12 +755,32 @@ export function ReceiptDetailPage() {
       />
 
       {refundOpen && (
-        <ManualRefund
-          einkaufId={data.id}
-          positions={data.artikel.filter(a => !a.is_refund)}
+        <RefundReconcileDialog
+          amount={0}
+          editableAmount
+          candidates={[{
+            id: data.id,
+            datum: String(data.datum),
+            roh_ladenname: data.roh_ladenname,
+            gesamt_betrag: data.gesamt_betrag != null ? Number(data.gesamt_betrag) : null,
+            konto_name: data.konto_name ?? null,
+            positions: data.artikel.filter(a => !a.is_refund).map(a => ({
+              id: a.id,
+              name: a.canonical_name || a.name || '?',
+              preis: a.preis != null ? Number(String(a.preis).replace(',', '.')) : null,
+              menge: a.menge != null ? Number(String(a.menge).replace(',', '.')) : null,
+              einheit: a.einheit,
+            })),
+          }]}
+          initialReceiptId={data.id}
+          booking={refundMut.isPending}
           onClose={() => setRefundOpen(false)}
-          onSaved={() => { setRefundOpen(false); void qc.invalidateQueries({ queryKey: ['receipt', id] }); void qc.invalidateQueries({ queryKey: ['receipts'] }); }}
+          onBook={(p) => refundMut.mutate(p)}
         />
+      )}
+
+      {mailOpen && (
+        <RefundMailModal mails={refundMails.data?.mails ?? []} onClose={() => setMailOpen(false)} />
       )}
 
       <ArticleEditModal
@@ -1067,75 +1126,3 @@ function ZoomResetButton() {
   );
 }
 
-/** Manual "record a refund" for an item on THIS receipt: a negative position linked to the
- *  original (refund_for_artikel_id) so both vanish from product statistics. Category is inherited
- *  from the refunded item so the negative nets the right spend bucket. */
-function ManualRefund({ einkaufId, positions, onClose, onSaved }: {
-  einkaufId: number; positions: Artikel[]; onClose: () => void; onSaved: () => void;
-}) {
-  const { t, i18n } = useTranslation();
-  const [posId, setPosId] = useState<number | null>(positions[0]?.id ?? null);
-  const chosen = positions.find(p => p.id === posId) ?? null;
-  const chosenPrice = () => {
-    const v = parseFloat((chosen?.preis ?? '').toString().replace(',', '.'));
-    return Number.isFinite(v) ? Math.abs(v) : 0;
-  };
-  const [amount, setAmount] = useState(chosenPrice() ? String(chosenPrice()) : '');
-  const [note, setNote] = useState('');
-  const eur = (n: number) => new Intl.NumberFormat(i18n.language, { style: 'currency', currency: 'EUR' }).format(n);
-
-  const save = useMutation({
-    mutationFn: () => api('/api/articles', {
-      method: 'POST',
-      body: {
-        einkauf_id: einkaufId,
-        is_refund: true,
-        refund_for_artikel_id: posId,
-        preis: -Math.abs(Number(amount)),
-        category_path: chosen?.category_path ?? null,
-        name: note.trim() || t('receiptDetail.refundChip'),
-      },
-    }),
-    onSuccess: () => { toast(t('profile.mailbox.log.refundBooked'), 'success'); onSaved(); },
-    onError: (e) => toast((e as Error).message, 'error'),
-  });
-  const valid = posId != null && Number(amount) > 0;
-
-  return (
-    <Modal open onClose={onClose} title={t('receiptDetail.refundModalTitle')}>
-      <div className="flex flex-col gap-3">
-        <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('receiptDetail.refundModalHint')}</p>
-        <div>
-          <Label>{t('receiptDetail.refundForPosition')}</Label>
-          <Select value={String(posId ?? '')} onChange={ev => {
-            const id = ev.target.value ? Number(ev.target.value) : null;
-            setPosId(id);
-            const p = positions.find(x => x.id === id);
-            const v = parseFloat((p?.preis ?? '').toString().replace(',', '.'));
-            if (Number.isFinite(v)) setAmount(String(Math.abs(v)));
-          }}>
-            {positions.map(p => (
-              <option key={p.id} value={p.id}>
-                {(p.canonical_name || p.name || '?')}{p.preis ? ` · ${eur(Math.abs(parseFloat(p.preis.toString().replace(',', '.'))))}` : ''}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <div>
-          <Label>{t('receiptDetail.refundAmountLabel')}</Label>
-          <Input type="number" step="0.01" min="0" value={amount} onChange={ev => setAmount(ev.target.value)} />
-        </div>
-        <div>
-          <Label>{t('receiptDetail.refundNoteLabel')}</Label>
-          <Input value={note} onChange={ev => setNote(ev.target.value)} placeholder="z.B. RMA Erstattung" />
-        </div>
-        <div className="flex justify-end gap-2 pt-1">
-          <Button variant="secondary" onClick={onClose}>{t('common.cancel')}</Button>
-          <Button onClick={() => save.mutate()} disabled={!valid || save.isPending}>
-            {save.isPending ? t('common.saving') : t('receiptDetail.refundSave')}
-          </Button>
-        </div>
-      </div>
-    </Modal>
-  );
-}

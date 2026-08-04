@@ -103,6 +103,7 @@
       "tapToLinkIncome": "→ Einnahme zuordnen",
       "linkTitle": "Beleg zuordnen",
       "linkIncomeTitle": "Einnahme zuordnen",
+      "bookRefund": "Stattdessen eine Rückerstattung buchen",
       "matched": "Bank",
       "noCandidates": "Keine passenden Belege gefunden (Betrag/Datum).",
       "unlink": "Verknüpfung lösen",
@@ -476,6 +477,7 @@
     "refunded": "−{{amount}} erstattet",
     "refundChip": "Erstattung",
     "addRefund": "Erstattung erfassen",
+    "returnedBadge": "zurückgegeben",
     "refundModalTitle": "Erstattung erfassen",
     "refundModalHint": "Eine Rückzahlung für einen Artikel dieses Belegs. Sie wird als Minus-Position gebucht und das Teil verschwindet aus der Produkt-Statistik.",
     "refundForPosition": "Für welche Position?",
@@ -1161,6 +1163,8 @@
         "refundDescription": "Beschreibung",
         "refundBook": "Erstattung buchen",
         "refundBooked": "Erstattung auf dem Beleg verbucht.",
+        "reconcile": "prüfen",
+        "viewMail": "Mail",
         "noSubject": "(ohne Betreff)",
         "status": {
           "imported": "Importiert · {{n}} Pos.",
@@ -1170,10 +1174,40 @@
           "processing": "Läuft…",
           "income": "Einnahme",
           "incomeAmount": "Einnahme · {{amount}} €",
-          "refund": "Erstattung"
+          "refund": "Erstattung",
+          "refundSuggested": "Erstattung? · prüfen"
         }
       }
     }
+  },
+  "refund": {
+    "title": "Rückerstattung zuordnen",
+    "amountLabel": "Erstattungsbetrag",
+    "viewMail": "Erstattungsmail",
+    "receipt": "Beleg",
+    "discountOnly": "nur Rabatt",
+    "discountOnlyHint": "Preisnachlass, kein Artikel geht zurück",
+    "discountBody": "Es wird eine Minus-Position über {{amount}} auf dem Beleg eingefügt; der Belegpreis sinkt entsprechend.",
+    "receiptPositions": "Belegpositionen",
+    "matchHint": "passt zur Erstattung",
+    "returnQty": "zurück:",
+    "of": "von",
+    "wholeLine": "ganze Position",
+    "noPositions": "Keine Positionen auf diesem Beleg.",
+    "noCandidates": "Kein passender Beleg gefunden. Öffne den Beleg direkt und nutze dort „Erstattung erfassen\".",
+    "mailPositions": "Erstattungsmail",
+    "itemHint": "Erstatteter Artikel laut Mail: {{item}}",
+    "noteLabel": "Notiz (optional)",
+    "notePlaceholder": "z.B. Amazon Rücksendung",
+    "receiptNet": "Beleg-Netto",
+    "returnedTotal": "Rückgabe gesamt",
+    "mismatch": "weicht von {{amount}} ab",
+    "book": "Rückerstattung buchen",
+    "mailTitle": "Erstattungsmail",
+    "noSubject": "(ohne Betreff)",
+    "openPdf": "PDF öffnen",
+    "hidePdf": "PDF ausblenden",
+    "noMail": "Keine Erstattungsmail gespeichert."
   },
   "positionen": {
     "search": "Suchen…",

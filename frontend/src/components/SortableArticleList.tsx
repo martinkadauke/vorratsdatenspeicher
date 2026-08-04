@@ -19,11 +19,12 @@ import { toast } from './Toast';
 import { api } from '../api/client';
 import { eur } from '../lib/utils';
 
-export function SortableArticleList({ receiptId, artikel, onEdit, highlightIds, scrollToId, keyboardNav, readOnly, onDuplicate, onInsertAfter }: {
+export function SortableArticleList({ receiptId, artikel, onEdit, highlightIds, returnedIds, scrollToId, keyboardNav, readOnly, onDuplicate, onInsertAfter }: {
   receiptId: number;
   artikel: Artikel[];
   onEdit: (a: Artikel, focus?: 'name' | 'price') => void;
   highlightIds?: Set<number>;
+  returnedIds?: Set<number>;   // positions fully refunded (returned) — shown struck-through
   scrollToId?: number | null;
   keyboardNav?: boolean;
   readOnly?: boolean;
@@ -106,6 +107,7 @@ export function SortableArticleList({ receiptId, artikel, onEdit, highlightIds, 
                 onEdit={(focus) => onEdit(a, focus)}
                 onDuplicate={!readOnly && onDuplicate ? () => onDuplicate(a.id) : undefined}
                 highlighted={highlightIds?.has(a.id) ?? false}
+                returned={returnedIds?.has(a.id) ?? false}
                 scrollHere={scrollToId === a.id}
                 cursored={i === cursor}
                 readOnly={readOnly ?? false}
@@ -131,7 +133,7 @@ export function SortableArticleList({ receiptId, artikel, onEdit, highlightIds, 
   );
 }
 
-function SortableRow({ a, onEdit, onDuplicate, highlighted, scrollHere, cursored, readOnly }: { a: Artikel; onEdit: (focus?: 'name' | 'price') => void; onDuplicate?: () => void; highlighted: boolean; scrollHere: boolean; cursored: boolean; readOnly: boolean }) {
+function SortableRow({ a, onEdit, onDuplicate, highlighted, returned, scrollHere, cursored, readOnly }: { a: Artikel; onEdit: (focus?: 'name' | 'price') => void; onDuplicate?: () => void; highlighted: boolean; returned: boolean; scrollHere: boolean; cursored: boolean; readOnly: boolean }) {
   const { t } = useTranslation();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: a.id });
   const rowRef = useRef<HTMLDivElement | null>(null);
@@ -172,7 +174,10 @@ function SortableRow({ a, onEdit, onDuplicate, highlighted, scrollHere, cursored
           {a.canonical_name && <CanonicalIcon name={a.canonical_name} size={32} />}
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center gap-1.5">
-              <span className="truncate font-medium">{a.canonical_name ?? a.ai_guess ?? a.name}</span>
+              <span className={`truncate font-medium ${returned ? 'text-zinc-400 line-through dark:text-zinc-500' : ''}`}>{a.canonical_name ?? a.ai_guess ?? a.name}</span>
+              {returned && (
+                <span className="shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">{t('receiptDetail.returnedBadge', 'zurückgegeben')}</span>
+              )}
               {a.user_corrected && (
                 <span title={t('article.userCorrected')} className="shrink-0" aria-label={t('article.userCorrected')}>
                   <UserCheck size={13} className="text-emerald-500" />
@@ -194,7 +199,7 @@ function SortableRow({ a, onEdit, onDuplicate, highlighted, scrollHere, cursored
           type="button"
           onClick={() => onEdit('price')}
           title={t('article.totalPrice')}
-          className="tabular shrink-0 rounded-md px-1.5 py-1 font-semibold hover:bg-zinc-100 dark:hover:bg-zinc-800"
+          className={`tabular shrink-0 rounded-md px-1.5 py-1 font-semibold hover:bg-zinc-100 dark:hover:bg-zinc-800 ${returned ? 'text-zinc-400 line-through dark:text-zinc-500' : ''}`}
         >
           {eur(a.preis)}
         </button>

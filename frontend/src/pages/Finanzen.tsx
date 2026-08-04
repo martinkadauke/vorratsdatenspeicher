@@ -13,6 +13,8 @@ import { api, getToken } from '../api/client';
 import { Card, Spinner, Button, Input, Label, Select, Switch, Modal, EmptyState, Badge, FeedbackIconButton } from '../components/ui';
 import { CategoryPicker } from '../components/CategoryPicker';
 import { toast } from '../components/Toast';
+import { RefundReconcileDialog } from '../components/RefundReconcileDialog';
+import type { RefundCandidate, RefundBookPayload } from '../api/types';
 import { confirm } from '../components/Confirm';
 // monthNameOf is the shared "Juli 2026" formatter; MonthTab keeps a local `monthLabel`
 // string for the header, hence the rename on import.
@@ -2958,6 +2960,23 @@ function BankLinkPicker({ tx, t, onClose, onPick, onApprove }: {
     enabled: searching,
   });
   const results = searchQ.data?.results ?? [];
+  // Credit → book it as a REFUND on an existing receipt (negative position) instead of income.
+  const qc = useQueryClient();
+  const [refundMode, setRefundMode] = useState(false);
+  const refundCands = useQuery({
+    queryKey: ['bank-refund-cands', tx.id],
+    queryFn: () => api<{ candidates: RefundCandidate[] }>(`/api/finances/bank/${tx.id}/refund-candidates`),
+    enabled: refundMode,
+  });
+  const refundMut = useMutation({
+    mutationFn: (p: RefundBookPayload) => api(`/api/finances/bank/${tx.id}/refund`, { method: 'POST', body: p }),
+    onSuccess: () => {
+      toast(t('profile.mailbox.log.refundBooked'), 'success');
+      void qc.invalidateQueries();
+      onClose();
+    },
+    onError: (e) => toast((e as Error).message, 'error'),
+  });
   // Debit → receipt candidates: offer a "view" (new tab) so the user can inspect the
   // receipt before linking (e.g. tell apart several Amazon orders found by item name).
   const isDebit = tx.amount < 0;
@@ -2979,10 +2998,31 @@ function BankLinkPicker({ tx, t, onClose, onPick, onApprove }: {
       )}
     </li>
   );
+  if (refundMode) {
+    if (refundCands.isLoading) {
+      return <Modal open onClose={() => setRefundMode(false)} title={t('finances.bank.linkIncomeTitle')}><div className="py-8 text-center"><Spinner /></div></Modal>;
+    }
+    return (
+      <RefundReconcileDialog
+        amount={Math.abs(tx.amount)}
+        merchant={tx.counterparty}
+        candidates={refundCands.data?.candidates ?? []}
+        booking={refundMut.isPending}
+        onClose={() => setRefundMode(false)}
+        onBook={(p) => refundMut.mutate(p)}
+      />
+    );
+  }
   return (
     <Modal open onClose={onClose} title={tx.amount > 0 ? t('finances.bank.linkIncomeTitle') : t('finances.bank.linkTitle')}>
       <div className="flex flex-col gap-3">
         <div className="text-xs text-zinc-500 dark:text-zinc-400">{tx.counterparty} · {eur(tx.amount)} · {ddmmyyyy(tx.booking_date)}</div>
+        {tx.amount > 0 && (
+          <button type="button" onClick={() => setRefundMode(true)}
+            className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-amber-300 px-3 py-2 text-sm font-medium text-amber-600 hover:border-amber-400 hover:bg-amber-50 dark:border-amber-800 dark:text-amber-400 dark:hover:bg-amber-950/30">
+            <Undo2 size={15} /> {t('finances.bank.bookRefund')}
+          </button>
+        )}
         {/* Full CSV booking text — reveal to judge what an unclear booking is about. */}
         {!tx.private && tx.description && (
           <div>

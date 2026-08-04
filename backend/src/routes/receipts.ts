@@ -10,6 +10,7 @@ import { accountHasStatements } from './konten.js';
 import { ocrFromImage, type OcrResult } from '../llm/ocr.js';
 import { searchFilter, col, numCol, lk, type Frag } from '../lib/search.js';
 import { cleanMatch } from '../lib/canonicalMatch.js';
+import { bookRefundReconciliation, RefundError, type RefundReturnLine } from '../lib/refundReconcile.js';
 import { claimDemoOcr, ocrLimitMessage } from '../demo/limits.js';
 import { ocrKey, loadAliasMap, loadUserAliasKeys, recordAliases } from '../lib/canonicalAlias.js';
 import { triggerChurnAfterOcr } from '../churner/index.js';
@@ -140,7 +141,7 @@ export async function ocrAndStore(id: number, bildPfad: string, hint?: string | 
 /** Best-effort scrub of e-mail HTML before it's shown in a sandboxed iframe.
  *  The iframe sandbox (no allow-scripts) is the real XSS guard; this strips the
  *  obvious active content as defence in depth. */
-function sanitizeEmailHtml(html: string): string {
+export function sanitizeEmailHtml(html: string): string {
   return html
     .replace(/<\s*script[\s\S]*?<\s*\/\s*script\s*>/gi, '')
     .replace(/<\s*(?:iframe|object|embed|link|meta|base)\b[^>]*>/gi, '')
@@ -678,7 +679,8 @@ export function receiptRoutes(app: FastifyInstance): void {
              e.private_for_user_id, e.bank_tx_id, e.snapped_by_member_id,
              bt.booking_date::text AS bank_booking, bt.amount::float8 AS bank_amount, bt.counterparty AS bank_counterparty,
              (e.private_for_user_id IS NOT NULL) AS private,
-             EXISTS(SELECT 1 FROM email_message em WHERE em.einkauf_id = e.id) AS has_email
+             EXISTS(SELECT 1 FROM email_message em WHERE em.einkauf_id = e.id) AS has_email,
+             EXISTS(SELECT 1 FROM refund_email re WHERE re.einkauf_id = e.id) AS has_refund_email
       FROM einkauf e LEFT JOIN konto k ON k.id = e.konto_id
       LEFT JOIN bank_tx bt ON bt.id = e.bank_tx_id
       WHERE e.id = ${id}
@@ -802,6 +804,49 @@ export function receiptRoutes(app: FastifyInstance): void {
       sent_at: em.sent_at,
       html: em.html ? sanitizeEmailHtml(em.html as string) : null,
       text: em.body_text,
+    };
+  });
+
+  /** Book a refund/return on THIS receipt manually (no bank credit, no mail) — the reconciliation
+   *  dialog's "Erstattung erfassen". Same atomic split/net engine as the mail + bank paths. */
+  app.post('/api/receipts/:id/refund', async (req, reply) => {
+    const id = parseInt((req.params as { id: string }).id, 10);
+    if (!id) return reply.code(400).send({ error: 'invalid id' });
+    if (!await guardReceipt(req, reply, id)) return;
+    const body = (req.body ?? {}) as { discount_only?: unknown; amount?: unknown; description?: unknown; lines?: unknown };
+    const lines: RefundReturnLine[] | undefined = Array.isArray(body.lines)
+      ? body.lines.map((l) => ({ artikel_id: Number((l as { artikel_id?: unknown }).artikel_id), return_qty: Number((l as { return_qty?: unknown }).return_qty) }))
+      : undefined;
+    try {
+      const res = await bookRefundReconciliation({
+        einkauf_id: id, user_id: req.user!.id,
+        discount_only: body.discount_only === true,
+        amount: Number(body.amount ?? 0),
+        description: body.description != null ? String(body.description) : null,
+        lines,
+      });
+      return { ok: true, einkauf_id: res.einkauf_id, total: res.total };
+    } catch (e) {
+      if (e instanceof RefundError) return reply.code(400).send({ error: e.message, code: e.code });
+      throw e;
+    }
+  });
+
+  /** Refund mails attached to THIS receipt (the paperclip): sanitised html + pdf link + amount. */
+  app.get('/api/receipts/:id/refund-emails', async (req, reply) => {
+    const id = parseInt((req.params as { id: string }).id, 10);
+    if (!id) return reply.code(400).send({ error: 'invalid id' });
+    if (!await guardReceipt(req, reply, id)) return;
+    const rows = await sql`
+      SELECT id, amount::float8 AS amount, merchant, subject, from_addr, sent_at::text AS sent_at, pdf_pfad, html, body_text
+      FROM refund_email WHERE einkauf_id = ${id} ORDER BY id`;
+    return {
+      mails: rows.map(m => ({
+        id: m.id as number, amount: (m.amount as number | null) ?? null, merchant: m.merchant as string | null,
+        subject: m.subject as string | null, from: m.from_addr as string | null, sent_at: m.sent_at as string | null,
+        pdf_pfad: m.pdf_pfad as string | null,
+        html: m.html ? sanitizeEmailHtml(m.html as string) : null, text: m.body_text as string | null,
+      })),
     };
   });
 }

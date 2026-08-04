@@ -47,6 +47,26 @@ export interface Receipt {
   ocr_pending?: boolean;
   date_uncertain?: boolean;
   has_email?: boolean;
+  has_refund_email?: boolean;   // a refund mail is attached (paperclip)
+}
+
+/** A candidate ORIGINAL receipt a refund can be booked onto, with its positions
+ *  (menge/einheit carried so the reconciliation dialog can split a combined line). */
+export interface RefundCandidatePosition {
+  id: number; name: string; preis: number | null; menge: number | null; einheit: string | null;
+}
+export interface RefundCandidate {
+  id: number; datum: string; roh_ladenname: string | null;
+  gesamt_betrag: number | null; konto_name: string | null;
+  positions: RefundCandidatePosition[];
+}
+/** What the reconciliation dialog sends to whichever refund endpoint booked it. */
+export interface RefundBookPayload {
+  einkauf_id: number;
+  discount_only: boolean;
+  amount: number;
+  description?: string;
+  lines?: { artikel_id: number; return_qty: number }[];
 }
 
 export interface Konto {

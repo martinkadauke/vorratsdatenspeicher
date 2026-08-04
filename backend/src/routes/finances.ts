@@ -15,6 +15,7 @@ import { parseComdirectCsv } from '../finances/bankCsv.js';
 import { sniffCsv, fingerprintHeader, applyCsvMapping, generateCsvMapping, type CsvMappingSpec } from '../finances/csvMapping.js';
 import { normMerchant, alignInvoiceToBank } from '../lib/merchant.js';
 import { todayLocal } from '../lib/localDate.js';
+import { bookRefundReconciliation, findRefundCandidates, RefundError, type RefundReturnLine } from '../lib/refundReconcile.js';
 
 /** Pay-slip files live in a NON-static subdir of the receipts volume (the static
  *  /receipts/:file route rejects any name containing '/'), so they're reachable
@@ -1636,7 +1637,7 @@ export function financeRoutes(app: FastifyInstance): void {
         const cands = await sql`
           SELECT e.id, e.bank_tx_id,
                  (e.gesamt_betrag - COALESCE((SELECT SUM(ABS(bt2.amount)) FROM bank_tx bt2
-                    WHERE bt2.einkauf_id = e.id OR bt2.id = e.bank_tx_id), 0))::float8 AS remaining
+                    WHERE (bt2.einkauf_id = e.id OR bt2.id = e.bank_tx_id) AND bt2.amount < 0), 0))::float8 AS remaining
           FROM einkauf e JOIN email_message em ON em.einkauf_id = e.id
           WHERE e.gesamt_betrag IS NOT NULL
             AND (em.body_text ILIKE ${like} OR em.html ILIKE ${like} OR em.subject ILIKE ${like})`;
@@ -2347,10 +2348,10 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
           -- statements already attached, either link direction), NOT the full total. So a
           -- split shipment's next debit is suggested, and a fully-covered receipt drops out —
           -- go by exact remaining value, not "has ≥1 statement".
-          AND ABS((e.gesamt_betrag - COALESCE((SELECT SUM(ABS(bt2.amount)) FROM bank_tx bt2 WHERE bt2.einkauf_id = e.id OR bt2.id = e.bank_tx_id), 0)) - ${target}) <= ${tol}
+          AND ABS((e.gesamt_betrag - COALESCE((SELECT SUM(ABS(bt2.amount)) FROM bank_tx bt2 WHERE (bt2.einkauf_id = e.id OR bt2.id = e.bank_tx_id) AND bt2.amount < 0), 0)) - ${target}) <= ${tol}
           AND e.datum BETWEEN ${lo} AND ${hi}
           ${kontoScope(req.user, sql`e`)}
-        ORDER BY ABS((e.gesamt_betrag - COALESCE((SELECT SUM(ABS(bt2.amount)) FROM bank_tx bt2 WHERE bt2.einkauf_id = e.id OR bt2.id = e.bank_tx_id), 0)) - ${target}), e.datum DESC
+        ORDER BY ABS((e.gesamt_betrag - COALESCE((SELECT SUM(ABS(bt2.amount)) FROM bank_tx bt2 WHERE (bt2.einkauf_id = e.id OR bt2.id = e.bank_tx_id) AND bt2.amount < 0), 0)) - ${target}), e.datum DESC
         LIMIT 40`;
       return { kind: 'receipt', candidates: rows };
     }
@@ -2408,7 +2409,7 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
         -- direction) already sum to the receipt total. A partially-covered split (e.g. an
         -- Amazon order paid per shipment) still shows — it needs more. Go by exact value,
         -- not "has ≥1 statement", so multi-statement receipts aren't wrongly hidden.
-        AND COALESCE((SELECT SUM(ABS(bt2.amount)) FROM bank_tx bt2 WHERE bt2.einkauf_id = e.id OR bt2.id = e.bank_tx_id), 0) < e.gesamt_betrag - 0.005
+        AND COALESCE((SELECT SUM(ABS(bt2.amount)) FROM bank_tx bt2 WHERE (bt2.einkauf_id = e.id OR bt2.id = e.bank_tx_id) AND bt2.amount < 0), 0) < e.gesamt_betrag - 0.005
         AND (e.roh_ladenname ILIKE ${like}
              ${amtNum != null ? sql`OR ABS(e.gesamt_betrag - ${amtNum}) <= 0.01` : sql``}
              OR e.datum::text ILIKE ${like}
@@ -2417,6 +2418,53 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
       ORDER BY (e.bank_tx_id IS NOT NULL), e.datum DESC
       LIMIT 40`;
     return { kind: 'receipt', results: rows };
+  });
+
+  /** Candidate ORIGINAL receipts for booking a bank CREDIT as a REFUND (not income): ranked by the
+   *  credit's amount + counterparty, plus an optional free-text ?q (item / merchant / order ref).
+   *  Reuses the same matcher as the mail refund flow; the datum filter keeps only receipts that
+   *  PRECEDE the credit (a refund follows its purchase). */
+  app.get('/api/finances/bank/:id/refund-candidates', async (req, reply) => {
+    const id = parseInt(String((req.params as { id: string }).id), 10);
+    if (!id) return reply.code(400).send({ error: 'bad id' });
+    const [bt] = await sql`SELECT amount::float8 AS amount, counterparty, booking_date::text AS booking FROM bank_tx WHERE id = ${id}`;
+    if (!bt) return reply.code(404).send({ error: 'not found' });
+    const q = String((req.query as { q?: string }).q ?? '').trim();
+    const candidates = await findRefundCandidates(req.user!.id, {
+      amount: Math.abs(bt.amount as number),
+      merchant: q || ((bt.counterparty as string | null) ?? ''),
+      item: q, order_ref: q, datum: (bt.booking as string | null) ?? null,
+    });
+    return { candidates };
+  });
+
+  /** Book a bank CREDIT as a REFUND on an existing receipt (negative position(s)), NOT income —
+   *  income.amount is CHECK(>=0) and would inflate spend. Consumes the credit (bank_tx.einkauf_id)
+   *  so it leaves "open". Off on the demo (bank CSV is disabled there anyway). */
+  app.post('/api/finances/bank/:id/refund', async (req, reply) => {
+    if (DEMO_MODE) return reply.code(403).send({ error: BANK_CSV_OFF_DEMO });
+    const id = parseInt(String((req.params as { id: string }).id), 10);
+    if (!id) return reply.code(400).send({ error: 'bad id' });
+    const [bt] = await sql`SELECT amount::float8 AS amount FROM bank_tx WHERE id = ${id}`;
+    if (!bt) return reply.code(404).send({ error: 'not found' });
+    if ((bt.amount as number) <= 0) return reply.code(400).send({ error: 'Nur Gutschriften können als Erstattung gebucht werden.' });
+    const body = (req.body ?? {}) as { einkauf_id?: unknown; discount_only?: unknown; amount?: unknown; description?: unknown; lines?: unknown };
+    const lines: RefundReturnLine[] | undefined = Array.isArray(body.lines)
+      ? body.lines.map((l) => ({ artikel_id: Number((l as { artikel_id?: unknown }).artikel_id), return_qty: Number((l as { return_qty?: unknown }).return_qty) }))
+      : undefined;
+    try {
+      const res = await bookRefundReconciliation({
+        einkauf_id: Number(body.einkauf_id), user_id: req.user!.id,
+        discount_only: body.discount_only === true,
+        amount: Number(body.amount ?? Math.abs(bt.amount as number)),
+        description: body.description != null ? String(body.description) : null,
+        lines, bank_tx_id: id,
+      });
+      return { ok: true, einkauf_id: res.einkauf_id, total: res.total };
+    } catch (e) {
+      if (e instanceof RefundError) return reply.code(400).send({ error: e.message, code: e.code });
+      throw e;
+    }
   });
 
   /** Manually link a bank transaction to a receipt (debit) or income row (credit),

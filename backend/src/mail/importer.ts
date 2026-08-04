@@ -8,6 +8,8 @@ import { decryptSecret } from '../lib/crypto.js';
 import { ocrFromText, reinterpretMail, INCOME_CATEGORIES, type OcrResult, type IncomeCategory } from '../llm/ocr.js';
 import { ocrAndStore, storeOcrResult } from '../routes/receipts.js';
 import { applyLearnedKonto } from '../lib/merchant.js';
+import { detectRefundMail } from '../lib/refundHeuristic.js';
+import { findRefundCandidates, type RefundCandidate } from '../lib/refundReconcile.js';
 import { todayLocal, localDay } from '../lib/localDate.js';
 import { getConfig } from '../config.js';
 
@@ -161,6 +163,50 @@ export async function testMailbox(cfg: ConnectCfg & { folder: string }): Promise
   }
 }
 
+/** Code-supplied (constant → injection-safe) instruction used by the AUTOMATIC refund pre-check.
+ *  The mail body stays in the untrusted block; only this fixed text steers the model. */
+const REFUND_AUTODETECT_INSTRUCTION =
+  'Automatische Vorprüfung: Diese E-Mail wurde per Stichwörtern als mögliche ERSTATTUNG / Rückerstattung / '
+  + 'Rückzahlung / Gutschrift / Storno / Rückgabe / Preisnachlass für einen FRÜHEREN Kauf erkannt. '
+  + 'Wenn das zutrifft, gib kind="refund" mit Betrag, Händler, erstattetem Artikel und Bestell-/Referenznummer zurück. '
+  + 'Wenn es KEINE Erstattung ist (normaler Kaufbeleg, Versandbestätigung, Werbung, Widerrufsbelehrung, Gutschein), gib kind="none".';
+
+/** Persist an auto-detected refund mail as a 'refund_suggested' ledger entry (no money booked):
+ *  store the mail body + any PDF + the parsed refund fields so the user can reconcile it from the
+ *  import log with one click. Runs in its own tx so a failure leaves the ledger row untouched. */
+async function storeRefundSuggestion(
+  ledgerId: number,
+  parsed: ParsedMail,
+  r: { amount: number; merchant: string; item: string; order_ref: string; description: string },
+  pdf: { content?: Buffer } | null,
+): Promise<void> {
+  let pdfPfad: string | null = null;
+  if (pdf?.content) {
+    try {
+      const filename = `vds-${crypto.randomUUID()}.pdf`;
+      await writeFile(path.join(RECEIPTS_LOCAL_PATH, filename), pdf.content);
+      pdfPfad = `/receipts/${filename}`;
+    } catch { pdfPfad = null; }
+  }
+  const html = parsed.html || null;
+  const bodyTextRaw = (parsed.text ?? (parsed.html ? stripHtml(parsed.html) : null))?.slice(0, 100000) ?? null;
+  const from = parsed.from?.text ?? null;
+  const subj = (parsed.subject ?? '').slice(0, 500) || null;
+  const sentAt = parsed.date ? parsed.date.toISOString() : null;
+  await sql.begin(async (tx) => {
+    await tx`
+      INSERT INTO refund_email
+        (imported_email_id, einkauf_id, refund_artikel_id, amount, merchant, item, order_ref, from_addr, subject, sent_at, html, body_text, pdf_pfad)
+      VALUES
+        (${ledgerId}, NULL, NULL, ${r.amount || null}, ${(r.merchant || null)?.slice(0, 200) ?? null}, ${(r.item || null)?.slice(0, 200) ?? null},
+         ${(r.order_ref || null)?.slice(0, 60) ?? null}, ${from}, ${subj}, ${sentAt}, ${html}, ${bodyTextRaw}, ${pdfPfad})`;
+    await tx`
+      UPDATE imported_email SET status = 'refund_suggested',
+        reason = ${'Mögliche Erstattung' + (r.amount ? ': ' + r.amount.toFixed(2) + ' €' : '') + (r.merchant ? ' · ' + r.merchant : '')}
+      WHERE id = ${ledgerId}`;
+  });
+}
+
 /** Parse one raw message and, if new, file it as a receipt for this user.
  *  Dedup is an ATOMIC claim on (user_id, message_id): the ledger INSERT wins or
  *  loses the race outright, so a cron run and a manual run can never double-import
@@ -178,12 +224,12 @@ async function processMessage(mb: MailboxRow, kontoId: number | null, raw: Buffe
   // status guard) are race-safe vs. a concurrent manual run.
   const claim = await sql`
     WITH ins AS (
-      INSERT INTO imported_email (user_id, message_id, subject, status)
-      VALUES (${mb.user_id}, ${messageId}, ${subject}, 'processing')
+      INSERT INTO imported_email (user_id, message_id, subject, status, claimed_at)
+      VALUES (${mb.user_id}, ${messageId}, ${subject}, 'processing', NOW())
       ON CONFLICT (user_id, message_id) DO NOTHING
       RETURNING id
     ), upd AS (
-      UPDATE imported_email SET status = 'processing', reason = NULL, subject = ${subject}
+      UPDATE imported_email SET status = 'processing', reason = NULL, subject = ${subject}, claimed_at = NOW()
       WHERE user_id = ${mb.user_id} AND message_id = ${messageId}
         AND status IN ('failed', 'skipped')
       RETURNING id
@@ -219,6 +265,25 @@ async function processMessage(mb: MailboxRow, kontoId: number | null, raw: Buffe
   const pdf = usable.find(a => isPdf(a) && INVOICE.test(a.filename ?? '')) ?? usable.find(a => isPdf(a));
   const img = usable.find(a => isImg(a));
   const bodyText = pickBody(parsed);
+
+  // Refund pre-check: a refund / return / credit-note mail must NOT become a positive receipt
+  // (that would inflate spend) — nor be silently skipped. A cheap keyword gate → LLM confirm →
+  // store a 'refund_suggested' entry the user reconciles from the import log. NEVER books money.
+  if (bodyText || subject) {
+    if (detectRefundMail(subject, bodyText).isRefund) {
+      try {
+        const header = `Betreff: ${parsed.subject ?? ''}\nVon: ${parsed.from?.text ?? ''}\n\n`;
+        const r = await reinterpretMail(header + bodyText, REFUND_AUTODETECT_INSTRUCTION);
+        if (r.kind === 'refund') {
+          await storeRefundSuggestion(ledgerId, parsed, r, pdf ?? null);
+          return false; // surfaced for review; no receipt, no money
+        }
+      } catch (e) {
+        console.error(`[mailimport] refund pre-check failed for ledger ${ledgerId}:`, (e as Error).message);
+        // fall through to normal processing
+      }
+    }
+  }
 
   let einkaufId: number | null = null;
   let status = 'imported';
@@ -485,8 +550,6 @@ async function fetchRawByMessageId(mb: MailboxRow, mid: string): Promise<Buffer 
   }
 }
 
-export interface RefundCandidate { id: number; datum: string; roh_ladenname: string | null; gesamt_betrag: number | null; konto_name: string | null; positions: { id: number; name: string; preis: number | null }[] }
-
 export type ReinterpretOutcome =
   | { status: 'imported'; einkauf_id: number; reason: null }
   | { status: 'skipped'; reason: string; einkauf_id: null }
@@ -537,64 +600,7 @@ export async function reinterpretImportedEmail(userId: number, ledgerId: number,
     // confirmMailRefund. No write here.
     await sql`UPDATE imported_email SET instruction = ${ins} WHERE id = ${ledgerId}`.catch(() => {});
     const refDate = r.datum ?? datum;
-    const merchant = r.merchant.trim();
-    // Propose only receipts THIS user may see (super-admins see all; others: shared + own-private).
-    const [u] = await sql`SELECT sees_all_konten FROM users WHERE id = ${userId}`;
-    const visScope = u?.sees_all_konten ? sql`` : sql`AND (e.private_for_user_id IS NULL OR e.private_for_user_id = ${userId})`;
-    // Find the ORIGINAL receipt the way a human would, in priority order:
-    //  1. order/reference number (strongest — generic across vendors), matched against the
-    //     receipt's stored source mail and any position's raw text.
-    //  2. the refunded ITEM appearing as a position in a receipt from the SAME vendor.
-    //  3. the refunded item in any receipt · 4. same vendor · 5. amount (last-resort fallback).
-    // NOT the price corridor first — a refund is identified by what it is, not by its number.
-    // All ${amount} cast ::numeric (postgres.js int4-inference guard).
-    const like = merchant ? '%' + merchant + '%' : null;
-    const itemLike = r.item.trim() ? '%' + r.item.trim() + '%' : null;
-    const ref = r.order_ref.trim() || null;
-    const amtPos = r.amount > 0;
-    const F = sql`FALSE`;
-    const refMatch = ref
-      ? sql`(EXISTS(SELECT 1 FROM email_message em WHERE em.einkauf_id = e.id AND (em.body_text ILIKE ${'%' + ref + '%'} OR em.subject ILIKE ${'%' + ref + '%'}))
-             OR EXISTS(SELECT 1 FROM artikel ar WHERE ar.einkauf_id = e.id AND ar.original_text ILIKE ${'%' + ref + '%'}))` : F;
-    const itemMatch = itemLike
-      ? sql`EXISTS(SELECT 1 FROM artikel ai WHERE ai.einkauf_id = e.id AND NOT ai.is_refund AND (ai.name ILIKE ${itemLike} OR ai.canonical_name ILIKE ${itemLike} OR ai.ai_guess ILIKE ${itemLike} OR ai.original_text ILIKE ${itemLike}))` : F;
-    const vendorMatch = like ? sql`e.roh_ladenname ILIKE ${like}` : F;
-    const amountNear = amtPos ? sql`ABS(COALESCE(e.gesamt_betrag,0) - ${r.amount}::numeric) <= GREATEST(1, ${r.amount}::numeric * 0.01)` : F;
-    const anySignal = !!(ref || itemLike || like || amtPos);
-    // Build ORDER BY from PRESENT signals only. A missing signal is the constant FALSE, and
-    // Postgres rejects a bare constant in ORDER BY ("non-integer constant") — a present signal
-    // is a column expression, which is fine. Innermost tie-breaker first, then prepend by priority.
-    let ord = sql`e.datum DESC`;
-    if (amtPos) ord = sql`(${amountNear}) DESC, ${ord}`;
-    if (like) ord = sql`(${vendorMatch}) DESC, ${ord}`;
-    if (itemLike) ord = sql`(${itemMatch}) DESC, ${ord}`;
-    if (itemLike && like) ord = sql`((${itemMatch}) AND (${vendorMatch})) DESC, ${ord}`;
-    if (ref) ord = sql`(${refMatch}) DESC, ${ord}`;
-    const cands = await sql`
-      SELECT e.id, e.datum::text AS datum, e.roh_ladenname, e.gesamt_betrag::float8 AS gesamt_betrag, k.name AS konto_name
-      FROM einkauf e
-      LEFT JOIN konto k ON k.id = e.konto_id
-      WHERE TRUE
-        ${anySignal ? sql`AND ((${refMatch}) OR (${itemMatch}) OR (${vendorMatch}) OR (${amountNear}))` : sql``}
-        ${refDate ? sql`AND e.datum <= ${refDate}::date` : sql``}
-        ${visScope}
-      ORDER BY ${ord}
-      LIMIT 8`;
-    // Per receipt, surface the position matching the refunded item first (so it's pre-selected).
-    const posItemMatch = itemLike
-      ? sql`(name ILIKE ${itemLike} OR canonical_name ILIKE ${itemLike} OR ai_guess ILIKE ${itemLike} OR original_text ILIKE ${itemLike})` : F;
-    const candidates: RefundCandidate[] = [];
-    for (const c of cands) {
-      const pos = await sql`
-        SELECT id, COALESCE(NULLIF(canonical_name,''), NULLIF(ai_guess,''), name, '?') AS name, preis::float8 AS preis
-        FROM artikel WHERE einkauf_id = ${c.id as number} AND NOT is_refund
-        ORDER BY (${posItemMatch}) DESC, ABS(COALESCE(preis,0) - ${r.amount}::numeric) ASC, id ASC`;
-      candidates.push({
-        id: c.id as number, datum: c.datum as string, roh_ladenname: c.roh_ladenname as string | null,
-        gesamt_betrag: (c.gesamt_betrag as number | null) ?? null, konto_name: c.konto_name as string | null,
-        positions: pos.map(p => ({ id: p.id as number, name: p.name as string, preis: (p.preis as number | null) ?? null })),
-      });
-    }
+    const candidates = await findRefundCandidates(userId, { amount: r.amount, merchant: r.merchant, item: r.item, order_ref: r.order_ref, datum: refDate });
     return { status: 'refund_preview', refund: { amount: r.amount, datum: refDate, merchant: r.merchant, description: r.description, confidence: r.confidence }, candidates };
   }
 
