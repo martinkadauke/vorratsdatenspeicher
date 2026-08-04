@@ -49,7 +49,10 @@ function estCostUsd(model: string, inTok: number, outTok: number): number {
   if (!p) return 0;
   return (inTok / 1e6) * p.in + (outTok / 1e6) * p.out;
 }
-const VALID_TASKS: AiTask[] = ['recategorize', 'churner_stage1', 'churner_stage2', 'ocr', 'categories_chat', 'model_review'];
+// Every configurable AI task — MUST stay in sync with the AiTask union (provider.ts). A task
+// missing here makes PUT /api/ai/tasks/:task reject it with "invalid task", so the Admin
+// provider/model change silently does nothing (that's what hid mailreinterpret/bankmatch/statsask).
+const VALID_TASKS: AiTask[] = ['recategorize', 'churner_stage1', 'churner_stage2', 'ocr', 'categories_chat', 'model_review', 'nlanalytics', 'bankmatch', 'statsask', 'csvmapping', 'mailreinterpret'];
 
 // ── update check (self-hosters) ───────────────────────────────────────────
 // Upstream repo — a fork still gets upstream's release info, which is what a

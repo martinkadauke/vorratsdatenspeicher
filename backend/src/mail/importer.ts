@@ -541,17 +541,28 @@ export async function reinterpretImportedEmail(userId: number, ledgerId: number,
     // Propose only receipts THIS user may see (super-admins see all; others: shared + own-private).
     const [u] = await sql`SELECT sees_all_konten FROM users WHERE id = ${userId}`;
     const visScope = u?.sees_all_konten ? sql`` : sql`AND (e.private_for_user_id IS NULL OR e.private_for_user_id = ${userId})`;
+    // Match a candidate receipt by merchant name and/or a total close to the refund amount.
+    // Every ${amount} is cast ::numeric — a bare `$n = 0` (or `numeric - $n`) makes postgres.js
+    // infer the param as int4, which then rejects a decimal amount (e.g. 24.99) with a 500.
+    const like = merchant ? '%' + merchant + '%' : null;
+    const amtPos = r.amount > 0;
+    const amtNear = sql`ABS(COALESCE(e.gesamt_betrag,0) - ${r.amount}::numeric) <= GREATEST(1, ${r.amount}::numeric * 0.01)`;
+    const matchCond =
+      like && amtPos ? sql`AND (e.roh_ladenname ILIKE ${like} OR ${amtNear})`
+      : like ? sql`AND e.roh_ladenname ILIKE ${like}`
+      : amtPos ? sql`AND ${amtNear}`
+      : sql``;   // no merchant + no amount → fall back to the most recent receipts before the mail
     const cands = await sql`
       SELECT e.id, e.datum::text AS datum, e.roh_ladenname, e.gesamt_betrag::float8 AS gesamt_betrag, k.name AS konto_name
       FROM einkauf e
       LEFT JOIN konto k ON k.id = e.konto_id
       WHERE TRUE
-        ${merchant ? sql`AND (e.roh_ladenname ILIKE ${'%' + merchant + '%'} OR ${r.amount} = 0 OR ABS(COALESCE(e.gesamt_betrag,0) - ${r.amount}) <= GREATEST(1, ${r.amount} * 0.01))` : sql``}
+        ${matchCond}
         ${refDate ? sql`AND e.datum <= ${refDate}::date` : sql``}
         ${visScope}
       ORDER BY
-        (CASE WHEN ${merchant || ''} <> '' AND e.roh_ladenname ILIKE ${'%' + merchant + '%'} THEN 0 ELSE 1 END),
-        ABS(COALESCE(e.gesamt_betrag,0) - ${r.amount}) ASC,
+        ${like ? sql`(CASE WHEN e.roh_ladenname ILIKE ${like} THEN 0 ELSE 1 END),` : sql``}
+        ABS(COALESCE(e.gesamt_betrag,0) - ${r.amount}::numeric) ASC,
         e.datum DESC
       LIMIT 8`;
     const candidates: RefundCandidate[] = [];
@@ -559,7 +570,7 @@ export async function reinterpretImportedEmail(userId: number, ledgerId: number,
       const pos = await sql`
         SELECT id, COALESCE(NULLIF(canonical_name,''), NULLIF(ai_guess,''), name, '?') AS name, preis::float8 AS preis
         FROM artikel WHERE einkauf_id = ${c.id as number} AND NOT is_refund
-        ORDER BY ABS(COALESCE(preis,0) - ${r.amount}) ASC, id ASC`;
+        ORDER BY ABS(COALESCE(preis,0) - ${r.amount}::numeric) ASC, id ASC`;
       candidates.push({
         id: c.id as number, datum: c.datum as string, roh_ladenname: c.roh_ladenname as string | null,
         gesamt_betrag: (c.gesamt_betrag as number | null) ?? null, konto_name: c.konto_name as string | null,
