@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import sql, { DEMO_MODE } from '../db.js';
 import { encryptSecret, decryptSecret } from '../lib/crypto.js';
-import { testMailbox, runMailImportForUser, backfillEmails, retryImportedEmail } from '../mail/importer.js';
+import { testMailbox, runMailImportForUser, backfillEmails, retryImportedEmail, reinterpretImportedEmail, confirmMailIncome } from '../mail/importer.js';
 import { ocrAndStore } from './receipts.js';
 
 /** Re-run OCR (with the now invoice-aware prompt) on the given PDF receipts,
@@ -129,24 +129,37 @@ export function mailboxRoutes(app: FastifyInstance): void {
     const userId = req.user!.id;
     const limit = Math.min(Number((req.query as { limit?: string }).limit) || 60, 200);
     const rows = await sql`
-      SELECT ie.id, ie.status, ie.reason, ie.einkauf_id, ie.created_at::text AS created_at,
+      SELECT ie.id, ie.status, ie.reason, ie.einkauf_id, ie.income_id, ie.created_at::text AS created_at,
              LEFT(ie.subject, 200) AS subject,
-             e.roh_ladenname,
+             e.roh_ladenname, inc.amount AS income_amount,
              COALESCE((SELECT COUNT(*)::int FROM artikel a WHERE a.einkauf_id = ie.einkauf_id), 0) AS items
       FROM imported_email ie
       LEFT JOIN einkauf e ON e.id = ie.einkauf_id
+      LEFT JOIN income inc ON inc.id = ie.income_id
       WHERE ie.user_id = ${userId}
       ORDER BY ie.created_at DESC
       LIMIT ${limit}`;
     return { entries: rows };
   });
 
-  // Retry ONE skipped/failed mail from the log — re-fetches it by Message-ID and
-  // runs it through the pipeline again (e.g. after an extractor fix). Guarded to
-  // this user's rows without a receipt, so it can never duplicate an import.
+  // Retry ONE skipped/failed mail from the log. Three modes on one endpoint:
+  //  • {}                      → plain re-run through the pipeline (unchanged behaviour).
+  //  • {instruction:"…"}       → AI reinterpret under a user instruction → a corrected receipt,
+  //                              or an income PREVIEW (no write) the user then confirms.
+  //  • {confirmIncome:{…}}     → book the previewed income (server re-validates + caps the amount).
+  // Guarded to this user's own unresolved rows, so it can never duplicate an import.
   app.post('/api/me/mailbox/log/:id/retry', async (req, reply) => {
     const id = Number((req.params as { id: string }).id);
     if (!Number.isInteger(id)) return reply.code(400).send({ error: 'bad id' });
+    const body = (req.body ?? {}) as { instruction?: unknown; confirmIncome?: Record<string, unknown> };
+    if (body.confirmIncome && typeof body.confirmIncome === 'object') {
+      const ci = body.confirmIncome;
+      return confirmMailIncome(req.user!.id, id, {
+        amount: ci.amount, datum: ci.datum, category_path: ci.category_path, description: ci.description,
+      });
+    }
+    const instruction = (body.instruction ?? '').toString().trim();
+    if (instruction) return reinterpretImportedEmail(req.user!.id, id, instruction);
     return retryImportedEmail(req.user!.id, id);
   });
 

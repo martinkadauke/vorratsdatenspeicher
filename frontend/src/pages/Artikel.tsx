@@ -10,6 +10,7 @@ import { CategoryPicker } from '../components/CategoryPicker';
 import { FirstVisitHint } from '../components/FirstVisitHint';
 import { useAuth } from '../context/auth';
 import { CanonicalIcon } from '../components/IconPicker';
+import { ShareButton } from '../components/ShareButton';
 import { ConsumerChips } from '../components/ConsumerChips';
 import { toast } from '../components/Toast';
 import { NameEditModal } from './Names';
@@ -524,6 +525,16 @@ export function Artikel() {
                   </div>
                 </div>
               </button>
+              {/* share this product with another household member (canonical groups only —
+                  a loose item has no stable address to link to) */}
+              {g.canonical_name && (
+                <ShareButton
+                  path={`/warenstamm/artikel?q=${encodeURIComponent(g.canonical_name)}`}
+                  title={g.display}
+                  text={t('share.artikelText', { name: g.display })}
+                  className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                />
+              )}
               {/* hide / unhide this product from the list (canonical groups only) */}
               {canWrite && g.canonical_name && (
                 <button

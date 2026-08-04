@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft, Pencil, Trash2, AlertTriangle, ScanLine, ChevronLeft, ChevronRight, RotateCw, Check, Hand, Wallet, X, Search, Ban, Lock, Plus, Camera, ImagePlus, FileText, Mail, Maximize2, Landmark } from 'lucide-react';
 import { TransformWrapper, TransformComponent, useControls } from 'react-zoom-pan-pinch';
+import { ShareButton } from '../components/ShareButton';
 import { api } from '../api/client';
 import type { Artikel, Receipt, ReceiptDetail } from '../api/types';
 import { Spinner, Modal, Input, Label, Button, ProgressBar, Select } from '../components/ui';
@@ -316,6 +317,12 @@ export function ReceiptDetailPage() {
             <ArrowLeft size={20} />
           </Link>
           <h1 className="min-w-0 flex-1 truncate text-lg font-bold">{data.roh_ladenname ?? '?'}</h1>
+          <ShareButton
+            path={`/receipts/${data.id}`}
+            title={`${data.roh_ladenname ?? 'Beleg'} · ${eur(data.gesamt_betrag)}`}
+            text={t('share.receiptText', { store: data.roh_ladenname ?? '', total: eur(data.gesamt_betrag) })}
+            iconSize={18}
+          />
           <span className="tabular shrink-0 text-xs font-medium text-zinc-400 dark:text-zinc-500">#{data.id}</span>
         </div>
 

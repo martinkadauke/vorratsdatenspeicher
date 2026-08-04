@@ -239,7 +239,7 @@ const RESET_MARKER_KEY = 'admin.reset_marker';
 
 function resetMarker(username: string, password: string): string {
   // Local require: bcrypt is already imported; crypto is stdlib. Keeps the marker opaque.
-  return createHash('sha256').update(`${username} ${password}`).digest('hex');
+  return createHash('sha256').update(`${username} ${password}`).digest('hex');
 }
 
 async function readResetMarker(conn: postgres.Sql): Promise<string | null> {

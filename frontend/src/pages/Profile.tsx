@@ -7,7 +7,7 @@ import { api } from '../api/client';
 import { useAuth } from '../context/auth';
 import { setLanguage } from '../i18n';
 import { pushSupported, pushStatus, enablePush, disablePush } from '../lib/push';
-import { Card, Button, Input, Label, Select, Switch } from '../components/ui';
+import { Card, Button, Input, Label, Select, Switch, Modal } from '../components/ui';
 import { cn } from '../lib/utils';
 import { EmojiPicker } from '../components/EmojiPicker';
 import { confirm } from '../components/Confirm';
@@ -355,19 +355,25 @@ function MailboxSettings() {
 
 interface LogEntry {
   id: number;
-  status: string;            // imported | skipped | failed | processing
+  status: string;            // imported | skipped | failed | processing | income
   reason: string | null;
   einkauf_id: number | null; // set only if the receipt still exists
+  income_id: number | null;  // set only if the mail was booked as one-off income
+  income_amount: number | null;
   created_at: string;
   subject: string | null;
   roh_ladenname: string | null;
   items: number;
 }
 
+interface IncomePreview { ledgerId: number; amount: number; datum: string | null; category_path: string; description: string; confidence: number }
+const INCOME_CATEGORIES = ['Gehalt', 'Erstattung', 'Verkauf', 'Geschenk', 'Sonstiges'] as const;
+
 /** Pick a coloured badge + label key for an import-log row. An 'imported' row
  *  with zero line items is called out separately — it made a receipt shell but
  *  the extractor found nothing, which is exactly the case a user needs to see. */
 function statusMeta(e: LogEntry): { cls: string; key: string } {
+  if (e.status === 'income') return { cls: 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300', key: 'income' };
   if (e.status === 'processing') return { cls: 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300', key: 'processing' };
   if (e.status === 'failed') return { cls: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300', key: 'failed' };
   if (e.status === 'skipped') return { cls: 'bg-zinc-200 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300', key: 'skipped' };
@@ -390,12 +396,38 @@ function ImportLog() {
   });
   const entries = data?.entries ?? [];
 
+  const [incomePreview, setIncomePreview] = useState<IncomePreview | null>(null);
+
+  type RetryResp = {
+    status?: string; einkauf_id?: number | null; error?: string;
+    income?: { amount: number; datum: string | null; category_path: string; description: string; confidence: number };
+  };
+  // One endpoint, three bodies: {} plain retry · {instruction} AI reinterpret · handled elsewhere for confirm.
   const retry = useMutation({
-    mutationFn: (id: number) => api<{ status?: string; einkauf_id?: number | null; error?: string }>(`/api/me/mailbox/log/${id}/retry`, { method: 'POST' }),
-    onSuccess: (r) => {
-      if (r.error) toast(t('profile.mailbox.log.retryFail', { error: r.error }), 'error');
-      else if (r.einkauf_id) toast(t('profile.mailbox.log.retryImported'), 'success');
+    mutationFn: (v: { id: number; instruction?: string }) =>
+      api<RetryResp>(`/api/me/mailbox/log/${v.id}/retry`, { method: 'POST', body: v.instruction ? { instruction: v.instruction } : {} }),
+    onSuccess: (r, v) => {
+      if (r.error) { toast(t('profile.mailbox.log.retryFail', { error: r.error }), 'error'); return; }
+      if (r.status === 'preview' && r.income) {   // income proposed — confirm the amount before booking
+        setIncomePreview({ ledgerId: v.id, amount: r.income.amount, datum: r.income.datum, category_path: r.income.category_path, description: r.income.description, confidence: r.income.confidence });
+        return;
+      }
+      if (r.einkauf_id) toast(t('profile.mailbox.log.retryImported'), 'success');
       else toast(t('profile.mailbox.log.retryNone'), 'info');
+      void qc.invalidateQueries({ queryKey: ['mailbox-log'] });
+    },
+    onError: (e) => toast(t('profile.mailbox.log.retryFail', { error: (e as Error).message }), 'error'),
+  });
+
+  const bookIncome = useMutation({
+    mutationFn: (p: IncomePreview) => api<RetryResp>(`/api/me/mailbox/log/${p.ledgerId}/retry`, {
+      method: 'POST',
+      body: { confirmIncome: { amount: p.amount, datum: p.datum, category_path: p.category_path, description: p.description } },
+    }),
+    onSuccess: (r) => {
+      if (r.error) { toast(t('profile.mailbox.log.retryFail', { error: r.error }), 'error'); return; }
+      toast(t('profile.mailbox.log.incomeBooked'), 'success');
+      setIncomePreview(null);
       void qc.invalidateQueries({ queryKey: ['mailbox-log'] });
     },
     onError: (e) => toast(t('profile.mailbox.log.retryFail', { error: (e as Error).message }), 'error'),
@@ -432,48 +464,143 @@ function ImportLog() {
                 <LogRow
                   key={e.id}
                   e={e}
-                  onOpen={() => e.einkauf_id && navigate(`/receipts/${e.einkauf_id}`)}
-                  onRetry={() => retry.mutate(e.id)}
-                  retrying={retry.isPending && retry.variables === e.id}
+                  onOpen={() => {
+                    if (e.income_id) navigate('/finanzen');
+                    else if (e.einkauf_id) navigate(`/receipts/${e.einkauf_id}`);
+                  }}
+                  onRetry={() => retry.mutate({ id: e.id })}
+                  onInstruct={(instruction) => retry.mutate({ id: e.id, instruction })}
+                  busy={retry.isPending && retry.variables?.id === e.id}
                 />
               ))}
             </ul>
           )}
         </div>
       )}
+
+      {incomePreview && (
+        <IncomeConfirm
+          preview={incomePreview}
+          onChange={setIncomePreview}
+          onCancel={() => setIncomePreview(null)}
+          onBook={() => bookIncome.mutate(incomePreview)}
+          booking={bookIncome.isPending}
+        />
+      )}
     </div>
   );
 }
 
-function LogRow({ e, onOpen, onRetry, retrying }: { e: LogEntry; onOpen: () => void; onRetry: () => void; retrying: boolean }) {
+/** Confirm dialog for an income the AI proposed from a mail — the amount is shown and editable
+ *  BEFORE anything is written to the books (the mail is vendor-authored text, so a human okays
+ *  the number). Category/date/description are editable too. */
+function IncomeConfirm({ preview, onChange, onCancel, onBook, booking }: {
+  preview: IncomePreview; onChange: (p: IncomePreview) => void; onCancel: () => void; onBook: () => void; booking: boolean;
+}) {
+  const { t } = useTranslation();
+  const valid = Number.isFinite(preview.amount) && preview.amount > 0;
+  return (
+    <Modal open onClose={onCancel} title={t('profile.mailbox.log.incomeTitle')}>
+      <div className="flex flex-col gap-3">
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('profile.mailbox.log.incomeHint')}</p>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label>{t('profile.mailbox.log.incomeAmount')}</Label>
+            <Input type="number" step="0.01" min="0" value={String(preview.amount)}
+              onChange={ev => onChange({ ...preview, amount: Number(ev.target.value) })} />
+          </div>
+          <div>
+            <Label>{t('profile.mailbox.log.incomeDate')}</Label>
+            <Input type="date" value={preview.datum ?? ''} onChange={ev => onChange({ ...preview, datum: ev.target.value || null })} />
+          </div>
+        </div>
+        <div>
+          <Label>{t('profile.mailbox.log.incomeCategory')}</Label>
+          <Select value={preview.category_path} onChange={ev => onChange({ ...preview, category_path: ev.target.value })}>
+            {INCOME_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+          </Select>
+        </div>
+        <div>
+          <Label>{t('profile.mailbox.log.incomeDescription')}</Label>
+          <Input value={preview.description} onChange={ev => onChange({ ...preview, description: ev.target.value })} />
+        </div>
+        <div className="flex justify-end gap-2 pt-1">
+          <Button variant="secondary" onClick={onCancel}>{t('common.cancel')}</Button>
+          <Button onClick={onBook} disabled={!valid || booking}>
+            {booking ? t('common.saving') : t('profile.mailbox.log.incomeBook')}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function LogRow({ e, onOpen, onRetry, onInstruct, busy }: {
+  e: LogEntry; onOpen: () => void; onRetry: () => void; onInstruct: (instruction: string) => void; busy: boolean;
+}) {
   const { t, i18n } = useTranslation();
+  const [instructOpen, setInstructOpen] = useState(false);
+  const [instruction, setInstruction] = useState('');
   const m = statusMeta(e);
   const laden = (e.roh_ladenname || '').trim();
   const title = (e.subject || laden || t('profile.mailbox.log.noSubject')).trim();
   const date = new Date(e.created_at).toLocaleDateString(i18n.language, { day: '2-digit', month: '2-digit', year: '2-digit' });
-  // A skipped/failed mail that produced no receipt can be re-fetched and retried
-  // (e.g. after an extractor fix). Rows that already made a receipt link instead.
-  const canRetry = !e.einkauf_id && (e.status === 'skipped' || e.status === 'failed');
+  // A skipped/failed mail that produced neither a receipt nor an income can be re-run — plainly,
+  // or with an instruction that tells the AI what it really is. Resolved rows link out instead.
+  const canRetry = !e.einkauf_id && !e.income_id && (e.status === 'skipped' || e.status === 'failed');
+  const resolved = e.einkauf_id || e.income_id;
   return (
     <li className="py-1.5">
       <div className="flex items-start gap-2">
         <span className={cn('mt-0.5 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium', m.cls)}>
-          {t(`profile.mailbox.log.status.${m.key}`, { n: e.items })}
+          {e.status === 'income' && e.income_amount != null
+            ? t('profile.mailbox.log.status.incomeAmount', { amount: Number(e.income_amount).toFixed(2) })
+            : t(`profile.mailbox.log.status.${m.key}`, { n: e.items })}
         </span>
         <div className="min-w-0 flex-1">
           <p className="truncate text-xs font-medium text-zinc-700 dark:text-zinc-200">{title}</p>
           {e.reason && <p className="text-[11px] leading-tight text-zinc-500">{e.reason}</p>}
+          {canRetry && instructOpen && (
+            <div className="mt-1.5 flex flex-col gap-1.5">
+              <textarea
+                value={instruction}
+                onChange={ev => setInstruction(ev.target.value)}
+                rows={2}
+                placeholder={t('profile.mailbox.log.instructionPlaceholder')}
+                className="w-full rounded-lg border border-zinc-300 bg-white px-2 py-1.5 text-[12px] text-zinc-800 placeholder:text-zinc-400 focus:border-sky-400 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+              />
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => instruction.trim() && onInstruct(instruction.trim())}
+                  disabled={busy || !instruction.trim()}
+                  className="rounded-lg bg-sky-600 px-2.5 py-1 text-[11px] font-medium text-white disabled:opacity-50"
+                >
+                  {busy ? t('profile.mailbox.log.instructing') : t('profile.mailbox.log.instructApply')}
+                </button>
+                <button onClick={() => setInstructOpen(false)} className="text-[11px] text-zinc-500 hover:underline">
+                  {t('common.cancel')}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
         <div className="shrink-0 text-right">
           <p className="text-[10px] text-zinc-400">{date}</p>
-          {e.einkauf_id ? (
+          {resolved ? (
             <button onClick={onOpen} className="text-[11px] text-emerald-600 hover:underline">
-              {t('profile.mailbox.log.view')}
+              {e.income_id ? t('profile.mailbox.log.viewIncome') : t('profile.mailbox.log.view')}
             </button>
           ) : canRetry ? (
-            <button onClick={onRetry} disabled={retrying} className="text-[11px] text-sky-600 hover:underline disabled:opacity-50">
-              {retrying ? t('profile.mailbox.log.retrying') : t('profile.mailbox.log.retry')}
-            </button>
+            <div className="flex flex-col items-end gap-0.5">
+              <button onClick={onRetry} disabled={busy} className="text-[11px] text-sky-600 hover:underline disabled:opacity-50">
+                {busy ? t('profile.mailbox.log.retrying') : t('profile.mailbox.log.retry')}
+              </button>
+              {!instructOpen && (
+                <button onClick={() => setInstructOpen(true)} className="text-[11px] text-zinc-500 hover:underline">
+                  {t('profile.mailbox.log.instructOpen')}
+                </button>
+              )}
+            </div>
           ) : null}
         </div>
       </div>

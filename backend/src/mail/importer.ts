@@ -5,10 +5,11 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import sql from '../db.js';
 import { decryptSecret } from '../lib/crypto.js';
-import { ocrFromText, type OcrResult } from '../llm/ocr.js';
+import { ocrFromText, reinterpretMail, INCOME_CATEGORIES, type OcrResult, type IncomeCategory } from '../llm/ocr.js';
 import { ocrAndStore, storeOcrResult } from '../routes/receipts.js';
 import { applyLearnedKonto } from '../lib/merchant.js';
 import { todayLocal, localDay } from '../lib/localDate.js';
+import { getConfig } from '../config.js';
 
 /** Local mount where receipt photos/PDFs are persisted (shared with receipts.ts;
  *  the host path is mapped here via the docker volume in deploy/stack.yml). */
@@ -375,6 +376,12 @@ export async function runMailImport(trigger: string): Promise<{ users: number; i
     const [{ locked }] = await conn`SELECT pg_try_advisory_lock(${LOCK_KEY}) AS locked`;
     if (!locked) return { users: 0, imported: 0 }; // another replica is mid-run
     try {
+      // Re-open any ledger row wedged in 'processing' — a container that died between the
+      // reinterpret claim and its completion would otherwise block that mail's retry forever.
+      await sql`
+        UPDATE imported_email SET status = 'failed', reason = 'timeout — bitte erneut versuchen'
+        WHERE status = 'processing' AND claimed_at IS NOT NULL AND claimed_at < NOW() - INTERVAL '15 minutes'`
+        .catch(() => {});
       const mbs = await sql<MailboxRow[]>`SELECT * FROM user_mailbox WHERE enabled = TRUE ORDER BY user_id`;
       let imported = 0;
       for (const mb of mbs) {
@@ -423,14 +430,33 @@ const BACKFILL_MAX_SCAN = 20000;
  *  re-claims a 'skipped'/'failed' ledger row and imports it if it now yields data.
  *  Guarded to rows without a receipt yet, so it can never duplicate an import. */
 export async function retryImportedEmail(userId: number, ledgerId: number): Promise<{ status: string; einkauf_id: number | null; reason: string | null } | { error: string }> {
-  const [row] = await sql`SELECT message_id, status, einkauf_id FROM imported_email WHERE id = ${ledgerId} AND user_id = ${userId}`;
+  const [row] = await sql`SELECT message_id, status, einkauf_id, income_id FROM imported_email WHERE id = ${ledgerId} AND user_id = ${userId}`;
   if (!row) return { error: 'not found' };
   if (row.einkauf_id != null) return { error: 'already has a receipt — use "re-scan PDFs" instead' };
+  if (row.income_id != null) return { error: 'already recorded as income' };
   const mid = normMid(row.message_id as string);
   if (!mid || mid.startsWith('nomsgid-')) return { error: 'this mail has no Message-ID and cannot be re-fetched' };
   const [mb] = await sql<MailboxRow[]>`SELECT * FROM user_mailbox WHERE user_id = ${userId} AND enabled = TRUE`;
   if (!mb) return { error: 'no enabled mailbox configured' };
 
+  let source: Buffer | null;
+  try { source = await fetchRawByMessageId(mb, mid); }
+  catch (e) { return { error: (e as Error).message.slice(0, 300) }; }
+  if (!source) return { error: 'message no longer found in the mailbox folder' };
+  try {
+    const kontoId = await defaultKontoFor(userId);
+    await processMessage(mb, kontoId, source);
+  } catch (e) {
+    return { error: (e as Error).message.slice(0, 300) };
+  }
+  const [after] = await sql`SELECT status, einkauf_id, reason FROM imported_email WHERE id = ${ledgerId}`;
+  return { status: after.status as string, einkauf_id: (after.einkauf_id as number | null) ?? null, reason: (after.reason as string | null) ?? null };
+}
+
+/** Fetch one raw message from the user's mailbox folder by Message-ID (header scan; last
+ *  match wins for a re-labelled copy). Returns null if not present. Throws on connect/auth
+ *  failure or a folder too large to scan. Shared by the plain retry and the instructed retry. */
+async function fetchRawByMessageId(mb: MailboxRow, mid: string): Promise<Buffer | null> {
   let client: ImapFlow | null = null;
   try {
     client = await openMailbox({
@@ -438,35 +464,155 @@ export async function retryImportedEmail(userId: number, ledgerId: number): Prom
       imap_user: mb.imap_user, pass: decryptSecret(mb.imap_pass_enc),
     });
     const lock = await client.getMailboxLock(mb.folder || 'INBOX');
-    let source: Buffer | null = null;
     try {
       const box = client.mailbox;
-      if (box && box.exists > BACKFILL_MAX_SCAN) return { error: `mailbox too large to scan (${box.exists} messages)` };
-      if (box && box.exists > 0) {
-        let uid = 0;
-        for await (const m of client.fetch('1:*', { uid: true, envelope: true }, { uid: true })) {
-          if (normMid(m.envelope?.messageId) === mid) uid = Number(m.uid); // last match wins (newest label copy)
-        }
-        if (uid) {
-          for await (const m of client.fetch(String(uid), { uid: true, source: true }, { uid: true })) {
-            if (m.source) source = m.source as Buffer;
-            break;
-          }
-        }
+      if (box && box.exists > BACKFILL_MAX_SCAN) throw new Error(`mailbox too large to scan (${box.exists} messages)`);
+      if (!box || box.exists === 0) return null;
+      let uid = 0;
+      for await (const m of client.fetch('1:*', { uid: true, envelope: true }, { uid: true })) {
+        if (normMid(m.envelope?.messageId) === mid) uid = Number(m.uid); // last match wins (newest label copy)
       }
+      if (!uid) return null;
+      for await (const m of client.fetch(String(uid), { uid: true, source: true }, { uid: true })) {
+        if (m.source) return m.source as Buffer;
+      }
+      return null;
     } finally {
       lock.release();
     }
-    if (!source) return { error: 'message no longer found in the mailbox folder' };
-    const kontoId = await defaultKontoFor(userId);
-    await processMessage(mb, kontoId, source);
-  } catch (e) {
-    return { error: (e as Error).message.slice(0, 300) };
   } finally {
     if (client) { try { await client.logout(); } catch { /* ignore */ } }
   }
-  const [after] = await sql`SELECT status, einkauf_id, reason FROM imported_email WHERE id = ${ledgerId}`;
-  return { status: after.status as string, einkauf_id: (after.einkauf_id as number | null) ?? null, reason: (after.reason as string | null) ?? null };
+}
+
+export type ReinterpretOutcome =
+  | { status: 'imported'; einkauf_id: number; reason: null }
+  | { status: 'skipped'; reason: string; einkauf_id: null }
+  | { status: 'preview'; income: { amount: number; datum: string | null; category_path: IncomeCategory; description: string; confidence: number } }
+  | { error: string };
+
+/** Retry a skipped/failed import under a free-text USER instruction. The AI reclassifies the
+ *  mail into a corrected receipt (created here) or a one-off income (PREVIEW only — the user
+ *  confirms the amount via confirmMailIncome before anything is booked) or none. The plain
+ *  cron/retry path is untouched; this runs only when an instruction is supplied. */
+export async function reinterpretImportedEmail(userId: number, ledgerId: number, instruction: string): Promise<ReinterpretOutcome> {
+  const ins = instruction.slice(0, 2000);
+  const [row] = await sql`SELECT message_id, einkauf_id, income_id FROM imported_email WHERE id = ${ledgerId} AND user_id = ${userId}`;
+  if (!row) return { error: 'not found' };
+  if (row.einkauf_id != null || row.income_id != null) return { error: 'already resolved' };
+  const mid = normMid(row.message_id as string);
+  if (!mid || mid.startsWith('nomsgid-')) return { error: 'this mail has no Message-ID and cannot be re-fetched' };
+  const [mb] = await sql<MailboxRow[]>`SELECT * FROM user_mailbox WHERE user_id = ${userId} AND enabled = TRUE`;
+  if (!mb) return { error: 'no enabled mailbox configured' };
+
+  let source: Buffer | null;
+  try { source = await fetchRawByMessageId(mb, mid); }
+  catch (e) { return { error: (e as Error).message.slice(0, 300) }; }
+  if (!source) return { error: 'message no longer found in the mailbox folder' };
+
+  const parsed = await simpleParser(source);
+  const header = `Betreff: ${parsed.subject ?? ''}\nVon: ${parsed.from?.text ?? ''}\n\n`;
+  const subject = (parsed.subject ?? '').slice(0, 500) || null;
+  const datum = parsed.date ? localDay(parsed.date) : null;
+
+  let r;
+  try { r = await reinterpretMail(header + pickBody(parsed), instruction); }
+  catch (e) {
+    await sql`UPDATE imported_email SET status = 'failed', reason = ${'KI-Fehler: ' + (e as Error).message.slice(0, 200)}, instruction = ${ins} WHERE id = ${ledgerId}`.catch(() => {});
+    return { error: (e as Error).message.slice(0, 300) };
+  }
+
+  if (r.kind === 'income') {
+    // Preview only — booking money requires the user's explicit confirm (confirmMailIncome).
+    await sql`UPDATE imported_email SET instruction = ${ins} WHERE id = ${ledgerId}`.catch(() => {});
+    return { status: 'preview', income: { amount: r.amount, datum: r.datum ?? datum, category_path: r.category_path, description: r.description, confidence: r.confidence } };
+  }
+
+  if (r.kind === 'receipt' && (r.receipt.ladenkette || r.receipt.artikel.length)) {
+    // Mirror processMessage's body path: create the einkauf, store items best-effort, and ALWAYS
+    // link einkauf_id on the ledger — so a storeOcrResult failure leaves a linked (openable)
+    // receipt, never an orphan, and a re-click can't create a second one (the guard blocks it).
+    const privateFor = mb.make_private ? mb.user_id : null;
+    const [snapMember] = await sql`SELECT id FROM family_member WHERE user_id = ${userId} ORDER BY sort_order, id LIMIT 1`;
+    const snappedBy = (snapMember?.id as number | undefined) ?? null;
+    const kontoId = await defaultKontoFor(userId);
+    const [einkauf] = await sql`
+      INSERT INTO einkauf (datum, roh_ladenname, quelle, konto_id, private_for_user_id, snapped_by_member_id)
+      VALUES (${datum ?? todayISO()}, ${subject}, 'email', ${kontoId}, ${privateFor}, ${snappedBy})
+      RETURNING id`;
+    const einkaufId = einkauf.id as number;
+    let status = 'imported';
+    let reason: string | null = null;
+    try { await storeOcrResult(einkaufId, r.receipt); }
+    catch (e) { status = 'failed'; reason = (e as Error).message.slice(0, 300); }
+    if (datum) {
+      await sql`UPDATE einkauf SET datum = ${datum}::date, date_uncertain = FALSE
+                WHERE id = ${einkaufId} AND (datum IS NULL OR date_uncertain = TRUE OR ABS(datum - ${datum}::date) > 21)`.catch(() => {});
+    }
+    await applyLearnedKonto(einkaufId).catch(() => {});
+    try { await storeEmail(einkaufId, parsed); } catch { /* best-effort */ }
+    await sql`UPDATE imported_email SET einkauf_id = ${einkaufId}, status = ${status}, reason = ${reason}, instruction = ${ins} WHERE id = ${ledgerId}`;
+    return status === 'imported'
+      ? { status: 'imported', einkauf_id: einkaufId, reason: null }
+      : { error: reason ?? 'receipt import failed' };
+  }
+
+  // kind === 'none', or a receipt the model couldn't fill.
+  const note = (r.kind === 'none' ? r.note : null) || 'KI: weder Beleg noch Einnahme erkennbar';
+  await sql`UPDATE imported_email SET status = 'skipped', reason = ${note}, instruction = ${ins} WHERE id = ${ledgerId}`;
+  return { status: 'skipped', reason: note, einkauf_id: null };
+}
+
+function isRealYmd(s: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const d = new Date(s + 'T00:00:00Z');
+  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+}
+
+/** Book the previewed income after the user has seen and confirmed the amount. Re-validates
+ *  everything server-side (client-echoed values are re-checked; konto/source/created_by are
+ *  never client-supplied) and inserts exactly one income row via a single-winner atomic claim,
+ *  so a double-click or a race can never create two. */
+export async function confirmMailIncome(
+  userId: number, ledgerId: number,
+  income: { amount: unknown; datum: unknown; category_path: unknown; description: unknown },
+): Promise<{ status: 'income'; income_id: number } | { error: string }> {
+  const cap = await getConfig('income.max_mail_amount');
+  const amount = Number(income.amount);
+  if (!Number.isFinite(amount) || amount <= 0) return { error: 'Betrag muss größer als 0 sein.' };
+  if (amount > cap) return { error: `Betrag über dem Limit (max. ${cap} €).` };
+  const category_path: IncomeCategory = INCOME_CATEGORIES.includes(income.category_path as IncomeCategory)
+    ? (income.category_path as IncomeCategory) : 'Erstattung';
+  const rawDatum = String(income.datum ?? '');
+  const datum = isRealYmd(rawDatum) ? rawDatum : todayISO();
+  const description = (String(income.description ?? '').trim() || 'Einnahme (E-Mail)').slice(0, 300);
+  const kontoId = await defaultKontoFor(userId);
+
+  try {
+    const incomeId = await sql.begin(async (tx) => {
+      // Single-winner claim: only a still-unresolved skipped/failed row can be booked. A concurrent
+      // second commit finds status='processing' (or already 'income') → no row → aborts.
+      const claim = await tx`
+        UPDATE imported_email SET status = 'processing', claimed_at = NOW()
+        WHERE id = ${ledgerId} AND user_id = ${userId}
+          AND einkauf_id IS NULL AND income_id IS NULL AND status IN ('skipped', 'failed')
+        RETURNING id`;
+      if (!claim.length) return null;
+      const [inc] = await tx`
+        INSERT INTO income (datum, amount, category_path, konto_id, source, description, created_by)
+        VALUES (${datum}::date, ${amount}, ${category_path}, ${kontoId}, 'email', ${description}, ${userId})
+        RETURNING id`;
+      const id = inc.id as number;
+      await tx`UPDATE imported_email SET income_id = ${id}, status = 'income', reason = ${'Einnahme: ' + amount.toFixed(2) + ' €'} WHERE id = ${ledgerId}`;
+      return id;
+    });
+    if (incomeId == null) return { error: 'bereits verbucht oder in Bearbeitung' };
+    return { status: 'income', income_id: incomeId };
+  } catch (e) {
+    // The tx rolled back → no partial income row; re-open the ledger row for another attempt.
+    await sql`UPDATE imported_email SET status = 'failed', reason = ${(e as Error).message.slice(0, 200)} WHERE id = ${ledgerId} AND income_id IS NULL`.catch(() => {});
+    return { error: (e as Error).message.slice(0, 300) };
+  }
 }
 
 /** Normalise a Message-ID for matching: strip the angle brackets + lowercase, so

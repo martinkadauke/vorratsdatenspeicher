@@ -33,6 +33,11 @@ export interface AppConfig {
   'ai.statsask.model': string;
   'ai.csvmapping.provider': string;
   'ai.csvmapping.model': string;
+  'ai.mailreinterpret.provider': string;
+  'ai.mailreinterpret.model': string;
+  // Hard ceiling for an income booked from a mail via the reinterpret retry — a safety cap
+  // against an attacker-authored mail (or a mis-read) writing an absurd amount to the books.
+  'income.max_mail_amount': number;
   'churner.enabled': boolean;
   'churner.cron': string;
   // Run a churn pass right after any receipt is OCR'd (debounced), so imports get
@@ -136,6 +141,12 @@ const DEFAULTS: AppConfig = {
   // spec. Needs solid reasoning → defaults to Claude (self-host without a key: switch to ollama).
   'ai.csvmapping.provider': 'anthropic',
   'ai.csvmapping.model': 'claude-sonnet-5',
+  // Mail-reinterpret: user gives a free-text instruction on a skipped import and the model
+  // reclassifies the mail as a corrected receipt or a one-off income. Reasoning over
+  // untrusted mail text + a trusted instruction → defaults to Claude (self-host w/o key: ollama).
+  'ai.mailreinterpret.provider': 'anthropic',
+  'ai.mailreinterpret.model': 'claude-sonnet-5',
+  'income.max_mail_amount': 100000,
   'churner.enabled': true,
   'churner.cron': '0 3 * * *',
   'churner.run_after_ocr': true,

@@ -1005,6 +1005,8 @@
     "taskBankmatchDesc": "Kreativer Zweitversuch beim „Neu abgleichen“: ordnet offene Bankbuchungen Belegen/Einnahmen/Fixkosten zu, die der deterministische Abgleich nicht findet. Nur Vorschläge (⭐), die du bestätigst. Braucht ein starkes Reasoning-Modell.",
     "taskStatsask": "Statistik-Assistent (KI)",
     "taskStatsaskDesc": "Übersetzt eine Frage in der Statistik (z. B. „wie viel für Kraftstoff in 2026“) in Filter — Kategorie oder Artikel(gruppe) + Zeitraum + Konten. Die KI nennt nie eine Zahl; die App rechnet alles deterministisch aus. Kleine, strukturierte Aufgabe → ein günstiges Modell reicht.",
+    "taskMailReinterpret": "E-Mail neu deuten (KI)",
+    "taskMailReinterpretDesc": "Beim „mit Anweisung“-Erneutversuch im Import-Protokoll: deutet eine übersprungene Mail anhand deiner Anweisung neu — als korrigierten Beleg oder als einmalige Einnahme (z. B. eine Amazon-RMA-Erstattung). Braucht solides Reasoning; ohne Cloud-Key läuft es lokal über Ollama.",
     "reviewTitle": "Modell-Review",
     "reviewHint": "Alle 2 Wochen schlägt das Reviewer-Modell pro KI-Aufgabe je ein API/Cloud- UND ein Open-Weight-Modell vor (preis/leistungs-bewusst). Du bekommst per Email die Wahl: alle API oder alle Open-Weight übernehmen – oder ablehnen. Nichts wird automatisch umgestellt.",
     "reviewRunBtn": "Review jetzt ausführen",
@@ -1122,18 +1124,33 @@
         "refresh": "Aktualisieren",
         "empty": "Noch keine E-Mails abgerufen.",
         "view": "Beleg öffnen",
+        "viewIncome": "In Finanzen öffnen",
         "retry": "Erneut versuchen",
         "retrying": "Läuft…",
         "retryImported": "Als Beleg importiert.",
         "retryNone": "Weiterhin keine Belegdaten in dieser Mail gefunden.",
         "retryFail": "Wiederholung fehlgeschlagen: {{error}}",
+        "instructOpen": "mit Anweisung…",
+        "instructionPlaceholder": "Sag der KI, was diese Mail ist – z. B. „Das ist eine Amazon-RMA-Erstattung, kein Beleg, sondern eine einmalige Einnahme.“",
+        "instructApply": "Anwenden",
+        "instructing": "KI arbeitet…",
+        "incomeTitle": "Als Einnahme verbuchen?",
+        "incomeHint": "Die KI hat diese Mail als Geldeingang erkannt. Prüfe den Betrag, bevor er in deine Finanzen gebucht wird.",
+        "incomeAmount": "Betrag (€)",
+        "incomeDate": "Datum",
+        "incomeCategory": "Kategorie",
+        "incomeDescription": "Beschreibung",
+        "incomeBook": "Als Einnahme buchen",
+        "incomeBooked": "Als Einnahme verbucht.",
         "noSubject": "(ohne Betreff)",
         "status": {
           "imported": "Importiert · {{n}} Pos.",
           "importedEmpty": "Leer erkannt",
           "skipped": "Übersprungen",
           "failed": "Fehler",
-          "processing": "Läuft…"
+          "processing": "Läuft…",
+          "income": "Einnahme",
+          "incomeAmount": "Einnahme · {{amount}} €"
         }
       }
     }
@@ -1282,6 +1299,14 @@
     "email": "E-Mail",
     "bar": "Bar",
     "upload": "Rechnung"
+  },
+  "share": {
+    "button": "Teilen",
+    "receiptText": "Beleg {{store}} · {{total}}",
+    "artikelText": "Artikel: {{name}}",
+    "unavailableTitle": "Teilen hier nicht verfügbar",
+    "unavailableBody": "Das Teilen über das System-Menü braucht eine sichere (HTTPS-)Verbindung. Diese VDS-Instanz wird über eine ungesicherte HTTP-Verbindung ausgeliefert, daher ist das Teilen-Menü hier nicht verfügbar.",
+    "unavailableHint": "Tipp: Betreibe VDS hinter einem Reverse-Proxy mit HTTPS (z. B. Caddy), dann funktioniert das Teilen. Bis dahin kannst du den obigen Link manuell kopieren."
   },
   "artikel": {
     "search": "Suchen (Name, OCR-Text, KI-Vorschlag…)",

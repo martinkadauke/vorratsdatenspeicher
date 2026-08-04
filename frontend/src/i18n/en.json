@@ -1003,6 +1003,8 @@
     "taskBankmatchDesc": "Creative second pass on \"Re-match\": links open bank bookings to receipts/income/fixed costs the deterministic matcher misses. Suggestions only (⭐), approved by you. Needs a strong reasoning model.",
     "taskStatsask": "Statistics assistant (AI)",
     "taskStatsaskDesc": "Turns a question in Statistik (e.g. \"how much for fuel in 2026\") into filters — a category or article group + date range + accounts. The AI never states a number; the app computes everything deterministically. Small, structured task → a cheap model is plenty.",
+    "taskMailReinterpret": "Reinterpret e-mail (AI)",
+    "taskMailReinterpretDesc": "For the \"with instruction\" retry in the import log: reinterprets a skipped mail from your instruction — as a corrected receipt or as a one-off income (e.g. an Amazon RMA refund). Needs solid reasoning; without a cloud key it runs locally via Ollama.",
     "reviewTitle": "Model review",
     "reviewHint": "Every 2 weeks the reviewer model proposes, per AI task, both an API/cloud and an open-weight model (price/performance aware). The email lets you apply all-API or all-open-weight — or reject. Nothing is switched automatically.",
     "reviewRunBtn": "Run review now",
@@ -1120,18 +1122,33 @@
         "refresh": "Refresh",
         "empty": "No e-mails fetched yet.",
         "view": "Open receipt",
+        "viewIncome": "Open in Finances",
         "retry": "Retry",
         "retrying": "Working…",
         "retryImported": "Imported as a receipt.",
         "retryNone": "Still no receipt data found in this mail.",
         "retryFail": "Retry failed: {{error}}",
+        "instructOpen": "with instruction…",
+        "instructionPlaceholder": "Tell the AI what this mail is — e.g. \"This is an Amazon RMA refund, not a receipt but a one-off income.\"",
+        "instructApply": "Apply",
+        "instructing": "AI working…",
+        "incomeTitle": "Book as income?",
+        "incomeHint": "The AI read this mail as money coming in. Check the amount before it's booked to your finances.",
+        "incomeAmount": "Amount (€)",
+        "incomeDate": "Date",
+        "incomeCategory": "Category",
+        "incomeDescription": "Description",
+        "incomeBook": "Book as income",
+        "incomeBooked": "Booked as income.",
         "noSubject": "(no subject)",
         "status": {
           "imported": "Imported · {{n}} items",
           "importedEmpty": "Detected empty",
           "skipped": "Skipped",
           "failed": "Failed",
-          "processing": "Working…"
+          "processing": "Working…",
+          "income": "Income",
+          "incomeAmount": "Income · €{{amount}}"
         }
       }
     }
@@ -1280,6 +1297,14 @@
     "email": "Email",
     "bar": "Cash",
     "upload": "Invoice"
+  },
+  "share": {
+    "button": "Share",
+    "receiptText": "Receipt {{store}} · {{total}}",
+    "artikelText": "Article: {{name}}",
+    "unavailableTitle": "Sharing not available here",
+    "unavailableBody": "Sharing via the system menu needs a secure (HTTPS) connection. This VDS instance is served over an unsecured HTTP connection, so the share menu isn't available here.",
+    "unavailableHint": "Tip: run VDS behind a reverse proxy with HTTPS (e.g. Caddy) and sharing will work. Until then you can copy the link above manually."
   },
   "artikel": {
     "search": "Search (name, OCR text, AI guess…)",

@@ -316,6 +316,7 @@ const AI_TASKS = [
   { key: 'model_review',     i18n: 'admin.taskModelReview',    descI18n: 'admin.taskModelReviewDesc' },
   { key: 'bankmatch',        i18n: 'admin.taskBankmatch',      descI18n: 'admin.taskBankmatchDesc' },
   { key: 'statsask',         i18n: 'admin.taskStatsask',       descI18n: 'admin.taskStatsaskDesc' },
+  { key: 'mailreinterpret',  i18n: 'admin.taskMailReinterpret', descI18n: 'admin.taskMailReinterpretDesc' },
 ] as const;
 
 interface AiTaskLogRow {
