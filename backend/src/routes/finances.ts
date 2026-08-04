@@ -2479,6 +2479,19 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
       if (!linked.length) return reply.code(400).send({ error: 'Bankbuchung ist bereits zugeordnet.' });
       return { ok: true, einkauf_id: einkaufId, linked: true };
     }
+    // Backstop against a DOUBLE refund: if the target receipt already carries a refund for ~this
+    // amount, refuse to book a NEW one (it would refund a second unit that wasn't returned, and drop
+    // the kept product from Warenstamm). The credit must be LINKED instead. The frontend offers this
+    // (already_refunded → "Gutschrift zuordnen"); this guards a stale/racing client.
+    {
+      const eid = Number(body.einkauf_id);
+      const a = Math.abs(bt.amount as number);
+      if (Number.isInteger(eid)) {
+        const [dup] = await sql`SELECT 1 FROM artikel WHERE einkauf_id = ${eid} AND is_refund
+          AND ABS(COALESCE(preis,0) + ${a}::numeric) <= GREATEST(0.5, ${a}::numeric * 0.02) LIMIT 1`;
+        if (dup) return reply.code(409).send({ error: 'Dieser Beleg hat bereits eine Erstattung über diesen Betrag — bitte „Gutschrift zuordnen" statt eine zweite zu buchen.', code: 'already_refunded' });
+      }
+    }
     const lines: RefundReturnLine[] | undefined = Array.isArray(body.lines)
       ? body.lines.map((l) => ({ artikel_id: Number((l as { artikel_id?: unknown }).artikel_id), return_qty: Number((l as { return_qty?: unknown }).return_qty) }))
       : undefined;

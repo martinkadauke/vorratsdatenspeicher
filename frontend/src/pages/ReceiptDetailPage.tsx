@@ -53,6 +53,15 @@ export function ReceiptDetailPage() {
     queryFn: () => api<{ mails: RefundMailItem[] }>(`/api/receipts/${id}/refund-emails`),
     enabled: mailOpen,
   });
+  const undoRefund = useMutation({
+    mutationFn: (artikelId: number) => api(`/api/articles/${artikelId}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      toast(t('receiptDetail.refundUndone'), 'success');
+      void qc.invalidateQueries({ queryKey: ['receipt', id] });
+      void qc.invalidateQueries({ queryKey: ['receipts'] });
+    },
+    onError: (e) => toast((e as Error).message, 'error'),
+  });
   const [imgVersion, setImgVersion] = useState(0); // cache-buster after rotate
   const [panEnabled, setPanEnabled] = useState(false); // mobile: image pan active?
 
@@ -733,6 +742,35 @@ export function ReceiptDetailPage() {
             >
               <Plus size={16} /> {t('receiptDetail.addPosition')}
             </button>
+          )}
+          {editable && data.artikel.some(a => a.is_refund) && (
+            <div className="mt-1 rounded-xl border border-amber-200 bg-amber-50/50 px-3 py-2 dark:border-amber-900/40 dark:bg-amber-950/20">
+              <div className="mb-1 text-[11px] font-medium text-amber-700 dark:text-amber-400">{t('receiptDetail.refundsHeading')}</div>
+              <ul className="flex flex-col gap-1">
+                {data.artikel.filter(a => a.is_refund).map(r => {
+                  const tgt = r.refund_for_artikel_id != null ? data.artikel.find(x => x.id === r.refund_for_artikel_id) : null;
+                  const label = tgt ? (tgt.canonical_name || tgt.name || '?') : (r.name || t('receiptDetail.refundChip'));
+                  return (
+                    <li key={r.id} className="flex items-center justify-between gap-2 text-sm">
+                      <span className="min-w-0 truncate text-zinc-700 dark:text-zinc-300">{label}</span>
+                      <span className="flex shrink-0 items-center gap-2">
+                        <span className="tabular font-medium text-amber-700 dark:text-amber-400">{eur(artPreis(r))}</span>
+                        <button
+                          type="button"
+                          disabled={undoRefund.isPending}
+                          onClick={async () => {
+                            if (await confirm({ title: t('receiptDetail.refundUndoTitle'), message: t('receiptDetail.refundUndoMsg'), confirmLabel: t('receiptDetail.refundUndo'), cancelLabel: t('common.cancel'), danger: true })) undoRefund.mutate(r.id);
+                          }}
+                          className="rounded-md px-1.5 py-0.5 text-[11px] text-zinc-500 hover:bg-zinc-100 hover:text-red-600 disabled:opacity-50 dark:hover:bg-zinc-800"
+                        >
+                          {t('receiptDetail.refundUndo')}
+                        </button>
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
           )}
           {editable && data.artikel.some(a => !a.is_refund) && (
             <button
