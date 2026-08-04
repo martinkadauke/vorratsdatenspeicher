@@ -442,8 +442,11 @@ export function ReceiptDetailPage() {
                 </Link>
               );
             }
-            // Split payment (e.g. an Amazon order billed per shipment) → one badge → popup.
-            const sum = banks.reduce((s, b) => s + Math.abs(b.amount), 0);
+            // Split payment (Amazon per shipment) OR a refund credit linked back → one badge → popup.
+            // NET the signed amounts so a linked refund credit (+) offsets the debits (−) instead of
+            // being ADDED to them (two split debits still sum to the gross; a debit + refund → the
+            // net actually paid). abs() because the badge shows a positive figure.
+            const sum = Math.abs(banks.reduce((s, b) => s + b.amount, 0));
             return (
               <button type="button" onClick={() => setBanksOpen(true)} title={t('receiptDetail.bankMatches', { n: banks.length })} className={cls}>
                 <Landmark size={11} /> {t('receiptDetail.bankMatches', { n: banks.length })} · {eur(sum)}
