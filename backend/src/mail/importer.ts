@@ -541,36 +541,54 @@ export async function reinterpretImportedEmail(userId: number, ledgerId: number,
     // Propose only receipts THIS user may see (super-admins see all; others: shared + own-private).
     const [u] = await sql`SELECT sees_all_konten FROM users WHERE id = ${userId}`;
     const visScope = u?.sees_all_konten ? sql`` : sql`AND (e.private_for_user_id IS NULL OR e.private_for_user_id = ${userId})`;
-    // Match a candidate receipt by merchant name and/or a total close to the refund amount.
-    // Every ${amount} is cast ::numeric — a bare `$n = 0` (or `numeric - $n`) makes postgres.js
-    // infer the param as int4, which then rejects a decimal amount (e.g. 24.99) with a 500.
+    // Find the ORIGINAL receipt the way a human would, in priority order:
+    //  1. order/reference number (strongest — generic across vendors), matched against the
+    //     receipt's stored source mail and any position's raw text.
+    //  2. the refunded ITEM appearing as a position in a receipt from the SAME vendor.
+    //  3. the refunded item in any receipt · 4. same vendor · 5. amount (last-resort fallback).
+    // NOT the price corridor first — a refund is identified by what it is, not by its number.
+    // All ${amount} cast ::numeric (postgres.js int4-inference guard).
     const like = merchant ? '%' + merchant + '%' : null;
+    const itemLike = r.item.trim() ? '%' + r.item.trim() + '%' : null;
+    const ref = r.order_ref.trim() || null;
     const amtPos = r.amount > 0;
-    const amtNear = sql`ABS(COALESCE(e.gesamt_betrag,0) - ${r.amount}::numeric) <= GREATEST(1, ${r.amount}::numeric * 0.01)`;
-    const matchCond =
-      like && amtPos ? sql`AND (e.roh_ladenname ILIKE ${like} OR ${amtNear})`
-      : like ? sql`AND e.roh_ladenname ILIKE ${like}`
-      : amtPos ? sql`AND ${amtNear}`
-      : sql``;   // no merchant + no amount → fall back to the most recent receipts before the mail
+    const F = sql`FALSE`;
+    const refMatch = ref
+      ? sql`(EXISTS(SELECT 1 FROM email_message em WHERE em.einkauf_id = e.id AND (em.body_text ILIKE ${'%' + ref + '%'} OR em.subject ILIKE ${'%' + ref + '%'}))
+             OR EXISTS(SELECT 1 FROM artikel ar WHERE ar.einkauf_id = e.id AND ar.original_text ILIKE ${'%' + ref + '%'}))` : F;
+    const itemMatch = itemLike
+      ? sql`EXISTS(SELECT 1 FROM artikel ai WHERE ai.einkauf_id = e.id AND NOT ai.is_refund AND (ai.name ILIKE ${itemLike} OR ai.canonical_name ILIKE ${itemLike} OR ai.ai_guess ILIKE ${itemLike} OR ai.original_text ILIKE ${itemLike}))` : F;
+    const vendorMatch = like ? sql`e.roh_ladenname ILIKE ${like}` : F;
+    const amountNear = amtPos ? sql`ABS(COALESCE(e.gesamt_betrag,0) - ${r.amount}::numeric) <= GREATEST(1, ${r.amount}::numeric * 0.01)` : F;
+    const anySignal = !!(ref || itemLike || like || amtPos);
+    // Build ORDER BY from PRESENT signals only. A missing signal is the constant FALSE, and
+    // Postgres rejects a bare constant in ORDER BY ("non-integer constant") — a present signal
+    // is a column expression, which is fine. Innermost tie-breaker first, then prepend by priority.
+    let ord = sql`e.datum DESC`;
+    if (amtPos) ord = sql`(${amountNear}) DESC, ${ord}`;
+    if (like) ord = sql`(${vendorMatch}) DESC, ${ord}`;
+    if (itemLike) ord = sql`(${itemMatch}) DESC, ${ord}`;
+    if (itemLike && like) ord = sql`((${itemMatch}) AND (${vendorMatch})) DESC, ${ord}`;
+    if (ref) ord = sql`(${refMatch}) DESC, ${ord}`;
     const cands = await sql`
       SELECT e.id, e.datum::text AS datum, e.roh_ladenname, e.gesamt_betrag::float8 AS gesamt_betrag, k.name AS konto_name
       FROM einkauf e
       LEFT JOIN konto k ON k.id = e.konto_id
       WHERE TRUE
-        ${matchCond}
+        ${anySignal ? sql`AND ((${refMatch}) OR (${itemMatch}) OR (${vendorMatch}) OR (${amountNear}))` : sql``}
         ${refDate ? sql`AND e.datum <= ${refDate}::date` : sql``}
         ${visScope}
-      ORDER BY
-        ${like ? sql`(CASE WHEN e.roh_ladenname ILIKE ${like} THEN 0 ELSE 1 END),` : sql``}
-        ABS(COALESCE(e.gesamt_betrag,0) - ${r.amount}::numeric) ASC,
-        e.datum DESC
+      ORDER BY ${ord}
       LIMIT 8`;
+    // Per receipt, surface the position matching the refunded item first (so it's pre-selected).
+    const posItemMatch = itemLike
+      ? sql`(name ILIKE ${itemLike} OR canonical_name ILIKE ${itemLike} OR ai_guess ILIKE ${itemLike} OR original_text ILIKE ${itemLike})` : F;
     const candidates: RefundCandidate[] = [];
     for (const c of cands) {
       const pos = await sql`
         SELECT id, COALESCE(NULLIF(canonical_name,''), NULLIF(ai_guess,''), name, '?') AS name, preis::float8 AS preis
         FROM artikel WHERE einkauf_id = ${c.id as number} AND NOT is_refund
-        ORDER BY ABS(COALESCE(preis,0) - ${r.amount}::numeric) ASC, id ASC`;
+        ORDER BY (${posItemMatch}) DESC, ABS(COALESCE(preis,0) - ${r.amount}::numeric) ASC, id ASC`;
       candidates.push({
         id: c.id as number, datum: c.datum as string, roh_ladenname: c.roh_ladenname as string | null,
         gesamt_betrag: (c.gesamt_betrag as number | null) ?? null, konto_name: c.konto_name as string | null,
