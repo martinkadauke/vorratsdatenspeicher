@@ -1320,6 +1320,12 @@
     "bar": "Bar",
     "upload": "Rechnung"
   },
+  "version": {
+    "label": "Version",
+    "dev": "Entwicklung",
+    "env": "Umgebung",
+    "startedAt": "gestartet {{when}}"
+  },
   "share": {
     "button": "Teilen",
     "receiptText": "Beleg {{store}} · {{total}}",

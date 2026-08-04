@@ -1318,6 +1318,12 @@
     "bar": "Cash",
     "upload": "Invoice"
   },
+  "version": {
+    "label": "Version",
+    "dev": "Development",
+    "env": "Environment",
+    "startedAt": "started {{when}}"
+  },
   "share": {
     "button": "Share",
     "receiptText": "Receipt {{store}} · {{total}}",

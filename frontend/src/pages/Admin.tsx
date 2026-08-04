@@ -12,6 +12,7 @@ import { useAuth } from '../context/auth';
 import { confirm } from '../components/Confirm';
 import { cn, cronToHuman, downloadFile, fmtBytes } from '../lib/utils';
 import { toast } from '../components/Toast';
+import { AppVersion } from '../components/AppVersion';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -133,6 +134,8 @@ export function Admin() {
           </button>
         )}
       </div>
+
+      <AppVersion className="-mt-1 text-[11px] leading-relaxed text-zinc-400 dark:text-zinc-500" />
 
       <div className="relative">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />

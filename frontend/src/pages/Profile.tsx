@@ -8,6 +8,7 @@ import { useAuth } from '../context/auth';
 import { setLanguage } from '../i18n';
 import { pushSupported, pushStatus, enablePush, disablePush } from '../lib/push';
 import { Card, Button, Input, Label, Select, Switch, Modal } from '../components/ui';
+import { AppVersion } from '../components/AppVersion';
 import { cn } from '../lib/utils';
 import { EmojiPicker } from '../components/EmojiPicker';
 import { confirm } from '../components/Confirm';
@@ -115,6 +116,8 @@ export function Profile() {
       <Button variant="secondary" onClick={() => { logout(); navigate('/login'); }}>
         <LogOut size={16} /> {t('nav.logout')}
       </Button>
+
+      <AppVersion className="pt-1 text-center text-[11px] leading-relaxed text-zinc-400 dark:text-zinc-600" />
     </div>
   );
 }
