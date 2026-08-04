@@ -473,6 +473,15 @@
     "panOff": "Verschieben",
     "addArticle": "Artikel hinzufügen",
     "addPosition": "Position hinzufügen",
+    "refunded": "−{{amount}} erstattet",
+    "refundChip": "Erstattung",
+    "addRefund": "Erstattung erfassen",
+    "refundModalTitle": "Erstattung erfassen",
+    "refundModalHint": "Eine Rückzahlung für einen Artikel dieses Belegs. Sie wird als Minus-Position gebucht und das Teil verschwindet aus der Produkt-Statistik.",
+    "refundForPosition": "Für welche Position?",
+    "refundAmountLabel": "Erstatteter Betrag (€)",
+    "refundNoteLabel": "Anmerkung",
+    "refundSave": "Erstattung buchen",
     "private": "Privat",
     "makePrivate": "Privat machen",
     "privateToggle": "Nur du siehst private Belege – klick zum Umschalten",
@@ -1142,6 +1151,16 @@
         "incomeDescription": "Beschreibung",
         "incomeBook": "Als Einnahme buchen",
         "incomeBooked": "Als Einnahme verbucht.",
+        "refundTitle": "Erstattung einem Beleg zuordnen",
+        "refundHint": "Die KI hat diese Mail als Rückzahlung für einen früheren Kauf erkannt. Wähle den passenden Beleg und die Position — die Erstattung wird als Minus-Position darauf gebucht und mindert die Ausgabe.",
+        "refundNoCandidates": "Kein passender Beleg gefunden. Öffne den Ursprungs-Beleg und nutze dort „Erstattung erfassen“.",
+        "refundAmount": "Betrag (€)",
+        "refundReceipt": "Beleg",
+        "refundPosition": "Position",
+        "refundWholeReceipt": "Ganzer Beleg (keine einzelne Position)",
+        "refundDescription": "Beschreibung",
+        "refundBook": "Erstattung buchen",
+        "refundBooked": "Erstattung auf dem Beleg verbucht.",
         "noSubject": "(ohne Betreff)",
         "status": {
           "imported": "Importiert · {{n}} Pos.",
@@ -1150,7 +1169,8 @@
           "failed": "Fehler",
           "processing": "Läuft…",
           "income": "Einnahme",
-          "incomeAmount": "Einnahme · {{amount}} €"
+          "incomeAmount": "Einnahme · {{amount}} €",
+          "refund": "Erstattung"
         }
       }
     }

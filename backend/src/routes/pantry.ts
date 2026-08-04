@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import sql from '../db.js';
 import { kontoScope } from '../auth/konto.js';
+import { excludeRefunded } from '../lib/refund.js';
 import { loadUnits, normalizeEinheit, comparisonGroups, unitGroup, unitGroupOf, type PriceLine } from '../lib/units.js';
 import { estimateVorrat } from '../lib/vorrat.js';
 import { sendMail, smtpConfigured } from '../mailer.js';
@@ -57,6 +58,7 @@ async function trackedVorrat(user: ScopeUser) {
     FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
     WHERE a.canonical_name IN ${sql(canons)}
       ${kontoScope(user, sql`e`)}
+      ${excludeRefunded(sql`a`)}
   `) as unknown as PLine[];
   const byCanon = new Map<string, PLine[]>();
   for (const l of lines) { const arr = byCanon.get(l.canonical_name) ?? []; arr.push(l); byCanon.set(l.canonical_name, arr); }
@@ -108,6 +110,7 @@ async function liveVorratFor(user: ScopeUser, canons: string[], units: Units): P
     FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
     WHERE a.canonical_name IN ${sql(canons)}
       ${kontoScope(user, sql`e`)}
+      ${excludeRefunded(sql`a`)}
   `) as unknown as PLine[];
   const byCanon = new Map<string, PLine[]>();
   for (const l of lines) { const arr = byCanon.get(l.canonical_name) ?? []; arr.push(l); byCanon.set(l.canonical_name, arr); }

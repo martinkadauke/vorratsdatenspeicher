@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import sql, { DEMO_MODE } from '../db.js';
 import { encryptSecret, decryptSecret } from '../lib/crypto.js';
-import { testMailbox, runMailImportForUser, backfillEmails, retryImportedEmail, reinterpretImportedEmail, confirmMailIncome } from '../mail/importer.js';
+import { testMailbox, runMailImportForUser, backfillEmails, retryImportedEmail, reinterpretImportedEmail, confirmMailIncome, confirmMailRefund } from '../mail/importer.js';
 import { ocrAndStore } from './receipts.js';
 
 /** Re-run OCR (with the now invoice-aware prompt) on the given PDF receipts,
@@ -151,11 +151,17 @@ export function mailboxRoutes(app: FastifyInstance): void {
   app.post('/api/me/mailbox/log/:id/retry', async (req, reply) => {
     const id = Number((req.params as { id: string }).id);
     if (!Number.isInteger(id)) return reply.code(400).send({ error: 'bad id' });
-    const body = (req.body ?? {}) as { instruction?: unknown; confirmIncome?: Record<string, unknown> };
+    const body = (req.body ?? {}) as { instruction?: unknown; confirmIncome?: Record<string, unknown>; confirmRefund?: Record<string, unknown> };
     if (body.confirmIncome && typeof body.confirmIncome === 'object') {
       const ci = body.confirmIncome;
       return confirmMailIncome(req.user!.id, id, {
         amount: ci.amount, datum: ci.datum, category_path: ci.category_path, description: ci.description,
+      });
+    }
+    if (body.confirmRefund && typeof body.confirmRefund === 'object') {
+      const cr = body.confirmRefund;
+      return confirmMailRefund(req.user!.id, id, {
+        einkauf_id: cr.einkauf_id, refund_for_artikel_id: cr.refund_for_artikel_id, amount: cr.amount, description: cr.description,
       });
     }
     const instruction = (body.instruction ?? '').toString().trim();

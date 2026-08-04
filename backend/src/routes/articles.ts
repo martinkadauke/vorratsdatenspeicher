@@ -43,8 +43,17 @@ export function articleRoutes(app: FastifyInstance): void {
     const canonical = body.canonical_name ? String(body.canonical_name) : null;
     const category = body.category_path ? String(body.category_path) : null;
     const afterId = body.after_artikel_id ? parseInt(String(body.after_artikel_id), 10) : null;
+    // Manual refund position: a negative-price line linked to the original it refunds, so both
+    // vanish from product stats (excludeRefunded). canonical_name stays NULL (never a product).
+    const isRefund = body.is_refund === true;
+    const refFor = isRefund && body.refund_for_artikel_id != null && Number.isInteger(Number(body.refund_for_artikel_id))
+      ? Number(body.refund_for_artikel_id) : null;
 
     const id = await sql.begin(async tx => {
+      if (isRefund && refFor != null) {
+        const [orig] = await tx`SELECT id FROM artikel WHERE id = ${refFor} AND einkauf_id = ${einkaufId} AND NOT is_refund`;
+        if (!orig) throw new Error('refund_for_artikel_id gehört nicht zu diesem Beleg');
+      }
       // Insert directly under `afterId` when given (the gap-divider flow); else
       // sort_order stays NULL so COALESCE(sort_order, id) appends by id.
       let at: number | null = null;
@@ -54,10 +63,10 @@ export function articleRoutes(app: FastifyInstance): void {
       }
       const [row] = await tx`
         INSERT INTO artikel
-          (einkauf_id, name, canonical_name, category_path, menge, einheit, preis, ai_guess, original_text, sort_order)
+          (einkauf_id, name, canonical_name, category_path, menge, einheit, preis, ai_guess, original_text, sort_order, is_refund, refund_for_artikel_id)
         VALUES
-          (${einkaufId}, ${name || canonical || 'Artikel'}, ${canonical}, ${category},
-           ${menge}, ${einheit}, ${preis}, ${canonical}, ${'manuell hinzugefügt'}, ${at})
+          (${einkaufId}, ${name || canonical || 'Artikel'}, ${isRefund ? null : canonical}, ${category},
+           ${menge}, ${einheit}, ${preis}, ${isRefund ? null : canonical}, ${isRefund ? 'Erstattung (manuell)' : 'manuell hinzugefügt'}, ${at}, ${isRefund}, ${refFor})
         RETURNING id`;
       return row.id as number;
     });

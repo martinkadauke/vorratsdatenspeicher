@@ -34,6 +34,7 @@ export function ReceiptDetailPage() {
   const [editFocus, setEditFocus] = useState<'name' | 'price'>('name'); // which field to focus when the editor opens
   const [editReceipt, setEditReceipt] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [refundOpen, setRefundOpen] = useState(false);
   const [imgVersion, setImgVersion] = useState(0); // cache-buster after rotate
   const [panEnabled, setPanEnabled] = useState(false); // mobile: image pan active?
 
@@ -176,7 +177,10 @@ export function ReceiptDetailPage() {
   const [reocrHint, setReocrHint] = useState('');
   useEffect(() => {
     if (!data) return;
+    // Refund positions excluded: the "items match the printed total" check is about the GROSS
+    // purchase, so a refund (which only affects the derived net) must not flip it to mismatch.
     const sum = data.artikel.reduce((acc, a) => {
+      if (a.is_refund) return acc;
       const p = parseFloat((a.preis ?? '').toString().replace(',', '.'));
       return acc + (Number.isFinite(p) ? p : 0);
     }, 0);
@@ -245,13 +249,19 @@ export function ReceiptDetailPage() {
   if (isLoading) return <Spinner />;
   if (!data) return null;
 
-  // Sum of line totals — flag if it doesn't match the receipt's printed gesamt_betrag.
-  const itemSum = data.artikel.reduce((acc, a) => {
+  const artPreis = (a: { preis?: unknown }) => {
     const p = parseFloat((a.preis ?? '').toString().replace(',', '.'));
-    return acc + (Number.isFinite(p) ? p : 0);
-  }, 0);
+    return Number.isFinite(p) ? p : 0;
+  };
+  // Sum of PURCHASE line totals (refunds excluded) — this is what must match the printed
+  // gesamt_betrag (the gross paid total), so a refund never triggers a false "Summe ≠ Bon".
+  const itemSum = data.artikel.reduce((acc, a) => acc + (a.is_refund ? 0 : artPreis(a)), 0);
+  // Refunds (negative) reduce the DERIVED net only; gesamt_betrag stays gross.
+  const refundTotal = data.artikel.reduce((acc, a) => acc + (a.is_refund ? artPreis(a) : 0), 0);
   const printedTotal = parseFloat((data.gesamt_betrag ?? '').toString().replace(',', '.'));
   const totalKnown = Number.isFinite(printedTotal);
+  const netTotal = (totalKnown ? printedTotal : itemSum) + refundTotal;
+  const hasRefund = refundTotal < 0;
   const diff = totalKnown ? itemSum - printedTotal : 0;
   const mismatch = totalKnown && Math.abs(diff) > 0.01;
 
@@ -327,7 +337,15 @@ export function ReceiptDetailPage() {
         </div>
 
         <div className="text-sm text-zinc-500">
-          {fmtDate(data.datum, i18n.language)} · <span className="tabular font-semibold text-emerald-600 dark:text-emerald-500">{eur(data.gesamt_betrag)}</span>
+          {fmtDate(data.datum, i18n.language)} · {hasRefund ? (
+            <>
+              <span className="tabular text-zinc-400 line-through">{eur(data.gesamt_betrag)}</span>{' '}
+              <span className="tabular font-semibold text-emerald-600 dark:text-emerald-500">{eur(netTotal)}</span>{' '}
+              <span className="text-[11px] text-amber-600 dark:text-amber-400">({t('receiptDetail.refunded', { amount: eur(-refundTotal) })})</span>
+            </>
+          ) : (
+            <span className="tabular font-semibold text-emerald-600 dark:text-emerald-500">{eur(data.gesamt_betrag)}</span>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-1">
@@ -674,6 +692,15 @@ export function ReceiptDetailPage() {
               <Plus size={16} /> {t('receiptDetail.addPosition')}
             </button>
           )}
+          {editable && data.artikel.some(a => !a.is_refund) && (
+            <button
+              type="button"
+              onClick={() => setRefundOpen(true)}
+              className="mt-1 flex items-center justify-center gap-2 rounded-xl border border-dashed border-amber-300 px-3 py-2 text-sm font-medium text-amber-600 hover:border-amber-400 hover:bg-amber-50 dark:border-amber-800 dark:text-amber-400 dark:hover:bg-amber-950/30"
+            >
+              <RotateCw size={15} /> {t('receiptDetail.addRefund')}
+            </button>
+          )}
         </div>
       </div>
 
@@ -687,6 +714,15 @@ export function ReceiptDetailPage() {
         onClose={() => { setAdding(false); setInsertAfterId(null); }}
         invalidateKeys={[['receipt', id], ['receipts']]}
       />
+
+      {refundOpen && (
+        <ManualRefund
+          einkaufId={data.id}
+          positions={data.artikel.filter(a => !a.is_refund)}
+          onClose={() => setRefundOpen(false)}
+          onSaved={() => { setRefundOpen(false); void qc.invalidateQueries({ queryKey: ['receipt', id] }); void qc.invalidateQueries({ queryKey: ['receipts'] }); }}
+        />
+      )}
 
       <ArticleEditModal
         artikel={editing}
@@ -1028,5 +1064,78 @@ function ZoomResetButton() {
     >
       1:1
     </button>
+  );
+}
+
+/** Manual "record a refund" for an item on THIS receipt: a negative position linked to the
+ *  original (refund_for_artikel_id) so both vanish from product statistics. Category is inherited
+ *  from the refunded item so the negative nets the right spend bucket. */
+function ManualRefund({ einkaufId, positions, onClose, onSaved }: {
+  einkaufId: number; positions: Artikel[]; onClose: () => void; onSaved: () => void;
+}) {
+  const { t, i18n } = useTranslation();
+  const [posId, setPosId] = useState<number | null>(positions[0]?.id ?? null);
+  const chosen = positions.find(p => p.id === posId) ?? null;
+  const chosenPrice = () => {
+    const v = parseFloat((chosen?.preis ?? '').toString().replace(',', '.'));
+    return Number.isFinite(v) ? Math.abs(v) : 0;
+  };
+  const [amount, setAmount] = useState(chosenPrice() ? String(chosenPrice()) : '');
+  const [note, setNote] = useState('');
+  const eur = (n: number) => new Intl.NumberFormat(i18n.language, { style: 'currency', currency: 'EUR' }).format(n);
+
+  const save = useMutation({
+    mutationFn: () => api('/api/articles', {
+      method: 'POST',
+      body: {
+        einkauf_id: einkaufId,
+        is_refund: true,
+        refund_for_artikel_id: posId,
+        preis: -Math.abs(Number(amount)),
+        category_path: chosen?.category_path ?? null,
+        name: note.trim() || t('receiptDetail.refundChip'),
+      },
+    }),
+    onSuccess: () => { toast(t('profile.mailbox.log.refundBooked'), 'success'); onSaved(); },
+    onError: (e) => toast((e as Error).message, 'error'),
+  });
+  const valid = posId != null && Number(amount) > 0;
+
+  return (
+    <Modal open onClose={onClose} title={t('receiptDetail.refundModalTitle')}>
+      <div className="flex flex-col gap-3">
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('receiptDetail.refundModalHint')}</p>
+        <div>
+          <Label>{t('receiptDetail.refundForPosition')}</Label>
+          <Select value={String(posId ?? '')} onChange={ev => {
+            const id = ev.target.value ? Number(ev.target.value) : null;
+            setPosId(id);
+            const p = positions.find(x => x.id === id);
+            const v = parseFloat((p?.preis ?? '').toString().replace(',', '.'));
+            if (Number.isFinite(v)) setAmount(String(Math.abs(v)));
+          }}>
+            {positions.map(p => (
+              <option key={p.id} value={p.id}>
+                {(p.canonical_name || p.name || '?')}{p.preis ? ` · ${eur(Math.abs(parseFloat(p.preis.toString().replace(',', '.'))))}` : ''}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div>
+          <Label>{t('receiptDetail.refundAmountLabel')}</Label>
+          <Input type="number" step="0.01" min="0" value={amount} onChange={ev => setAmount(ev.target.value)} />
+        </div>
+        <div>
+          <Label>{t('receiptDetail.refundNoteLabel')}</Label>
+          <Input value={note} onChange={ev => setNote(ev.target.value)} placeholder="z.B. RMA Erstattung" />
+        </div>
+        <div className="flex justify-end gap-2 pt-1">
+          <Button variant="secondary" onClick={onClose}>{t('common.cancel')}</Button>
+          <Button onClick={() => save.mutate()} disabled={!valid || save.isPending}>
+            {save.isPending ? t('common.saving') : t('receiptDetail.refundSave')}
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }

@@ -180,7 +180,8 @@ export function receiptRoutes(app: FastifyInstance): void {
       SELECT e.id, e.datum, e.roh_ladenname, e.bild_pfad, e.gesamt_betrag, e.geprueft,
              e.konto_id, e.quelle, k.name AS konto_name, k.account_type, e.ocr_pending, e.date_uncertain,
              (e.private_for_user_id IS NOT NULL) AS private,
-             COUNT(a.id)::int AS item_count
+             COUNT(a.id) FILTER (WHERE NOT a.is_refund)::int AS item_count,
+             COALESCE(SUM(a.preis) FILTER (WHERE a.is_refund), 0)::float8 AS refund_total
       FROM einkauf e
       LEFT JOIN artikel a ON a.einkauf_id = e.id
       LEFT JOIN konto k ON k.id = e.konto_id
@@ -472,7 +473,9 @@ export function receiptRoutes(app: FastifyInstance): void {
     if (updates.geprueft === true && !('gesamt_betrag' in body)) {
       const [cur] = await sql`SELECT gesamt_betrag FROM einkauf WHERE id = ${id}`;
       if (cur && cur.gesamt_betrag === null) {
-        const [{ sum }] = await sql`SELECT COALESCE(SUM(preis), 0)::numeric(10,2) AS sum FROM artikel WHERE einkauf_id = ${id}`;
+        // Exclude refund positions: gesamt_betrag is the GROSS paid total; a refund must reduce
+        // only the DERIVED net (gross + Σrefund), never the stored gross — else it double-subtracts.
+        const [{ sum }] = await sql`SELECT COALESCE(SUM(preis), 0)::numeric(10,2) AS sum FROM artikel WHERE einkauf_id = ${id} AND NOT is_refund`;
         if (Number(sum) > 0) updates.gesamt_betrag = Number(sum);
       }
     }
@@ -690,9 +693,10 @@ export function receiptRoutes(app: FastifyInstance): void {
 
     const artikel = await sql`
       SELECT a.id, a.name, a.menge, a.einheit, a.preis, a.original_text,
-             a.ai_guess, a.canonical_name, a.category_path, a.user_corrected
+             a.ai_guess, a.canonical_name, a.category_path, a.user_corrected,
+             a.is_refund, a.refund_for_artikel_id
       FROM artikel a WHERE a.einkauf_id = ${id}
-      ORDER BY COALESCE(a.sort_order, a.id), a.id
+      ORDER BY a.is_refund, COALESCE(a.sort_order, a.id), a.id
     `;
 
     const canonicals = [...new Set(artikel.map(a => a.canonical_name).filter(Boolean))] as string[];

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import sql from '../db.js';
 import { kontoScope } from '../auth/konto.js';
+import { excludeRefunded } from '../lib/refund.js';
 import { searchFilter, col, numCol, lk } from '../lib/search.js';
 import { recordAliases } from '../lib/canonicalAlias.js';
 import { loadUnits, comparisonGroups, unitGroup, unitGroupOf, type PriceLine } from '../lib/units.js';
@@ -30,6 +31,7 @@ export function nameRoutes(app: FastifyInstance): void {
           fields: { kategorie: col(sql`a.category_path`) },
         })}
         ${kontoScope(req.user, sql`e`)}
+        ${excludeRefunded(sql`a`)}
       GROUP BY a.canonical_name
       ORDER BY a.canonical_name ASC
     `;
@@ -96,6 +98,7 @@ export function nameRoutes(app: FastifyInstance): void {
         })}
         ${catFilter} ${fromFilter} ${toFilter} ${kontoFilter}
         ${kontoScope(req.user, sql`e`)}
+        ${excludeRefunded(sql`a`)}
       GROUP BY grp
     `;
 
@@ -124,7 +127,7 @@ export function nameRoutes(app: FastifyInstance): void {
     const lineRows = canonicals.length ? await sql`
       SELECT a.canonical_name, a.preis, a.menge, a.einheit, e.datum::text AS datum
       FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
-      WHERE a.canonical_name IN ${sql(canonicals)} ${kontoScope(req.user, sql`e`)}
+      WHERE a.canonical_name IN ${sql(canonicals)} ${kontoScope(req.user, sql`e`)} ${excludeRefunded(sql`a`)}
     ` : [];
     const linesByCanon = new Map<string, (PriceLine & { datum: string })[]>();
     for (const l of lineRows as unknown as (PriceLine & { canonical_name: string; datum: string })[]) {
@@ -181,7 +184,7 @@ export function nameRoutes(app: FastifyInstance): void {
     const lines = await sql`
       SELECT a.preis, a.menge, a.einheit, e.datum::text AS datum
       FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
-      WHERE a.canonical_name = ${name} ${kontoScope(req.user, sql`e`)}`;
+      WHERE a.canonical_name = ${name} ${kontoScope(req.user, sql`e`)} ${excludeRefunded(sql`a`)}`;
     const [meta] = await sql`SELECT base_unit, consumption_per_week::float8 AS consumption_per_week, expected_price::float8 AS expected_price FROM canonical_meta WHERE canonical_name = ${name}`;
     const [ov] = await sql`SELECT menge::float8 AS menge, gesetzt_am::text AS gesetzt_am FROM vorrat_override WHERE canonical_name = ${name}`;
     const units = await loadUnits();
@@ -310,6 +313,7 @@ export function nameRoutes(app: FastifyInstance): void {
         })}
         ${catFilter} ${fromFilter} ${toFilter} ${kontoFilter}
         ${kontoScope(req.user, sql`e`)}
+        ${excludeRefunded(sql`a`)}
     `;
     return { items: row.items, total: row.total };
   });

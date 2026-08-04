@@ -589,7 +589,9 @@ export function Receipts() {
                       {fmtDate(r.datum, i18n.language)} · {r.item_count} {t('receipts.items')}
                     </div>
                     <div className="tabular mt-0.5 font-semibold text-emerald-600 dark:text-emerald-500">
-                      {eur(r.gesamt_betrag)}
+                      {r.refund_total && r.refund_total < 0
+                        ? eur((parseFloat((r.gesamt_betrag ?? '0').toString().replace(',', '.')) || 0) + r.refund_total)
+                        : eur(r.gesamt_betrag)}
                     </div>
                   </div>
                   {r.private && (

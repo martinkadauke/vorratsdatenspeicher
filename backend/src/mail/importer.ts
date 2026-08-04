@@ -485,10 +485,13 @@ async function fetchRawByMessageId(mb: MailboxRow, mid: string): Promise<Buffer 
   }
 }
 
+export interface RefundCandidate { id: number; datum: string; roh_ladenname: string | null; gesamt_betrag: number | null; konto_name: string | null; positions: { id: number; name: string; preis: number | null }[] }
+
 export type ReinterpretOutcome =
   | { status: 'imported'; einkauf_id: number; reason: null }
   | { status: 'skipped'; reason: string; einkauf_id: null }
   | { status: 'preview'; income: { amount: number; datum: string | null; category_path: IncomeCategory; description: string; confidence: number } }
+  | { status: 'refund_preview'; refund: { amount: number; datum: string | null; merchant: string; description: string; confidence: number }; candidates: RefundCandidate[] }
   | { error: string };
 
 /** Retry a skipped/failed import under a free-text USER instruction. The AI reclassifies the
@@ -526,6 +529,44 @@ export async function reinterpretImportedEmail(userId: number, ledgerId: number,
     // Preview only — booking money requires the user's explicit confirm (confirmMailIncome).
     await sql`UPDATE imported_email SET instruction = ${ins} WHERE id = ${ledgerId}`.catch(() => {});
     return { status: 'preview', income: { amount: r.amount, datum: r.datum ?? datum, category_path: r.category_path, description: r.description, confidence: r.confidence } };
+  }
+
+  if (r.kind === 'refund') {
+    // A refund belongs ON an existing receipt as a negative position. Propose the most likely
+    // original receipts (user-visible only) + their positions; the user picks + confirms via
+    // confirmMailRefund. No write here.
+    await sql`UPDATE imported_email SET instruction = ${ins} WHERE id = ${ledgerId}`.catch(() => {});
+    const refDate = r.datum ?? datum;
+    const merchant = r.merchant.trim();
+    // Propose only receipts THIS user may see (super-admins see all; others: shared + own-private).
+    const [u] = await sql`SELECT sees_all_konten FROM users WHERE id = ${userId}`;
+    const visScope = u?.sees_all_konten ? sql`` : sql`AND (e.private_for_user_id IS NULL OR e.private_for_user_id = ${userId})`;
+    const cands = await sql`
+      SELECT e.id, e.datum::text AS datum, e.roh_ladenname, e.gesamt_betrag::float8 AS gesamt_betrag, k.name AS konto_name
+      FROM einkauf e
+      LEFT JOIN konto k ON k.id = e.konto_id
+      WHERE TRUE
+        ${merchant ? sql`AND (e.roh_ladenname ILIKE ${'%' + merchant + '%'} OR ${r.amount} = 0 OR ABS(COALESCE(e.gesamt_betrag,0) - ${r.amount}) <= GREATEST(1, ${r.amount} * 0.01))` : sql``}
+        ${refDate ? sql`AND e.datum <= ${refDate}::date` : sql``}
+        ${visScope}
+      ORDER BY
+        (CASE WHEN ${merchant || ''} <> '' AND e.roh_ladenname ILIKE ${'%' + merchant + '%'} THEN 0 ELSE 1 END),
+        ABS(COALESCE(e.gesamt_betrag,0) - ${r.amount}) ASC,
+        e.datum DESC
+      LIMIT 8`;
+    const candidates: RefundCandidate[] = [];
+    for (const c of cands) {
+      const pos = await sql`
+        SELECT id, COALESCE(NULLIF(canonical_name,''), NULLIF(ai_guess,''), name, '?') AS name, preis::float8 AS preis
+        FROM artikel WHERE einkauf_id = ${c.id as number} AND NOT is_refund
+        ORDER BY ABS(COALESCE(preis,0) - ${r.amount}) ASC, id ASC`;
+      candidates.push({
+        id: c.id as number, datum: c.datum as string, roh_ladenname: c.roh_ladenname as string | null,
+        gesamt_betrag: (c.gesamt_betrag as number | null) ?? null, konto_name: c.konto_name as string | null,
+        positions: pos.map(p => ({ id: p.id as number, name: p.name as string, preis: (p.preis as number | null) ?? null })),
+      });
+    }
+    return { status: 'refund_preview', refund: { amount: r.amount, datum: refDate, merchant: r.merchant, description: r.description, confidence: r.confidence }, candidates };
   }
 
   if (r.kind === 'receipt' && (r.receipt.ladenkette || r.receipt.artikel.length)) {
@@ -611,6 +652,70 @@ export async function confirmMailIncome(
   } catch (e) {
     // The tx rolled back → no partial income row; re-open the ledger row for another attempt.
     await sql`UPDATE imported_email SET status = 'failed', reason = ${(e as Error).message.slice(0, 200)} WHERE id = ${ledgerId} AND income_id IS NULL`.catch(() => {});
+    return { error: (e as Error).message.slice(0, 300) };
+  }
+}
+
+/** Book a refund the user confirmed: add ONE negative artikel position to the chosen receipt,
+ *  linked to the original position it refunds (refund_for_artikel_id) so both vanish from product
+ *  statistics. gesamt_betrag (gross paid) is untouched; the negative position nets category spend
+ *  and the receipt's derived net. Re-validates everything server-side (amount cap, receipt + the
+ *  refunded position both visible to this user) and is idempotent via a single-winner ledger claim. */
+export async function confirmMailRefund(
+  userId: number, ledgerId: number,
+  refund: { einkauf_id: unknown; refund_for_artikel_id: unknown; amount: unknown; description: unknown },
+): Promise<{ status: 'refund'; einkauf_id: number } | { error: string }> {
+  const cap = await getConfig('income.max_mail_amount');
+  const amount = Number(refund.amount);
+  if (!Number.isFinite(amount) || amount <= 0) return { error: 'Betrag muss größer als 0 sein.' };
+  if (amount > cap) return { error: `Betrag über dem Limit (max. ${cap} €).` };
+  const einkaufId = Number(refund.einkauf_id);
+  if (!Number.isInteger(einkaufId)) return { error: 'Kein Beleg gewählt.' };
+  const description = (String(refund.description ?? '').trim() || 'Erstattung (E-Mail)').slice(0, 300);
+  const refForRaw = refund.refund_for_artikel_id == null ? null : Number(refund.refund_for_artikel_id);
+  const refFor = refForRaw != null && Number.isInteger(refForRaw) ? refForRaw : null;
+
+  // The chosen receipt must be visible to this user (shared, own-private, or super-admin).
+  const [u] = await sql`SELECT sees_all_konten FROM users WHERE id = ${userId}`;
+  const [tgt] = await sql`
+    SELECT e.id FROM einkauf e WHERE e.id = ${einkaufId}
+      ${u?.sees_all_konten ? sql`` : sql`AND (e.private_for_user_id IS NULL OR e.private_for_user_id = ${userId})`}`;
+  if (!tgt) return { error: 'Beleg nicht gefunden oder nicht sichtbar.' };
+  // The referenced original position (if any) must belong to that receipt.
+  let refCategory: string | null = null;
+  if (refFor != null) {
+    const [orig] = await sql`SELECT category_path FROM artikel WHERE id = ${refFor} AND einkauf_id = ${einkaufId} AND NOT is_refund`;
+    if (!orig) return { error: 'Original-Position gehört nicht zu diesem Beleg.' };
+    refCategory = (orig.category_path as string | null) ?? null;
+  }
+  // Fall back to the receipt's dominant non-Meta category so the refund nets the right bucket.
+  if (!refCategory) {
+    const [dom] = await sql`
+      SELECT category_path FROM artikel
+      WHERE einkauf_id = ${einkaufId} AND category_path IS NOT NULL AND category_path NOT LIKE 'Meta/%' AND NOT is_refund
+      GROUP BY category_path ORDER BY SUM(preis) DESC LIMIT 1`;
+    refCategory = (dom?.category_path as string | null) ?? null;
+  }
+
+  try {
+    const ok = await sql.begin(async (tx) => {
+      const claim = await tx`
+        UPDATE imported_email SET status = 'processing', claimed_at = NOW()
+        WHERE id = ${ledgerId} AND user_id = ${userId}
+          AND einkauf_id IS NULL AND income_id IS NULL AND status IN ('skipped', 'failed')
+        RETURNING id`;
+      if (!claim.length) return false;
+      await tx`
+        INSERT INTO artikel (einkauf_id, name, menge, einheit, preis, category_path, original_text, canonical_name, is_refund, refund_for_artikel_id)
+        VALUES (${einkaufId}, ${description}, 1, NULL, ${-amount}, ${refCategory}, ${'Erstattung (E-Mail): ' + description}, NULL, TRUE, ${refFor})`;
+      // Link the ledger to the receipt it landed on (einkauf_id has no UNIQUE constraint) and mark resolved.
+      await tx`UPDATE imported_email SET einkauf_id = ${einkaufId}, status = 'refund', reason = ${'Erstattung: -' + amount.toFixed(2) + ' € auf Beleg #' + einkaufId} WHERE id = ${ledgerId}`;
+      return true;
+    });
+    if (!ok) return { error: 'bereits verbucht oder in Bearbeitung' };
+    return { status: 'refund', einkauf_id: einkaufId };
+  } catch (e) {
+    await sql`UPDATE imported_email SET status = 'failed', reason = ${(e as Error).message.slice(0, 200)} WHERE id = ${ledgerId} AND einkauf_id IS NULL`.catch(() => {});
     return { error: (e as Error).message.slice(0, 300) };
   }
 }

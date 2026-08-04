@@ -42,6 +42,7 @@ export interface Receipt {
   account_type?: string | null;
   quelle?: string;
   item_count?: number;
+  refund_total?: number;   // Σ of refund positions (≤ 0); receipt net = gesamt_betrag + refund_total
   private?: boolean;
   ocr_pending?: boolean;
   date_uncertain?: boolean;
@@ -69,6 +70,8 @@ export interface Artikel {
   canonical_name: string | null;
   category_path: string | null;
   user_corrected?: boolean;
+  is_refund?: boolean;
+  refund_for_artikel_id?: number | null;
   consumers: number[];
   consumers_exclusive: boolean;
   consumers_source: 'artikel' | 'canonical' | 'none';

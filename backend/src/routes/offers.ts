@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import sql, { DEMO_MODE, withHousehold } from '../db.js';
 import { requireAdmin, requireOperator } from '../auth/plugin.js';
 import { kontoScope } from '../auth/konto.js';
+import { excludeRefunded } from '../lib/refund.js';
 import { runOfferSearch, sendOfferDigests, isOfferSearchRunning, debugOfferSearch } from '../offers/index.js';
 import { loadUnits, normalizeEinheit, comparisonGroups, unitGroup, unitGroupOf, type PriceLine } from '../lib/units.js';
 import { estimateVorrat, type VorratLine, type VorratOverride } from '../lib/vorrat.js';
@@ -47,7 +48,7 @@ export function offerRoutes(app: FastifyInstance): void {
     const lines = offered.length ? await sql`
       SELECT a.canonical_name, a.preis, a.menge, a.einheit, e.datum::text AS datum
       FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
-      WHERE a.canonical_name IN ${sql(offered)} ${kontoScope(req.user, sql`e`)}
+      WHERE a.canonical_name IN ${sql(offered)} ${kontoScope(req.user, sql`e`)} ${excludeRefunded(sql`a`)}
     ` : [];
     const metaRows = offered.length ? await sql`
       SELECT canonical_name, base_unit, consumption_per_week::float8 AS consumption_per_week, expected_price::float8 AS expected_price FROM canonical_meta WHERE canonical_name IN ${sql(offered)}

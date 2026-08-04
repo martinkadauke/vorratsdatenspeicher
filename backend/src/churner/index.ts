@@ -359,9 +359,10 @@ async function churnWork(eventId: number, trigger: 'cron' | 'manual' | 'auto_ocr
     SELECT a.id, a.name, a.original_text, a.ai_guess, a.canonical_name, e.roh_ladenname AS store_raw
     FROM artikel a
     LEFT JOIN einkauf e ON e.id = a.einkauf_id
-    WHERE a.canonical_name IS NULL
+    WHERE NOT a.is_refund AND (
+          a.canonical_name IS NULL
        OR LENGTH(a.canonical_name) > 40
-       OR a.canonical_name IN ('Diverse Artikel', 'Backwaren', 'Gemüse', 'Fleisch', 'Gewürze')
+       OR a.canonical_name IN ('Diverse Artikel', 'Backwaren', 'Gemüse', 'Fleisch', 'Gewürze'))
     ORDER BY a.id DESC
     LIMIT ${batchSize}
   `;

@@ -473,6 +473,15 @@
     "panOff": "Pan",
     "addArticle": "Add item",
     "addPosition": "Add item",
+    "refunded": "−{{amount}} refunded",
+    "refundChip": "Refund",
+    "addRefund": "Record refund",
+    "refundModalTitle": "Record refund",
+    "refundModalHint": "A refund for an item on this receipt. It's booked as a negative position and the item disappears from product statistics.",
+    "refundForPosition": "For which item?",
+    "refundAmountLabel": "Refunded amount (€)",
+    "refundNoteLabel": "Note",
+    "refundSave": "Book refund",
     "private": "Private",
     "makePrivate": "Make private",
     "privateToggle": "Only you can see private receipts — click to toggle",
@@ -1140,6 +1149,16 @@
         "incomeDescription": "Description",
         "incomeBook": "Book as income",
         "incomeBooked": "Booked as income.",
+        "refundTitle": "Attach refund to a receipt",
+        "refundHint": "The AI read this mail as a refund for an earlier purchase. Pick the matching receipt and item — the refund is booked as a negative position on it and lowers the spend.",
+        "refundNoCandidates": "No matching receipt found. Open the original receipt and use \"Record refund\" there.",
+        "refundAmount": "Amount (€)",
+        "refundReceipt": "Receipt",
+        "refundPosition": "Item",
+        "refundWholeReceipt": "Whole receipt (no single item)",
+        "refundDescription": "Description",
+        "refundBook": "Book refund",
+        "refundBooked": "Refund booked on the receipt.",
         "noSubject": "(no subject)",
         "status": {
           "imported": "Imported · {{n}} items",
@@ -1148,7 +1167,8 @@
           "failed": "Failed",
           "processing": "Working…",
           "income": "Income",
-          "incomeAmount": "Income · €{{amount}}"
+          "incomeAmount": "Income · €{{amount}}",
+          "refund": "Refund"
         }
       }
     }
