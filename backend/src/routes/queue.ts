@@ -45,7 +45,7 @@ async function approveQueueItem(item: QueueRow, canonical: string): Promise<numb
       // Legacy fallback: match by the AI guess, only filling empty canonicals.
       rows = await tx`
         UPDATE artikel SET canonical_name = ${canonical}, user_corrected = TRUE
-        WHERE canonical_name IS NULL
+        WHERE canonical_name IS NULL AND NOT is_refund
           AND COALESCE(NULLIF(ai_guess, ''), name) = ${item.ai_examples}
         RETURNING original_text, name
       `;

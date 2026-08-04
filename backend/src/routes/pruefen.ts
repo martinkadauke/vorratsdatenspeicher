@@ -21,7 +21,7 @@ export function pruefenRoutes(app: FastifyInstance): void {
   const needsCount = (req: { user?: Parameters<typeof kontoScope>[0] }) => sql`
     SELECT COUNT(DISTINCT COALESCE(NULLIF(a.ocr_key, ''), 'id:' || a.id))::int AS count
     FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
-    WHERE a.canonical_name IS NULL AND a.user_corrected = FALSE
+    WHERE a.canonical_name IS NULL AND a.user_corrected = FALSE AND NOT a.is_refund
       ${kontoScope(req.user, sql`e`)}
   `;
 
@@ -31,7 +31,7 @@ export function pruefenRoutes(app: FastifyInstance): void {
         SELECT a.id, a.original_text, a.name, a.ai_guess, a.ocr_key, a.einkauf_id, e.datum,
                COALESCE(NULLIF(a.ocr_key, ''), 'id:' || a.id) AS grp
         FROM artikel a JOIN einkauf e ON e.id = a.einkauf_id
-        WHERE a.canonical_name IS NULL AND a.user_corrected = FALSE
+        WHERE a.canonical_name IS NULL AND a.user_corrected = FALSE AND NOT a.is_refund
           ${kontoScope(req.user, sql`e`)}
       ),
       withprop AS (
