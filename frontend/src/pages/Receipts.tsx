@@ -143,6 +143,10 @@ export function Receipts() {
     if (kontoInit.current || !konten.length) return;
     kontoInit.current = true;
     if (params.get('konto')) return;
+    // The reminder deep-link (?status=open) wants the FULL open backlog across ALL accounts
+    // so the list matches the push count — force "Alle Konten" and skip the per-account default.
+    // (A single-account user sees only their account regardless, so this is identical for them.)
+    if (params.get('status') === 'open') { setKontoFilter(null); return; }
     const stored = loadStoredFilters();
     if ('konto' in stored) updateKontoFilter(stored.konto ?? null);
     else if (defaultKontoId) updateKontoFilter(defaultKontoId);
