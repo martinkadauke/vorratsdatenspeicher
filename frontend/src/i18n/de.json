@@ -1247,7 +1247,13 @@
       "title": "KI & Suche",
       "body": "VDS liest Belege per KI (OCR) und ordnet Produkte zu, plus Websuche für neue Produkte & Angebote. Trage die Zugänge deiner Anbieter ein — grün = erreichbar, rot = nicht erreichbar. Mindestens einen Anbieter brauchst du (Anthropic empfohlen).",
       "reachable": "erreichbar",
-      "unreachable": "nicht erreichbar"
+      "unreachable": "nicht erreichbar",
+      "recommended": "empfohlen",
+      "noneTitle": "Vorratsdatenspeicher ist eine KI-native App.",
+      "noneBody": "Ohne KI funktioniert VDS nicht richtig. Du kannst die Einrichtung jetzt abschließen und später einen KI-API-Key eintragen. Zum Aufladen:",
+      "noOcr": "Für die Beleg-Erkennung (OCR) brauchst du Anthropic oder — selbst gehostet — Ollama. DeepSeek und OpenAI können in VDS kein OCR.",
+      "noneForModels": "Trage zuerst im vorherigen Schritt einen erreichbaren KI-Anbieter ein.",
+      "taskNoProvider": "Kein OCR-Anbieter (Anthropic/Ollama) erreichbar."
     },
     "household": {
       "title": "Dein Haushalt",

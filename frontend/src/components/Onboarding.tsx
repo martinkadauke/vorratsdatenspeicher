@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { useNavigate } from 'react-router-dom';
-import { Sparkles, Bot, Cpu, Tags, Home, Users, Wallet, Mail, Inbox, PartyPopper, Languages, Plus, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Sparkles, Bot, Cpu, Tags, Home, Users, Wallet, Mail, Inbox, PartyPopper, Languages, Plus, Trash2, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
 import { api } from '../api/client';
 import { Button, Input, Select, Label, Switch, FeedbackIconButton } from './ui';
 import { EmojiSelect } from './EmojiPicker';
@@ -17,7 +17,9 @@ import { cn } from '../lib/utils';
 interface Konto { id: number; name: string; is_shared: boolean; account_type: string }
 const KONTO_TYPES = ['giro', 'kreditkarte', 'paypal', 'bargeld', 'krypto', 'depot'];
 const DETAILS = ['grob', 'mittel', 'fein'];
-const PROVIDERS = ['ollama', 'deepseek', 'anthropic', 'openai'];
+const PROVIDERS = ['anthropic', 'openai', 'deepseek', 'ollama'];   // OCR-capable (anthropic/openai) first
+const OCR_PROVIDERS = ['anthropic', 'ollama'];                     // VDS OCR backend (llm/ocr.ts) supports ONLY these — NOT openai/deepseek
+const aiKeyOf = (p: string) => (p === 'ollama' ? 'ollama.url' : `${p}.api_key`);
 const AI_TASKS: [string, string][] = [
   ['ocr', 'admin.taskOcr'],
   ['categories_chat', 'admin.taskCategoriesChat'],
@@ -79,6 +81,18 @@ export function Onboarding() {
     },
     onError: (e: Error) => toast(e.message, 'error'),
   });
+  // FB-09: which AI providers are usable (a key/URL is set AND the health check is green) —
+  // gates the model-per-task step. configuredAi (a key/URL is set) drives the setup warnings.
+  const aiHealth = useQueries({
+    queries: PROVIDERS.map(p => ({
+      queryKey: [`${p}-health`],
+      queryFn: () => api<{ ok: boolean }>(`/api/ai/health?provider=${p}`),
+      enabled: show, retry: false, refetchInterval: 60_000,
+    })),
+  });
+  const configuredAi = PROVIDERS.filter(p => !!String(config?.[aiKeyOf(p)] ?? '').trim());
+  const usableAi = PROVIDERS.filter((p, i) => configuredAi.includes(p) && aiHealth[i]?.data?.ok === true);
+  const hasOcrConfigured = OCR_PROVIDERS.some(p => configuredAi.includes(p));
   const setTaskAi = useMutation({
     mutationFn: (b: { task: string; provider: string; model: string }) => api(`/api/ai/tasks/${b.task}`, { method: 'PUT', body: { provider: b.provider, model: b.model } }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['config'] }),
@@ -218,21 +232,38 @@ export function Onboarding() {
 
           {cur.key === 'ai' && (
             <div className="flex flex-col gap-3">
-              <ProviderRow provider="anthropic" cfgKey="anthropic.api_key" label="Anthropic — API-Key" password placeholder="sk-ant-…" config={config} setCfg={setCfg} t={t} />
+              <ProviderRow provider="anthropic" cfgKey="anthropic.api_key" label="Anthropic — API-Key" recommended password placeholder="sk-ant-…" config={config} setCfg={setCfg} t={t} />
+              <ProviderRow provider="openai" cfgKey="openai.api_key" label="OpenAI — API-Key" recommended password placeholder="sk-…" config={config} setCfg={setCfg} t={t} />
               <ProviderRow provider="deepseek" cfgKey="deepseek.api_key" label="DeepSeek — API-Key" password placeholder="sk-…" config={config} setCfg={setCfg} t={t} />
-              <ProviderRow provider="openai" cfgKey="openai.api_key" label="OpenAI — API-Key" password placeholder="sk-…" config={config} setCfg={setCfg} t={t} />
               <ProviderRow provider="ollama" cfgKey="ollama.url" label="Ollama — URL" placeholder="http://…:11434" config={config} setCfg={setCfg} t={t} />
               <ProviderRow provider="searxng" cfgKey="searxng.url" label="SearXNG — URL" placeholder="http://…:8089" fallback={demo ? undefined : 'http://searxng:8080'} config={config} setCfg={setCfg} t={t} />
+              {config && configuredAi.length === 0 && (
+                <div className="rounded-lg bg-amber-50 p-3 text-xs leading-relaxed text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+                  <p className="font-semibold">{t('onboarding.ai.noneTitle')}</p>
+                  <p className="mt-1">{t('onboarding.ai.noneBody')}</p>
+                  <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 font-medium">
+                    <a href="https://console.anthropic.com/settings/billing" target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 underline">Anthropic <ExternalLink size={11} /></a>
+                    <a href="https://platform.openai.com/settings/organization/billing" target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 underline">OpenAI <ExternalLink size={11} /></a>
+                    <a href="https://platform.deepseek.com/top_up" target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 underline">DeepSeek <ExternalLink size={11} /></a>
+                  </div>
+                </div>
+              )}
+              {config && configuredAi.length > 0 && !hasOcrConfigured && (
+                <p className="rounded-lg bg-amber-50 p-2.5 text-xs leading-relaxed text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">{t('onboarding.ai.noOcr')}</p>
+              )}
             </div>
           )}
 
           {cur.key === 'models' && (
             <div className="flex flex-col gap-2">
-              {AI_TASKS.map(([task, labelKey]) => (
+              {usableAi.length === 0 ? (
+                <p className="rounded-lg bg-amber-50 p-2.5 text-xs leading-relaxed text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">{t('onboarding.ai.noneForModels')}</p>
+              ) : AI_TASKS.map(([task, labelKey]) => (
                 <TaskModelRow key={task} task={task} label={t(labelKey)}
-                  cfgProvider={(config?.[`ai.${task}.provider`] as string) ?? 'anthropic'}
+                  cfgProvider={(config?.[`ai.${task}.provider`] as string) ?? ''}
                   cfgModel={(config?.[`ai.${task}.model`] as string) ?? ''}
                   visionOnly={task === 'ocr'}
+                  usable={usableAi}
                   saveTask={saveTask} />
               ))}
             </div>
@@ -351,9 +382,9 @@ export function Onboarding() {
 }
 
 /** A provider credential field with a live green/red reachability indicator + colored border. */
-function ProviderRow({ provider, cfgKey, label, config, setCfg, password, placeholder, fallback, t }: {
+function ProviderRow({ provider, cfgKey, label, config, setCfg, password, placeholder, fallback, recommended, t }: {
   provider: string; cfgKey: string; label: string; config: Record<string, unknown> | undefined;
-  setCfg: { mutate: (b: { key: string; value: unknown }) => void }; password?: boolean; placeholder?: string; fallback?: string; t: TFunction;
+  setCfg: { mutate: (b: { key: string; value: unknown }) => void }; password?: boolean; placeholder?: string; fallback?: string; recommended?: boolean; t: TFunction;
 }) {
   const { data, isLoading } = useQuery({
     queryKey: [`${provider}-health`],
@@ -368,7 +399,10 @@ function ProviderRow({ provider, cfgKey, label, config, setCfg, password, placeh
   return (
     <div>
       <div className="mb-1 flex items-center justify-between gap-2">
-        <Label className="mb-0">{label}</Label>
+        <div className="flex items-center gap-1.5">
+          <Label className="mb-0">{label}</Label>
+          {recommended && <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400">{t('onboarding.ai.recommended')}</span>}
+        </div>
         <span title={data?.error ?? ''} className={cn('flex shrink-0 items-center gap-1 text-[11px] font-medium', tone)}>
           <span className={cn('h-1.5 w-1.5 rounded-full', dot)} />
           {state === 'ok' ? t('onboarding.ai.reachable') : state === 'down' ? t('onboarding.ai.unreachable') : '…'}
@@ -386,10 +420,13 @@ function ProviderRow({ provider, cfgKey, label, config, setCfg, password, placeh
  *  selected provider's real models only (fetched live); OCR is locked to Anthropic + the
  *  vision-only list. Switching provider fetches the NEW provider's models and persists its
  *  first model atomically, so no cross-provider model (e.g. qwen under Anthropic) survives. */
-function TaskModelRow({ task, label, cfgProvider, cfgModel, saveTask, visionOnly }: {
-  task: string; label: string; cfgProvider: string; cfgModel: string; saveTask: (task: string, provider: string, model: string) => void; visionOnly?: boolean;
+function TaskModelRow({ task, label, cfgProvider, cfgModel, saveTask, visionOnly, usable }: {
+  task: string; label: string; cfgProvider: string; cfgModel: string; saveTask: (task: string, provider: string, model: string) => void; visionOnly?: boolean; usable: string[];
 }) {
-  const provider = cfgProvider || (visionOnly ? 'anthropic' : 'ollama');
+  const { t } = useTranslation();
+  // Only providers that are configured AND reachable are offerable (FB-09); OCR excludes DeepSeek.
+  const choices = visionOnly ? usable.filter(p => OCR_PROVIDERS.includes(p)) : usable;
+  const provider = cfgProvider || choices[0] || (visionOnly ? 'anthropic' : 'ollama');
   const model = cfgModel;
   const { data, isFetching } = useQuery({
     queryKey: ['ai-models', provider, visionOnly ? 'vision' : 'all'],
@@ -408,11 +445,17 @@ function TaskModelRow({ task, label, cfgProvider, cfgModel, saveTask, visionOnly
   };
   const onModel = (m: string) => saveTask(task, provider, m);
   const opts = model && !models.includes(model) ? [model, ...models] : models;   // keep the current/legacy model visible + selectable
+  if (!choices.length) return (
+    <div className="flex items-center gap-2">
+      <span className="w-28 shrink-0 break-words text-xs font-medium leading-tight text-zinc-600 dark:text-zinc-300" title={label}>{label}</span>
+      <span className="flex-1 text-xs text-amber-600 dark:text-amber-400">{t('onboarding.ai.taskNoProvider')}</span>
+    </div>
+  );
   return (
     <div className="flex items-center gap-2">
       <span className="w-28 shrink-0 break-words text-xs font-medium leading-tight text-zinc-600 dark:text-zinc-300" title={label}>{label}</span>
       <Select className="w-24 shrink-0" value={provider} onChange={e => onProvider(e.target.value)}>
-        {(visionOnly ? ['anthropic', 'ollama'] : PROVIDERS).map(p => <option key={p} value={p}>{p}</option>)}
+        {choices.map(p => <option key={p} value={p}>{p}</option>)}
       </Select>
       {isFetching ? <Input className="min-w-0 flex-1" value="…" disabled />
         : opts.length ? (

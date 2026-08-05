@@ -1245,7 +1245,13 @@
       "title": "AI & search",
       "body": "VDS reads receipts with AI (OCR) and classifies products, plus web search for new products & offers. Enter your providers' credentials — green = reachable, red = unreachable. You need at least one provider (Anthropic recommended).",
       "reachable": "reachable",
-      "unreachable": "unreachable"
+      "unreachable": "unreachable",
+      "recommended": "recommended",
+      "noneTitle": "Vorratsdatenspeicher is an AI-native app.",
+      "noneBody": "Without AI, VDS won't work properly. You can finish setup now and add an AI API key later. Top up:",
+      "noOcr": "For receipt recognition (OCR) you need Anthropic, or — self-hosted — Ollama. DeepSeek and OpenAI can't do OCR in VDS.",
+      "noneForModels": "First add a reachable AI provider in the previous step.",
+      "taskNoProvider": "No OCR provider (Anthropic/Ollama) reachable."
     },
     "household": {
       "title": "Your household",
