@@ -7,6 +7,8 @@ import { Sparkles, Bot, Cpu, Tags, Home, Users, Wallet, Mail, Inbox, PartyPopper
 import { api } from '../api/client';
 import { Button, Input, Select, Label, Switch, FeedbackIconButton } from './ui';
 import { EmojiSelect } from './EmojiPicker';
+import { SmtpHelp } from './SmtpHelp';
+import { ImapHelp } from './ImapHelp';
 import { useAuth } from '../context/auth';
 import { toast } from './Toast';
 import type { FamilyMember } from '../api/types';
@@ -308,7 +310,8 @@ export function Onboarding() {
           )}
 
           {cur.key === 'email' && (
-            <div className="grid grid-cols-6 gap-2">
+            <div className="flex flex-col gap-3">
+              <div className="grid grid-cols-6 gap-2">
               <div className="col-span-4"><Label>{t('onboarding.email.host')}</Label>{cfgInput('smtp.host', { placeholder: 'smtp.gmail.com' })}</div>
               <div className="col-span-2"><Label>{t('onboarding.email.port')}</Label>{cfgInput('smtp.port', { type: 'number', placeholder: '587' })}</div>
               <div className="col-span-3"><Label>{t('onboarding.email.user')}</Label>{cfgInput('smtp.user')}</div>
@@ -318,6 +321,8 @@ export function Onboarding() {
               <div className="col-span-4"><Label>{t('onboarding.email.to')}</Label><Input type="email" value={smtpTo} onChange={e => setSmtpTo(e.target.value)} placeholder="test@…" /></div>
               <div className="col-span-2 flex items-end"><Button variant="secondary" className="w-full justify-center" disabled={!smtpTo || smtpTest.isPending} onClick={() => { setSmtpResult(null); smtpTest.mutate(); }}>{t('onboarding.email.test')}</Button></div>
               {smtpResult && <p className={cn('col-span-6 text-xs font-medium', smtpResult.ok ? 'text-emerald-600' : 'text-red-500')}>{smtpResult.ok ? '● ' : '● '}{smtpResult.msg}</p>}
+              </div>
+              <SmtpHelp />
             </div>
           )}
 
@@ -449,6 +454,7 @@ function ImapStep({ t }: { t: TFunction }) {
         <Button className="flex-1 justify-center" disabled={!f.imap_host || !f.imap_user || save.isPending} onClick={() => save.mutate()}>{t('onboarding.imap.save')}</Button>
       </div>
       {result && <p className={cn('col-span-6 text-xs font-medium', result.ok ? 'text-emerald-600' : 'text-red-500')}>● {result.msg}</p>}
+      <div className="col-span-6"><ImapHelp /></div>
     </div>
   );
 }

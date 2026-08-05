@@ -5,6 +5,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { LogOut, Sparkles, Inbox, Bell, ChevronDown, ChevronRight, Paperclip, Undo2, Mail } from 'lucide-react';
 import { api } from '../api/client';
 import { MailForwardHelp } from '../components/MailForwardHelp';
+import { ImapHelp } from '../components/ImapHelp';
 import { useAuth } from '../context/auth';
 import { setLanguage } from '../i18n';
 import { pushSupported, pushStatus, enablePush, disablePush } from '../lib/push';
@@ -337,6 +338,7 @@ function MailboxSettings() {
         <h2 className="text-base font-semibold">{t('profile.mailbox.heading')}</h2>
       </div>
       <p className="text-xs text-zinc-500">{t('profile.mailbox.intro')}</p>
+      <ImapHelp />
 
       <div className="grid grid-cols-3 gap-2">
         <div className="col-span-2">

@@ -1506,6 +1506,23 @@
     "dontShowAgain": "Nicht mehr anzeigen",
     "close": "Schließen"
   },
+  "imapHelp": {
+    "title": "Wie richte ich IMAP ein?",
+    "pwTitle": "Wichtig: Manche Anbieter brauchen ein App-Passwort oder du musst IMAP erst aktivieren.",
+    "pwGmail": "Gmail: nur mit App-Passwort (2-Faktor muss aktiv sein) und IMAP in den Einstellungen aktivieren.",
+    "pwGmailLink": "App-Passwörter bei Google",
+    "pwOutlook": "Outlook.com: App-Passwort in den Sicherheitseinstellungen erstellen.",
+    "pwGmxWebde": "GMX / Web.de: IMAP muss erst im Web-Postfach aktiviert werden (Einstellungen → POP3/IMAP).",
+    "note": {
+      "gmx": "IMAP zuvor im Web-Postfach aktivieren.",
+      "webde": "IMAP zuvor im Web-Postfach aktivieren.",
+      "gmail": "App-Passwort statt Kontopasswort; IMAP in den Gmail-Einstellungen aktivieren.",
+      "tonline": "Anmeldung mit deiner T-Online-E-Mail-Adresse und dem E-Mail-Passwort.",
+      "outlook": "App-Passwort verwenden — das normale Passwort wird oft abgelehnt.",
+      "mailbox": "Normales Passwort; IMAP ist standardmäßig aktiv."
+    },
+    "userHint": "Der Benutzername ist fast immer deine vollständige E-Mail-Adresse. Standard: Port 993 mit SSL/TLS."
+  },
   "smtpHelp": {
     "title": "Wie richte ich SMTP ein?",
     "pwTitle": "Wichtig: Die meisten Anbieter lehnen dein normales Kontopasswort ab.",

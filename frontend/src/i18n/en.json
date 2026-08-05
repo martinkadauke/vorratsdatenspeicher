@@ -1504,6 +1504,23 @@
     "dontShowAgain": "Don't show again",
     "close": "Close"
   },
+  "imapHelp": {
+    "title": "How do I set up IMAP?",
+    "pwTitle": "Important: some providers need an app password, or you must enable IMAP first.",
+    "pwGmail": "Gmail: app password only (two-factor must be on) and enable IMAP in settings.",
+    "pwGmailLink": "App passwords at Google",
+    "pwOutlook": "Outlook.com: create an app password in the security settings.",
+    "pwGmxWebde": "GMX / Web.de: IMAP must be enabled in the web mailbox first (Settings -> POP3/IMAP).",
+    "note": {
+      "gmx": "Enable IMAP in the web mailbox first.",
+      "webde": "Enable IMAP in the web mailbox first.",
+      "gmail": "App password instead of the account password; enable IMAP in Gmail settings.",
+      "tonline": "Sign in with your T-Online e-mail address and e-mail password.",
+      "outlook": "Use an app password — the normal password is often rejected.",
+      "mailbox": "Normal password; IMAP is on by default."
+    },
+    "userHint": "The username is almost always your full e-mail address. Default: port 993 with SSL/TLS."
+  },
   "smtpHelp": {
     "title": "How do I set up SMTP?",
     "pwTitle": "Important: most providers reject your normal account password.",
