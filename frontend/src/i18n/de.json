@@ -515,7 +515,7 @@
   "article": {
     "edit": "Artikel bearbeiten",
     "originalText": "Original (Kassenbon)",
-    "canonical": "Kanonischer Name",
+    "canonical": "Artikelname",
     "userCorrected": "Nutzerkorrigiert – der Name wurde von einer Person bestätigt",
     "category": "Kategorie",
     "amount": "Menge",
@@ -733,7 +733,7 @@
     "pruefen": "Prüfen"
   },
   "names": {
-    "title": "Kanonische Namen",
+    "title": "Artikelnamen",
     "search": "Namen suchen…",
     "count": "Käufe",
     "rename": "Umbenennen",
@@ -809,12 +809,12 @@
   "hint": {
     "artikel": {
       "title": "Tipp: deine Artikel",
-      "body": "Alle Käufe unter ihrem kanonischen Namen. Suche mit Operatoren (»eier -bio«), Taste F = Suche, C = Kategorie-Suche. Filtere oben nach Konto, und über das Regler-Symbol nach Kategorie + Zeitraum (mit Ausgabensumme). Mehrere markieren → Angebote abonnieren, vermeiden, Kategorie/Mitglied setzen.",
-      "bodyMobile": "Alle Käufe unter ihrem kanonischen Namen. Suche mit Operatoren (»eier -bio«). Filtere oben nach Konto und über das Regler-Symbol nach Kategorie + Zeitraum (mit Ausgabensumme), sowie nach abonnierten und gemiedenen Artikeln. Tippe mehrere an → Angebote abonnieren, vermeiden, Kategorie/Mitglied setzen."
+      "body": "Alle Käufe unter ihrem Artikelnamen. Suche mit Operatoren (»eier -bio«), Taste F = Suche, C = Kategorie-Suche. Filtere oben nach Konto, und über das Regler-Symbol nach Kategorie + Zeitraum (mit Ausgabensumme). Mehrere markieren → Angebote abonnieren, vermeiden, Kategorie/Mitglied setzen.",
+      "bodyMobile": "Alle Käufe unter ihrem Artikelnamen. Suche mit Operatoren (»eier -bio«). Filtere oben nach Konto und über das Regler-Symbol nach Kategorie + Zeitraum (mit Ausgabensumme), sowie nach abonnierten und gemiedenen Artikeln. Tippe mehrere an → Angebote abonnieren, vermeiden, Kategorie/Mitglied setzen."
     },
     "articleEdit": {
       "title": "Tipp: Artikel bearbeiten",
-      "body": "Der kanonische Name ist schon ausgewählt – einfach lostippen. »Auf alle anwenden« überträgt Name + Kategorie auf alle gleichen Posten. Menge/Einzelpreis/Gesamt rechnen sich gegenseitig aus."
+      "body": "Der Artikelname ist schon ausgewählt – einfach lostippen. »Auf alle anwenden« überträgt Name + Kategorie auf alle gleichen Posten. Menge/Einzelpreis/Gesamt rechnen sich gegenseitig aus."
     },
     "offers": {
       "title": "Tipp: Angebote",
@@ -826,8 +826,8 @@
     },
     "receiptDetail": {
       "title": "Tipp: schnelles Erfassen",
-      "body": "Mit ↑/↓ springst du durch die Posten (grün umrandet), Enter öffnet den Artikel mit fokussiertem kanonischen Namen. Posten lassen sich per Griff neu ordnen. Stimmt die Summe mit dem Bon-Total überein, blitzt es grün.",
-      "bodyMobile": "Tippe einen Posten zum Bearbeiten – der kanonische Name ist gleich fokussiert. Mit dem Kopier-Symbol duplizierst du, mit der dünnen Linie zwischen zwei Posten fügst du eine neue Position ein, mit dem Griff ordnest du um. Stimmt die Summe mit dem Bon-Total überein, blitzt es grün."
+      "body": "Mit ↑/↓ springst du durch die Posten (grün umrandet), Enter öffnet den Artikel mit fokussiertem Artikelnamen. Posten lassen sich per Griff neu ordnen. Stimmt die Summe mit dem Bon-Total überein, blitzt es grün.",
+      "bodyMobile": "Tippe einen Posten zum Bearbeiten – der Artikelname ist gleich fokussiert. Mit dem Kopier-Symbol duplizierst du, mit der dünnen Linie zwischen zwei Posten fügst du eine neue Position ein, mit dem Griff ordnest du um. Stimmt die Summe mit dem Bon-Total überein, blitzt es grün."
     },
     "queue": {
       "title": "Tipp: Prüfung",
@@ -956,7 +956,7 @@
     "backupBusy": "Backup wird erstellt…",
     "householdsHint": "Alle Haushalte der Plattform ansehen, einzelne Haushalte samt Daten und Belegfotos löschen — nur Super-Admin.",
     "maintenance": "Nächtliche Wartung",
-    "maintenanceHint": "Im Hintergrund laufende KI-Aufgaben: Kategorisierung neuer Artikel, Bereinigung kanonischer Namen, automatisches Holen von Laden-Logos.",
+    "maintenanceHint": "Im Hintergrund laufende KI-Aufgaben: Kategorisierung neuer Artikel, Bereinigung der Artikelnamen, automatisches Holen von Laden-Logos.",
     "maintenanceEnabled": "Wartung nachts aktiv",
     "runAfterOcr": "Nach jedem Beleg churnen",
     "runAfterOcrHint": "Startet direkt nach dem Scannen eines Belegs einen Churn-Lauf (entprellt), statt bis zum nächtlichen Lauf zu warten. Bereinigt neue Belege sofort.",
@@ -974,7 +974,7 @@
     "taskRecategorize": "Kategorisierung",
     "taskRecategorizeDesc": "Ordnet jedem Artikel einen Kategorie-Pfad zu (z.B. »Lebensmittel/Obst/Bananen«). Closed-Vocab: nur die definierten Kategorien.",
     "taskChurnerStage1": "Churner Stufe 1 — Klassifikation",
-    "taskChurnerStage1Desc": "Bereinigt kanonische Produktnamen aus OCR-Müll (»BIO BANANE« → »Bananen«). Entscheidet: bekannter Name, neuer Name, oder Web-Suche nötig.",
+    "taskChurnerStage1Desc": "Bereinigt Artikelnamen aus OCR-Müll (»BIO BANANE« → »Bananen«). Entscheidet: bekannter Name, neuer Name, oder Web-Suche nötig.",
     "taskChurnerStage2": "Churner Stufe 2 — Web-Recherche",
     "taskChurnerStage2Desc": "Wird nur aufgerufen wenn Stufe 1 »Web-Suche« sagt. Bekommt SearXNG-Treffer und schlägt einen Namen vor.",
     "taskOcr": "Vision-OCR",
@@ -1409,10 +1409,10 @@
     "selected": "ausgewählt",
     "assignMembers": "Mitglieder zuweisen",
     "assignTitle": "Mitglieder zu {{count}} Artikeln zuweisen",
-    "assignHint": "Setzt die Konsumenten. Bei Artikeln mit kanonischem Namen gilt es für alle zukünftigen Käufe.",
+    "assignHint": "Setzt die Konsumenten. Bei Artikeln mit Artikelnamen gilt es für alle zukünftigen Käufe.",
     "assigned": "Zugewiesen ✓",
     "setCanonical": "Name setzen",
-    "setCanonicalTitle": "Kanonischen Namen für {{count}} Auswahl(en) setzen",
+    "setCanonicalTitle": "Artikelnamen für {{count}} Auswahl(en) setzen",
     "setCategory": "Kategorie setzen",
     "setCategoryTitle": "Kategorie für {{count}} Auswahl(en) setzen",
     "categorySet": "Kategorie gesetzt",
@@ -1421,13 +1421,13 @@
     "unhide": "Einblenden",
     "showHidden": "Ausgeblendete zeigen",
     "hideHidden": "Ausgeblendete verbergen",
-    "setCanonicalHint": "Setzt den kanonischen Namen auf alle Artikel der Auswahl. Gleiche Namen collapsen danach zu einer Gruppe.",
+    "setCanonicalHint": "Setzt den Artikelnamen auf alle Artikel der Auswahl. Gleiche Namen collapsen danach zu einer Gruppe.",
     "canonicalSet": "Name gesetzt ✓",
     "avoid": "Vermeiden",
     "unavoid": "Nicht mehr vermeiden",
     "avoided": "{{count}} Artikel auf Vermeiden-Liste",
     "unavoided": "Von Vermeiden-Liste entfernt",
-    "avoidNeedsCanonical": "Nur Artikel mit kanonischem Namen können vermieden werden.",
+    "avoidNeedsCanonical": "Nur Artikel mit Artikelnamen können vermieden werden.",
     "trackVorrat": "Vorrat verfolgen",
     "untrackVorrat": "Nicht mehr verfolgen",
     "tracked": "{{count}} im Vorrat verfolgt",

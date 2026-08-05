@@ -515,7 +515,7 @@
   "article": {
     "edit": "Edit item",
     "originalText": "Original (receipt)",
-    "canonical": "Canonical name",
+    "canonical": "Item name",
     "userCorrected": "User-corrected – the name was confirmed by a person",
     "category": "Category",
     "amount": "Amount",
@@ -733,7 +733,7 @@
     "pruefen": "Review"
   },
   "names": {
-    "title": "Canonical names",
+    "title": "Item names",
     "search": "Search names…",
     "count": "Purchases",
     "rename": "Rename",
@@ -809,12 +809,12 @@
   "hint": {
     "artikel": {
       "title": "Tip: your items",
-      "body": "Every purchase grouped under its canonical name. Search with operators (»eggs -organic«), press F for search, C for the category search. Filter by account at the top, and by category + date range (with total spend) via the sliders icon. Select several → subscribe to offers, avoid, set category/member.",
-      "bodyMobile": "Every purchase grouped under its canonical name. Search with operators (»eggs -organic«). Filter by account at the top and by category + date range (with total spend) via the sliders icon, plus subscribed and avoided items. Tap several → subscribe to offers, avoid, set category/member."
+      "body": "Every purchase grouped under its item name. Search with operators (»eggs -organic«), press F for search, C for the category search. Filter by account at the top, and by category + date range (with total spend) via the sliders icon. Select several → subscribe to offers, avoid, set category/member.",
+      "bodyMobile": "Every purchase grouped under its item name. Search with operators (»eggs -organic«). Filter by account at the top and by category + date range (with total spend) via the sliders icon, plus subscribed and avoided items. Tap several → subscribe to offers, avoid, set category/member."
     },
     "articleEdit": {
       "title": "Tip: editing an item",
-      "body": "The canonical name is already selected – just start typing. »Apply to all« propagates name + category to all matching items. Quantity / unit price / total compute from each other."
+      "body": "The item name is already selected – just start typing. »Apply to all« propagates name + category to all matching items. Quantity / unit price / total compute from each other."
     },
     "offers": {
       "title": "Tip: offers",
@@ -826,8 +826,8 @@
     },
     "receiptDetail": {
       "title": "Tip: fast entry",
-      "body": "Use ↑/↓ to move through items (green outline), Enter opens the item with the canonical name focused. Drag the handle to reorder. When the item sum matches the receipt total, it flashes green.",
-      "bodyMobile": "Tap an item to edit it – the canonical name is focused right away. Use the copy icon to duplicate, the thin line between two items to insert a new one, and the grip to reorder. When the item sum matches the receipt total, the screen flashes green."
+      "body": "Use ↑/↓ to move through items (green outline), Enter opens the item with the item name focused. Drag the handle to reorder. When the item sum matches the receipt total, it flashes green.",
+      "bodyMobile": "Tap an item to edit it – the item name is focused right away. Use the copy icon to duplicate, the thin line between two items to insert a new one, and the grip to reorder. When the item sum matches the receipt total, the screen flashes green."
     },
     "queue": {
       "title": "Tip: review queue",
@@ -954,7 +954,7 @@
     "backupBusy": "Creating backup…",
     "householdsHint": "View every household on the platform, delete a household with all its data and receipt photos — super-admin only.",
     "maintenance": "Nightly maintenance",
-    "maintenanceHint": "Background AI jobs: categorize new items, clean up canonical names, fetch store logos.",
+    "maintenanceHint": "Background AI jobs: categorize new items, clean up item names, fetch store logos.",
     "maintenanceEnabled": "Maintenance runs nightly",
     "runAfterOcr": "Churn after every receipt",
     "runAfterOcrHint": "Runs a churn pass right after a receipt is scanned (debounced), instead of waiting for the nightly run. Cleans up new receipts immediately.",
@@ -972,7 +972,7 @@
     "taskRecategorize": "Categorization",
     "taskRecategorizeDesc": "Assigns each item to a category path (e.g. \"Food/Fruit/Bananas\"). Closed vocabulary — only the defined categories.",
     "taskChurnerStage1": "Churner Stage 1 — Classification",
-    "taskChurnerStage1Desc": "Cleans canonical product names from OCR noise (\"BIO BANANE\" → \"Bananas\"). Decides: known name, new name, or web search needed.",
+    "taskChurnerStage1Desc": "Cleans item names from OCR noise (\"BIO BANANE\" → \"Bananas\"). Decides: known name, new name, or web search needed.",
     "taskChurnerStage2": "Churner Stage 2 — Web Lookup",
     "taskChurnerStage2Desc": "Only invoked when Stage 1 says \"web search\". Reads SearXNG hits and proposes a name.",
     "taskOcr": "Vision OCR",
@@ -1407,10 +1407,10 @@
     "selected": "selected",
     "assignMembers": "Assign members",
     "assignTitle": "Assign members to {{count}} items",
-    "assignHint": "Sets the consumers. For items with a canonical name it applies to all future purchases.",
+    "assignHint": "Sets the consumers. For items with a item name it applies to all future purchases.",
     "assigned": "Assigned ✓",
     "setCanonical": "Set name",
-    "setCanonicalTitle": "Set canonical name for {{count}} selection(s)",
+    "setCanonicalTitle": "Set item name for {{count}} selection(s)",
     "setCategory": "Set category",
     "setCategoryTitle": "Set category for {{count}} selection(s)",
     "categorySet": "Category set",
@@ -1419,13 +1419,13 @@
     "unhide": "Unhide",
     "showHidden": "Show hidden",
     "hideHidden": "Hide hidden",
-    "setCanonicalHint": "Sets the canonical name on every article in the selection. Identical names then collapse into one group.",
+    "setCanonicalHint": "Sets the item name on every article in the selection. Identical names then collapse into one group.",
     "canonicalSet": "Name set ✓",
     "avoid": "Avoid",
     "unavoid": "Stop avoiding",
     "avoided": "{{count}} items on the avoid list",
     "unavoided": "Removed from the avoid list",
-    "avoidNeedsCanonical": "Only items with a canonical name can be avoided.",
+    "avoidNeedsCanonical": "Only items with a item name can be avoided.",
     "trackVorrat": "Track stock",
     "untrackVorrat": "Stop tracking",
     "tracked": "{{count}} now tracked",
