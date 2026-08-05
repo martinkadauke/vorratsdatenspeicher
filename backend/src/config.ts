@@ -96,6 +96,10 @@ export interface AppConfig {
   'offers.push_enabled': boolean;
   'shopping.email_enabled': boolean;
   'shopping.push_enabled': boolean;
+  // monthly to-do push reminders (1st = budgets, 7th = uploads, 15th = finish receipts).
+  // Push-only; per-user opt-out lives in notification_pref. One cron covers all three days.
+  'reminders.enabled': boolean;
+  'reminders.cron': string;
   // category granularity chosen in onboarding — steers the category-designer prompt
   'categories.detail': string;   // 'grob' | 'mittel' | 'fein'
   // first-run onboarding wizard completed (household-global; surfaced on /api/auth/me)
@@ -186,6 +190,8 @@ const DEFAULTS: AppConfig = {
   'offers.push_enabled': true,
   'shopping.email_enabled': true,
   'shopping.push_enabled': true,
+  'reminders.enabled': true,
+  'reminders.cron': '0 9 1,7,15 * *', // 09:00 Europe/Berlin on the 1st, 7th, 15th
   'categories.detail': 'mittel',
   'onboarding.done': false,
 };

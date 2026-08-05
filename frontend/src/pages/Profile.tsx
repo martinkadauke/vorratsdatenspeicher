@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
-import { LogOut, Sparkles, Inbox, Bell, ChevronDown, ChevronRight, Paperclip, Undo2 } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { LogOut, Sparkles, Inbox, Bell, ChevronDown, ChevronRight, Paperclip, Undo2, Mail } from 'lucide-react';
 import { api } from '../api/client';
+import { MailForwardHelp } from '../components/MailForwardHelp';
 import { useAuth } from '../context/auth';
 import { setLanguage } from '../i18n';
 import { pushSupported, pushStatus, enablePush, disablePush } from '../lib/push';
@@ -24,6 +25,22 @@ export function Profile() {
   const [oldPw, setOldPw] = useState('');
   const [newPw, setNewPw] = useState('');
   const [pwSaved, setPwSaved] = useState(false);
+
+  // E-mail-forwarding tutorial. Opens from ?help=mailforward (the 7th-of-month reminder's
+  // deep-link) or the Help card button; "nicht mehr anzeigen" persists has_seen_email_tutorial.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [helpOpen, setHelpOpen] = useState(false);
+  useEffect(() => {
+    if (searchParams.get('help') === 'mailforward') setHelpOpen(true);
+  }, [searchParams]);
+  const closeHelp = () => {
+    setHelpOpen(false);
+    if (searchParams.get('help')) {
+      const p = new URLSearchParams(searchParams);
+      p.delete('help');
+      setSearchParams(p, { replace: true });
+    }
+  };
 
   const patch = useMutation({
     mutationFn: (body: Record<string, unknown>) => api('/api/me', { method: 'PATCH', body }),
@@ -114,6 +131,11 @@ export function Profile() {
         >
           <Sparkles size={14} /> {t('profile.replayTour')}
         </Button>
+        {!demo && (
+          <Button variant="secondary" onClick={() => setHelpOpen(true)}>
+            <Mail size={14} /> {t('mailForward.openButton')}
+          </Button>
+        )}
       </Card>
 
       <Button variant="secondary" onClick={() => { logout(); navigate('/login'); }}>
@@ -121,6 +143,20 @@ export function Profile() {
       </Button>
 
       <AppVersion className="pt-1 text-center text-[11px] leading-relaxed text-zinc-400 dark:text-zinc-600" />
+
+      <Modal open={helpOpen} onClose={closeHelp} title={t('mailForward.title')} wide>
+        <MailForwardHelp />
+        <div className="mt-4 flex items-center justify-between gap-2">
+          <button
+            type="button"
+            className="text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+            onClick={() => { patch.mutate({ has_seen_email_tutorial: true }); closeHelp(); }}
+          >
+            {t('mailForward.dontShowAgain')}
+          </button>
+          <Button variant="secondary" onClick={closeHelp}>{t('mailForward.close')}</Button>
+        </div>
+      </Modal>
     </div>
   );
 }
@@ -155,6 +191,19 @@ function PushSettings() {
     } catch { setTestMsg(t('profile.push.failed')); }
   };
 
+  // Per-user opt-out for the monthly to-do reminders (1st/7th/15th). No pref row = opted in.
+  const [remindersOn, setRemindersOn] = useState(true);
+  useEffect(() => {
+    void api<{ prefs: { kind: string; push: boolean }[] }>('/api/me/notification-prefs')
+      .then(r => { const p = r.prefs.find(x => x.kind === 'reminders'); if (p) setRemindersOn(p.push); })
+      .catch(() => { /* default on */ });
+  }, []);
+  const toggleReminders = async (v: boolean) => {
+    setRemindersOn(v);
+    try { await api('/api/me/notification-prefs', { method: 'PUT', body: { kind: 'reminders', push: v } }); }
+    catch { setRemindersOn(!v); }
+  };
+
   return (
     <Card className="flex flex-col gap-2 p-4">
       <div className="flex items-center gap-2">
@@ -175,6 +224,13 @@ function PushSettings() {
               {testMsg && <span className="text-xs text-zinc-600 dark:text-zinc-300">{testMsg}</span>}
             </div>
           )}
+          <div className="mt-1 flex items-center justify-between gap-2 border-t border-zinc-100 pt-2 dark:border-zinc-800">
+            <div className="flex flex-col pr-2">
+              <span className="text-sm font-medium">{t('profile.push.reminders')}</span>
+              <span className="text-[11px] text-zinc-400">{t('profile.push.remindersHint')}</span>
+            </div>
+            <Switch checked={remindersOn} onChange={toggleReminders} />
+          </div>
           <p className="text-[11px] text-zinc-400">{t('profile.push.iosHint')}</p>
         </>
       ) : (

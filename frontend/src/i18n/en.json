@@ -396,7 +396,8 @@
     "reviewProgress": "Receipts reviewed",
     "cardSize": "Card size",
     "filters": "Filters",
-    "onlyHidden": "Only hidden"
+    "onlyHidden": "Only hidden",
+    "onlyOpen": "Only open"
   },
   "receiptEdit": {
     "title": "Edit receipt",
@@ -1097,7 +1098,9 @@
       "failed": "Could not enable push.",
       "test": "Send test",
       "testSent": "Test sent ({{n}} device(s)).",
-      "testNone": "No active subscription on this account."
+      "testNone": "No active subscription on this account.",
+      "reminders": "Monthly reminders",
+      "remindersHint": "Nudges on the 1st, 7th and 15th: adjust budgets, upload documents, finish receipts."
     },
     "helpHeading": "Help & introduction",
     "replayTour": "Replay tour",
@@ -1481,6 +1484,26 @@
       "test": "Send test",
       "testOk": "Test mail sent – check your inbox. These settings only take effect once you press “Save”."
     }
+  },
+  "mailForward": {
+    "title": "Set up e-mail invoices",
+    "openButton": "Set up e-mail invoices",
+    "intro": "To have invoices land in VDS as receipts automatically, connect your mailbox via IMAP (above under 'E-mail mailbox') and have invoice mails sorted there automatically.",
+    "step1": "Connect the mailbox: enter your provider's IMAP details above under 'E-mail mailbox'. VDS then reads the chosen folder.",
+    "step2": "Create a forwarding rule / filter: at your provider, add a rule that moves invoice mails (e.g. sender, or 'invoice' in the subject) into that folder, or forwards them to your VDS mailbox.",
+    "step3": "Done: new invoices appear automatically under 'Receipts'. You can always upload receipts manually too.",
+    "providersTitle": "How to create the rule at your provider",
+    "note": {
+      "gmx": "GMX: Settings → E-mail → Filter rules → New rule. Condition 'From contains …' or 'Subject contains invoice', action 'Move to folder'.",
+      "webde": "Web.de: Settings → E-mail → Filter → Add filter. Pick a condition, action 'Move to folder'.",
+      "gmail": "Gmail: search bar → search options → 'Create filter'. Action 'Apply label' or 'Forward to' (forwarding must first be confirmed under Settings → Forwarding).",
+      "tonline": "T-Online: E-mail center → Settings → Filter rules → New rule. Pick a condition, action 'Move to folder'.",
+      "outlook": "Outlook.com: Settings → Mail → Rules → Add rule. Condition 'From'/'Subject', action 'Move to' or 'Forward to'.",
+      "mailbox": "mailbox.org: Settings → Filter → New rule. Condition + 'File message in' or 'Redirect to' your VDS mailbox."
+    },
+    "outro": "Tip: a dedicated invoices-only folder keeps your mailbox tidy — point the IMAP field above at that same folder.",
+    "dontShowAgain": "Don't show again",
+    "close": "Close"
   },
   "smtpHelp": {
     "title": "How do I set up SMTP?",

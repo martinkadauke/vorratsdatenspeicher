@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useInfiniteQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Search, CheckCircle2, Rows3, X, ChevronLeft, ChevronRight, Plus, Lock, Mail, SlidersHorizontal, EyeOff } from 'lucide-react';
+import { Search, CheckCircle2, Rows3, X, ChevronLeft, ChevronRight, Plus, Lock, Mail, SlidersHorizontal, EyeOff, CircleDashed } from 'lucide-react';
 import { api } from '../api/client';
 import type { Receipt } from '../api/types';
 import { Card, Input, Spinner, EmptyState } from '../components/ui';
@@ -97,6 +97,15 @@ export function Receipts() {
   // "Nur versteckte": super-admin-only filter → show ONLY private receipts.
   const [hiddenOnly, setHiddenOnly] = useState(params.get('hidden') === '1');
   const canSeeHidden = !!user?.sees_all_konten;
+  // "Nur offene": receipts still lacking the green check. Deep-linked from the 15th-of-month reminder.
+  const [statusOpen, setStatusOpen] = useState(params.get('status') === 'open');
+  const toggleStatusOpen = () => {
+    const nv = !statusOpen;
+    setStatusOpen(nv);
+    const next = new URLSearchParams(params);
+    if (nv) next.set('status', 'open'); else next.delete('status');
+    setParams(next, { replace: true });
+  };
   // Source filter only makes sense if the user actually has >1 source.
   const { data: quellenRaw } = useQuery({
     queryKey: ['receipt-quellen'],
@@ -166,9 +175,10 @@ export function Receipts() {
     if (search.trim()) p.set('q', search.trim());
     if (effQuelle !== 'alle') p.set('quelle', effQuelle);
     if (canSeeHidden && hiddenOnly) p.set('hidden', '1');
+    if (statusOpen) p.set('status', 'open');
     const s = p.toString();
     return s ? `?${s}` : '';
-  }, [storeFilter, kontoFilter, search, effQuelle, canSeeHidden, hiddenOnly]);
+  }, [storeFilter, kontoFilter, search, effQuelle, canSeeHidden, hiddenOnly, statusOpen]);
 
   const gridRef = useRef<HTMLDivElement>(null);
   const [cols, setCols] = useState(3);
@@ -248,12 +258,13 @@ export function Receipts() {
   const storeParam = storeFilter ? `&store=${encodeURIComponent(storeFilter)}` : '';
   const kontoParam = kontoFilter ? `&konto=${encodeURIComponent(kontoFilter)}` : '';
   const hiddenParam = canSeeHidden && hiddenOnly ? '&hidden=1' : '';
+  const statusParam = statusOpen ? '&status=open' : '';
   const {
     data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage,
   } = useInfiniteQuery({
-    queryKey: ['receipts', search, storeFilter, kontoFilter, effQuelle, hiddenParam],
+    queryKey: ['receipts', search, storeFilter, kontoFilter, effQuelle, hiddenParam, statusParam],
     queryFn: ({ pageParam }) =>
-      api<Receipt[]>(`/api/receipts?limit=${PAGE}&offset=${pageParam}&q=${encodeURIComponent(search)}${storeParam}${kontoParam}${quelleParam}${hiddenParam}`),
+      api<Receipt[]>(`/api/receipts?limit=${PAGE}&offset=${pageParam}&q=${encodeURIComponent(search)}${storeParam}${kontoParam}${quelleParam}${hiddenParam}${statusParam}`),
     initialPageParam: 0,
     getNextPageParam: (last, all) => (last.length === PAGE ? all.length * PAGE : undefined),
   });
@@ -323,7 +334,8 @@ export function Receipts() {
   const hasActiveFilters = !!storeFilter
     || (showQuelle && quelleFilter !== 'zettel')
     || (kontoFilter !== defaultKontoId)
-    || (canSeeHidden && hiddenOnly);
+    || (canSeeHidden && hiddenOnly)
+    || statusOpen;
 
   return (
     <div className="flex flex-col gap-3">
@@ -509,6 +521,23 @@ export function Receipts() {
           )}
         </div>
       )}
+
+      {/* "Nur offene": receipts still lacking the green check. Deep-linked from the
+          15th-of-month reminder; useful any time to work down the review backlog. */}
+      <div className="-mx-1 flex px-1">
+        <button
+          onClick={toggleStatusOpen}
+          aria-pressed={statusOpen}
+          className={cn(
+            'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium',
+            statusOpen
+              ? 'border-transparent bg-emerald-600 text-white'
+              : 'border-zinc-300 text-zinc-500 dark:border-zinc-700',
+          )}
+        >
+          <CircleDashed size={13} /> {t('receipts.onlyOpen')}
+        </button>
+      </div>
 
       {/* Super-admin only: show ONLY hidden (private) receipts — the ones normally
           invisible to everyone else. Sits with the other filters. */}

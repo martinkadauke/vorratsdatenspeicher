@@ -165,7 +165,7 @@ export function receiptRoutes(app: FastifyInstance): void {
   }
 
   app.get('/api/receipts', async (req) => {
-    const q = req.query as { limit?: string; offset?: string; q?: string; from?: string; to?: string; store?: string; konto?: string; quelle?: string; hidden?: string };
+    const q = req.query as { limit?: string; offset?: string; q?: string; from?: string; to?: string; store?: string; konto?: string; quelle?: string; hidden?: string; status?: string };
     const limit = Math.min(parseInt(q.limit ?? '50', 10) || 50, 200);
     const offset = parseInt(q.offset ?? '0', 10) || 0;
     const search = (q.q ?? '').trim();
@@ -176,6 +176,8 @@ export function receiptRoutes(app: FastifyInstance): void {
     // (kontoScope is bypassed for them, so this surfaces everyone's private ones);
     // for a normal user kontoScope still limits it to their own private receipts.
     const onlyHidden = q.hidden === '1';
+    // "Nur offene": receipts still lacking the green check (not yet abgeschlossen).
+    const onlyOpen = q.status === 'open';
 
     const rows = await sql`
       SELECT e.id, e.datum, e.roh_ladenname, e.bild_pfad, e.gesamt_betrag, e.geprueft,
@@ -192,6 +194,7 @@ export function receiptRoutes(app: FastifyInstance): void {
         ${kontoId ? sql`AND e.konto_id = ${kontoId}` : sql``}
         ${quellen ? sql`AND e.quelle IN ${sql(quellen)}` : sql``}
         ${onlyHidden ? sql`AND e.private_for_user_id IS NOT NULL` : sql``}
+        ${onlyOpen ? sql`AND NOT e.geprueft` : sql``}
         ${q.from ? sql`AND e.datum >= ${q.from}` : sql``}
         ${q.to ? sql`AND e.datum <= ${q.to}` : sql``}
         ${kontoScope(req.user, sql`e`)}
@@ -616,7 +619,7 @@ export function receiptRoutes(app: FastifyInstance): void {
 
     // Respect the same filters the list used, so prev/next stay within the
     // visible (filtered) set the user is navigating.
-    const fq = req.query as { q?: string; store?: string; konto?: string; quelle?: string; from?: string; to?: string };
+    const fq = req.query as { q?: string; store?: string; konto?: string; quelle?: string; from?: string; to?: string; status?: string };
     const search = (fq.q ?? '').trim();
     const storeLike = fq.store ? `%${fq.store}%` : null;
     const kontoId = fq.konto ? parseInt(fq.konto, 10) : null;
@@ -626,6 +629,7 @@ export function receiptRoutes(app: FastifyInstance): void {
       ${storeLike ? sql`AND einkauf.roh_ladenname ILIKE ${storeLike}` : sql``}
       ${kontoId ? sql`AND einkauf.konto_id = ${kontoId}` : sql``}
       ${quellen ? sql`AND einkauf.quelle IN ${sql(quellen)}` : sql``}
+      ${fq.status === 'open' ? sql`AND NOT einkauf.geprueft` : sql``}
       ${fq.from ? sql`AND einkauf.datum >= ${fq.from}` : sql``}
       ${fq.to ? sql`AND einkauf.datum <= ${fq.to}` : sql``}
       ${kontoScope(req.user, sql`einkauf`)}

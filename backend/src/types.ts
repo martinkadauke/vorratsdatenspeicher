@@ -10,6 +10,7 @@ export interface User {
   prefers_dark: boolean;
   preferred_lang: string;
   has_seen_tour: boolean;
+  has_seen_email_tutorial?: boolean;
   emoji: string | null;        // resolved avatar emoji (own → linked member → 🤖 for admin)
   pinned_chains?: string[];
   // Computed per request: account ids this user may see (empty when sees_all).

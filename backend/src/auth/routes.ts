@@ -55,13 +55,13 @@ export function authRoutes(app: FastifyInstance): void {
     // fresh login and a page reload would disagree about whether the scanner preloads.
     const rows = DEMO_MODE
       ? await adminSql`
-          SELECT u.id, u.username, u.password_hash, u.is_admin, u.sees_all_konten, u.is_super_admin, u.household_id, u.can_write, u.prefers_dark, u.preferred_lang, u.email, u.has_seen_tour, u.pinned_chains, u.emoji,
+          SELECT u.id, u.username, u.password_hash, u.is_admin, u.sees_all_konten, u.is_super_admin, u.household_id, u.can_write, u.prefers_dark, u.preferred_lang, u.email, u.has_seen_tour, u.has_seen_email_tutorial, u.pinned_chains, u.emoji,
                  h.onboarding_done, (COALESCE(h.ocr_count, 0) > 0) AS demo_scanned,
                  (SELECT emoji FROM family_member WHERE user_id = u.id AND emoji IS NOT NULL ORDER BY sort_order LIMIT 1) AS member_emoji
           FROM users u LEFT JOIN household h ON h.id = u.household_id
           WHERE LOWER(u.email) = LOWER(${username})`
       : await sql`
-          SELECT u.id, u.username, u.password_hash, u.is_admin, u.sees_all_konten, u.can_write, u.prefers_dark, u.preferred_lang, u.email, u.has_seen_tour, u.pinned_chains, u.emoji,
+          SELECT u.id, u.username, u.password_hash, u.is_admin, u.sees_all_konten, u.can_write, u.prefers_dark, u.preferred_lang, u.email, u.has_seen_tour, u.has_seen_email_tutorial, u.pinned_chains, u.emoji,
                  (SELECT emoji FROM family_member WHERE user_id = u.id AND emoji IS NOT NULL ORDER BY sort_order LIMIT 1) AS member_emoji
           FROM users u
           WHERE LOWER(u.username) = LOWER(${username}) OR LOWER(u.email) = LOWER(${username})`;
@@ -84,6 +84,7 @@ export function authRoutes(app: FastifyInstance): void {
         preferred_lang: u.preferred_lang,
         email: u.email,
         has_seen_tour: u.has_seen_tour,
+        has_seen_email_tutorial: u.has_seen_email_tutorial,
         emoji: resolvedEmoji(u.emoji, u.member_emoji),
         pinned_chains: u.pinned_chains,
         ...(DEMO_MODE

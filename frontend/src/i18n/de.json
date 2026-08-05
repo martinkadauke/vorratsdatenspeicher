@@ -396,7 +396,8 @@
     "reviewProgress": "Belege geprüft",
     "cardSize": "Kartengröße",
     "filters": "Filter",
-    "onlyHidden": "Nur versteckte"
+    "onlyHidden": "Nur versteckte",
+    "onlyOpen": "Nur offene"
   },
   "receiptEdit": {
     "title": "Beleg bearbeiten",
@@ -1099,7 +1100,9 @@
       "failed": "Push konnte nicht aktiviert werden.",
       "test": "Test senden",
       "testSent": "Test gesendet ({{n}} Gerät(e)).",
-      "testNone": "Keine aktive Subscription auf diesem Konto."
+      "testNone": "Keine aktive Subscription auf diesem Konto.",
+      "reminders": "Monatliche Erinnerungen",
+      "remindersHint": "Erinnerungen am 1., 7. und 15.: Budgets anpassen, Unterlagen hochladen, Belege abschließen."
     },
     "helpHeading": "Hilfe & Einführung",
     "replayTour": "Tour erneut starten",
@@ -1483,6 +1486,26 @@
       "test": "Test senden",
       "testOk": "Test-Mail verschickt – schau in dein Postfach. Die Einstellungen gelten erst nach „Speichern“."
     }
+  },
+  "mailForward": {
+    "title": "E-Mail-Rechnungen einrichten",
+    "openButton": "E-Mail-Rechnungen einrichten",
+    "intro": "Damit Rechnungen automatisch als Belege in VDS landen, verbinde dein Postfach per IMAP (oben unter 'E-Mail-Postfach') und lass Rechnungs-Mails automatisch dorthin einsortieren.",
+    "step1": "Postfach verbinden: Trage oben unter 'E-Mail-Postfach' die IMAP-Daten deines Anbieters ein. VDS liest dann den gewählten Ordner aus.",
+    "step2": "Weiterleitung/Filter anlegen: Richte bei deinem Anbieter eine Regel ein, die Rechnungs-Mails (z. B. Absender oder 'Rechnung' im Betreff) in diesen Ordner verschiebt oder an dein VDS-Postfach weiterleitet.",
+    "step3": "Fertig: Neue Rechnungen erscheinen automatisch unter 'Belege'. Belege kannst du jederzeit auch manuell hochladen.",
+    "providersTitle": "So legst du die Regel bei deinem Anbieter an",
+    "note": {
+      "gmx": "GMX: Einstellungen → E-Mail → Filterregeln → Neue Regel. Bedingung 'Von enthält …' oder 'Betreff enthält Rechnung', Aktion 'In Ordner verschieben'.",
+      "webde": "Web.de: Einstellungen → E-Mail → Filter → Filter hinzufügen. Bedingung wählen, Aktion 'In Ordner verschieben'.",
+      "gmail": "Gmail: Suchleiste → Suchoptionen → 'Filter erstellen'. Aktion 'Label anwenden' oder 'Weiterleiten an' (Weiterleitung vorher unter Einstellungen → Weiterleitung bestätigen).",
+      "tonline": "T-Online: E-Mail-Center → Einstellungen → Filterregeln → Neue Regel. Bedingung wählen, Aktion 'In Ordner verschieben'.",
+      "outlook": "Outlook.com: Einstellungen → E-Mail → Regeln → Regel hinzufügen. Bedingung 'Von'/'Betreff', Aktion 'Verschieben in' oder 'Weiterleiten an'.",
+      "mailbox": "mailbox.org: Einstellungen → Filter → Neue Regel. Bedingung + 'Nachricht ablegen in' oder 'Umleiten an' dein VDS-Postfach."
+    },
+    "outro": "Tipp: Ein eigener Ordner nur für Rechnungen hält dein Postfach übersichtlich – gib denselben Ordner oben im IMAP-Feld an.",
+    "dontShowAgain": "Nicht mehr anzeigen",
+    "close": "Schließen"
   },
   "smtpHelp": {
     "title": "Wie richte ich SMTP ein?",

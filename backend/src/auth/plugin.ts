@@ -42,13 +42,13 @@ export function registerAuth(app: FastifyInstance): void {
       // carries no RLS, so the join is safe on the owner connection (same as the login query).
       const rows = DEMO_MODE
         ? await adminSql`
-            SELECT u.id, u.username, u.email, u.is_admin, u.sees_all_konten, u.is_super_admin, u.household_id, u.can_write, u.prefers_dark, u.preferred_lang, u.has_seen_tour, u.pinned_chains, u.emoji,
+            SELECT u.id, u.username, u.email, u.is_admin, u.sees_all_konten, u.is_super_admin, u.household_id, u.can_write, u.prefers_dark, u.preferred_lang, u.has_seen_tour, u.has_seen_email_tutorial, u.pinned_chains, u.emoji,
                    (COALESCE(h.ocr_count, 0) > 0) AS demo_scanned,
                    (SELECT emoji FROM family_member WHERE user_id = u.id AND emoji IS NOT NULL ORDER BY sort_order LIMIT 1) AS member_emoji
             FROM users u LEFT JOIN household h ON h.id = u.household_id
             WHERE u.id = ${payload.sub}`
         : await sql`
-            SELECT u.id, u.username, u.email, u.is_admin, u.sees_all_konten, u.can_write, u.prefers_dark, u.preferred_lang, u.has_seen_tour, u.pinned_chains, u.emoji,
+            SELECT u.id, u.username, u.email, u.is_admin, u.sees_all_konten, u.can_write, u.prefers_dark, u.preferred_lang, u.has_seen_tour, u.has_seen_email_tutorial, u.pinned_chains, u.emoji,
                    (SELECT emoji FROM family_member WHERE user_id = u.id AND emoji IS NOT NULL ORDER BY sort_order LIMIT 1) AS member_emoji
             FROM users u WHERE u.id = ${payload.sub}`;
       if (!rows.length) return reply.code(401).send({ error: 'unauthorized' });

@@ -7,6 +7,7 @@ import { getAllConfig, setConfig, getConfig, isHouseholdConfigKey, scopeConfigFo
 import { rescheduleChurner } from '../churner/scheduler.js';
 import { rescheduleSupermarket } from '../supermarket/scheduler.js';
 import { rescheduleModelReview } from '../maintenance/modelReview.js';
+import { rescheduleReminders, runReminders } from '../maintenance/reminders.js';
 import { rescheduleDemoSweep } from '../maintenance/demoSweep.js';
 import { rescheduleMailImport } from '../mail/scheduler.js';
 import { rescheduleDropfolder } from '../dropfolder/scheduler.js';
@@ -163,6 +164,7 @@ export function adminRoutes(app: FastifyInstance): void {
     if (key.startsWith('churner.')) await rescheduleChurner();
     if (key.startsWith('supermarket.')) await rescheduleSupermarket();
     if (key.startsWith('model_review.')) await rescheduleModelReview();
+    if (!DEMO_MODE && key.startsWith('reminders.')) await rescheduleReminders();   // no per-user reminders on demo
     if (!DEMO_MODE && key.startsWith('mailimport.')) await rescheduleMailImport();   // no IMAP on demo
     if (key.startsWith('dropfolder.')) await rescheduleDropfolder();
     if (DEMO_MODE && key.startsWith('demo_sweep.')) await rescheduleDemoSweep();
@@ -178,6 +180,17 @@ export function adminRoutes(app: FastifyInstance): void {
   app.post('/api/dropfolder/scan', { preHandler: requireOperator }, async () => {
     if (isDropfolderRunning()) return { running: true };
     return runDropfolderImport('manual');
+  });
+
+  /** Manual trigger for the monthly reminder batch (test/ops). `day` picks which reminder
+   *  (1 = budgets, 7 = uploads, 15 = finish receipts) and BYPASSES the once-per-day claim,
+   *  so it can be re-run. Off-demo only — reminders don't run on the demo. */
+  app.post('/api/reminders/run', { preHandler: requireAdmin }, async (req, reply) => {
+    if (DEMO_MODE) return reply.code(403).send({ error: 'reminders do not run on the demo' });
+    const { day } = (req.body ?? {}) as { day?: number };
+    const d = Number(day);
+    if (![1, 7, 15].includes(d)) return reply.code(400).send({ error: 'day must be 1, 7 or 15' });
+    return { ok: true, ...(await runReminders(d)) };
   });
 
   // ── users (invite-only) ─────────────────────────────────────────────────

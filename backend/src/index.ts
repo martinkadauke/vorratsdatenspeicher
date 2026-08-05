@@ -42,6 +42,7 @@ import { offerRoutes } from './routes/offers.js';
 import { rescheduleChurner } from './churner/scheduler.js';
 import { rescheduleSupermarket } from './supermarket/scheduler.js';
 import { rescheduleModelReview } from './maintenance/modelReview.js';
+import { rescheduleReminders } from './maintenance/reminders.js';
 import { rescheduleMailImport } from './mail/scheduler.js';
 import { rescheduleDropfolder } from './dropfolder/scheduler.js';
 import { modelReviewRoutes } from './routes/modelReview.js';
@@ -252,6 +253,7 @@ async function main(): Promise<void> {
   await rescheduleChurner();
   await rescheduleSupermarket();
   await rescheduleModelReview();
+  if (!DEMO_MODE) await rescheduleReminders();     // per-user reminders need a household scope a cron lacks on demo
   setEmailBaseUrl(await getConfig('app.base_url')); // hosted logo URL for emails
   if (!DEMO_MODE) await rescheduleMailImport();   // no IMAP polling on the demo — see above
   await rescheduleDropfolder();
