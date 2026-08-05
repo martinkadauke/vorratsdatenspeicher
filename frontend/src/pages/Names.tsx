@@ -199,13 +199,15 @@ export function NameEditModal({ name, onClose }: { name: CanonicalName | null; o
             kompakter Block. Ohne-Gewicht wird hier (statt als Listen-Icon) erklärt. */}
         <div className="flex flex-col gap-3 rounded-xl border border-zinc-200 p-3 dark:border-zinc-800">
           <div className="grid grid-cols-2 gap-3">
-            <div>
+            <div className="flex flex-col">
               <Label>{t('names.baseUnit')}</Label>
-              <UnitSelect value={baseUnit} onChange={setBaseUnit} allowEmpty />
+              <div className="mt-auto">
+                <UnitSelect value={baseUnit} onChange={setBaseUnit} allowEmpty />
+              </div>
             </div>
-            <div>
+            <div className="flex flex-col">
               <Label>{t('names.expectedPrice')}</Label>
-              <div className="flex items-center gap-1">
+              <div className="mt-auto flex items-center gap-1">
                 <Input
                   value={expectedPrice}
                   onChange={e => setExpectedPrice(e.target.value)}

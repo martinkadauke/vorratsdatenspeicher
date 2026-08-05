@@ -103,13 +103,7 @@ function NameReview() {
   const decide = useMutation({
     mutationFn: (b: { artikel_ids: number[]; canonical?: string; action: string }) =>
       api('/api/pruefen/decide', { method: 'POST', body: b }),
-    onSuccess: (_r, vars) => {
-      invalidate();
-      // Make "reject" visibly do something (it buries the wrong proposal so the
-      // churner won't re-mint it) — otherwise the row just reappears and it reads
-      // as a no-op. Approve keeps its silent flow (the row simply drops out).
-      if (vars.action === 'reject') toast(t('queue.rejected'), 'success');
-    },
+    onSuccess: () => { invalidate(); },
     onError: (e) => toast((e as Error).message, 'error'),
   });
   const decideBulk = useMutation({
@@ -231,7 +225,6 @@ function NameReview() {
               />
               <div className="flex flex-wrap gap-2">
                 <Button className="min-w-[6rem] flex-1" disabled={!value.trim()} onClick={() => decide.mutate({ artikel_ids: g.artikel_ids, canonical: value.trim(), action: 'approve' })}>{t('queue.approve')}</Button>
-                <Button variant="ghost" className="min-w-[5rem]" onClick={() => decide.mutate({ artikel_ids: g.artikel_ids, action: 'reject' })}>{t('queue.reject')}</Button>
               </div>
             </Card>
           );

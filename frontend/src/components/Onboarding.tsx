@@ -113,6 +113,7 @@ export function Onboarding() {
     onError: (e: Error) => toast(e.message, 'error'),
   });
   const delFam = useMutation({ mutationFn: (id: number) => api(`/api/family/${id}`, { method: 'DELETE' }), onSuccess: () => void qc.invalidateQueries({ queryKey: ['family'] }) });
+  const patchFam = useMutation({ mutationFn: (b: { id: number; body: { name?: string; emoji?: string } }) => api(`/api/family/${b.id}`, { method: 'PATCH', body: b.body }), onSuccess: () => void qc.invalidateQueries({ queryKey: ['family'] }), onError: (e: Error) => toast(e.message, 'error') });
 
   const invKonten = () => void qc.invalidateQueries({ queryKey: ['konten-admin'] });
   const patchKonto = useMutation({ mutationFn: (b: { id: number; body: Partial<Konto> }) => api(`/api/admin/konten/${b.id}`, { method: 'PATCH', body: b.body }), onSuccess: invKonten, onError: (e: Error) => toast(e.message, 'error') });
@@ -219,7 +220,7 @@ export function Onboarding() {
               <ProviderRow provider="deepseek" cfgKey="deepseek.api_key" label="DeepSeek — API-Key" password placeholder="sk-…" config={config} setCfg={setCfg} t={t} />
               <ProviderRow provider="openai" cfgKey="openai.api_key" label="OpenAI — API-Key" password placeholder="sk-…" config={config} setCfg={setCfg} t={t} />
               <ProviderRow provider="ollama" cfgKey="ollama.url" label="Ollama — URL" placeholder="http://…:11434" config={config} setCfg={setCfg} t={t} />
-              <ProviderRow provider="searxng" cfgKey="searxng.url" label="SearXNG — URL" placeholder="http://…:8089" config={config} setCfg={setCfg} t={t} />
+              <ProviderRow provider="searxng" cfgKey="searxng.url" label="SearXNG — URL" placeholder="http://…:8089" fallback={demo ? undefined : 'http://searxng:8080'} config={config} setCfg={setCfg} t={t} />
             </div>
           )}
 
@@ -262,10 +263,11 @@ export function Onboarding() {
           {cur.key === 'family' && (
             <div className="flex flex-col gap-2">
               {(family ?? []).map(m => (
-                <div key={m.id} className="flex items-center gap-2 rounded-xl border border-zinc-200 px-3 py-1.5 dark:border-zinc-800">
-                  <span className="text-lg">{m.emoji || '🙂'}</span>
-                  <span className="flex-1 truncate text-sm font-medium">{m.name}</span>
-                  <button onClick={() => delFam.mutate(m.id)} className="rounded-lg p-1.5 text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30"><Trash2 size={15} /></button>
+                <div key={m.id} className="flex items-center gap-2">
+                  <EmojiSelect value={m.emoji || '🙂'} onChange={e => patchFam.mutate({ id: m.id, body: { emoji: e } })} />
+                  <Input className="flex-1" defaultValue={m.name}
+                    onBlur={e => { const v = e.target.value.trim(); if (v && v !== m.name) patchFam.mutate({ id: m.id, body: { name: v } }); }} />
+                  <button onClick={() => delFam.mutate(m.id)} className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30"><Trash2 size={15} /></button>
                 </div>
               ))}
               <div className="flex items-center gap-2">
@@ -344,9 +346,9 @@ export function Onboarding() {
 }
 
 /** A provider credential field with a live green/red reachability indicator + colored border. */
-function ProviderRow({ provider, cfgKey, label, config, setCfg, password, placeholder, t }: {
+function ProviderRow({ provider, cfgKey, label, config, setCfg, password, placeholder, fallback, t }: {
   provider: string; cfgKey: string; label: string; config: Record<string, unknown> | undefined;
-  setCfg: { mutate: (b: { key: string; value: unknown }) => void }; password?: boolean; placeholder?: string; t: TFunction;
+  setCfg: { mutate: (b: { key: string; value: unknown }) => void }; password?: boolean; placeholder?: string; fallback?: string; t: TFunction;
 }) {
   const { data, isLoading } = useQuery({
     queryKey: [`${provider}-health`],
@@ -368,7 +370,7 @@ function ProviderRow({ provider, cfgKey, label, config, setCfg, password, placeh
         </span>
       </div>
       <Input type={password ? 'password' : 'text'} autoComplete="off" className={border}
-        defaultValue={saved} placeholder={placeholder}
+        defaultValue={saved || fallback || ''} placeholder={placeholder}
         onBlur={e => e.target.value !== saved && setCfg.mutate({ key: cfgKey, value: e.target.value })} />
     </div>
   );
@@ -403,18 +405,18 @@ function TaskModelRow({ task, label, cfgProvider, cfgModel, saveTask, visionOnly
   const opts = model && !models.includes(model) ? [model, ...models] : models;   // keep the current/legacy model visible + selectable
   return (
     <div className="flex items-center gap-2">
-      <span className="w-24 shrink-0 truncate text-xs font-medium text-zinc-600 dark:text-zinc-300" title={label}>{label}</span>
+      <span className="w-28 shrink-0 break-words text-xs font-medium leading-tight text-zinc-600 dark:text-zinc-300" title={label}>{label}</span>
       <Select className="w-24 shrink-0" value={provider} onChange={e => onProvider(e.target.value)}>
         {(visionOnly ? ['anthropic', 'ollama'] : PROVIDERS).map(p => <option key={p} value={p}>{p}</option>)}
       </Select>
-      {isFetching ? <Input className="flex-1" value="…" disabled />
+      {isFetching ? <Input className="min-w-0 flex-1" value="…" disabled />
         : opts.length ? (
-          <Select className="flex-1" value={model} onChange={e => onModel(e.target.value)}>
+          <Select className="min-w-0 flex-1" value={model} onChange={e => onModel(e.target.value)}>
             {!model && <option value="">—</option>}
             {opts.map(m => <option key={m} value={m}>{m}</option>)}
           </Select>
         ) : (
-          <Input className="flex-1" defaultValue={model} placeholder="Modell" onBlur={e => e.target.value !== model && onModel(e.target.value)} />
+          <Input className="min-w-0 flex-1" defaultValue={model} placeholder="Modell" onBlur={e => e.target.value !== model && onModel(e.target.value)} />
         )}
     </div>
   );

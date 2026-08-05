@@ -838,7 +838,6 @@
     "title": "Verification queue",
     "approve": "Approve",
     "reject": "Reject",
-    "rejected": "Proposal dismissed — won't be suggested again",
     "adopt": "Tap to adopt:",
     "adoptTitle": "Adopt “{{name}}” as the name",
     "remove": "Remove",
