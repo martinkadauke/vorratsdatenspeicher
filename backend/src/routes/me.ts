@@ -5,8 +5,8 @@ import sql from '../db.js';
 export function meRoutes(app: FastifyInstance): void {
   app.patch('/api/me', async (req, reply) => {
     const userId = req.user!.id;
-    const { prefers_dark, preferred_lang, password, old_password, has_seen_tour, has_seen_email_tutorial, pinned_chains, emoji } = (req.body ?? {}) as {
-      prefers_dark?: boolean; preferred_lang?: string; password?: string; old_password?: string; has_seen_tour?: boolean; has_seen_email_tutorial?: boolean; pinned_chains?: string[]; emoji?: string | null;
+    const { prefers_dark, preferred_lang, password, old_password, has_seen_tour, has_seen_email_tutorial, pinned_chains, emoji, email } = (req.body ?? {}) as {
+      prefers_dark?: boolean; preferred_lang?: string; password?: string; old_password?: string; has_seen_tour?: boolean; has_seen_email_tutorial?: boolean; pinned_chains?: string[]; emoji?: string | null; email?: string | null;
     };
 
     const updates: Record<string, unknown> = {};
@@ -14,6 +14,15 @@ export function meRoutes(app: FastifyInstance): void {
     if (has_seen_tour !== undefined) updates.has_seen_tour = has_seen_tour;
     if (has_seen_email_tutorial !== undefined) updates.has_seen_email_tutorial = has_seen_email_tutorial;
     if (emoji !== undefined) updates.emoji = typeof emoji === 'string' && emoji.trim() ? emoji.trim().slice(0, 16) : null;
+    if (email !== undefined) {
+      const e = (email ?? '').trim();
+      if (e && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) return reply.code(400).send({ error: 'invalid_email', message: 'Bitte eine gültige E-Mail-Adresse eingeben.' });
+      // Lowercase on store (like signup, auth/routes.ts) so the case-sensitive `email TEXT UNIQUE`
+      // constraint is effectively case-insensitive — a case-variant of an existing address then
+      // hits 23505 → email_taken instead of creating a LOWER()-colliding duplicate that would make
+      // login/forgot-password nondeterministic (they all match on LOWER(email)).
+      updates.email = e ? e.toLowerCase().slice(0, 254) : null;
+    }
     if (Array.isArray(pinned_chains)) updates.pinned_chains = pinned_chains.filter(s => typeof s === 'string').slice(0, 50);
     if (preferred_lang !== undefined) {
       if (!['de', 'en'].includes(preferred_lang)) return reply.code(400).send({ error: 'lang must be de or en' });
@@ -28,7 +37,12 @@ export function meRoutes(app: FastifyInstance): void {
     }
     if (!Object.keys(updates).length) return reply.code(400).send({ error: 'nothing to update' });
 
-    await sql`UPDATE users SET ${sql(updates)} WHERE id = ${userId}`;
+    try {
+      await sql`UPDATE users SET ${sql(updates)} WHERE id = ${userId}`;
+    } catch (e) {
+      if ((e as { code?: string }).code === '23505') return reply.code(409).send({ error: 'email_taken', message: 'Diese E-Mail-Adresse ist bereits vergeben.' });
+      throw e;
+    }
     return { ok: true };
   });
 

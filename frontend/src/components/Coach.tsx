@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { useQuery } from '@tanstack/react-query';
-import { api } from '../api/client';
+import { api, ApiError } from '../api/client';
 import { CoachMark } from './CoachMark';
 import { useCoach } from './useCoach';
+import { useAuth } from '../context/auth';
 import { pushSupported, enablePush } from '../lib/push';
 import { toast } from './Toast';
-import { Button } from './ui';
+import { Button, Input } from './ui';
 
 /** Global onboarding-coach driver (FB-01) — mounted once in Layout, off-demo only. Handles
  *  the route-agnostic stages B (VDS aufs Handy) and C (Push aktivieren); Stage A lives on the
@@ -40,27 +40,49 @@ export function Coach() {
 
 function StageB({ onDone, onLater }: { onDone: () => void; onLater: () => void }) {
   const { t } = useTranslation();
-  const [sent, setSent] = useState(false);
-  const [sending, setSending] = useState(false);
-  const { data: mail } = useQuery({
-    queryKey: ['mail-status'],
-    queryFn: () => api<{ ok: boolean; reason: string | null }>('/api/bug-reports/mail-status'),
-    staleTime: 5 * 60 * 1000,
-    retry: false,
-  });
-  const sendGuide = async () => {
-    setSending(true);
+  const { user, refreshUser } = useAuth();
+  const [phase, setPhase] = useState<'idle' | 'sending' | 'sent' | 'needEmail' | 'needSmtp'>('idle');
+  const [emailInput, setEmailInput] = useState('');
+  const [savingEmail, setSavingEmail] = useState(false);
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+
+  // Send the guide. The endpoint reports *why* it can't (no_email / no_smtp) so we can guide
+  // the user to fix it inline instead of a dead-end error.
+  const send = async () => {
+    setPhase('sending');
     try {
       await api('/api/onboarding/coach/mail-setup-guide', { method: 'POST' });
-      setSent(true);
+      setPhase('sent');
       toast(t('coach.b.mailSent'), 'success');
-    } catch {
-      toast(t('coach.b.mailFailed'), 'error');
-    } finally {
-      setSending(false);
+    } catch (e) {
+      const code = e instanceof ApiError ? e.message : '';
+      if (code === 'no_email') setPhase('needEmail');
+      else if (code === 'no_smtp') setPhase('needSmtp');
+      else if (code === 'rate_limited') { setPhase('idle'); toast(t('coach.b.rateLimited'), 'error'); }
+      else { setPhase('idle'); toast(t('coach.b.mailFailed'), 'error'); }
     }
   };
-  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+
+  // no_email path: let the user set their own address, then retry (the server re-reads req.user
+  // on the next request, so no re-login is needed).
+  const saveEmailAndSend = async () => {
+    const val = emailInput.trim();
+    if (!val || savingEmail) return;
+    setSavingEmail(true);
+    try {
+      await api('/api/me', { method: 'PATCH', body: { email: val } });
+      void refreshUser();
+      await send();
+    } catch (e) {
+      const code = e instanceof ApiError ? e.message : '';
+      toast(code === 'email_taken' ? t('coach.b.emailTaken')
+        : code === 'invalid_email' ? t('coach.b.emailInvalid')
+        : t('coach.b.emailSaveFailed'), 'error');
+    } finally {
+      setSavingEmail(false);
+    }
+  };
+
   return (
     <CoachMark title={t('coach.b.title')} cta={t('coach.common.gotIt')} onCta={onDone} onLater={onLater}>
       <div className="flex flex-col gap-3">
@@ -70,9 +92,25 @@ function StageB({ onDone, onLater }: { onDone: () => void; onLater: () => void }
           <li>{t('coach.b.step2i')}<br />{t('coach.b.step2a')}</li>
           <li>{t('coach.b.step3')}</li>
         </ol>
-        {mail?.ok && (
-          <Button variant="secondary" onClick={sendGuide} disabled={sending || sent} className="self-start">
-            {sent ? t('coach.b.mailSentShort') : t('coach.b.mailBtn')}
+
+        {phase === 'sent' ? (
+          <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400">{t('coach.b.mailSent')}</p>
+        ) : phase === 'needEmail' ? (
+          <div className="flex flex-col gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/30">
+            <p className="text-xs text-amber-800 dark:text-amber-200">{t('coach.b.needEmail')}</p>
+            <div className="flex gap-2">
+              <Input type="email" autoComplete="email" placeholder={t('coach.b.emailPlaceholder')}
+                value={emailInput} onChange={e => setEmailInput(e.target.value)} className="min-w-0 flex-1" />
+              <Button onClick={saveEmailAndSend} disabled={savingEmail || !emailInput.trim()}>{t('coach.b.saveAndSend')}</Button>
+            </div>
+          </div>
+        ) : phase === 'needSmtp' ? (
+          <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+            {user?.is_admin ? t('coach.b.needSmtpAdmin') : t('coach.b.needSmtpUser')}
+          </p>
+        ) : (
+          <Button variant="secondary" onClick={send} disabled={phase === 'sending'} className="self-start">
+            {t('coach.b.mailBtn')}
           </Button>
         )}
       </div>

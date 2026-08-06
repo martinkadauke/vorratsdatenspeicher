@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { LogOut, Sparkles, Inbox, Bell, ChevronDown, ChevronRight, Paperclip, Undo2, Mail } from 'lucide-react';
-import { api } from '../api/client';
+import { api, ApiError } from '../api/client';
 import { MailForwardHelp } from '../components/MailForwardHelp';
 import { ImapHelp } from '../components/ImapHelp';
 import { useAuth } from '../context/auth';
@@ -100,6 +100,27 @@ export function Profile() {
             <option value="de">Deutsch</option>
             <option value="en">English</option>
           </Select>
+        </div>
+
+        <div>
+          <Label>{t('profile.email')}</Label>
+          <Input
+            type="email"
+            autoComplete="email"
+            defaultValue={user.email ?? ''}
+            placeholder={t('profile.emailPlaceholder')}
+            onBlur={e => {
+              const val = e.target.value.trim();
+              if (val === (user.email ?? '')) return;
+              patch.mutate({ email: val || null }, {
+                onError: err => toast(
+                  (err as ApiError).message === 'email_taken' ? t('profile.emailTaken')
+                    : (err as ApiError).message === 'invalid_email' ? t('profile.emailInvalid')
+                    : t('profile.emailSaveFailed'), 'error'),
+              });
+            }}
+          />
+          <p className="mt-1 text-xs text-zinc-400">{t('profile.emailHint')}</p>
         </div>
       </Card>
 
