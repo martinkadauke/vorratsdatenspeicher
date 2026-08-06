@@ -1444,6 +1444,17 @@
     "krypto": "Crypto account",
     "depot": "Securities account"
   },
+  "coach": {
+    "later": "Later",
+    "never": "Don't show again",
+    "restart": "Restart onboarding",
+    "resetDone": "Onboarding reset — the tips will show again.",
+    "a": {
+      "title": "Your first receipt is here! 🎉",
+      "body": "The AI read your receipt — every line is its best guess. Open Warenstamm → Prüfen (Review) to set the item names: then VDS recognises the same product instantly next time, and gets better with every scan.",
+      "cta": "Go to Review"
+    }
+  },
   "update": {
     "available": "Version {{version}} available",
     "whatsNew": "What's new?",

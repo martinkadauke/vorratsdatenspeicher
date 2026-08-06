@@ -14,6 +14,8 @@ import { ArticleEditModal } from '../components/ArticleEditModal';
 import { FirstVisitHint } from '../components/FirstVisitHint';
 import { AddArticleModal } from '../components/AddArticleModal';
 import { SortableArticleList } from '../components/SortableArticleList';
+import { CoachMark } from '../components/CoachMark';
+import { useCoach } from '../components/useCoach';
 import { useAuth } from '../context/auth';
 import { toast } from '../components/Toast';
 import { confirm } from '../components/Confirm';
@@ -29,6 +31,11 @@ export function ReceiptDetailPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const qc = useQueryClient();
+  const { enabled: coachOn, coach, dismiss: coachDismiss } = useCoach();
+  const [snoozedA, setSnoozedA] = useState(false);   // Stage-A soft close, per receipt
+  // prev/next/swipe navigate to /receipts/<otherId> WITHOUT remounting (same route, no key),
+  // so reset the soft-close whenever the receipt id changes — else Stage A stays suppressed.
+  useEffect(() => { setSnoozedA(false); }, [id]);
   // Filter context (?store=&q=) carried from the list so prev/next stay
   // within the filtered set.
   const filterQs = location.search;
@@ -350,6 +357,12 @@ export function ReceiptDetailPage() {
   // OCR finished but found no line items (e.g. a screenshot with only a total).
   const ocrEmpty = !!data.bild_pfad && !data.ocr_pending && data.artikel.length === 0;
 
+  // Onboarding coach — Stage A: this receipt is recognized (positions visible) and not yet
+  // reviewed → explain what happened and point to Prüfen. Repeats on every receipt until
+  // permanently dismissed; a soft "später" snoozes it just for this receipt view.
+  const showCoachA = coachOn && !!coach && !coach.dismissed.includes('A') && !snoozedA
+    && !ocrPending && data.artikel.length > 0 && !data.geprueft;
+
   // Warn if this receipt contains items the household decided to avoid.
   const avoidedSet = new Set(avoidedList ?? []);
   const avoidedHere = [...new Set(
@@ -359,6 +372,15 @@ export function ReceiptDetailPage() {
   return (
     <div className="flex flex-col gap-4" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
       {matchFlash && <div className="flash-green-overlay pointer-events-none fixed inset-0 z-50 bg-emerald-400/30" />}
+      {showCoachA && (
+        <CoachMark title={t('coach.a.title')}
+          cta={t('coach.a.cta')}
+          onCta={() => { coachDismiss.mutate('A'); navigate('/warenstamm/pruefen'); }}
+          onNever={() => coachDismiss.mutate('A')}
+          onLater={() => setSnoozedA(true)}>
+          {t('coach.a.body')}
+        </CoachMark>
+      )}
       <div className="flex flex-col gap-1.5">
         {/* Title row — the store name gets the FULL width (only back + #id share the
             row); #id sits far right. Action buttons moved to the toolbar below so they

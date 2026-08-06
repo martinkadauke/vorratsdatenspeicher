@@ -14,6 +14,7 @@ import { RefundReconcileDialog } from '../components/RefundReconcileDialog';
 import { RefundMailModal, type RefundMailItem } from '../components/RefundMailModal';
 import type { RefundCandidate, RefundBookPayload } from '../api/types';
 import { AppVersion } from '../components/AppVersion';
+import { useCoach } from '../components/useCoach';
 import { cn } from '../lib/utils';
 import { EmojiPicker } from '../components/EmojiPicker';
 import { confirm } from '../components/Confirm';
@@ -22,6 +23,7 @@ import { toast } from '../components/Toast';
 export function Profile() {
   const { t } = useTranslation();
   const { user, logout, refreshUser, demo } = useAuth();
+  const { reset: coachReset } = useCoach();
   const navigate = useNavigate();
   const [oldPw, setOldPw] = useState('');
   const [newPw, setNewPw] = useState('');
@@ -132,6 +134,11 @@ export function Profile() {
         >
           <Sparkles size={14} /> {t('profile.replayTour')}
         </Button>
+        {!demo && (
+          <Button variant="secondary" onClick={() => coachReset.mutate(undefined, { onSuccess: () => toast(t('coach.resetDone'), 'success') })}>
+            <Sparkles size={14} /> {t('coach.restart')}
+          </Button>
+        )}
         {!demo && (
           <Button variant="secondary" onClick={() => setHelpOpen(true)}>
             <Mail size={14} /> {t('mailForward.openButton')}

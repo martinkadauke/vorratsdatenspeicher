@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
@@ -10,6 +10,7 @@ import { CanonicalCombo } from '../components/CanonicalCombo';
 import { UnitSelect } from '../components/UnitSelect';
 import { CanonicalIcon } from '../components/IconPicker';
 import { FirstVisitHint } from '../components/FirstVisitHint';
+import { useCoach } from '../components/useCoach';
 import { toast } from '../components/Toast';
 import { cn } from '../lib/utils';
 import { useUrlState } from '../hooks/useUrlState';
@@ -43,6 +44,17 @@ function TabBtn({ active, onClick, label, count }: { active: boolean; onClick: (
 
 export function Queue() {
   const { t } = useTranslation();
+  // Onboarding coach: remember the user visited Prüfen (a prerequisite for Stage B). The ref
+  // guarantees a single POST — react-query's mutation object is a fresh reference each render,
+  // so without it the effect would re-fire in a loop until the refetch flips the flag.
+  const { enabled: coachOn, coach, recordEvent } = useCoach();
+  const sentPruefen = useRef(false);
+  useEffect(() => {
+    if (coachOn && coach && !coach.events.pruefen_visited && !sentPruefen.current) {
+      sentPruefen.current = true;
+      recordEvent.mutate('pruefen_visited');
+    }
+  }, [coachOn, coach?.events.pruefen_visited]);   // eslint-disable-line react-hooks/exhaustive-deps
   const [tab, setTab] = useUrlState('tab', 'names');
   const { data: nameData } = useQuery({
     queryKey: ['pruefen'],

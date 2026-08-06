@@ -27,6 +27,7 @@ import { pruefenUnitRoutes } from './routes/pruefenUnits.js';
 import { notificationRoutes } from './routes/notifications.js';
 import { adminRoutes } from './routes/admin.js';
 import { meRoutes } from './routes/me.js';
+import { onboardingRoutes } from './routes/onboarding.js';
 import { maintenanceRoutes } from './routes/maintenance.js';
 import { i18nRoutes } from './routes/i18n.js';
 import { exportRoutes } from './routes/exports.js';
@@ -157,6 +158,7 @@ async function main(): Promise<void> {
   notificationRoutes(app);
   adminRoutes(app);
   meRoutes(app);
+  onboardingRoutes(app);
   maintenanceRoutes(app);
   i18nRoutes(app);
   exportRoutes(app);

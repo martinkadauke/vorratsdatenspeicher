@@ -1446,6 +1446,17 @@
     "krypto": "Krypto-Konto",
     "depot": "Depot"
   },
+  "coach": {
+    "later": "Später",
+    "never": "Nicht mehr anzeigen",
+    "restart": "Onboarding neu starten",
+    "resetDone": "Onboarding zurückgesetzt — die Tipps erscheinen wieder.",
+    "a": {
+      "title": "Dein erster Beleg ist da! 🎉",
+      "body": "Die KI hat den Beleg ausgelesen — alle Positionen sind ihr bester Vorschlag. Leg unter Warenstamm → Prüfen die Artikelnamen fest: Dann erkennt VDS dasselbe Produkt beim nächsten Kauf sofort und wird mit jedem Scan besser.",
+      "cta": "Zu Prüfen"
+    }
+  },
   "update": {
     "available": "Version {{version}} verfügbar",
     "whatsNew": "Was ist neu?",
