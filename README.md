@@ -87,6 +87,72 @@ Then open **http://&lt;your-server-ip&gt;:8766** (`localhost` only if Docker is 
 
 Prefer to build from source instead of pulling the image? Replace the `image:` line with `build: .` and run `docker compose up -d --build`.
 
+### One-click updates (optional)
+
+By default the update banner just shows you the command to run. If you'd rather update **from inside the app** — one click, the way Home Assistant does it — add the small `updater` sidecar below. When you click **Jetzt aktualisieren / Update now**, VDS drops a marker file; the sidecar sees it and runs `docker compose pull vds && docker compose up -d --no-deps vds` for you, then the page reloads onto the new version.
+
+VDS itself stays **unprivileged** — it has no access to Docker. It only writes a marker file; the sidecar does the pull-and-restart, and only ever recreates the `vds` service (never your database).
+
+> **Security:** the sidecar mounts the Docker socket, which is **root-equivalent on the host**. That is why this is opt-in — add it only on a host you alone control, and only if you're comfortable with that trade-off. It runs a single fixed command; it takes no input from the app beyond "an update was requested".
+
+Three small edits to your `docker-compose.yml` — **merge** each into the block that's already there, don't paste a second copy of it.
+
+**1.** In the **`vds`** service, add the `SELF_UPDATE` flag and the `vds-updater` volume. If your volumes are still the inline `volumes: ["vds-receipts:/receipts"]` from the Quick start, replace that one line with the block form shown here:
+
+```yaml
+  vds:
+    # …everything you already have (image, ports, depends_on, restart)…
+    environment:
+      # …your existing vars (DATABASE_URL, JWT_SECRET, …)…
+      SELF_UPDATE: "1"                      # ← add: shows the in-app "Update now" button
+    volumes:                               # ← replaces the inline volumes: [ … ] line
+      - vds-receipts:/receipts
+      - vds-updater:/updater               # ← add: shared marker channel with the sidecar
+```
+
+**2.** Add the **`updater`** service under `services:` (alongside `vds`, `db`, `searxng`):
+
+```yaml
+  updater:
+    image: docker:cli                       # ships the compose plugin
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./:/project                         # the folder holding THIS docker-compose.yml
+      - vds-updater:/updater
+    working_dir: /project
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        rm -f /updater/request /updater/status
+        proj=$$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$$(hostname)" 2>/dev/null)
+        echo "updater ready — bound to compose project '$$proj', watching for update requests"
+        while true; do
+          if [ -f /updater/request ]; then
+            rm -f /updater/request
+            echo running > /updater/status
+            echo "update requested — pulling + recreating vds"
+            if [ -n "$$proj" ] && docker compose -p "$$proj" pull vds && docker compose -p "$$proj" up -d --no-deps vds; then
+              echo ok > /updater/status
+            else
+              echo failed > /updater/status
+            fi
+          fi
+          sleep 3
+        done
+```
+
+**3.** Add the one new line `vds-updater: {}` to your **existing** top-level `volumes:` block at the very bottom of the file, so it becomes:
+
+```yaml
+volumes:
+  vds-receipts: {}                          # already there
+  vds-db: {}                                # already there
+  vds-updater: {}                           # ← the only new line
+```
+
+Then `docker compose up -d`. The button appears in the update banner (admin only) whenever a newer release is out.
+
 ## Bring your own AI
 
 VDS uses AI to read receipts, categorise, and answer stats questions. You pick a provider **per task** and mix them freely:

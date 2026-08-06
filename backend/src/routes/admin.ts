@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
+import { writeFile, mkdir } from 'node:fs/promises';
 import sql, { DEMO_MODE } from '../db.js';
 import { requireAdmin, requireOperator } from '../auth/plugin.js';
 import { getAllConfig, setConfig, getConfig, isHouseholdConfigKey, scopeConfigForHousehold } from '../config.js';
@@ -66,6 +67,16 @@ let relCache: { at: number; releases: GhRelease[] } | null = null;
 let relFailUntil = 0;                        // don't re-hit GitHub on every page load after a failure
 const REL_TTL = 6 * 60 * 60 * 1000;
 const REL_FAIL_BACKOFF = 15 * 60 * 1000;
+
+// ── one-click self-update (opt-in updater sidecar) ─────────────────────────
+// A self-hoster can add a tiny `updater` sidecar (Docker socket + the compose dir)
+// that watches a marker file and runs `docker compose pull vds && up -d vds`. VDS
+// itself stays UNPRIVILEGED — it has no Docker access; the endpoint below only WRITES
+// the marker. The action is fixed (pull latest stable + recreate vds), so even a
+// compromised app can ask for nothing more than "update and restart". Advertised to
+// the UI via `self_update` on /api/update-check, gated on the operator opting in.
+const SELF_UPDATE_DIR = process.env.SELF_UPDATE_DIR || '/updater';
+const selfUpdateEnabled = (): boolean => process.env.SELF_UPDATE === '1' || process.env.SELF_UPDATE === 'true';
 /** Compare two semvers ("1.2.3" / "v1.2.3"). >0 → a is newer. */
 function cmpSemver(a: string, b: string): number {
   const p = (s: string) => s.replace(/^v/, '').split('.').map(n => parseInt(n, 10) || 0);
@@ -108,7 +119,7 @@ export function adminRoutes(app: FastifyInstance): void {
       }
     }
     const releases = relCache?.releases ?? null;
-    if (!releases) return { channel: 'release' as const, current, update_available: false, notes: [], ...(err ? { error: err } : {}) };
+    if (!releases) return { channel: 'release' as const, current, update_available: false, notes: [], self_update: selfUpdateEnabled(), ...(err ? { error: err } : {}) };
 
     // Strict semver: a release someone forgot to flag as pre-release (1.2.0-rc1) must not
     // be treated as stable.
@@ -123,6 +134,8 @@ export function adminRoutes(app: FastifyInstance): void {
       update_available: newer.length > 0,
       url: newest?.html_url ?? null,
       published_at: newest?.published_at ?? null,
+      // true only if the operator added the updater sidecar → the UI may offer one-click update.
+      self_update: selfUpdateEnabled(),
       notes: newer.map(r => ({
         version: r.tag_name.replace(/^v/, ''),
         name: r.name ?? r.tag_name,
@@ -130,6 +143,22 @@ export function adminRoutes(app: FastifyInstance): void {
         published_at: r.published_at,
       })),
     };
+  });
+
+  /** One-click self-update: drop a marker file the opt-in `updater` sidecar watches.
+   *  VDS never touches Docker itself — the sidecar performs the hardcoded pull+recreate.
+   *  Admin-only (requireOperator) and never on the demo. No request body: the action is
+   *  fixed, so a compromised app can at most request "pull latest stable + restart vds". */
+  app.post('/api/self-update', { preHandler: requireOperator }, async (req, reply) => {
+    if (DEMO_MODE) return reply.code(403).send({ error: 'forbidden' });
+    if (!selfUpdateEnabled()) return reply.code(409).send({ error: 'self_update_disabled' });
+    try {
+      await mkdir(SELF_UPDATE_DIR, { recursive: true });
+      await writeFile(`${SELF_UPDATE_DIR}/request`, `${new Date().toISOString()} user=${req.user?.id ?? '?'}\n`, 'utf8');
+    } catch (e) {
+      return reply.code(500).send({ error: 'updater_unreachable', detail: String((e as Error)?.message ?? e).slice(0, 200) });
+    }
+    return { ok: true, started: true };
   });
 
   // ── app config ──────────────────────────────────────────────────────────

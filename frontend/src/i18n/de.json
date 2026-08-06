@@ -1455,7 +1455,14 @@
     "copy": "Befehl kopieren",
     "copied": "Befehl kopiert",
     "viewOnGithub": "Release auf GitHub ansehen",
-    "dismiss": "Ausblenden"
+    "dismiss": "Ausblenden",
+    "selfUpdate": "Jetzt aktualisieren",
+    "selfUpdateHint": "Aktualisiert diese Instanz im Hintergrund auf {{version}} und startet neu.",
+    "selfUpdating": "Update läuft …",
+    "selfUpdatingBody": "Der Server lädt das neue Image und startet neu. Diese Seite lädt automatisch neu, sobald die neue Version bereit ist — das dauert meist ein bis zwei Minuten.",
+    "selfFailed": "Update konnte nicht gestartet werden. Prüfe den updater-Container oder aktualisiere manuell.",
+    "selfTimeout": "Das Update dauert länger als erwartet. Lade die Seite gleich neu; falls die Version gleich bleibt, sieh in die Logs des updater-Containers.",
+    "manualAlt": "Lieber manuell aktualisieren?"
   },
   "bugReport": {
     "noMail": "Diese Meldung kann den Entwickler noch nicht erreichen: Auf dieser Instanz ist kein E-Mail-Versand eingerichtet. Sie wird gespeichert, aber nicht an {{mail}} geschickt.",

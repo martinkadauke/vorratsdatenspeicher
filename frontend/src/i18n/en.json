@@ -1453,7 +1453,14 @@
     "copy": "Copy command",
     "copied": "Command copied",
     "viewOnGithub": "View release on GitHub",
-    "dismiss": "Dismiss"
+    "dismiss": "Dismiss",
+    "selfUpdate": "Update now",
+    "selfUpdateHint": "Updates this instance to {{version}} in the background and restarts.",
+    "selfUpdating": "Updating …",
+    "selfUpdatingBody": "The server is pulling the new image and restarting. This page reloads automatically once the new version is ready — usually one or two minutes.",
+    "selfFailed": "Couldn't start the update. Check the updater container, or update manually.",
+    "selfTimeout": "The update is taking longer than expected. Reload in a moment; if the version doesn't change, check the updater container's logs.",
+    "manualAlt": "Prefer to update manually?"
   },
   "bugReport": {
     "noMail": "This report can't reach the developer yet: no e-mail sending is set up on this instance. It will be stored, but not sent to {{mail}}.",
