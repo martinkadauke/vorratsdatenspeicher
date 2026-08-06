@@ -8,6 +8,7 @@ import { api } from '../api/client';
 import { NotificationBell } from './NotificationBell';
 import { Tour } from './Tour';
 import { Onboarding } from './Onboarding';
+import { Coach } from './Coach';
 import { Toaster } from './Toast';
 import { ConfirmHost } from './Confirm';
 import { cn } from '../lib/utils';
@@ -182,6 +183,7 @@ export function Layout() {
       {/* Demo-only floating CTAs: "Get VDS" install guide + a bug-report button on every page. */}
       {demo && <><InstallButton /><BugReportButton /></>}
       <Onboarding />
+      <Coach />
       <Tour open={tourOpen} onClose={() => setTourOpen(false)} />
       <Toaster />
       <ConfirmHost />

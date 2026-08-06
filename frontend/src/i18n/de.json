@@ -1455,6 +1455,29 @@
       "title": "Dein erster Beleg ist da! 🎉",
       "body": "Die KI hat den Beleg ausgelesen — alle Positionen sind ihr bester Vorschlag. Leg unter Warenstamm → Prüfen die Artikelnamen fest: Dann erkennt VDS dasselbe Produkt beim nächsten Kauf sofort und wird mit jedem Scan besser.",
       "cta": "Zu Prüfen"
+    },
+    "common": {
+      "gotIt": "Alles klar"
+    },
+    "b": {
+      "title": "VDS aufs Handy holen 📱",
+      "intro": "In drei Schritten hast du Vorratsdatenspeicher als App auf dem Handy — mit eigenem Icon.",
+      "step1": "Öffne diese Adresse im Browser deines Handys:",
+      "step2i": "iPhone: Safari → Teilen → Zum Home-Bildschirm.",
+      "step2a": "Android: Chrome → Menü → App installieren.",
+      "step3": "Für unterwegs braucht die App HTTPS — über einen Reverse-Proxy (Caddy) mit eigener Domain oder einen günstigen VPS. Die Anleitung schick ich dir gern per E-Mail.",
+      "mailBtn": "Anleitung per E-Mail",
+      "mailSent": "Anleitung ist unterwegs — schau in dein Postfach.",
+      "mailSentShort": "Gesendet ✓",
+      "mailFailed": "E-Mail konnte nicht gesendet werden."
+    },
+    "c": {
+      "title": "Push-Benachrichtigungen aktivieren?",
+      "body": "VDS kann dich an offene Belege, Angebote und die Einkaufsliste erinnern — direkt aufs Gerät. Jederzeit im Profil abschaltbar.",
+      "enable": "Push aktivieren",
+      "enabled": "Push aktiviert 🔔",
+      "denied": "Benachrichtigungen sind im Browser blockiert. Erlaube sie in den Website-Einstellungen.",
+      "failed": "Push konnte nicht aktiviert werden."
     }
   },
   "update": {

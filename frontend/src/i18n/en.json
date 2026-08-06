@@ -1453,6 +1453,29 @@
       "title": "Your first receipt is here! 🎉",
       "body": "The AI read your receipt — every line is its best guess. Open Warenstamm → Prüfen (Review) to set the item names: then VDS recognises the same product instantly next time, and gets better with every scan.",
       "cta": "Go to Review"
+    },
+    "common": {
+      "gotIt": "Got it"
+    },
+    "b": {
+      "title": "Get VDS on your phone 📱",
+      "intro": "Three steps and Vorratsdatenspeicher is an app on your phone — with its own icon.",
+      "step1": "Open this address in your phone's browser:",
+      "step2i": "iPhone: Safari → Share → Add to Home Screen.",
+      "step2a": "Android: Chrome → menu → Install app.",
+      "step3": "For use on the go the app needs HTTPS — via a reverse proxy (Caddy) with your own domain, or a cheap VPS. I can email you the full guide.",
+      "mailBtn": "Email me the guide",
+      "mailSent": "The guide is on its way — check your inbox.",
+      "mailSentShort": "Sent ✓",
+      "mailFailed": "Couldn't send the email."
+    },
+    "c": {
+      "title": "Enable push notifications?",
+      "body": "VDS can remind you about open receipts, offers and the shopping list — right on your device. Turn it off anytime in your profile.",
+      "enable": "Enable push",
+      "enabled": "Push enabled 🔔",
+      "denied": "Notifications are blocked in your browser. Allow them in the site settings.",
+      "failed": "Couldn't enable push."
     }
   },
   "update": {

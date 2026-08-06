@@ -286,6 +286,40 @@ export function noticeEmail(opts: { subject: string; heading: string; body: stri
   return { subject: opts.subject, text: opts.body, html: layout({ preheader: opts.body, heading: opts.subject, inner }) };
 }
 
+/** Onboarding coach (Stage B): the user asked to be emailed the "get VDS on your phone"
+ *  guide — install as a PWA + how to make the instance reachable over HTTPS. */
+export function phoneSetupEmail(opts: { appUrl?: string }): { subject: string; text: string; html: string } {
+  const subject = 'Vorratsdatenspeicher als App aufs Handy';
+  const repo = 'https://github.com/martinkadauke/vorratsdatenspeicher#readme';
+  const openUrl = (opts.appUrl || '').replace(/\/$/, '');
+  const step = (n: string, title: string, bodyHtml: string): string => `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 14px;">
+      <tr>
+        <td width="28" valign="top" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;font-weight:700;color:${C.brandDark};padding-top:1px;">${n}</td>
+        <td style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6;color:${C.body};"><strong style="color:${C.heading};">${esc(title)}</strong><br>${bodyHtml}</td>
+      </tr>
+    </table>`;
+  const inner = `
+    <h1 style="margin:0 0 12px;font-size:22px;line-height:1.3;font-weight:700;color:${C.heading};letter-spacing:-0.01em;">VDS als App aufs Handy 📱</h1>
+    <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:${C.body};">In drei Schritten hast du Vorratsdatenspeicher als App auf dem Handy — mit eigenem Icon, wie eine native App.</p>
+    ${step('1', 'Auf dem Handy öffnen', openUrl
+      ? `Öffne <a href="${esc(openUrl)}" target="_blank" style="color:${C.brand};">${esc(openUrl)}</a> im Browser deines Handys.`
+      : 'Öffne die Adresse deiner VDS-Instanz im Browser deines Handys (dieselbe, unter der du VDS gerade nutzt).')}
+    ${step('2', 'Als App installieren',
+      '<strong>iPhone:</strong> Safari &rarr; Teilen-Symbol &rarr; „Zum Home-Bildschirm".<br><strong>Android:</strong> Chrome &rarr; Menü (&#8942;) &rarr; „App installieren".')}
+    ${step('3', 'Von überall erreichbar (optional)',
+      'Die App-Installation braucht HTTPS. Zuhause im WLAN reicht dein Server; für unterwegs stell VDS über einen Reverse-Proxy wie <strong>Caddy</strong> (eigene Domain + Zertifikat) bereit — oder hoste es auf einem günstigen VPS (Hetzner, Netcup, Hostinger). Die vollständige Anleitung steht im README.')}
+    <div style="margin:8px 0 20px;">${openUrl ? button('Instanz öffnen', openUrl, 'primary') : button('Anleitung auf GitHub', repo, 'primary')}</div>
+    ${footerNote('Diese E-Mail hast du dir selbst aus Vorratsdatenspeicher geschickt (Onboarding).')}`;
+  const text =
+    'VDS als App aufs Handy\n\n' +
+    `1. Auf dem Handy öffnen: ${openUrl || 'die Adresse deiner VDS-Instanz'} im Handy-Browser.\n\n` +
+    '2. Als App installieren: iPhone → Safari → Teilen → „Zum Home-Bildschirm". Android → Chrome → Menü → „App installieren".\n\n' +
+    '3. Von überall erreichbar (optional): HTTPS nötig — Reverse-Proxy (Caddy) mit eigener Domain, oder ein günstiger VPS (Hetzner/Netcup/Hostinger). Details im README:\n' +
+    `${repo}\n`;
+  return { subject, text, html: layout({ preheader: 'In drei Schritten VDS als App aufs Handy.', heading: subject, inner }) };
+}
+
 /** Ops notice → webmaster: a new demo household was created (demo only). */
 export function newHouseholdEmail(opts: { householdName: string; adminEmail: string; total: number }): { subject: string; text: string; html: string } {
   const subject = `Neuer Haushalt angelegt: ${opts.householdName}`;

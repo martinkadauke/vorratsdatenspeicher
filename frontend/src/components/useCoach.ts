@@ -14,7 +14,8 @@ export interface CoachState {
 export function useCoach() {
   const { user, demo } = useAuth();
   const qc = useQueryClient();
-  const enabled = !!user && !demo;
+  // Off-demo, signed in, and past the first-run setup wizard (don't pop coach-marks over it).
+  const enabled = user != null && !demo && user.onboarding_done !== false;
   const { data } = useQuery({
     queryKey: ['coach'],
     queryFn: () => api<CoachState>('/api/onboarding/coach'),
