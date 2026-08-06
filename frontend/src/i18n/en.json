@@ -1457,6 +1457,7 @@
     "selfUpdate": "Update now",
     "selfUpdateHint": "Updates this instance to {{version}} in the background and restarts.",
     "selfUpdating": "Updating …",
+    "selfUpdatingTo": "Updating to {{version}} …",
     "selfUpdatingBody": "The server is pulling the new image and restarting. This page reloads automatically once the new version is ready — usually one or two minutes.",
     "selfFailed": "Couldn't start the update. Check the updater container, or update manually.",
     "selfTimeout": "The update is taking longer than expected. Reload in a moment; if the version doesn't change, check the updater container's logs.",

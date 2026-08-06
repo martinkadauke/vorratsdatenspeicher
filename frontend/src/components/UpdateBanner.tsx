@@ -116,7 +116,7 @@ export function UpdateBanner() {
             {phase === 'updating' ? (
               <div className="flex flex-col items-center gap-3 py-6 text-center">
                 <Loader2 size={32} className="animate-spin text-emerald-600 dark:text-emerald-400" />
-                <p className="text-sm font-medium">{t('update.selfUpdating')}</p>
+                <p className="text-sm font-medium">{t('update.selfUpdatingTo', { version: data.latest })}</p>
                 <p className="max-w-xs text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">{t('update.selfUpdatingBody')}</p>
               </div>
             ) : (
