@@ -290,7 +290,7 @@ export function noticeEmail(opts: { subject: string; heading: string; body: stri
  *  guide — install as a PWA + how to make the instance reachable over HTTPS. */
 export function phoneSetupEmail(opts: { appUrl?: string }): { subject: string; text: string; html: string } {
   const subject = 'Vorratsdatenspeicher als App aufs Handy';
-  const repo = 'https://github.com/martinkadauke/vorratsdatenspeicher#readme';
+  const guide = 'https://vorratsdatenspeicher.com/selberhosten';
   const openUrl = (opts.appUrl || '').replace(/\/$/, '');
   const step = (n: string, title: string, bodyHtml: string): string => `
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 14px;">
@@ -308,15 +308,16 @@ export function phoneSetupEmail(opts: { appUrl?: string }): { subject: string; t
     ${step('2', 'Als App installieren',
       '<strong>iPhone:</strong> Safari &rarr; Teilen-Symbol &rarr; „Zum Home-Bildschirm".<br><strong>Android:</strong> Chrome &rarr; Menü (&#8942;) &rarr; „App installieren".')}
     ${step('3', 'Von überall erreichbar (optional)',
-      'Die App-Installation braucht HTTPS. Zuhause im WLAN reicht dein Server; für unterwegs stell VDS über einen Reverse-Proxy wie <strong>Caddy</strong> (eigene Domain + Zertifikat) bereit — oder hoste es auf einem günstigen VPS (Hetzner, Netcup, Hostinger). Die vollständige Anleitung steht im README.')}
-    <div style="margin:8px 0 20px;">${openUrl ? button('Instanz öffnen', openUrl, 'primary') : button('Anleitung auf GitHub', repo, 'primary')}</div>
+      'Die App-Installation braucht HTTPS. Zuhause im WLAN reicht dein Server; für unterwegs stell VDS über einen Reverse-Proxy wie <strong>Caddy</strong> (eigene Domain + Zertifikat) bereit — oder hoste es auf einem günstigen VPS. Die komplette, anfängerfreundliche Schritt-für-Schritt-Anleitung (Windows, Mac, alter PC oder Server) findest du hier:')}
+    <div style="margin:8px 0 8px;">${button('Zur Selber-Hosten-Anleitung', guide, 'primary')}</div>
+    ${openUrl ? `<div style="margin:0 0 20px;">${button('Deine Instanz öffnen', openUrl, 'secondary')}</div>` : '<div style="margin:0 0 12px;"></div>'}
     ${footerNote('Diese E-Mail hast du dir selbst aus Vorratsdatenspeicher geschickt (Onboarding).')}`;
   const text =
     'VDS als App aufs Handy\n\n' +
     `1. Auf dem Handy öffnen: ${openUrl || 'die Adresse deiner VDS-Instanz'} im Handy-Browser.\n\n` +
     '2. Als App installieren: iPhone → Safari → Teilen → „Zum Home-Bildschirm". Android → Chrome → Menü → „App installieren".\n\n' +
-    '3. Von überall erreichbar (optional): HTTPS nötig — Reverse-Proxy (Caddy) mit eigener Domain, oder ein günstiger VPS (Hetzner/Netcup/Hostinger). Details im README:\n' +
-    `${repo}\n`;
+    '3. Von überall erreichbar (optional): HTTPS nötig — Reverse-Proxy (Caddy) mit eigener Domain, oder ein günstiger VPS. Komplette Schritt-für-Schritt-Anleitung:\n' +
+    `${guide}\n`;
   return { subject, text, html: layout({ preheader: 'In drei Schritten VDS als App aufs Handy.', heading: subject, inner }) };
 }
 
