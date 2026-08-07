@@ -6,12 +6,20 @@
 ; electron-builder's own `deleteAppDataOnUninstall` would do this unconditionally and silently;
 ; that is the same switch minus the question.
 !macro customUnInstall
-  ${ifNot} ${isUpdated}          ; an in-place update also runs the uninstaller — never touch data there
+  ; ⚠️ An in-place update runs the uninstaller too — ${isUpdated} is how electron-builder's own
+  ; deleteAppDataOnUninstall tells the two apart, and getting it wrong would wipe a household's
+  ; archive on a routine update. /SD IDNO makes a SILENT uninstall keep the data: unattended means
+  ; nobody is there to answer, and the safe answer to an unasked question is "don't delete".
+  ${ifNot} ${isUpdated}
     MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2 \
       "Auch alle Daten löschen?$\r$\n$\r$\nDas entfernt die Datenbank mit allen Belegen, die gespeicherten Fotos und die Verbindungs-Einstellungen unwiderruflich.$\r$\n$\r$\nNein = Daten behalten (eine Neuinstallation findet sie wieder)." \
       /SD IDNO IDNO keepData
-      RMDir /r "$APPDATA\vorratsdatenspeicher-desktop"
-      RMDir /r "$LOCALAPPDATA\vorratsdatenspeicher-desktop"
+      ; APP_PACKAGE_NAME is package.json's `name` — the same string app.setName() pins, so this
+      ; cannot drift apart from the directory Electron actually writes to.
+      !ifdef APP_PACKAGE_NAME
+        RMDir /r "$APPDATA\${APP_PACKAGE_NAME}"
+        RMDir /r "$LOCALAPPDATA\${APP_PACKAGE_NAME}"
+      !endif
     keepData:
   ${endIf}
 !macroend

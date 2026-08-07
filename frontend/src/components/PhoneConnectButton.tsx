@@ -42,12 +42,22 @@ export function PhoneConnectButton() {
   useEscapeLayer(open, () => setOpen(false));
   useScrollLock(open);
 
+  // Ask /api/version (already cached by the layout) whether this is even the desktop build. Without
+  // this gate every Docker page load would fire an operator-only request that answers 401 — noise
+  // in the logs of every self-hoster and the demo, for a button that then renders nothing.
+  const { data: version } = useQuery({
+    queryKey: ['version'],
+    queryFn: () => api<{ desktop?: boolean }>('/api/version'),
+    staleTime: Infinity,
+  });
+
   // Polled while the dialog is open (state changes are driven by a login the user performs in
   // another window, so there is nothing to react to locally). Closed → one lazy check per mount,
   // which is all the header button needs to decide whether to render itself.
   const { data, refetch } = useQuery({
     queryKey: ['desktop-tunnel'],
     queryFn: () => api<TunnelStatus>('/api/desktop/tunnel'),
+    enabled: !!version?.desktop && !!user?.is_admin,
     refetchInterval: open ? 2000 : false,
     staleTime: 10_000,
   });
