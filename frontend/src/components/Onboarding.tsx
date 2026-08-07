@@ -62,10 +62,16 @@ export function Onboarding() {
   const fullWizard = !demo || isSuper;
   // IMAP is disabled entirely on the demo (the backend doesn't even register the routes),
   // so drop that step — it applies to the demo super-admin's full wizard too.
-  const STEP_META = (fullWizard ? FULL_STEPS : SLIM_STEPS).filter(s => !(demo && s.key === 'imap'));
+  const STEP_META = (fullWizard ? FULL_STEPS : SLIM_STEPS)
+    .filter(s => !(demo && s.key === 'imap'))
+    .filter(s => !(buildInfo?.desktop && s.key === 'websearch'));
   const show = !!user?.is_admin && user?.onboarding_done === false;
 
   const { data: config } = useQuery({ queryKey: ['config'], queryFn: () => api<Record<string, unknown>>('/api/config'), enabled: show });
+  // The desktop build brings its own search along, so asking its user for a SearXNG address would
+  // be asking about plumbing they neither installed nor can change. A Docker self-hoster does have
+  // to point us at one, so the step stays for them: same wizard, one honest difference.
+  const { data: buildInfo } = useQuery({ queryKey: ['version'], queryFn: () => api<{ desktop?: boolean }>('/api/version'), staleTime: Infinity, enabled: show });
   const setCfg = useMutation({
     mutationFn: (b: { key: string; value: unknown }) => api(`/api/config/${b.key}`, { method: 'PUT', body: { value: b.value } }),
     onSuccess: () => {
