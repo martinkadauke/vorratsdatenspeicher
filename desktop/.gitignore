@@ -13,3 +13,7 @@ tsnet-sidecar/bin/*
 # local rescue/diagnostic helpers (see the desktop recovery flow for the shipped version)
 reset-local.mjs
 peek.mjs
+# CI builds the bundle per OS into bin/; the directory itself stays tracked (electron-builder
+# aborts on a missing extraResources source).
+searxng/bin/*
+!searxng/bin/.gitkeep

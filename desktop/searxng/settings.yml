@@ -1,0 +1,34 @@
+# Template. The Electron shell copies this into the per-install data dir and replaces
+# __SECRET_KEY__ and __PORT__ at boot — the key must be generated PER INSTALL (a constant shipped
+# in the installer would be identical on every machine in the world), and the port is whatever
+# boot.mjs found free.
+#
+# This exact shape was verified to start SearXNG and answer
+#   GET /search?q=rewe+prospekt&format=json  ->  200 with real results
+# on Windows (with pwd.py present).
+use_default_settings: true
+
+server:
+  secret_key: "__SECRET_KEY__"
+  # Loopback only. This search instance exists for VDS on this machine; nothing else may reach it,
+  # and the tunnel deliberately exposes only the app, never this.
+  bind_address: "127.0.0.1"
+  port: __PORT__
+  # No rate limiter: the sole client is our own backend, and the limiter wants Valkey.
+  limiter: false
+  public_instance: false
+
+search:
+  # `json` is the whole point — searxngSearch() in the backend parses it. It is NOT in the
+  # upstream default (a public instance would be handing out a free scraping API).
+  formats:
+    - html
+    - json
+
+# Chatty by default, and every line lands in the shell's log file.
+general:
+  debug: false
+
+outgoing:
+  request_timeout: 6.0
+  max_request_timeout: 12.0
