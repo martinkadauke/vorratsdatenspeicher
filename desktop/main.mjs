@@ -143,22 +143,21 @@ function writeTunnelStatus(desktopDir, status) {
   log(`tunnel state: ${status.state}${status.url ? ` (${status.url})` : ''}${status.detail ? ` — ${status.detail}` : ''}`);
 }
 
-/** Show the Tailscale login inside VDS. The promise to the user is "one app, one installation" —
- *  bouncing them into a browser to set up an account they never asked for breaks it.
- *  ⚠️ The window deliberately runs with the app-wide scrubbed user agent (see start()): Google
- *  refuses OAuth from anything that self-identifies as an embedded browser. The dialog also offers
- *  a plain "open in browser" escape hatch, because an SSO provider can always tighten that check. */
+/** Send the Tailscale login to the user's own browser.
+ *
+ *  ⚠️ This USED to open an in-app window, because "one app, no detour" is the promise. It does not
+ *  work: Google refuses OAuth from anything it identifies as an embedded browser and answers
+ *  "Couldn't sign you in — This browser or app may not be secure", after the user has already gone
+ *  through the whole passkey dance on their phone. Scrubbing "Electron" out of the user agent was
+ *  not enough; that loophole is closed, and the other providers can close theirs any day.
+ *
+ *  The browser is also simply better here: the user is already signed in to Google there, their
+ *  password manager and passkeys work, and it is where every other desktop app does OAuth. Nothing
+ *  about the promise breaks — the login is a one-time step, and the app keeps polling on its own,
+ *  so the user just switches back when it is done. */
 function openAuthWindow(url) {
-  try {
-    if (authWin && !authWin.isDestroyed()) { authWin.loadURL(url); authWin.focus(); return; }
-    authWin = new BrowserWindow({
-      width: 520, height: 760, title: 'Vorratsdatenspeicher · Verbindung einrichten',
-      icon: iconPath, backgroundColor: '#ffffff', autoHideMenuBar: true,
-      parent: win || undefined, webPreferences: { contextIsolation: true, partition: 'persist:tsauth' },
-    });
-    authWin.on('closed', () => { authWin = null; });
-    authWin.loadURL(url);
-  } catch (e) { log(`auth window failed (${e}) — falling back to the browser`); shell.openExternal(url); }
+  log('opening the tailnet login in the system browser');
+  void shell.openExternal(url);
 }
 
 function closeAuthWindow() {

@@ -15,6 +15,7 @@ import { rescheduleDropfolder } from '../dropfolder/scheduler.js';
 import { runDropfolderImport, isDropfolderRunning } from '../dropfolder/importer.js';
 import { listOllamaModels, ollamaHealth } from '../llm/ollama.js';
 import { searxngHealth } from '../llm/searxng.js';
+import { isDesktop } from '../desktop.js';
 import { sendMail, sendMailWith, invalidateSmtpCheck, type SmtpSettings } from '../mailer.js';
 import { inviteEmail, resetEmail, noticeEmail, setEmailBaseUrl } from '../email/templates.js';
 import { createAuthToken } from '../auth/routes.js';
@@ -65,7 +66,12 @@ interface GhRelease { tag_name: string; name: string | null; body: string | null
 // unauthenticated 60 req/h even with several replicas.
 let relCache: { at: number; releases: GhRelease[] } | null = null;
 let relFailUntil = 0;                        // don't re-hit GitHub on every page load after a failure
-const REL_TTL = 6 * 60 * 60 * 1000;
+// ⚠️ Six hours is right for a long-lived container serving a household, and far too long for the
+// desktop app: it is ONE user in ONE process, and someone who installs a release minutes after it
+// is published caches a list in which they are the newest — then hears nothing for six hours even
+// though two versions shipped meanwhile. A desktop instance re-asks every quarter of an hour;
+// that is one request per user, nowhere near GitHub's unauthenticated budget.
+const REL_TTL = isDesktop() ? 15 * 60 * 1000 : 6 * 60 * 60 * 1000;
 const REL_FAIL_BACKOFF = 15 * 60 * 1000;
 
 // ── one-click self-update (opt-in updater sidecar) ─────────────────────────
@@ -90,7 +96,12 @@ export function adminRoutes(app: FastifyInstance): void {
    *  Only meaningful on a release image (APP_VERSION baked) — a dev-channel build
    *  reports channel:'dev' and never nags. `notes` carries every release newer than
    *  the running one, so the banner can show what was built since. */
-  app.get('/api/update-check', { preHandler: requireOperator }, async () => {
+  app.get<{ Querystring: { force?: string } }>('/api/update-check', { preHandler: requireOperator }, async (req) => {
+    // ⚠️ The 6h cache is right for the banner that polls in the background, and WRONG for a person
+    // who just clicked "check now": someone who installs a release minutes after it is published
+    // caches a list in which they ARE the newest, and then gets told there is no update for six
+    // hours. An explicit request skips both the cache and the failure back-off.
+    const force = req.query?.force === '1';
     const raw = process.env.APP_VERSION || '';
     // Only a real semver counts as a release build — a self-hoster who pins
     // APP_VERSION=latest must not get a permanent "update available".
@@ -99,7 +110,7 @@ export function adminRoutes(app: FastifyInstance): void {
 
     const now = Date.now();
     let err: string | null = null;
-    if (!(relCache && now - relCache.at < REL_TTL) && now >= relFailUntil) {
+    if (force || (!(relCache && now - relCache.at < REL_TTL) && now >= relFailUntil)) {
       try {
         const res = await fetch(RELEASES_URL, {
           headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'vds-update-check' },
