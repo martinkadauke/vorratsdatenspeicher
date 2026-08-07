@@ -39,6 +39,24 @@ npm run smoke            # headless proof (no window)
 npm start                # opens the real Electron window
 ```
 
+## Packaging (recipe written, build on each OS / in CI)
+
+`electron-builder.yml` bundles the existing `backend/dist` + `backend/migrations` +
+`frontend/dist` as `extraResources` (matching `main.mjs`'s packaged paths), unpacks the native
+Postgres binary out of the asar, and targets **NSIS** (Win) / **DMG** (Mac) / **AppImage** (Linux),
+**unsigned** (free path). Installers must be built on their own OS (or a CI matrix):
+
+```bash
+(cd ../backend && npm ci --omit=dev)   # prune to prod deps so the bundle isn't huge
+cd desktop && npm install
+npm run pack     # electron-builder --dir → out/<platform>-unpacked (fast assemble check)
+npm run dist     # full installer
+```
+
+⚠️ Not built/verified in the dev sandbox (needs Electron + a real per-OS toolchain). The
+known-fiddly bit is the **embedded-postgres native binary under asarUnpack** — confirm `initdb`
+runs from the unpacked path on a real `npm run pack` before trusting the recipe.
+
 ## Known gotchas / decisions
 
 - **UTF8 is mandatory.** On Windows `initdb` defaults to the OS locale (WIN1252), which can't
@@ -53,6 +71,8 @@ npm start                # opens the real Electron window
 
 ## Next (not built)
 
-Remote phone access via **Tailscale Funnel** (stable HTTPS, user-owned, no edge-decrypt),
-**QR-to-connect + PWA install**, **invite-by-link**, `electron-builder` packaging +
-`electron-updater`, and the searxng sidecar. See the `project-vds-electron-passkeys` memory.
+`electron-updater` auto-update (from the same GitHub Release assets), the **searxng sidecar**,
+wiring the live **Tailscale Funnel** host into the passkey RP-ID / `app.base_url`, the
+**QR-to-connect + PWA install** screen, and **invite-by-link**. First real-machine checks:
+`npm start` (see the window) and a Tailscale login (prove the Funnel). See the
+`project-vds-electron-passkeys` memory.

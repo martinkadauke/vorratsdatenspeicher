@@ -8,12 +8,15 @@
   "main": "main.mjs",
   "scripts": {
     "smoke": "node scripts/headless-smoke.mjs",
-    "start": "electron ."
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
   },
   "dependencies": {
     "embedded-postgres": "17.10.0-beta.17"
   },
   "devDependencies": {
-    "electron": "^33.2.0"
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
   }
 }

@@ -1,0 +1,58 @@
+# Packaging recipe for the VDS desktop app. Produces unsigned installers on the free path
+# (AppImage runs clean; Win/Mac show a first-open warning until code-signing/notarization is
+# added — a DEVELOPER cost, never the user's). Run per-OS on that OS (or in CI matrix):
+#   npm run pack   # electron-builder --dir  → out/<platform>-unpacked (assemble only, fast check)
+#   npm run dist   # full installer
+#
+# ⚠️ Before packaging, prune the backend to prod deps so node_modules isn't huge:
+#     (cd ../backend && npm ci --omit=dev)   # then rebuild dist if needed
+#
+# Layout must match main.mjs's app.isPackaged branch: the backend forks from
+# <resources>/backend/dist/index.js, and boot.mjs derives MIGRATIONS_DIR=<resources>/backend/
+# migrations and PUBLIC_DIR=<resources>/frontend/dist from it — hence the extraResources map.
+
+appId: com.vorratsdatenspeicher.desktop
+productName: Vorratsdatenspeicher
+directories:
+  output: out
+  buildResources: build
+
+# What goes into the app bundle (app.asar). The desktop glue + its node_modules (embedded-postgres
+# wrapper); the actual PG binary is unpacked below because you can't exec from inside an asar.
+files:
+  - main.mjs
+  - boot.mjs
+  - tunnel.mjs
+  - package.json
+  - node_modules/**/*
+
+asarUnpack:
+  - node_modules/@embedded-postgres/**   # native initdb/postgres binaries — must be real files
+  - node_modules/embedded-postgres/**
+
+# The existing backend + frontend build, copied verbatim next to the app (no rebuild). `from` is
+# relative to this desktop/ dir. backend/package.json is required so Node treats dist/*.js as ESM
+# ("type":"module"); backend/node_modules must be PROD deps (see the prune note above).
+extraResources:
+  - from: ../backend/dist
+    to: backend/dist
+  - from: ../backend/migrations
+    to: backend/migrations
+  - from: ../backend/package.json
+    to: backend/package.json
+  - from: ../backend/node_modules
+    to: backend/node_modules
+  - from: ../frontend/dist
+    to: frontend/dist
+
+win:
+  target: nsis
+mac:
+  target: dmg
+  category: public.app-category.finance
+linux:
+  target: AppImage
+  category: Utility
+
+# No `win.certificateFile` / `mac.notarize` on purpose — the free path. Add them later (Apple
+# notarization ≈ $99/yr) to remove the first-open warning; users never pay either way.
