@@ -165,6 +165,35 @@ function closeAuthWindow() {
   authWin = null;
 }
 
+/** Does the public address actually exist and answer — from the open internet?
+ *
+ *  ⚠️ Do not trust the sidecar's "funnel is up". ListenFunnel succeeds as soon as the node is
+ *  ALLOWED to funnel (the `funnel` nodeAttr in the tailnet policy). Publishing the name is a second,
+ *  independent switch: Tailscale only puts a tailnet into public DNS once HTTPS certificates are
+ *  enabled for it. With the attribute set and HTTPS off, we cheerfully showed a QR code for a
+ *  hostname that was NXDOMAIN — the user scans it and gets "site cannot be reached", with nothing
+ *  anywhere saying why. So: prove it from outside before calling it up.
+ *
+ *  Retries, because two slow things happen on first exposure: the DNS record appearing, and
+ *  Let's Encrypt issuing the certificate on the first request. */
+async function verifyPubliclyReachable(url, log) {
+  for (let attempt = 1; attempt <= 8; attempt++) {
+    try {
+      // Any HTTP answer proves the name resolves and the funnel terminates somewhere real; the
+      // status code is the app's business, not ours.
+      await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(12_000) });
+      return { ok: true };
+    } catch (e) {
+      const msg = String(e?.cause?.code || e?.message || e);
+      log(`tunnel reachability attempt ${attempt}: ${msg}`);
+      // ENOTFOUND/EAI_AGAIN = the name is not in public DNS → the HTTPS switch, not a slow network.
+      if (attempt === 8) return { ok: false, dns: /ENOTFOUND|EAI_AGAIN|getaddrinfo/i.test(msg), detail: msg.slice(0, 200) };
+      await new Promise(r => setTimeout(r, attempt * 4000));
+    }
+  }
+  return { ok: false };
+}
+
 function startTunnelFor(stack, { openLogin }) {
   if (tunnel) return;
   const binPath = sidecarPath({
@@ -183,6 +212,23 @@ function startTunnelFor(stack, { openLogin }) {
       if (e.state === 'auth' && openLogin) openAuthWindow(e.authUrl);
       if (e.state === 'connecting' || e.state === 'up') closeAuthWindow();
       if (e.state === 'error') tunnel = null;
+
+      // "up" from the sidecar means "permitted", not "reachable" — check before we hand the user
+      // a QR code. Show the checking state meanwhile so the dialog is never silently stuck.
+      if (e.state === 'up' && e.url) {
+        writeTunnelStatus(stack.desktopDir, { state: 'verifying', url: e.url });
+        void verifyPubliclyReachable(e.url, log).then(res => {
+          if (!tunnel) return;                       // stopped while we were probing
+          if (res.ok) return writeTunnelStatus(stack.desktopDir, e);
+          writeTunnelStatus(stack.desktopDir, {
+            state: res.dns ? 'needs_https' : 'unreachable',
+            url: e.url,
+            helpUrl: 'https://login.tailscale.com/admin/dns',
+            detail: res.detail,
+          });
+        });
+        return;
+      }
       writeTunnelStatus(stack.desktopDir, e);
     },
   });

@@ -28,7 +28,11 @@
     "funnelRetry": "Danach verbindet sich die App von selbst — dieses Fenster kann offen bleiben.",
     "errorTitle": "Verbindung fehlgeschlagen",
     "retry": "Nochmal versuchen",
-    "failed": "Das hat nicht geklappt"
+    "failed": "Das hat nicht geklappt",
+    "verifying": "Prüfe, ob die Adresse von außen erreichbar ist …",
+    "httpsBlurb": "Fast geschafft: In deinem Tailscale-Konto müssen noch HTTPS-Zertifikate freigeschaltet werden. Erst danach ist deine Adresse im Internet überhaupt auffindbar.",
+    "httpsEnable": "In Tailscale freischalten",
+    "unreachableBlurb": "Die Adresse existiert, antwortet aber nicht. Meist hilft es, gleich noch einmal zu probieren — manchmal dauert die Ausstellung des Zertifikats einen Moment."
   },
   "nav": {
     "analytics": "Analytics",

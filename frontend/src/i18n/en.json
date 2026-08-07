@@ -28,7 +28,11 @@
     "funnelRetry": "After that the app connects by itself — you can leave this window open.",
     "errorTitle": "Connection failed",
     "retry": "Try again",
-    "failed": "That didn't work"
+    "failed": "That didn't work",
+    "verifying": "Checking whether the address is reachable from outside …",
+    "httpsBlurb": "Almost there: HTTPS certificates still have to be switched on in your Tailscale account. Until then your address cannot be found on the internet at all.",
+    "httpsEnable": "Switch it on in Tailscale",
+    "unreachableBlurb": "The address exists but is not answering. Trying again usually helps — issuing the certificate can take a moment."
   },
   "nav": {
     "analytics": "Analytics",

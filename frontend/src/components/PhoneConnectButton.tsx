@@ -20,7 +20,7 @@ import { useEscapeLayer, useScrollLock } from './ui';
 // Docker builds never see this — the backend answers `available:false` there, and the button in
 // the header is not rendered at all.
 
-type TunnelState = 'off' | 'starting' | 'auth' | 'connecting' | 'up' | 'needs_funnel' | 'error' | 'unavailable';
+type TunnelState = 'off' | 'starting' | 'auth' | 'connecting' | 'verifying' | 'up' | 'needs_funnel' | 'needs_https' | 'unreachable' | 'error' | 'unavailable';
 interface TunnelStatus {
   available: boolean;
   state: TunnelState;
@@ -32,7 +32,7 @@ interface TunnelStatus {
 }
 
 /** States where something is actively happening — poll fast, and don't offer "connect" again. */
-const BUSY: TunnelState[] = ['starting', 'auth', 'connecting'];
+const BUSY: TunnelState[] = ['starting', 'auth', 'connecting', 'verifying'];
 
 /** Is this the Electron build (and may this user drive the tunnel)? Both the header button and the
  *  onboarding coach need the answer, and react-query dedupes the shared keys. */
@@ -111,7 +111,7 @@ export function PhoneConnectPanel() {
         <>
           <p className="mb-3 flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-200">
             <Loader2 size={16} className="animate-spin text-emerald-600" />
-            {state === 'auth' ? t('phone.authWaiting') : t('phone.starting')}
+            {state === 'auth' ? t('phone.authWaiting') : state === 'verifying' ? t('phone.verifying') : t('phone.starting')}
           </p>
           {state === 'auth' && (
             <>
@@ -134,16 +134,16 @@ export function PhoneConnectPanel() {
         </>
       )}
 
-      {state === 'needs_funnel' && (
+      {(state === 'needs_funnel' || state === 'needs_https' || state === 'unreachable') && (
         <>
           <p className="mb-3 flex gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-[11px] leading-relaxed text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/30 dark:text-amber-200">
-            <AlertTriangle size={26} className="shrink-0" /> {t('phone.funnelBlurb')}
+            <AlertTriangle size={26} className="shrink-0" /> {t(state === 'needs_funnel' ? 'phone.funnelBlurb' : state === 'needs_https' ? 'phone.httpsBlurb' : 'phone.unreachableBlurb')}
           </p>
           <a
             href={data?.helpUrl || 'https://login.tailscale.com/admin/dns'} target="_blank" rel="noopener noreferrer"
             className="mb-2 flex items-center justify-center gap-2 rounded-xl bg-emerald-600 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700"
           >
-            <ExternalLink size={15} /> {t('phone.funnelEnable')}
+            <ExternalLink size={15} /> {t(state === 'needs_funnel' ? 'phone.funnelEnable' : 'phone.httpsEnable')}
           </a>
           <p className="text-center text-[11px] text-zinc-400">{t('phone.funnelRetry')}</p>
         </>
@@ -191,7 +191,7 @@ export function PhoneConnectButton() {
   const state = data.state;
   const dot = state === 'up' ? 'bg-emerald-500'
     : BUSY.includes(state) ? 'bg-amber-400'
-    : state === 'needs_funnel' || state === 'error' ? 'bg-red-500'
+    : ['needs_funnel', 'needs_https', 'unreachable', 'error'].includes(state) ? 'bg-red-500'
     : 'bg-zinc-300 dark:bg-zinc-600';
 
   return (
