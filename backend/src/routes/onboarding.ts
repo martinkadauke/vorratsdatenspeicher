@@ -4,7 +4,8 @@ import { requireOperator } from '../auth/plugin.js';
 import { sendMail, smtpConfigured } from '../mailer.js';
 import { phoneSetupEmail } from '../email/templates.js';
 import { getConfig, setConfig } from '../config.js';
-import { setTaskAi, type AiTask, type ProviderName } from '../llm/provider.js';
+import { setTaskAi, listModelsForProvider, isVisionModel, type AiTask, type ProviderName } from '../llm/provider.js';
+import { searxngSearch } from '../llm/searxng.js';
 
 // v1 ships stages A–C; D–G are reserved so the guards accept them once built.
 const STAGES = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
@@ -15,6 +16,15 @@ const EVENTS = ['pruefen_visited', 'self_added_list_item'];
 const ALL_AI_TASKS: AiTask[] = ['recategorize', 'churner_stage1', 'churner_stage2', 'ocr', 'categories_chat', 'model_review', 'nlanalytics', 'bankmatch', 'statsask', 'csvmapping', 'mailreinterpret'];
 // Sensible defaults so OpenAI/Anthropic need no model choice (both handle text + vision/OCR).
 const QUICK_DEFAULTS: Record<string, string> = { anthropic: 'claude-sonnet-5', openai: 'gpt-4o' };
+
+// What WE would run on a self-hosted Ollama, best first. mistral-small3.2 measured ~98% of a
+// frontier model's OCR accuracy in our own tests; the rest are lighter fallbacks. Only ever
+// suggested when the household actually has the model pulled.
+const RECOMMENDED_OCR = ['mistral-small3.2', 'qwen2.5vl', 'minicpm-v', 'llava'];
+const RECOMMENDED_TEXT = ['qwen2.5:14b', 'qwen2.5', 'llama3.1', 'mistral'];
+// Bounds for the best-effort web lookup — a wizard step must never wait on the open internet.
+const WEB_VISION_LOOKUP_MAX = 6;
+const WEB_VISION_TIMEOUT_MS = 4000;
 
 // Defense-in-depth for the self-addressed setup-guide mail: even though it can only reach
 // the caller's own verified address, a runaway client/insider shouldn't drain the household's
@@ -105,6 +115,58 @@ export function onboardingRoutes(app: FastifyInstance): void {
       return reply.code(502).send({ error: 'mail_failed', message: 'E-Mail konnte nicht gesendet werden.' });
     }
     return { sent: true, to: user.email };
+  });
+
+  /** What the wizard offers a self-hoster running Ollama: the model list of THEIR instance,
+   *  which of those can read images, and our recommendation — but only ever a recommendation we
+   *  can actually honour, i.e. one that is present on their machine.
+   *
+   *  Vision capability is decided locally first (isVisionModel knows the common families). Models
+   *  it does not recognise get a BEST-EFFORT web lookup via the household's own SearXNG: bounded
+   *  in number and time, never fatal, and clearly reported as a guess. A wizard step must not hang
+   *  because a search engine is slow. */
+  app.get('/api/onboarding/ollama-models', { preHandler: requireOperator }, async (_req, reply) => {
+    let names: string[];
+    try {
+      names = await listModelsForProvider('ollama');
+    } catch (e) {
+      return reply.code(502).send({ error: 'unreachable', message: (e as Error).message });
+    }
+
+    const known = names.map(name => ({ name, vision: isVisionModel('ollama', name), source: 'known' as const }));
+    // Only the ones the local rules do NOT already call vision are worth asking the web about,
+    // and only a handful of them — this runs while someone waits on a wizard step.
+    const unknown = known.filter(m => !m.vision).slice(0, WEB_VISION_LOOKUP_MAX);
+    const out = new Map(known.map(m => [m.name, m as { name: string; vision: boolean; source: 'known' | 'web' }]));
+    await Promise.all(unknown.map(async m => {
+      try {
+        const hits = await Promise.race([
+          searxngSearch(`ollama ${m.name} vision multimodal image input`),
+          new Promise<never>((_, rej) => setTimeout(() => rej(new Error('timeout')), WEB_VISION_TIMEOUT_MS)),
+        ]);
+        const blob = hits.slice(0, 5).map(h => `${h.title} ${h.content ?? ''}`).join(' ').toLowerCase();
+        // Require the model's own name nearby, else a generic "vision models" page would vouch
+        // for every model we ask about.
+        const base = m.name.split(':')[0].toLowerCase();
+        if (blob.includes(base) && /(vision|multimodal|image input|bilder)/.test(blob)) {
+          out.set(m.name, { name: m.name, vision: true, source: 'web' });
+        }
+      } catch { /* best effort: leave it classified as text-only */ }
+    }));
+
+    const models = names.map(n => out.get(n)!);
+    const present = (list: string[]) => list.find(r => names.some(n => n === r || n.startsWith(`${r}:`)));
+    return {
+      models,
+      // null when we cannot recommend anything they actually have — the wizard then leaves the
+      // field empty rather than suggesting a download they never made.
+      recommended: {
+        ocr: present(RECOMMENDED_OCR) ?? null,
+        text: present(RECOMMENDED_TEXT) ?? null,
+        ocrWanted: RECOMMENDED_OCR[0],
+        textWanted: RECOMMENDED_TEXT[0],
+      },
+    };
   });
 
   /** Onboarding one-click AI setup: point EVERY task at a single provider so a beginner never

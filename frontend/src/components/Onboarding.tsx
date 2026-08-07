@@ -3,9 +3,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { useNavigate } from 'react-router-dom';
-import { Sparkles, Bot, Tags, Home, Users, Wallet, Mail, Inbox, PartyPopper, Languages, Plus, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Sparkles, Bot, Tags, Home, Users, Wallet, Mail, Inbox, PartyPopper, Languages, Plus, Trash2, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
 import { api } from '../api/client';
-import { Button, Input, Select, Label, Switch, FeedbackIconButton } from './ui';
+import { Button, Input, Select, Label, Switch, Modal, FeedbackIconButton } from './ui';
 import { EmojiSelect } from './EmojiPicker';
 import { SmtpHelp } from './SmtpHelp';
 import { ImapHelp } from './ImapHelp';
@@ -330,11 +330,63 @@ function AiSetup({ config, t }: { config: Record<string, unknown> | undefined; t
   const [chosen, setChosen] = useState<AiProviderId | null>(savedProvider ?? null);
   const [apiKey, setApiKey] = useState('');
   const [url, setUrl] = useState(String(config?.['ollama.url'] ?? ''));
-  const [ocrModel, setOcrModel] = useState(String(config?.['ai.ocr.model'] ?? ''));
-  const [kiModel, setKiModel] = useState(String(config?.['ai.recategorize.model'] ?? ''));
+  // ⚠️ Seed from the stored model ONLY when the stored provider is Ollama. Reading ai.ocr.model
+  // unconditionally is what put `claude-sonnet-5` — the CLOUD default — into the local-Ollama
+  // field. Revisiting the step must show what you saved; a fresh setup starts empty and gets
+  // filled once the instance tells us what it actually has.
+  const ollamaWasChosen = (k: string) => config?.[k] === 'ollama';
+  const [ocrModel, setOcrModel] = useState(ollamaWasChosen('ai.ocr.provider') ? String(config?.['ai.ocr.model'] ?? '') : '');
+  const [kiModel, setKiModel] = useState(ollamaWasChosen('ai.recategorize.provider') ? String(config?.['ai.recategorize.model'] ?? '') : '');
   const [saving, setSaving] = useState(false);
+  const [keyHelp, setKeyHelp] = useState(false);
   // Show the health line after a successful save (or immediately for an already-set provider).
   const [confirmed, setConfirmed] = useState(!!savedProvider);
+  // What the BACKEND currently knows as ollama.url — it probes the stored value, so the typed
+  // URL has to be persisted before "is it reachable?" can mean anything.
+  const [urlSaved, setUrlSaved] = useState(String(config?.['ollama.url'] ?? '').trim());
+
+  // Push the typed URL into config, debounced: one write per pause, not one per keystroke.
+  useEffect(() => {
+    if (chosen !== 'ollama') return;
+    const v = url.trim();
+    if (v === urlSaved) return;
+    const id = setTimeout(() => {
+      void api(`/api/config/ollama.url`, { method: 'PUT', body: { value: v } })
+        .then(() => setUrlSaved(v))
+        .catch(() => { /* a typo simply stays unreachable */ });
+    }, 700);
+    return () => clearTimeout(id);
+  }, [url, urlSaved, chosen]);
+
+  // Live reachability of the Ollama socket — drives the red/green field, before any saving.
+  const ollamaHealth = useQuery({
+    queryKey: ['ollama-health', urlSaved],
+    queryFn: () => api<{ ok: boolean; error?: string }>('/api/ai/health?provider=ollama'),
+    enabled: chosen === 'ollama' && !!urlSaved,
+    retry: false, refetchInterval: 15_000,
+  });
+  const ollamaUp = ollamaHealth.data?.ok === true;
+
+  // Only once it answers do we ask what it has. The backend also tells us which models can read
+  // images (local rules first, best-effort web lookup for the rest) and what we would recommend.
+  const ollamaModels = useQuery({
+    queryKey: ['ollama-models', urlSaved],
+    queryFn: () => api<{
+      models: { name: string; vision: boolean; source: 'known' | 'web' }[];
+      recommended: { ocr: string | null; text: string | null; ocrWanted: string; textWanted: string };
+    }>('/api/onboarding/ollama-models'),
+    enabled: chosen === 'ollama' && ollamaUp,
+    retry: false, staleTime: 60_000,
+  });
+
+  // Prefill with OUR pick — but only if they actually have it pulled; otherwise leave it empty
+  // rather than proposing a model that would fail on first use. Never overwrites a manual choice.
+  useEffect(() => {
+    const r = ollamaModels.data?.recommended;
+    if (!r) return;
+    setOcrModel(prev => prev || r.ocr || '');
+    setKiModel(prev => prev || r.text || '');
+  }, [ollamaModels.data]);
 
   // The chosen provider's health drives the green check. It refetches after save (we invalidate
   // its key), so the indicator flips to green as soon as the just-saved credential verifies —
@@ -347,8 +399,10 @@ function AiSetup({ config, t }: { config: Record<string, unknown> | undefined; t
   });
 
   const pick = (id: AiProviderId) => { setChosen(id); setConfirmed(false); setApiKey(''); };
+  // Ollama can only be saved once the instance actually answered — otherwise we would store
+  // model names nobody has verified against a machine that may not exist.
   const canSave = chosen === 'ollama'
-    ? !!(url.trim() && ocrModel.trim() && kiModel.trim())
+    ? !!(ollamaUp && ocrModel.trim() && kiModel.trim())
     : !!apiKey.trim();
 
   const save = async () => {
@@ -386,30 +440,87 @@ function AiSetup({ config, t }: { config: Record<string, unknown> | undefined; t
 
       {chosen && chosen !== 'ollama' && (
         <div className="flex flex-col gap-1.5">
-          <Label className="mb-0">{t('onboarding.ai.keyLabel', { name: chosen === 'openai' ? 'ChatGPT' : 'Claude' })}</Label>
+          <div className="flex items-center justify-between gap-2">
+            <Label className="mb-0">{t('onboarding.ai.keyLabel', { name: chosen === 'openai' ? 'ChatGPT' : 'Claude' })}</Label>
+            {/* Nobody arrives at this field already owning an API key — say where to get one. */}
+            <button type="button" onClick={() => setKeyHelp(true)}
+              className="shrink-0 text-[11px] font-medium text-emerald-600 underline hover:text-emerald-700 dark:text-emerald-400">
+              {t('onboarding.ai.keyHelpOpen')}
+            </button>
+          </div>
           <Input type="password" autoComplete="off" placeholder={chosen === 'openai' ? 'sk-…' : 'sk-ant-…'}
             value={apiKey} onChange={e => { setApiKey(e.target.value); setConfirmed(false); }} />
           <p className="text-[11px] leading-relaxed text-zinc-400">{t('onboarding.ai.keyHint', { name: chosen === 'openai' ? 'OpenAI' : 'Anthropic' })}</p>
         </div>
       )}
 
+      {keyHelp && chosen && chosen !== 'ollama' && (
+        <Modal open onClose={() => setKeyHelp(false)} title={t('onboarding.ai.keyHelpTitle', { name: chosen === 'openai' ? 'ChatGPT' : 'Claude' })}>
+          <div className="flex flex-col gap-3 text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">
+            <p>{t('onboarding.ai.keyHelpIntro')}</p>
+            <ol className="ml-4 list-decimal space-y-2">
+              <li>
+                {t('onboarding.ai.keyHelpStep1')}{' '}
+                <a href={chosen === 'openai' ? 'https://platform.openai.com/api-keys' : 'https://console.anthropic.com/settings/keys'}
+                  target="_blank" rel="noreferrer"
+                  className="inline-flex items-center gap-0.5 font-medium text-emerald-600 underline dark:text-emerald-400">
+                  {chosen === 'openai' ? 'platform.openai.com' : 'console.anthropic.com'} <ExternalLink size={11} />
+                </a>
+              </li>
+              <li>{t('onboarding.ai.keyHelpStep2')}</li>
+              <li>{t('onboarding.ai.keyHelpStep3')}</li>
+              <li>{t('onboarding.ai.keyHelpStep4')}</li>
+            </ol>
+            <p className="rounded-lg bg-zinc-100 p-2.5 text-xs dark:bg-zinc-800">{t('onboarding.ai.keyHelpCost')}</p>
+            <div className="flex justify-end">
+              <Button variant="secondary" onClick={() => setKeyHelp(false)}>{t('common.close')}</Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {chosen === 'ollama' && (
         <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-1">
-            <Label className="mb-0">{t('onboarding.ai.ollamaUrl')}</Label>
+            <div className="flex items-center justify-between gap-2">
+              <Label className="mb-0">{t('onboarding.ai.ollamaUrl')}</Label>
+              {!!urlSaved && (
+                <span title={ollamaHealth.data?.error ?? ''} className={cn('flex shrink-0 items-center gap-1 text-[11px] font-medium',
+                  ollamaHealth.isFetching && !ollamaHealth.data ? 'text-zinc-400' : ollamaUp ? 'text-emerald-600' : 'text-red-500')}>
+                  <span className={cn('h-1.5 w-1.5 rounded-full',
+                    ollamaHealth.isFetching && !ollamaHealth.data ? 'bg-zinc-400' : ollamaUp ? 'bg-emerald-500' : 'bg-red-500')} />
+                  {ollamaHealth.isFetching && !ollamaHealth.data ? t('onboarding.ai.checking')
+                    : ollamaUp ? t('onboarding.ai.reachable') : t('onboarding.ai.unreachable')}
+                </span>
+              )}
+            </div>
+            {/* Red until it answers, green once it does — the field itself carries the verdict. */}
             <Input type="text" autoComplete="off" placeholder="http://…:11434" value={url}
+              className={!urlSaved ? '' : ollamaUp ? '!border-emerald-400 focus:!border-emerald-500' : '!border-red-400 focus:!border-red-500'}
               onChange={e => { setUrl(e.target.value); setConfirmed(false); }} />
           </div>
-          <div className="flex flex-col gap-1">
-            <Label className="mb-0">{t('onboarding.ai.ocrModel')}</Label>
-            <Input type="text" autoComplete="off" placeholder="z. B. mistral-small3.2" value={ocrModel}
-              onChange={e => { setOcrModel(e.target.value); setConfirmed(false); }} />
-          </div>
-          <div className="flex flex-col gap-1">
-            <Label className="mb-0">{t('onboarding.ai.kiModel')}</Label>
-            <Input type="text" autoComplete="off" placeholder="z. B. qwen2.5:14b" value={kiModel}
-              onChange={e => { setKiModel(e.target.value); setConfirmed(false); }} />
-          </div>
+
+          {ollamaUp && (
+            <>
+              {/* What WE would run. Named even when they don't have it — so they know what to pull. */}
+              <div className="rounded-xl border-2 border-amber-400 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                <p className="font-semibold">{t('onboarding.ai.recTitle')}</p>
+                <p className="mt-1">
+                  {t('onboarding.ai.recOcr')} <code className="font-mono font-semibold">{ollamaModels.data?.recommended.ocrWanted ?? 'mistral-small3.2'}</code>
+                  {' · '}
+                  {t('onboarding.ai.recText')} <code className="font-mono font-semibold">{ollamaModels.data?.recommended.textWanted ?? 'qwen2.5:14b'}</code>
+                </p>
+                {ollamaModels.data && !ollamaModels.data.recommended.ocr && (
+                  <p className="mt-1.5">{t('onboarding.ai.recMissing', { model: ollamaModels.data.recommended.ocrWanted })}</p>
+                )}
+              </div>
+
+              <ModelPick label={t('onboarding.ai.ocrModel')} value={ocrModel} onChange={v => { setOcrModel(v); setConfirmed(false); }}
+                models={ollamaModels.data?.models ?? []} loading={ollamaModels.isFetching} visionOnlyHint t={t} />
+              <ModelPick label={t('onboarding.ai.kiModel')} value={kiModel} onChange={v => { setKiModel(v); setConfirmed(false); }}
+                models={ollamaModels.data?.models ?? []} loading={ollamaModels.isFetching} t={t} />
+            </>
+          )}
         </div>
       )}
 
@@ -426,6 +537,42 @@ function AiSetup({ config, t }: { config: Record<string, unknown> | undefined; t
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/** One model field for the Ollama setup: pick from what the instance actually serves (so a typo
+ *  can't reach the save), with a free-text fallback while the list is still loading or if the
+ *  household runs something we didn't get back. Models that can read images are marked — picking
+ *  a text-only model for receipt scanning is the one mistake worth preventing here. */
+function ModelPick({ label, value, onChange, models, loading, visionOnlyHint, t }: {
+  label: string; value: string; onChange: (v: string) => void;
+  models: { name: string; vision: boolean; source: 'known' | 'web' }[];
+  loading: boolean; visionOnlyHint?: boolean; t: TFunction;
+}) {
+  const chosenModel = models.find(m => m.name === value);
+  // A picked model that the instance no longer lists stays selectable, so an existing setup is
+  // never silently rewritten by this dropdown.
+  const options = value && !chosenModel ? [{ name: value, vision: false, source: 'known' as const }, ...models] : models;
+  const warnNoVision = !!visionOnlyHint && !!chosenModel && !chosenModel.vision;
+  return (
+    <div className="flex flex-col gap-1">
+      <Label className="mb-0">{label}</Label>
+      {loading && !models.length ? (
+        <Input value="…" disabled />
+      ) : options.length ? (
+        <Select value={value} onChange={e => onChange(e.target.value)}>
+          <option value="">{t('onboarding.ai.modelPick')}</option>
+          {options.map(m => (
+            <option key={m.name} value={m.name}>
+              {m.name}{m.vision ? ` — ${t('onboarding.ai.canVision')}${m.source === 'web' ? '?' : ''}` : ''}
+            </option>
+          ))}
+        </Select>
+      ) : (
+        <Input type="text" autoComplete="off" value={value} onChange={e => onChange(e.target.value)} placeholder="z. B. qwen2.5:14b" />
+      )}
+      {warnNoVision && <p className="text-[11px] leading-relaxed text-amber-600 dark:text-amber-400">{t('onboarding.ai.notVision')}</p>}
     </div>
   );
 }
