@@ -24,7 +24,7 @@ async function start() {
   stack = await boot({
     dataDir: app.getPath('userData'),
     backendEntry,
-    appPort: 8899,
+    // No fixed port — boot picks a free one (a stray server on 8899 must not break us).
     // Electron forks Node via utilityProcess so the child uses Electron's runtime, not a system node.
     forker: (entry, env) => utilityProcess.fork(entry, [], { env, stdio: 'inherit' }),
   });
@@ -52,7 +52,16 @@ async function waitForBackend(base, tries = 60) {
   }
 }
 
-app.whenReady().then(start);
+// Single-instance: a second launch must not spin up a second Postgres+backend against the same
+// data dir (that's how we leaked orphaned processes). Re-focus the existing window instead.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (win) { if (win.isMinimized()) win.restore(); win.focus(); }
+  });
+  app.whenReady().then(start);
+}
 
 app.on('window-all-closed', () => app.quit());
 app.on('before-quit', async (e) => {

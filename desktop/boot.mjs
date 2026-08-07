@@ -1,9 +1,25 @@
 import EmbeddedPostgres from 'embedded-postgres';
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { startFunnel } from './tunnel.mjs';
+
+/** Ask the OS for a free localhost port (avoids colliding with whatever else the user runs). */
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.unref();
+    srv.on('error', reject);
+    srv.listen(0, '127.0.0.1', () => { const { port } = srv.address(); srv.close(() => resolve(port)); });
+  });
+}
+
+/** Is a PID currently alive? (signal 0 probes without killing; EPERM means alive-but-not-ours.) */
+function pidAlive(pid) {
+  try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
+}
 
 /**
  * The app's JWT + internal secrets, generated once per install and persisted in dataDir so
@@ -38,8 +54,21 @@ export function resolveSecrets(dataDir, override) {
  *           secrets?: { jwt: string, internal: string }, forker?: (entry:string, env:object)=>any }} opts
  */
 export async function boot(opts) {
-  const { dataDir, backendEntry, appPort = 8899, pgPort = 54329, secrets, forker } = opts;
+  const { dataDir, backendEntry, secrets, forker } = opts;
+  // Free ports by default — a fixed port collides with whatever else the user runs (a stray
+  // python -m http.server on 8899 is exactly what bit us). The window/tunnel use stack.port.
+  const appPort = opts.appPort || await freePort();
+  const pgPort = opts.pgPort || await freePort();
   const pgDataDir = path.join(dataDir, 'pgdata');
+
+  // A hard kill / crash leaves a stale postmaster.pid that makes Postgres refuse to start
+  // ("lock file already exists"). If the PID it names is dead, the lock is stale → remove it.
+  // If a live process still holds the data dir, leave it (don't stomp a running DB).
+  const pidFile = path.join(pgDataDir, 'postmaster.pid');
+  if (existsSync(pidFile)) {
+    const pid = parseInt((readFileSync(pidFile, 'utf8').split('\n')[0] || '').trim(), 10);
+    if (!Number.isFinite(pid) || !pidAlive(pid)) rmSync(pidFile, { force: true });
+  }
 
   const pg = new EmbeddedPostgres({
     databaseDir: pgDataDir,

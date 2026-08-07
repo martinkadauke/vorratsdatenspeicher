@@ -34,8 +34,10 @@ try {
   rmSync(secDir, { recursive: true, force: true });
 
   console.log('[smoke] starting bundled Postgres + backend (no Docker) …');
+  // Free ports (no fixed 8899/54329 — those can collide with whatever else is running).
   // tunnel:false so the test never starts a real Funnel on a machine that happens to run Tailscale.
-  stack = await boot({ dataDir, backendEntry, appPort: 8899, pgPort: 54329, tunnel: false });
+  stack = await boot({ dataDir, backendEntry, tunnel: false });
+  console.log('[smoke] chose port', stack.port);
 
   const version = await waitFor(stack.url);
   console.log('[smoke] /api/version →', JSON.stringify(version));
