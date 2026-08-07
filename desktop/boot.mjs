@@ -1,8 +1,27 @@
 import EmbeddedPostgres from 'embedded-postgres';
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { startFunnel } from './tunnel.mjs';
+
+/**
+ * The app's JWT + internal secrets, generated once per install and persisted in dataDir so
+ * logins survive restarts (random-per-boot would silently log everyone out on every launch).
+ * A caller override (e.g. tests) wins.
+ */
+export function resolveSecrets(dataDir, override) {
+  if (override?.jwt && override?.internal) return { jwt: override.jwt, internal: override.internal };
+  const file = path.join(dataDir, 'secrets.json');
+  try {
+    const s = JSON.parse(readFileSync(file, 'utf8'));
+    if (s.jwt && s.internal) return { jwt: s.jwt, internal: s.internal };
+  } catch { /* generate + persist below */ }
+  const fresh = { jwt: crypto.randomBytes(32).toString('hex'), internal: crypto.randomBytes(32).toString('hex') };
+  mkdirSync(dataDir, { recursive: true });
+  writeFileSync(file, JSON.stringify(fresh), { mode: 0o600 });
+  return fresh;
+}
 
 /**
  * Boot the VDS stack WITHOUT Docker — the desktop equivalent of docker-compose:
@@ -41,10 +60,8 @@ export async function boot(opts) {
     try { await pg.createDatabase('vorratsdatenspeicher'); } catch { /* already exists */ }
   }
 
-  // In the real desktop build these secrets are generated once and persisted per install (e.g.
-  // in userData) so JWTs survive restarts; here we accept caller-supplied or random-per-boot.
-  const jwt = secrets?.jwt || crypto.randomBytes(32).toString('hex');
-  const internal = secrets?.internal || crypto.randomBytes(32).toString('hex');
+  // Generated once and persisted per install so logins survive restarts.
+  const { jwt, internal } = resolveSecrets(dataDir, secrets);
 
   // backendEntry = <backendRoot>/dist/index.js → migrations live at <backendRoot>/migrations.
   // The forked child's cwd is not the backend root, so point migrate() at them explicitly.
@@ -65,10 +82,19 @@ export async function boot(opts) {
 
   const child = (forker ?? spawnNode)(backendEntry, env);
 
+  // Optional public exposure via Tailscale Funnel (stable HTTPS → remote phone + PWA + passkeys).
+  // Absent / not-logged-in → the app still runs locally; `tunnel.available` reports why.
+  const tunnel = opts.tunnel === false
+    ? { available: false, reason: 'disabled', url: null, host: null, stop: async () => {} }
+    : await startFunnel(appPort).catch(() => ({ available: false, reason: 'error', url: null, host: null, stop: async () => {} }));
+
   return {
     port: appPort,
     url: `http://127.0.0.1:${appPort}`,
+    tunnel,                       // { available, reason, url, host, stop }
+    publicUrl: tunnel.url,        // the HTTPS URL to encode in the connect-phone QR, or null
     async stop() {
+      try { await tunnel.stop(); } catch { /* best effort */ }
       try { child.kill(); } catch { /* already gone */ }
       try { await pg.stop(); } catch { /* already stopped */ }
     },
