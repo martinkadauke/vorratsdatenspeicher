@@ -33,26 +33,40 @@ export function Coach() {
   }
   // Stage C: right after B is dismissed, and only where the browser can actually do push
   // (iOS only supports it once VDS is installed as a PWA — i.e. after Stage B).
-  if (done('B') && !done('C') && !soft('C') && pushSupported()) {
+  if (done('B') && !done('C') && !soft('C') && pushSupported() && pushOfferRelevant()) {
     return <StageC onDone={() => dismiss.mutate('C')} onLater={() => snooze('C')} />;
   }
   return null;
 }
 
-/** Where the "put VDS on your phone" card makes sense at all.
- *
- *  ⚠️ It used to appear on the desktop, where its very first instruction — open http://127.0.0.1:<port>
- *  on your phone — names an address reachable from exactly one machine, and where "add to home
- *  screen" is not a thing. And it kept appearing after the PWA was installed, i.e. to someone who
- *  had already done it. So: phones only, and only while the app is still running in a browser tab.
- *  Not build-specific — a Docker user on a laptop was being shown it too. */
+/** Running as an installed PWA (home-screen icon), rather than in a browser tab. */
+function isInstalledPwa(): boolean {
+  if (typeof window === 'undefined') return false;
+  return !!window.matchMedia?.('(display-mode: standalone)').matches
+    || (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
+}
+
+/** A touch device at phone size — not a laptop with a touchscreen. */
+function isPhone(): boolean {
+  if (typeof window === 'undefined') return false;
+  return !!window.matchMedia?.('(pointer: coarse)').matches && window.innerWidth <= 900;
+}
+
+/** "Put VDS on your phone" — pointless once it IS on the phone, and impossible to act on when the
+ *  address it hands out only resolves on this one machine (the desktop build binds to loopback by
+ *  design). On a Docker box reachable at a LAN address it stays useful on the desktop: that is
+ *  where you can read the address off the screen and type it into the phone. */
 function phoneInstallRelevant(): boolean {
   if (typeof window === 'undefined') return false;
-  const standalone = window.matchMedia?.('(display-mode: standalone)').matches
-    || (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
-  if (standalone) return false;                                   // already installed
-  const coarse = window.matchMedia?.('(pointer: coarse)').matches; // a touch device…
-  return !!coarse && window.innerWidth <= 900;                    // …that is phone-sized
+  if (isInstalledPwa()) return false;
+  return !/^(127\.|localhost|\[?::1)/.test(window.location.hostname);
+}
+
+/** Push notifications: only worth offering on a phone, and only once VDS is installed there.
+ *  iOS refuses web push entirely until the PWA sits on the home screen, so asking earlier is a
+ *  promise the browser cannot keep — and on a desktop it is simply the wrong device. */
+function pushOfferRelevant(): boolean {
+  return isPhone() && isInstalledPwa();
 }
 
 function StageB({ onDone, onLater }: { onDone: () => void; onLater: () => void }) {
