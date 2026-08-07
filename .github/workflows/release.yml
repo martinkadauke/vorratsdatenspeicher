@@ -91,3 +91,59 @@ jobs:
           gh release create "$TAG" --draft --generate-notes --title "VDS $TAG"
           echo "📝 drafted release $TAG — edit the notes and publish, or the update banner stays quiet"
       - run: echo "✅ published :${{ steps.v.outputs.version }} (stable=${{ steps.v.outputs.stable }}) APP_VERSION=${{ steps.v.outputs.version }}"
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      version: ${{ steps.v.outputs.version }}
+
+  # Desktop installers (Electron): the SAME backend+frontend the image runs, wrapped with a
+  # bundled Postgres so a non-technical user just downloads and double-clicks. Each OS must build
+  # on its own runner (an Apple installer cannot be produced on Windows). Unsigned on purpose —
+  # code signing is a DEVELOPER cost; users never pay either way. Windows shows a SmartScreen
+  # "more info → run anyway" prompt and macOS needs right-click → Open until notarisation is added.
+  desktop:
+    needs: build
+    strategy:
+      fail-fast: false          # a Mac failure must not deny Windows users their installer
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.build.outputs.tag }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # The desktop bundle ships the built frontend + the built backend. Dev deps are needed to
+      # BUILD the backend and are pruned afterwards, so the installer carries runtime deps only.
+      - name: Build frontend
+        working-directory: frontend
+        run: npm ci && npm run build
+      - name: Build backend
+        working-directory: backend
+        run: npm ci && npm run build
+      - name: Prune backend to production dependencies
+        working-directory: backend
+        run: npm ci --omit=dev
+
+      - name: Build installer
+        working-directory: desktop
+        env:
+          # Skip electron-builder's auto-publish; the assets are uploaded explicitly below.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm ci && npx electron-builder --publish never
+
+      # Attach to the (draft) GitHub Release the build job created, so one tag yields the Docker
+      # image AND the desktop installers — and /download can read them straight from the API.
+      - name: Upload installers to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.build.outputs.tag }}
+        shell: bash
+        run: |
+          shopt -s nullglob
+          files=(desktop/out/*.exe desktop/out/*.dmg desktop/out/*.AppImage desktop/out/*.zip desktop/out/*.blockmap desktop/out/latest*.yml)
+          if [ ${#files[@]} -eq 0 ]; then echo "::error::no installer artifacts found"; exit 1; fi
+          printf 'uploading: %s\n' "${files[@]}"
+          gh release upload "$TAG" "${files[@]}" --clobber
