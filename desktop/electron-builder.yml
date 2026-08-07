@@ -13,6 +13,15 @@
 
 appId: com.vorratsdatenspeicher.desktop
 productName: Vorratsdatenspeicher Desktop
+
+# ⚠️ Space-free FILE names, or auto-update 404s. productName has spaces, so the default artifact
+# name does too — and then the two sides disagree about what to call it: GitHub turns spaces into
+# DOTS when the asset is uploaded, while electron-builder writes the HYPHENATED form into
+# latest.yml. electron-updater dutifully requested
+# "Vorratsdatenspeicher-Desktop-Setup-0.24.0.exe" from a release that held
+# "Vorratsdatenspeicher.Desktop.Setup.0.24.0.exe" → 404, on the first update that otherwise worked
+# end to end. `name` is package.json's (already hyphenated), so both sides now agree.
+artifactName: ${name}-Setup-${version}.${ext}
 directories:
   output: out
   buildResources: build
