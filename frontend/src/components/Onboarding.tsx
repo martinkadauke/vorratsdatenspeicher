@@ -60,11 +60,6 @@ export function Onboarding() {
   // the slim wizard (own-household address / categories / family, saved to their row).
   const isSuper = !!user?.is_super_admin;
   const fullWizard = !demo || isSuper;
-  // IMAP is disabled entirely on the demo (the backend doesn't even register the routes),
-  // so drop that step — it applies to the demo super-admin's full wizard too.
-  const STEP_META = (fullWizard ? FULL_STEPS : SLIM_STEPS)
-    .filter(s => !(demo && s.key === 'imap'))
-    .filter(s => !(buildInfo?.desktop && s.key === 'websearch'));
   const show = !!user?.is_admin && user?.onboarding_done === false;
 
   const { data: config } = useQuery({ queryKey: ['config'], queryFn: () => api<Record<string, unknown>>('/api/config'), enabled: show });
@@ -72,6 +67,17 @@ export function Onboarding() {
   // be asking about plumbing they neither installed nor can change. A Docker self-hoster does have
   // to point us at one, so the step stays for them: same wizard, one honest difference.
   const { data: buildInfo } = useQuery({ queryKey: ['version'], queryFn: () => api<{ desktop?: boolean }>('/api/version'), staleTime: Infinity, enabled: show });
+
+  // ⚠️ Must come AFTER the queries it reads. `.filter()` runs during render, so a `const` declared
+  // below is in its temporal dead zone — and having it above cost an evening: the whole app went
+  // BLACK for every logged-in user (this component mounts even when it renders null, so the throw
+  // happened on every page). tsc does not catch it, because the reference sits inside a callback
+  // that could in principle run later. It does not.
+  // IMAP is disabled entirely on the demo (the backend doesn't even register the routes),
+  // so drop that step — it applies to the demo super-admin's full wizard too.
+  const STEP_META = (fullWizard ? FULL_STEPS : SLIM_STEPS)
+    .filter(s => !(demo && s.key === 'imap'))
+    .filter(s => !(buildInfo?.desktop && s.key === 'websearch'));
   const setCfg = useMutation({
     mutationFn: (b: { key: string; value: unknown }) => api(`/api/config/${b.key}`, { method: 'PUT', body: { value: b.value } }),
     onSuccess: () => {

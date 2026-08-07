@@ -353,6 +353,12 @@ function watchRenderer(w) {
     try { wc.reload(); } catch (e) { log(`reload after crash failed: ${e}`); }
   });
   wc.on('unresponsive', () => log('renderer unresponsive'));
+  // ⚠️ The renderer's console is the ONLY place a React render error appears, and none of the
+  // process-level events fire for it: the tree just unmounts and you get a blank window. That is
+  // precisely how a black screen looked "unexplainable" for an hour — the page painted, then threw.
+  wc.on('console-message', (_e, level, message, line, sourceId) => {
+    if (level >= 2) log(`renderer console: ${message} (${String(sourceId).split('/').pop()}:${line})`);
+  });
   wc.on('responsive', () => log('renderer responsive again'));
   w.on('focus', () => {
     for (const key of ['CommandOrControl+R', 'F5']) {
