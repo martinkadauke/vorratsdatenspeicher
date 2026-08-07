@@ -1,4 +1,4 @@
-import { app, BrowserWindow, utilityProcess, powerSaveBlocker } from 'electron';
+import { app, BrowserWindow, Menu, utilityProcess, powerSaveBlocker } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { boot } from './boot.mjs';
@@ -13,11 +13,18 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const backendEntry = app.isPackaged
   ? path.join(process.resourcesPath, 'backend', 'dist', 'index.js')
   : path.join(__dirname, '..', 'backend', 'dist', 'index.js');
+// Dev: the rounded-corner .ico (taskbar + titlebar). Packaged: electron-builder bakes
+// build/icon.ico into the exe for the taskbar; the window falls back to the bundled png.
+const iconPath = app.isPackaged
+  ? path.join(process.resourcesPath, 'frontend', 'dist', 'icon-512.png')
+  : path.join(__dirname, 'build', 'icon.ico');
 
 let stack = null;
 let win = null;
 
 async function start() {
+  // No native menu bar — this is an appliance, not a document editor (removes File/Edit/View/…).
+  Menu.setApplicationMenu(null);
   // Keep the machine reachable for phones while the app is open + plugged in.
   powerSaveBlocker.start('prevent-app-suspension');
 
@@ -33,7 +40,9 @@ async function start() {
     width: 1200,
     height: 820,
     title: 'Vorratsdatenspeicher',
+    icon: iconPath,
     backgroundColor: '#ffffff',
+    autoHideMenuBar: true,   // belt-and-suspenders on top of setApplicationMenu(null)
     webPreferences: { contextIsolation: true },
   });
 
@@ -51,6 +60,9 @@ async function waitForBackend(base, tries = 60) {
     await new Promise(r => setTimeout(r, 500));
   }
 }
+
+// Windows taskbar/notification identity (also lets the packaged exe icon group correctly).
+if (process.platform === 'win32') app.setAppUserModelId('com.vorratsdatenspeicher.desktop');
 
 // Single-instance: a second launch must not spin up a second Postgres+backend against the same
 // data dir (that's how we leaked orphaned processes). Re-focus the existing window instead.
