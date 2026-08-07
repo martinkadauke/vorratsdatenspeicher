@@ -1,107 +1,144 @@
 # Design: der Startbildschirm der Desktop-App
 
-**Status: Entwurf, nicht gebaut.** Vorschlag zur Entscheidung. Der aktuelle Zustand (ein kleiner
-Kassenbon mit gestrichelter Abrisskante) ist ein Zwischenschritt, kein Ziel.
+**Status: Entwurf, nicht gebaut.** Vorschlag zur Entscheidung. Der aktuelle Zustand (ein statischer
+Bon mit gestrichelter Kante) ist ein Zwischenschritt, kein Ziel.
 
 ## Das Problem
 
 Zwei Sekunden bei jedem Start, ~60 Sekunden beim allerersten. Der Bildschirm hat genau eine
-Aufgabe: **die Zeit erklären, statt sie nur zu füllen.** Der ursprüngliche Text („Beim ersten Start
-wird die Datenbank angelegt") stand bei jedem Start da und las sich beim zehnten Mal wie ein
-Defekt. Der aktuelle Bon ist ehrlicher, aber langweilig — er zeigt nichts, was mit *dieser*
-Installation zu tun hat.
+Aufgabe: **die Zeit erklären, statt sie nur zu füllen.**
 
-Ein Ladebildschirm, der nichts über dich weiß, ist verschenkte Zeit. Ein Ladebildschirm, der etwas
-über dich weiß, ist das Gegenteil: der Moment, in dem die App zeigt, dass sie sich erinnert.
+Der ursprüngliche Text („Beim ersten Start wird die Datenbank angelegt") stand bei *jedem* Start da
+und las sich beim zehnten Mal wie ein Defekt. Ein Ladebildschirm, der nichts über dich weiß, ist
+verschenkte Zeit. Einer, der etwas über dich weiß, ist der Moment, in dem die App zeigt, dass sie
+sich erinnert.
 
-## Der Vorschlag: der Bon druckt sich selbst
+---
 
-**Ein Kassenbon, der sich während des Starts Zeile für Zeile ausdruckt** — jede Zeile ein echter
-Startschritt, mit dem Zeichensatz und dem Rhythmus eines Thermodruckers.
+## Die Inszenierung: der Bon wird abgeschnitten
+
+Martins Idee, und sie ist die richtige — auf der Website sitzt an mehreren Stellen ein kleines
+Scherensymbol, das hier zur tragenden Bewegung wird.
 
 ```
-        VORRATSDATENSPEICHER
-     ---------------------------
-     Datenbank              ✓
-     Belege                 ✓
-     Preise                 ·
-     ---------------------------
+   ①  Bon fährt von oben ins Bild
+       ┌─────────────────────────┐
+       │  VORRATSDATENSPEICHER   │
+       │  ---------------------  │
+       │  Datenbank          ✓   │
+       │  Belege             ✓   │
+       │  ---------------------  │
+   ②  ✂- - - - - - - - - - - - -    ← Schere gleitet rechts → links,
+       │  TOTAL erfasst  1.284,55│      die Perforation entsteht in ihrer Spur
+       │  Willkommen zurück      │
+       └─────────────────────────┘
+   ③  oberer Teil fährt nach oben weg, der untere bleibt in der Mitte
 ```
 
-Warum das trägt:
+**Der Ablauf, an echte Startschritte gekoppelt:**
 
-- **Es ist die Bildsprache des Produkts.** VDS liest Kassenbons; die Website ist ein Kassenbon. Ein
-  Startbildschirm, der sich ausdruckt, erklärt in zwei Sekunden ohne ein Wort, worum es geht.
-- **Fortschritt braucht keinen Balken.** Jede gedruckte Zeile ist ein wirklich abgeschlossener
-  Schritt. Ein Balken, der 1,8 Sekunden lang scheinbar rechnet, ist eine Lüge; ein Bon, der bei
-  einer Zeile hängt, sagt dir, *wo* es klemmt.
-- **Es skaliert über beide Fälle.** Beim ersten Start druckt er langsam und mit einer erklärenden
-  Fußzeile; danach ist er in unter einer Sekunde durch und man sieht nur den Abriss.
+| Phase | Was passiert | Dauer |
+|---|---|---|
+| Einfahren | Bon kommt von oben herein, leichtes Nachfedern (Papier hat Trägheit) | ~400 ms |
+| Drucken | Zeilen erscheinen einzeln, ~120 ms Abstand — **jede Zeile ein wirklich fertiger Schritt** | variabel |
+| Schnitt | Schere gleitet rechts → links, hinter ihr entsteht die gezackte Kante + ein leises Zittern des Papiers | ~500 ms |
+| Abriss | Oberer Teil fährt nach oben aus dem Bild, unterer bleibt zentriert stehen | ~300 ms |
+| Warten | Der abgeschnittene Rest liegt in der Mitte, bis das Backend antwortet | 0 – 60 s |
+| Übergabe | Bon fährt ab, App erscheint | ~200 ms |
 
-### Die Zahl als Belohnung
+Das Kunststück: **der Schnitt kommt erst, wenn wirklich alles geladen ist.** Beim normalen Start
+folgt er nach zwei Sekunden, beim allerersten nach einer Minute — die Schere ist der
+Fortschrittsbalken, nur ohne zu lügen. Bleibt eine Zeile ungedruckt stehen, siehst du sofort, *wo*
+es klemmt.
 
-**Auf dem Bon steht am Ende eine echte Zahl aus dem eigenen Haushalt** — die Summe, die
-Vorratsdatenspeicher bisher erfasst hat:
+**Details:**
+
+- Die Schere ist **auf den Bon gedruckt**, nicht darübergelegt — gleiche Farbe, gleiche Unschärfe
+  wie der Rest des Thermodrucks. Sie gehört zum Papier.
+- Die Perforation entsteht **in der Spur der Schere**, nicht vorher. Sonst verrät der Bon die
+  Pointe.
+- `prefers-reduced-motion`: alles sofort da, kein Einfahren, kein Schnitt. Nur der fertige Rest.
+
+---
+
+## Was auf dem Bon steht
+
+Das Herz. Der obere Teil (der weggeschnitten wird) trägt die **Startschritte**, der untere Teil (der
+bleibt) trägt die **Botschaft**.
+
+### Immer: die eigene Zahl
 
 ```
      ---------------------------
      TOTAL erfasst     1.284,55
      ---------------------------
-       Willkommen zurück, Lena
 ```
 
-Das ist der Unterschied zwischen einem Ladebildschirm und einem *Gruß*. Man sieht beim Warten
-etwas, das nur die eigene Installation zeigen kann. (Beim allerersten Start steht dort
-stattdessen `TOTAL 0,00 — fangen wir an.` — auch das ist ein Versprechen.)
+Beim allerersten Start: `TOTAL 0,00 — fangen wir an.`
 
-⚠️ **Datenschutz-Vorbehalt:** die Zahl ist vor dem Login sichtbar. Auf einem privaten Rechner ist
-das harmlos, in einer WG oder einem Büro nicht unbedingt. Vorschlag: **standardmäßig an, im Profil
-abschaltbar** („Beim Start meine Gesamtsumme zeigen"). Notfalls nur die Anzahl der Belege statt des
-Betrags — weniger verräterisch, fast genauso schön.
+### Manchmal: was die Daten über den Haushalt erzählen
 
-### Bewegung
+Nicht bei jedem Start — **etwa jeder 10.**, damit es besonders bleibt. Ein Hintergrund-Job leitet
+aus den eigenen Daten kleine Beobachtungen ab:
 
-Kein Spinner, keine Animation um ihrer selbst willen. Nur:
+> „Eure Katze frisst gerade mehr als sonst." — *Katzenfutter, 3 Wochen: +40 %*
 
-- Zeilen erscheinen **einzeln**, mit ~120 ms Abstand, leicht versetzt von links — wie Papier, das
-  aus dem Schlitz kommt.
-- Der Punkt hinter dem laufenden Schritt **blinkt** im Takt eines Druckkopfs.
-- Ist alles fertig, **reißt der Bon ab**: die gestrichelte Kante wandert einmal kurz nach unten,
-  dann übernimmt die App. Das ist die einzige Stelle, an der etwas „passiert".
-- `prefers-reduced-motion`: alle Zeilen sofort, kein Abriss.
+Weitere Sorten, damit es nicht monoton wird:
 
-### Details, die den Unterschied machen
+| Sorte | Beispiel |
+|---|---|
+| **Veränderung** | „Kaffee ist bei euch seit Januar 18 % teurer geworden." |
+| **Treue** | „Ihr habt Butter 14-mal hintereinander bei Rewe gekauft. Beim Aldi war sie jedes Mal günstiger." |
+| **Jahreszeit** | „Erdbeeren sind wieder da — zum ersten Mal seit 240 Tagen auf einem Beleg." |
+| **Rekord** | „Der größte Einkauf des Jahres: 187,40 € am 23. Dezember. Verständlich." |
+| **Beharrlichkeit** | „Seit 62 Wochen ohne Unterbrechung: Milch." |
+| **Kurios** | „Ihr habt dieses Jahr 4,2 kg Nudeln gekauft und 5,1 kg Nudelsoße. Da stimmt was nicht." |
+| **Rückblick** | „Vor genau einem Jahr, am 8. August, habt ihr zum ersten Mal einen Beleg gescannt. 412 sind es inzwischen." |
+| **Sparen** | „Wenn ihr Kaffee immer im Angebot gekauft hättet, wären das 34 € weniger gewesen." |
+| **Vorrat** | „Nach unserer Rechnung ist das Klopapier am Donnerstag alle." |
 
-- **Zeichensatz:** eine echte Monospace mit Charakter, keine System-Monospace. Der Bon lebt vom
-  ungleichen Grau eines Thermodrucks — leichte Unschärfe, nicht ganz schwarz (`#2c2620` auf
-  `#fffdf7`), Zeilen minimal unterschiedlich stark.
-- **Papier:** ein Hauch Textur und ein weicher Schlagschatten. Der Bon liegt auf dem
-  Fensterhintergrund, er ist nicht der Hintergrund.
-- **Datum und Uhrzeit** oben rechts, wie auf einem echten Bon. Kostet nichts, wirkt sofort echt.
-- **Dunkler Modus:** kein invertierter Bon (sieht aus wie ein Röntgenbild). Stattdessen bleibt das
-  Papier hell und der Fensterhintergrund wird dunkel — ein beleuchteter Bon auf dunklem Tisch.
+⚠️ **Die Zahlen kommen aus der Datenbank, nie aus dem Modell.** Das ist dieselbe Regel, die schon
+für die Analytics-Seite und die Statistik-KI gilt: der Job rechnet deterministisch, die KI darf
+ausschließlich **formulieren**. Ein Ladebildschirm, der sich Zahlen ausdenkt, ist schlimmer als
+einer, der schweigt — und man würde es nie merken. Der Job speichert also `{fakt, zahlen, text}`,
+und wenn die KI nicht erreichbar ist, gibt es eine deterministische Formulierung als Rückfall.
+
+**Wann läuft der Job?** Nicht beim Start — der Bildschirm darf auf nichts warten. Sondern
+gelegentlich im Hintergrund (beim Churner-Lauf, nachts), der schreibt ein paar fertige Sprüche in
+die Datenbank, und die Shell legt sich den nächsten beim Beenden als Datei zurecht. Der
+Startbildschirm liest nur noch eine Zeile Text.
+
+---
 
 ## Was es dafür braucht
 
-Der Startbildschirm läuft, **bevor** das Backend antwortet — die Zahl kann also nicht per API
-kommen. Zwei Möglichkeiten:
+Der Startbildschirm läuft, **bevor** das Backend antwortet — Zahl und Spruch können also nicht per
+API kommen.
 
-1. **Zwischenspeichern:** die Shell schreibt beim letzten Beenden die Summe in eine kleine Datei
-   und liest sie beim nächsten Start. Zeigt also den Stand von *gestern* — für einen Gruß völlig
-   ausreichend und technisch trivial.
-2. **Nachladen:** der Bon druckt die Zahlenzeile erst, wenn das Backend antwortet. Ehrlicher, aber
-   die schönste Zeile erscheint dann ausgerechnet zum Schluss, kurz bevor das Fenster wechselt.
+> **Lösung:** die Shell schreibt beim Beenden Summe und nächsten Spruch in eine kleine Datei und
+> liest sie beim nächsten Start. Zeigt den Stand von gestern — für einen Gruß völlig ausreichend
+> und technisch trivial.
 
-Empfehlung: **(1)**. Der Startbildschirm soll nicht auf etwas warten.
+Umsetzung bleibt eine `data:`-URL ohne Abhängigkeiten (sie muss rendern, bevor irgendetwas anderes
+existiert). Einzige offene Frage ist der Zeichensatz: eine echte Monospace mit Charakter müsste als
+Data-URI eingebettet werden (~30 kB), sonst tut es eine sorgfältig gewählte System-Monospace.
 
-Umsetzung bleibt eine `data:`-URL ohne Abhängigkeiten (er muss rendern, bevor irgendetwas anderes
-existiert) — außer dem Zeichensatz, der als Data-URI eingebettet werden müsste. Alternativ eine
-sorgfältig gewählte System-Monospace; dann kostet der ganze Bildschirm nichts.
+**Optik:** Papier `#fffdf7`, Druck `#2c2620` mit minimal ungleichmäßiger Schwärze (Thermodruck ist
+nie ganz schwarz), weicher Schlagschatten, Datum und Uhrzeit oben rechts wie auf einem echten Bon.
+Im dunklen Modus **nicht invertieren** — das sieht aus wie ein Röntgenbild. Stattdessen bleibt das
+Papier hell und der Hintergrund wird dunkel: ein beleuchteter Bon auf dunklem Tisch.
+
+---
 
 ## Offen für Martin
 
-- Zahl auf dem Bon: **ja / nur Belegzahl / nein**?
-- Zeichensatz einbetten (~30 kB) oder System-Monospace?
-- Soll der Abriss auch beim *Beenden* laufen (Bon reißt ab, Fenster schließt)? Nett, aber
-  verlängert das Schließen um 300 ms — und nichts nervt mehr als eine App, die sich langsam
-  verabschiedet.
+- **Die Zahl ist vor dem Login sichtbar.** Auf einem privaten Rechner harmlos, in einer WG oder im
+  Büro nicht unbedingt. Vorschlag: standardmäßig an, im Profil abschaltbar; notfalls nur die Anzahl
+  der Belege statt des Betrags — weniger verräterisch, fast genauso schön. **Gilt für die Sprüche
+  genauso** — „Eure Katze frisst mehr" vor dem Login ist charmant, „Der größte Einkauf des Jahres:
+  187,40 €" vielleicht nicht.
+- Zeichensatz einbetten oder System-Monospace?
+- Jeder 10. Start — oder lieber an besondere Momente knüpfen (erster Start im Monat, Jahrestag des
+  ersten Belegs, nach einem Rekord-Einkauf)? Seltener heißt wertvoller.
+- Soll der Bon auch beim **Beenden** abgeschnitten werden? Schön symmetrisch, verlängert das
+  Schließen aber um 300 ms — und nichts nervt mehr als eine App, die sich langsam verabschiedet.
