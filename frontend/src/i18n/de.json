@@ -1250,16 +1250,20 @@
       "body": "In welcher Sprache möchtest du VDS nutzen? Jederzeit im Profil änderbar."
     },
     "ai": {
-      "title": "KI & Suche",
-      "body": "VDS liest Belege per KI (OCR) und ordnet Produkte zu, plus Websuche für neue Produkte & Angebote. Trage die Zugänge deiner Anbieter ein — grün = erreichbar, rot = nicht erreichbar. Mindestens einen Anbieter brauchst du (Anthropic empfohlen).",
-      "reachable": "erreichbar",
-      "unreachable": "nicht erreichbar",
-      "recommended": "empfohlen",
-      "noneTitle": "Vorratsdatenspeicher ist eine KI-native App.",
-      "noneBody": "Ohne KI funktioniert VDS nicht richtig. Du kannst die Einrichtung jetzt abschließen und später einen KI-API-Key eintragen. Zum Aufladen:",
-      "noOcr": "Für die Beleg-Erkennung (OCR) brauchst du Anthropic oder — selbst gehostet — Ollama. DeepSeek und OpenAI können in VDS kein OCR.",
-      "noneForModels": "Trage zuerst im vorherigen Schritt einen erreichbaren KI-Anbieter ein.",
-      "taskNoProvider": "Kein OCR-Anbieter (Anthropic/Ollama) erreichbar."
+      "title": "Künstliche Intelligenz",
+      "body": "VDS liest deine Belege per KI und ordnet deine Produkte zu. Wähle einfach deinen Anbieter — den Rest richtet VDS für dich ein.",
+      "pickQuestion": "Nutzt du ChatGPT, Claude oder Ollama?",
+      "localSub": "lokal",
+      "keyLabel": "{{name}}-API-Key",
+      "keyHint": "Den API-Key bekommst du in deinem {{name}}-Konto. VDS wählt danach automatisch für jede Aufgabe das passende Modell aus.",
+      "ollamaUrl": "Ollama-Adresse (URL)",
+      "ocrModel": "Modell für Bilderkennung (Belege lesen)",
+      "kiModel": "Modell für Künstliche Intelligenz (alles andere)",
+      "save": "Speichern",
+      "saved": "Gespeichert",
+      "checking": "prüfe…",
+      "reachable": "Verbindung erfolgreich",
+      "unreachable": "nicht erreichbar"
     },
     "household": {
       "title": "Dein Haushalt",
@@ -1289,11 +1293,6 @@
         "kreditkarte": "Kreditkarte",
         "paypal": "PayPal"
       }
-    },
-    "models": {
-      "title": "KI-Modelle pro Aufgabe",
-      "body": "Feineinstellung: welches Modell für welche Aufgabe. Der Standard passt meist — lokale Aufgaben nutzen Ollama, anspruchsvolle Claude. Jederzeit im Admin änderbar.",
-      "nlanalytics": "Analyse-Assistent"
     },
     "categories": {
       "title": "Kategorien-Detailgrad",

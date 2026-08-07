@@ -1,12 +1,20 @@
 import type { FastifyInstance } from 'fastify';
 import sql, { DEMO_MODE } from '../db.js';
+import { requireOperator } from '../auth/plugin.js';
 import { sendMail, smtpConfigured } from '../mailer.js';
 import { phoneSetupEmail } from '../email/templates.js';
-import { getConfig } from '../config.js';
+import { getConfig, setConfig } from '../config.js';
+import { setTaskAi, type AiTask, type ProviderName } from '../llm/provider.js';
 
 // v1 ships stages A–C; D–G are reserved so the guards accept them once built.
 const STAGES = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
 const EVENTS = ['pruefen_visited', 'self_added_list_item'];
+
+// Every configurable AI task (keep in sync with admin.ts VALID_TASKS / provider.ts AiTask). The
+// onboarding quickset points ALL of them at one provider so a beginner never picks per-task.
+const ALL_AI_TASKS: AiTask[] = ['recategorize', 'churner_stage1', 'churner_stage2', 'ocr', 'categories_chat', 'model_review', 'nlanalytics', 'bankmatch', 'statsask', 'csvmapping', 'mailreinterpret'];
+// Sensible defaults so OpenAI/Anthropic need no model choice (both handle text + vision/OCR).
+const QUICK_DEFAULTS: Record<string, string> = { anthropic: 'claude-sonnet-5', openai: 'gpt-4o' };
 
 // Defense-in-depth for the self-addressed setup-guide mail: even though it can only reach
 // the caller's own verified address, a runaway client/insider shouldn't drain the household's
@@ -97,5 +105,36 @@ export function onboardingRoutes(app: FastifyInstance): void {
       return reply.code(502).send({ error: 'mail_failed', message: 'E-Mail konnte nicht gesendet werden.' });
     }
     return { sent: true, to: user.email };
+  });
+
+  /** Onboarding one-click AI setup: point EVERY task at a single provider so a beginner never
+   *  picks per-task models. OpenAI/Anthropic auto-use a good default model (both do text + OCR);
+   *  Ollama needs the OCR model + the model for all other tasks. Admin can still mix & match
+   *  afterwards. Operator-gated. */
+  app.post('/api/onboarding/ai-quickset', { preHandler: requireOperator }, async (req, reply) => {
+    const body = (req.body ?? {}) as { provider?: string; api_key?: string; url?: string; ocr_model?: string; ki_model?: string };
+    const provider = String(body.provider ?? '');
+    if (!['anthropic', 'openai', 'ollama'].includes(provider)) return reply.code(400).send({ error: 'invalid_provider' });
+    const userId = req.user!.id;
+
+    let ocrModel: string, textModel: string;
+    if (provider === 'ollama') {
+      const url = (body.url ?? '').trim();
+      ocrModel = (body.ocr_model ?? '').trim();
+      textModel = (body.ki_model ?? '').trim();
+      if (!url) return reply.code(400).send({ error: 'url_required', message: 'Bitte die Ollama-URL angeben.' });
+      if (!ocrModel || !textModel) return reply.code(400).send({ error: 'models_required', message: 'Bitte OCR-Modell und KI-Modell angeben.' });
+      await setConfig('ollama.url', url, userId);
+    } else {
+      const key = (body.api_key ?? '').trim();
+      if (!key) return reply.code(400).send({ error: 'api_key_required', message: 'Bitte den API-Key angeben.' });
+      await setConfig(`${provider}.api_key`, key, userId);
+      ocrModel = textModel = QUICK_DEFAULTS[provider];
+    }
+
+    for (const task of ALL_AI_TASKS) {
+      await setTaskAi(task, provider as ProviderName, task === 'ocr' ? ocrModel : textModel, userId, 'manual');
+    }
+    return { ok: true, provider };
   });
 }

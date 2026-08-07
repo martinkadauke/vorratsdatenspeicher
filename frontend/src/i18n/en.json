@@ -1248,16 +1248,20 @@
       "body": "Which language would you like to use VDS in? Changeable anytime in your profile."
     },
     "ai": {
-      "title": "AI & search",
-      "body": "VDS reads receipts with AI (OCR) and classifies products, plus web search for new products & offers. Enter your providers' credentials — green = reachable, red = unreachable. You need at least one provider (Anthropic recommended).",
-      "reachable": "reachable",
-      "unreachable": "unreachable",
-      "recommended": "recommended",
-      "noneTitle": "Vorratsdatenspeicher is an AI-native app.",
-      "noneBody": "Without AI, VDS won't work properly. You can finish setup now and add an AI API key later. Top up:",
-      "noOcr": "For receipt recognition (OCR) you need Anthropic, or — self-hosted — Ollama. DeepSeek and OpenAI can't do OCR in VDS.",
-      "noneForModels": "First add a reachable AI provider in the previous step.",
-      "taskNoProvider": "No OCR provider (Anthropic/Ollama) reachable."
+      "title": "Artificial intelligence",
+      "body": "VDS reads your receipts with AI and classifies your products. Just pick your provider — VDS sets up the rest for you.",
+      "pickQuestion": "Do you use ChatGPT, Claude or Ollama?",
+      "localSub": "local",
+      "keyLabel": "{{name}} API key",
+      "keyHint": "You'll find the API key in your {{name}} account. VDS then automatically picks the right model for every task.",
+      "ollamaUrl": "Ollama address (URL)",
+      "ocrModel": "Model for image recognition (reading receipts)",
+      "kiModel": "Model for artificial intelligence (everything else)",
+      "save": "Save",
+      "saved": "Saved",
+      "checking": "checking…",
+      "reachable": "Connection successful",
+      "unreachable": "not reachable"
     },
     "household": {
       "title": "Your household",
@@ -1287,11 +1291,6 @@
         "kreditkarte": "Credit card",
         "paypal": "PayPal"
       }
-    },
-    "models": {
-      "title": "AI models per task",
-      "body": "Fine-tuning: which model for which task. The default is usually fine — local tasks use Ollama, demanding ones use Claude. Changeable anytime in Admin.",
-      "nlanalytics": "Analytics assistant"
     },
     "categories": {
       "title": "Category detail level",

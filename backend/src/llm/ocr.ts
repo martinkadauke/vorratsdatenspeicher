@@ -103,10 +103,33 @@ async function ollamaOcrChat(model: string, system: string, userText: string, im
   return { text: data.message?.content ?? '', input: data.prompt_eval_count ?? 0, output: data.eval_count ?? 0 };
 }
 
+/** Vision/text OCR via OpenAI's Chat Completions API. `content` is a plain string (text OCR)
+ *  or the multimodal array (image OCR: [{type:'text'},{type:'image_url'}]). Forces JSON output;
+ *  the VISION_/TEXT_SYSTEM prompts say "JSON" so json_object mode is satisfied. */
+async function openaiOcrChat(model: string, system: string, content: string | unknown[]): Promise<{ text: string; input: number; output: number }> {
+  const url = (await getConfig('openai.url')) || 'https://api.openai.com';
+  const apiKey = await getConfig('openai.api_key');
+  if (!apiKey) throw new Error('openai.api_key not configured');
+  const res = await fetch(`${url}/v1/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model,
+      temperature: 0.1,
+      response_format: { type: 'json_object' },
+      messages: [{ role: 'system', content: system }, { role: 'user', content }],
+    }),
+    signal: AbortSignal.timeout(180_000),
+  });
+  if (!res.ok) throw new Error(`OpenAI HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  const data = await res.json() as { choices?: { message?: { content?: string } }[]; usage?: { prompt_tokens?: number; completion_tokens?: number } };
+  return { text: data.choices?.[0]?.message?.content ?? '', input: data.usage?.prompt_tokens ?? 0, output: data.usage?.completion_tokens ?? 0 };
+}
+
 /** Runs vision OCR on an image. Source can be a local filesystem path
  *  (preferred — fastest, no roundtrip) or an absolute URL. The provider
- *  and model are taken from the `ai.ocr.*` config — Anthropic (images + PDF)
- *  or Ollama (self-hosted, images only). */
+ *  and model are taken from the `ai.ocr.*` config — Anthropic (images + PDF),
+ *  OpenAI (images only) or Ollama (self-hosted, images only). */
 export async function ocrFromImage(source: string, hint?: string | null): Promise<OcrResult> {
   const provider = await getConfig('ai.ocr.provider');
   const model = await getConfig('ai.ocr.model');
@@ -137,8 +160,22 @@ export async function ocrFromImage(source: string, hint?: string | null): Promis
     return parsed;
   }
 
+  // OpenAI vision (images only — the Chat Completions API can't read PDFs natively).
+  if (provider === 'openai') {
+    if (isPdf) throw new Error('OpenAI-OCR unterstützt nur Bilder (JPEG/PNG), keine PDFs — für PDF-Rechnungen bitte Anthropic (Vision) als OCR-Provider wählen.');
+    const mt = sniffMediaType(buf) ?? (/\.png$/i.test(source) ? 'image/png' : 'image/jpeg');
+    const { text, input, output } = await openaiOcrChat(model, VISION_SYSTEM, [
+      { type: 'text', text: 'Extrahiere die Bon-Daten als JSON.' + userHint },
+      { type: 'image_url', image_url: { url: `data:${mt};base64,${b64}` } },
+    ]);
+    const parsed = parseLlmJson<OcrResult>(text);
+    parsed.usage = { input_tokens: input, output_tokens: output };
+    await recordUsage('ocr', 'openai', model, input, output);
+    return parsed;
+  }
+
   if (provider !== 'anthropic') {
-    throw new Error(`OCR-Provider "${provider}" wird nicht unterstützt — nur "anthropic" (Bilder + PDF) oder "ollama" (nur Bilder).`);
+    throw new Error(`OCR-Provider "${provider}" wird nicht unterstützt — nur "anthropic" (Bilder + PDF), "openai" (nur Bilder) oder "ollama" (nur Bilder).`);
   }
   const url = await getConfig('anthropic.url');
   const apiKey = await getConfig('anthropic.api_key');
@@ -234,8 +271,15 @@ export async function ocrFromText(text: string): Promise<OcrResult> {
     await recordUsage('ocr', 'ollama', model, input, output);
     return parsed;
   }
+  if (provider === 'openai') {
+    const { text: out, input, output } = await openaiOcrChat(model, TEXT_SYSTEM, text.slice(0, 24000));
+    const parsed = parseLlmJson<OcrResult>(out);
+    parsed.usage = { input_tokens: input, output_tokens: output };
+    await recordUsage('ocr', 'openai', model, input, output);
+    return parsed;
+  }
   if (provider !== 'anthropic') {
-    throw new Error(`OCR-Provider "${provider}" wird nicht unterstützt — nur "anthropic" oder "ollama".`);
+    throw new Error(`OCR-Provider "${provider}" wird nicht unterstützt — nur "anthropic", "openai" oder "ollama".`);
   }
   const url = await getConfig('anthropic.url');
   const apiKey = await getConfig('anthropic.api_key');
@@ -415,7 +459,19 @@ export async function extractPayslip(buf: Buffer): Promise<PayslipResult> {
     await recordUsage('ocr', 'ollama', model, input, output);
     return parsed;
   }
-  if (provider !== 'anthropic') throw new Error(`OCR-Provider "${provider}" wird nicht unterstützt — nur "anthropic" oder "ollama" (nur Bilder).`);
+  if (provider === 'openai') {
+    if (isPdf) throw new Error('OpenAI-OCR unterstützt nur Bilder (JPEG/PNG), keine PDFs — für PDF-Abrechnungen bitte Anthropic (Vision) wählen.');
+    const mt = sniffMediaType(buf) ?? 'image/jpeg';
+    const { text, input, output } = await openaiOcrChat(model, PAYSLIP_SYSTEM, [
+      { type: 'text', text: 'Extrahiere die Gehaltsdaten als JSON.' },
+      { type: 'image_url', image_url: { url: `data:${mt};base64,${b64}` } },
+    ]);
+    const parsed = parseLlmJson<PayslipResult>(text);
+    parsed.usage = { input_tokens: input, output_tokens: output };
+    await recordUsage('ocr', 'openai', model, input, output);
+    return parsed;
+  }
+  if (provider !== 'anthropic') throw new Error(`OCR-Provider "${provider}" wird nicht unterstützt — nur "anthropic", "openai" (nur Bilder) oder "ollama" (nur Bilder).`);
   const url = await getConfig('anthropic.url');
   const apiKey = await getConfig('anthropic.api_key');
   if (!apiKey) throw new Error('anthropic.api_key not configured');

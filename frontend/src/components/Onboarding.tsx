@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { useNavigate } from 'react-router-dom';
-import { Sparkles, Bot, Cpu, Tags, Home, Users, Wallet, Mail, Inbox, PartyPopper, Languages, Plus, Trash2, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
+import { Sparkles, Bot, Tags, Home, Users, Wallet, Mail, Inbox, PartyPopper, Languages, Plus, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { api } from '../api/client';
 import { Button, Input, Select, Label, Switch, FeedbackIconButton } from './ui';
 import { EmojiSelect } from './EmojiPicker';
@@ -17,18 +17,12 @@ import { cn } from '../lib/utils';
 interface Konto { id: number; name: string; is_shared: boolean; account_type: string }
 const KONTO_TYPES = ['giro', 'kreditkarte', 'paypal', 'bargeld', 'krypto', 'depot'];
 const DETAILS = ['grob', 'mittel', 'fein'];
-const PROVIDERS = ['anthropic', 'openai', 'deepseek', 'ollama'];   // OCR-capable (anthropic/openai) first
-const OCR_PROVIDERS = ['anthropic', 'ollama'];                     // VDS OCR backend (llm/ocr.ts) supports ONLY these — NOT openai/deepseek
-const aiKeyOf = (p: string) => (p === 'ollama' ? 'ollama.url' : `${p}.api_key`);
-const AI_TASKS: [string, string][] = [
-  ['ocr', 'admin.taskOcr'],
-  ['categories_chat', 'admin.taskCategoriesChat'],
-  ['recategorize', 'admin.taskRecategorize'],
-  ['churner_stage1', 'admin.taskChurnerStage1'],
-  ['churner_stage2', 'admin.taskChurnerStage2'],
-  ['model_review', 'admin.taskModelReview'],
-  ['nlanalytics', 'onboarding.models.nlanalytics'],
-];
+const AI_PROVIDERS = [
+  { id: 'openai', label: 'ChatGPT', sub: 'OpenAI', cfgKey: 'openai.api_key' },
+  { id: 'anthropic', label: 'Claude', sub: 'Anthropic', cfgKey: 'anthropic.api_key' },
+  { id: 'ollama', label: 'Ollama', sub: 'lokal', cfgKey: 'ollama.url' },
+] as const;
+type AiProviderId = typeof AI_PROVIDERS[number]['id'];
 
 // Full wizard = the single-household admin (off-demo) OR the demo platform super-admin
 // (operator): sets up AI, mail, accounts, …
@@ -36,7 +30,6 @@ const FULL_STEPS = [
   { icon: Languages, emoji: '🌍', key: 'lang' },
   { icon: Sparkles, emoji: '👋', key: 'welcome' },
   { icon: Bot, emoji: '🤖', key: 'ai' },
-  { icon: Cpu, emoji: '🧠', key: 'models' },
   { icon: Tags, emoji: '🗂️', key: 'categories' },
   { icon: Home, emoji: '🏡', key: 'household' },
   { icon: Users, emoji: '👨‍👩‍👧‍👦', key: 'family' },
@@ -76,33 +69,11 @@ export function Onboarding() {
     mutationFn: (b: { key: string; value: unknown }) => api(`/api/config/${b.key}`, { method: 'PUT', body: { value: b.value } }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['config'] });
-      for (const p of ['ollama', 'deepseek', 'anthropic', 'openai', 'searxng']) void qc.invalidateQueries({ queryKey: [`${p}-health`] });
+      for (const p of ['ollama', 'deepseek', 'anthropic', 'openai']) void qc.invalidateQueries({ queryKey: [`${p}-health`] });
       void qc.invalidateQueries({ queryKey: ['ai-models'] });
     },
     onError: (e: Error) => toast(e.message, 'error'),
   });
-  // FB-09: which AI providers are usable (a key/URL is set AND the health check is green) —
-  // gates the model-per-task step. configuredAi (a key/URL is set) drives the setup warnings.
-  const aiHealth = useQueries({
-    queries: PROVIDERS.map(p => ({
-      queryKey: [`${p}-health`],
-      queryFn: () => api<{ ok: boolean }>(`/api/ai/health?provider=${p}`),
-      enabled: show, retry: false, refetchInterval: 60_000,
-    })),
-  });
-  const configuredAi = PROVIDERS.filter(p => !!String(config?.[aiKeyOf(p)] ?? '').trim());
-  const usableAi = PROVIDERS.filter((p, i) => configuredAi.includes(p) && aiHealth[i]?.data?.ok === true);
-  const hasOcrConfigured = OCR_PROVIDERS.some(p => configuredAi.includes(p));
-  const setTaskAi = useMutation({
-    mutationFn: (b: { task: string; provider: string; model: string }) => api(`/api/ai/tasks/${b.task}`, { method: 'PUT', body: { provider: b.provider, model: b.model } }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['config'] }),
-    onError: (e: Error) => toast(e.message, 'error'),
-  });
-  const saveTask = (task: string, provider: string, model: string) => {
-    if (!model) return;   // never save a task without a model (backend rejects it)
-    if (task === 'nlanalytics') { setCfg.mutate({ key: 'ai.nlanalytics.provider', value: provider }); setCfg.mutate({ key: 'ai.nlanalytics.model', value: model }); }
-    else setTaskAi.mutate({ task, provider, model });
-  };
 
   const { data: family } = useQuery({ queryKey: ['family'], queryFn: () => api<FamilyMember[]>('/api/family'), enabled: show });
   const { data: konten } = useQuery({ queryKey: ['konten-admin'], queryFn: () => api<Konto[]>('/api/admin/konten'), enabled: show });
@@ -230,44 +201,7 @@ export function Onboarding() {
             </div>
           )}
 
-          {cur.key === 'ai' && (
-            <div className="flex flex-col gap-3">
-              <ProviderRow provider="anthropic" cfgKey="anthropic.api_key" label="Anthropic — API-Key" recommended password placeholder="sk-ant-…" config={config} setCfg={setCfg} t={t} />
-              <ProviderRow provider="openai" cfgKey="openai.api_key" label="OpenAI — API-Key" recommended password placeholder="sk-…" config={config} setCfg={setCfg} t={t} />
-              <ProviderRow provider="deepseek" cfgKey="deepseek.api_key" label="DeepSeek — API-Key" password placeholder="sk-…" config={config} setCfg={setCfg} t={t} />
-              <ProviderRow provider="ollama" cfgKey="ollama.url" label="Ollama — URL" placeholder="http://…:11434" config={config} setCfg={setCfg} t={t} />
-              <ProviderRow provider="searxng" cfgKey="searxng.url" label="SearXNG — URL" placeholder="http://…:8089" fallback={demo ? undefined : 'http://searxng:8080'} config={config} setCfg={setCfg} t={t} />
-              {config && configuredAi.length === 0 && (
-                <div className="rounded-lg bg-amber-50 p-3 text-xs leading-relaxed text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-                  <p className="font-semibold">{t('onboarding.ai.noneTitle')}</p>
-                  <p className="mt-1">{t('onboarding.ai.noneBody')}</p>
-                  <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 font-medium">
-                    <a href="https://console.anthropic.com/settings/billing" target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 underline">Anthropic <ExternalLink size={11} /></a>
-                    <a href="https://platform.openai.com/settings/organization/billing" target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 underline">OpenAI <ExternalLink size={11} /></a>
-                    <a href="https://platform.deepseek.com/top_up" target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 underline">DeepSeek <ExternalLink size={11} /></a>
-                  </div>
-                </div>
-              )}
-              {config && configuredAi.length > 0 && !hasOcrConfigured && (
-                <p className="rounded-lg bg-amber-50 p-2.5 text-xs leading-relaxed text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">{t('onboarding.ai.noOcr')}</p>
-              )}
-            </div>
-          )}
-
-          {cur.key === 'models' && (
-            <div className="flex flex-col gap-2">
-              {usableAi.length === 0 ? (
-                <p className="rounded-lg bg-amber-50 p-2.5 text-xs leading-relaxed text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">{t('onboarding.ai.noneForModels')}</p>
-              ) : AI_TASKS.map(([task, labelKey]) => (
-                <TaskModelRow key={task} task={task} label={t(labelKey)}
-                  cfgProvider={(config?.[`ai.${task}.provider`] as string) ?? ''}
-                  cfgModel={(config?.[`ai.${task}.model`] as string) ?? ''}
-                  visionOnly={task === 'ocr'}
-                  usable={usableAi}
-                  saveTask={saveTask} />
-              ))}
-            </div>
-          )}
+          {cur.key === 'ai' && <AiSetup config={config} t={t} />}
 
           {cur.key === 'categories' && (
             <div className="flex flex-col gap-2">
@@ -381,91 +315,117 @@ export function Onboarding() {
   );
 }
 
-/** A provider credential field with a live green/red reachability indicator + colored border. */
-function ProviderRow({ provider, cfgKey, label, config, setCfg, password, placeholder, fallback, recommended, t }: {
-  provider: string; cfgKey: string; label: string; config: Record<string, unknown> | undefined;
-  setCfg: { mutate: (b: { key: string; value: unknown }) => void }; password?: boolean; placeholder?: string; fallback?: string; recommended?: boolean; t: TFunction;
-}) {
-  const { data, isLoading } = useQuery({
-    queryKey: [`${provider}-health`],
-    queryFn: () => provider === 'searxng' ? api<{ ok: boolean; error?: string }>('/api/searxng/health') : api<{ ok: boolean; error?: string }>(`/api/ai/health?provider=${provider}`),
+/** Onboarding one-click AI setup (father-simplification, FB-01): pick ONE provider —
+ *  ChatGPT / Claude / Ollama — and enter its credential inline in the SAME step (no card
+ *  switch). OpenAI + Anthropic auto-pick a good model for every task (text AND vision/OCR),
+ *  so there is no second "models" step; Ollama additionally asks for the image-recognition
+ *  model + the model for everything else. Saving points ALL tasks at that provider via
+ *  /api/onboarding/ai-quickset, then re-checks the provider's health so the green
+ *  "Verbindung erfolgreich" appears immediately — no click in/out needed. DeepSeek +
+ *  per-task mix-and-match live in the admin area only. */
+function AiSetup({ config, t }: { config: Record<string, unknown> | undefined; t: TFunction }) {
+  const qc = useQueryClient();
+  // Pre-select the provider whose credential is already stored (re-visiting the step).
+  const savedProvider = AI_PROVIDERS.find(p => String(config?.[p.cfgKey] ?? '').trim())?.id;
+  const [chosen, setChosen] = useState<AiProviderId | null>(savedProvider ?? null);
+  const [apiKey, setApiKey] = useState('');
+  const [url, setUrl] = useState(String(config?.['ollama.url'] ?? ''));
+  const [ocrModel, setOcrModel] = useState(String(config?.['ai.ocr.model'] ?? ''));
+  const [kiModel, setKiModel] = useState(String(config?.['ai.recategorize.model'] ?? ''));
+  const [saving, setSaving] = useState(false);
+  // Show the health line after a successful save (or immediately for an already-set provider).
+  const [confirmed, setConfirmed] = useState(!!savedProvider);
+
+  // The chosen provider's health drives the green check. It refetches after save (we invalidate
+  // its key), so the indicator flips to green as soon as the just-saved credential verifies —
+  // this is the fix for "grün greift nicht sofort".
+  const { data: health, isFetching: healthLoading } = useQuery({
+    queryKey: [`${chosen}-health`],
+    queryFn: () => api<{ ok: boolean; error?: string }>(`/api/ai/health?provider=${chosen}`),
+    enabled: !!chosen && confirmed,
     retry: false, refetchInterval: 60_000,
   });
-  const state = isLoading || !data ? 'unknown' : data.ok ? 'ok' : 'down';
-  const border = state === 'ok' ? '!border-emerald-400 focus:!border-emerald-500' : state === 'down' ? '!border-red-400 focus:!border-red-500' : '';
-  const tone = state === 'ok' ? 'text-emerald-600' : state === 'down' ? 'text-red-500' : 'text-zinc-400';
-  const dot = state === 'ok' ? 'bg-emerald-500' : state === 'down' ? 'bg-red-500' : 'bg-zinc-400';
-  const saved = String(config?.[cfgKey] ?? '');
-  return (
-    <div>
-      <div className="mb-1 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5">
-          <Label className="mb-0">{label}</Label>
-          {recommended && <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400">{t('onboarding.ai.recommended')}</span>}
-        </div>
-        <span title={data?.error ?? ''} className={cn('flex shrink-0 items-center gap-1 text-[11px] font-medium', tone)}>
-          <span className={cn('h-1.5 w-1.5 rounded-full', dot)} />
-          {state === 'ok' ? t('onboarding.ai.reachable') : state === 'down' ? t('onboarding.ai.unreachable') : '…'}
-        </span>
-      </div>
-      <Input type={password ? 'password' : 'text'} autoComplete="off" className={border}
-        defaultValue={saved || fallback || ''} placeholder={placeholder}
-        onBlur={e => e.target.value !== saved && setCfg.mutate({ key: cfgKey, value: e.target.value })} />
-    </div>
-  );
-}
 
-/** One AI task's provider + model selector. Provider/model are derived from config (props)
- *  each render, so an external config change reflects immediately. Model options are the
- *  selected provider's real models only (fetched live); OCR is locked to Anthropic + the
- *  vision-only list. Switching provider fetches the NEW provider's models and persists its
- *  first model atomically, so no cross-provider model (e.g. qwen under Anthropic) survives. */
-function TaskModelRow({ task, label, cfgProvider, cfgModel, saveTask, visionOnly, usable }: {
-  task: string; label: string; cfgProvider: string; cfgModel: string; saveTask: (task: string, provider: string, model: string) => void; visionOnly?: boolean; usable: string[];
-}) {
-  const { t } = useTranslation();
-  // Only providers that are configured AND reachable are offerable (FB-09); OCR excludes DeepSeek.
-  const choices = visionOnly ? usable.filter(p => OCR_PROVIDERS.includes(p)) : usable;
-  const provider = cfgProvider || choices[0] || (visionOnly ? 'anthropic' : 'ollama');
-  const model = cfgModel;
-  const { data, isFetching } = useQuery({
-    queryKey: ['ai-models', provider, visionOnly ? 'vision' : 'all'],
-    queryFn: () => api<{ models: string[] }>(`/api/ai/models?provider=${provider}${visionOnly ? '&vision=1' : ''}`).then(r => r.models),
-    retry: false, staleTime: 60_000,
-  });
-  const models = data ?? [];
-  // Switching provider must not keep the old provider's model: fetch the new provider's
-  // list and persist its first model in one write (fall back to the current model only if
-  // the new provider serves none).
-  const onProvider = async (p: string) => {
+  const pick = (id: AiProviderId) => { setChosen(id); setConfirmed(false); setApiKey(''); };
+  const canSave = chosen === 'ollama'
+    ? !!(url.trim() && ocrModel.trim() && kiModel.trim())
+    : !!apiKey.trim();
+
+  const save = async () => {
+    if (!chosen || !canSave) return;
+    setSaving(true);
     try {
-      const list = await api<{ models: string[] }>(`/api/ai/models?provider=${p}${visionOnly ? '&vision=1' : ''}`).then(r => r.models);
-      saveTask(task, p, list[0] ?? model);
-    } catch { saveTask(task, p, model); }
+      const body = chosen === 'ollama'
+        ? { provider: 'ollama', url: url.trim(), ocr_model: ocrModel.trim(), ki_model: kiModel.trim() }
+        : { provider: chosen, api_key: apiKey.trim() };
+      await api('/api/onboarding/ai-quickset', { method: 'POST', body });
+      setConfirmed(true);
+      await qc.invalidateQueries({ queryKey: ['config'] });
+      await qc.invalidateQueries({ queryKey: [`${chosen}-health`] });
+      toast(t('onboarding.ai.saved'), 'success');
+    } catch (e) {
+      toast((e as Error).message || t('common.error'), 'error');
+    } finally { setSaving(false); }
   };
-  const onModel = (m: string) => saveTask(task, provider, m);
-  const opts = model && !models.includes(model) ? [model, ...models] : models;   // keep the current/legacy model visible + selectable
-  if (!choices.length) return (
-    <div className="flex items-center gap-2">
-      <span className="w-28 shrink-0 break-words text-xs font-medium leading-tight text-zinc-600 dark:text-zinc-300" title={label}>{label}</span>
-      <span className="flex-1 text-xs text-amber-600 dark:text-amber-400">{t('onboarding.ai.taskNoProvider')}</span>
-    </div>
-  );
+
   return (
-    <div className="flex items-center gap-2">
-      <span className="w-28 shrink-0 break-words text-xs font-medium leading-tight text-zinc-600 dark:text-zinc-300" title={label}>{label}</span>
-      <Select className="w-24 shrink-0" value={provider} onChange={e => onProvider(e.target.value)}>
-        {choices.map(p => <option key={p} value={p}>{p}</option>)}
-      </Select>
-      {isFetching ? <Input className="min-w-0 flex-1" value="…" disabled />
-        : opts.length ? (
-          <Select className="min-w-0 flex-1" value={model} onChange={e => onModel(e.target.value)}>
-            {!model && <option value="">—</option>}
-            {opts.map(m => <option key={m} value={m}>{m}</option>)}
-          </Select>
-        ) : (
-          <Input className="min-w-0 flex-1" defaultValue={model} placeholder="Modell" onBlur={e => e.target.value !== model && onModel(e.target.value)} />
-        )}
+    <div className="flex flex-col gap-4">
+      <p className="text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">{t('onboarding.ai.pickQuestion')}</p>
+      <div className="grid grid-cols-3 gap-2">
+        {AI_PROVIDERS.map(p => (
+          <button key={p.id} type="button" onClick={() => pick(p.id)}
+            className={cn('flex flex-col items-center gap-0.5 rounded-xl border-2 px-2 py-3 text-center transition-colors',
+              chosen === p.id
+                ? 'border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200'
+                : 'border-zinc-200 text-zinc-700 hover:border-zinc-300 dark:border-zinc-700 dark:text-zinc-200')}>
+            <span className="text-sm font-semibold">{p.label}</span>
+            <span className="text-[10px] font-normal text-zinc-400">{p.id === 'ollama' ? t('onboarding.ai.localSub') : p.sub}</span>
+          </button>
+        ))}
+      </div>
+
+      {chosen && chosen !== 'ollama' && (
+        <div className="flex flex-col gap-1.5">
+          <Label className="mb-0">{t('onboarding.ai.keyLabel', { name: chosen === 'openai' ? 'ChatGPT' : 'Claude' })}</Label>
+          <Input type="password" autoComplete="off" placeholder={chosen === 'openai' ? 'sk-…' : 'sk-ant-…'}
+            value={apiKey} onChange={e => { setApiKey(e.target.value); setConfirmed(false); }} />
+          <p className="text-[11px] leading-relaxed text-zinc-400">{t('onboarding.ai.keyHint', { name: chosen === 'openai' ? 'OpenAI' : 'Anthropic' })}</p>
+        </div>
+      )}
+
+      {chosen === 'ollama' && (
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1">
+            <Label className="mb-0">{t('onboarding.ai.ollamaUrl')}</Label>
+            <Input type="text" autoComplete="off" placeholder="http://…:11434" value={url}
+              onChange={e => { setUrl(e.target.value); setConfirmed(false); }} />
+          </div>
+          <div className="flex flex-col gap-1">
+            <Label className="mb-0">{t('onboarding.ai.ocrModel')}</Label>
+            <Input type="text" autoComplete="off" placeholder="z. B. mistral-small3.2" value={ocrModel}
+              onChange={e => { setOcrModel(e.target.value); setConfirmed(false); }} />
+          </div>
+          <div className="flex flex-col gap-1">
+            <Label className="mb-0">{t('onboarding.ai.kiModel')}</Label>
+            <Input type="text" autoComplete="off" placeholder="z. B. qwen2.5:14b" value={kiModel}
+              onChange={e => { setKiModel(e.target.value); setConfirmed(false); }} />
+          </div>
+        </div>
+      )}
+
+      {chosen && (
+        <div className="flex flex-wrap items-center gap-3">
+          <Button type="button" onClick={save} disabled={!canSave || saving}>{saving ? '…' : t('onboarding.ai.save')}</Button>
+          {confirmed && (
+            <span title={health?.error ?? ''} className={cn('flex items-center gap-1.5 text-xs font-medium',
+              healthLoading || !health ? 'text-zinc-400' : health.ok ? 'text-emerald-600' : 'text-red-500')}>
+              <span className={cn('h-1.5 w-1.5 rounded-full',
+                healthLoading || !health ? 'bg-zinc-400' : health.ok ? 'bg-emerald-500' : 'bg-red-500')} />
+              {healthLoading || !health ? t('onboarding.ai.checking') : health.ok ? t('onboarding.ai.reachable') : (health.error || t('onboarding.ai.unreachable'))}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

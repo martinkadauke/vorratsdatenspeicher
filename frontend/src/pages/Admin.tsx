@@ -368,7 +368,7 @@ function TaskRow({ task, taskLabel, taskDesc, config }: {
   config: Record<string, unknown>;
 }) {
   const qc = useQueryClient();
-  // OCR runs vision → only the vision-capable providers (Anthropic + Ollama) are offered, and the model list is vision-only.
+  // OCR runs vision → only the vision-capable providers (Anthropic + OpenAI + Ollama) are offered, and the model list is vision-only.
   const visionOnly = task === 'ocr';
   // Derive from config each render so external config changes (e.g. model-review Apply) reflect immediately.
   const provider = (config[`ai.${task}.provider`] ?? (visionOnly ? 'anthropic' : 'ollama')) as Provider;
@@ -410,6 +410,7 @@ function TaskRow({ task, taskLabel, taskDesc, config }: {
           {visionOnly ? (
             <>
               <option value="anthropic">Anthropic</option>
+              <option value="openai">OpenAI</option>
               <option value="ollama">Ollama</option>
             </>
           ) : (
