@@ -27,7 +27,8 @@ export function Coach() {
   // Stage B: A dismissed + Prüfen visited + ≥1 Artikelname set + a couple of navigations
   // (the nav grace stops it popping the instant an article name is confirmed).
   if (done('A') && !done('B') && !soft('B')
-      && coach.events.pruefen_visited && coach.milestones.artikelname_set && navCount >= 2) {
+      && coach.events.pruefen_visited && coach.milestones.artikelname_set && navCount >= 2
+      && phoneInstallRelevant()) {
     return <StageB onDone={() => dismiss.mutate('B')} onLater={() => snooze('B')} />;
   }
   // Stage C: right after B is dismissed, and only where the browser can actually do push
@@ -38,6 +39,22 @@ export function Coach() {
   return null;
 }
 
+/** Where the "put VDS on your phone" card makes sense at all.
+ *
+ *  ⚠️ It used to appear on the desktop, where its very first instruction — open http://127.0.0.1:<port>
+ *  on your phone — names an address reachable from exactly one machine, and where "add to home
+ *  screen" is not a thing. And it kept appearing after the PWA was installed, i.e. to someone who
+ *  had already done it. So: phones only, and only while the app is still running in a browser tab.
+ *  Not build-specific — a Docker user on a laptop was being shown it too. */
+function phoneInstallRelevant(): boolean {
+  if (typeof window === 'undefined') return false;
+  const standalone = window.matchMedia?.('(display-mode: standalone)').matches
+    || (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
+  if (standalone) return false;                                   // already installed
+  const coarse = window.matchMedia?.('(pointer: coarse)').matches; // a touch device…
+  return !!coarse && window.innerWidth <= 900;                    // …that is phone-sized
+}
+
 function StageB({ onDone, onLater }: { onDone: () => void; onLater: () => void }) {
   const { t } = useTranslation();
   const { user, refreshUser } = useAuth();
@@ -45,6 +62,7 @@ function StageB({ onDone, onLater }: { onDone: () => void; onLater: () => void }
   const [emailInput, setEmailInput] = useState('');
   const [savingEmail, setSavingEmail] = useState(false);
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const secure = typeof window !== 'undefined' && window.location.protocol === 'https:';
 
   // Send the guide. The endpoint reports *why* it can't (no_email / no_smtp) so we can guide
   // the user to fix it inline instead of a dead-end error.
@@ -90,7 +108,10 @@ function StageB({ onDone, onLater }: { onDone: () => void; onLater: () => void }
         <ol className="list-decimal space-y-1.5 pl-5">
           <li>{t('coach.b.step1')} <code className="break-all rounded bg-zinc-100 px-1 text-xs dark:bg-zinc-800">{origin}</code></li>
           <li>{t('coach.b.step2i')}<br />{t('coach.b.step2a')}</li>
-          <li>{t('coach.b.step3')}</li>
+          {/* Only when this instance is NOT already reachable over HTTPS. Through the desktop
+              build's tunnel (or any self-hoster with a certificate) telling the user to go set up
+              Caddy and a VPS is advice for a problem they no longer have. */}
+          {!secure && <li>{t('coach.b.step3')}</li>}
         </ol>
 
         {phase === 'sent' ? (
@@ -108,7 +129,7 @@ function StageB({ onDone, onLater }: { onDone: () => void; onLater: () => void }
           <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
             {user?.is_admin ? t('coach.b.needSmtpAdmin') : t('coach.b.needSmtpUser')}
           </p>
-        ) : (
+        ) : secure ? null : (
           <Button variant="secondary" onClick={send} disabled={phase === 'sending'} className="self-start">
             {t('coach.b.mailBtn')}
           </Button>
