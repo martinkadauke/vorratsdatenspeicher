@@ -1,28 +1,48 @@
-// One-off live test of Option C: boot a real VDS backend, then run the compiled tsnet sidecar
-// against it. The sidecar prints VDS_AUTH_URL (open + log in with Google), then VDS_PUBLIC_URL
-// (the https://…ts.net address) + VDS_FUNNEL=up once Funnel serves. Not shipped — just proves the
-// Tailscale login + Funnel end-to-end before we wire it into the window.
+// Live test of the "Handy verbinden" path WITHOUT Electron: serve a marker page on a local port,
+// run the shipped tunnel manager against the real sidecar, and then fetch the resulting public
+// https://…ts.net URL from the outside. If the marker comes back, a phone scanning the QR would
+// reach this machine — which is the only thing that actually proves the feature.
+//
+// Uses the existing tsnet-state (a completed login), so no auth window is needed. Not shipped.
+//
+//   node scripts/tunnel-test.mjs
 import path from 'node:path';
+import http from 'node:http';
 import { fileURLToPath } from 'node:url';
-import { spawn } from 'node:child_process';
-import { boot } from '../boot.mjs';
+import { startTunnel, sidecarPath, hasTunnelState } from '../tunnel.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const backendEntry = path.resolve(__dirname, '..', '..', 'backend', 'dist', 'index.js');
-const dataDir = path.resolve(__dirname, '..', '.smoke-data');                         // gitignored throwaway DB
-const sidecar = path.resolve(__dirname, '..', 'tsnet-sidecar', 'Vorratsdatenspeicher Verbindung.exe');
-const tsnetDir = path.resolve(__dirname, '..', 'tsnet-sidecar', 'tsnet-state');       // gitignored; persists login
+const desktopRoot = path.resolve(__dirname, '..');
+const tsnetDir = path.resolve(desktopRoot, 'tsnet-sidecar', 'tsnet-state');   // gitignored; persists login
+const MARKER = 'VDS-TUNNEL-OK';
 
-console.log('[test] booting VDS backend (no boot-tunnel; the sidecar is the tunnel under test)…');
-const stack = await boot({ dataDir, backendEntry, tunnel: false });
-console.log('[test] VDS backend on port', stack.port);
+const server = http.createServer((_req, res) => { res.writeHead(200, { 'content-type': 'text/plain' }); res.end(MARKER); });
+await new Promise(r => server.listen(0, '127.0.0.1', r));
+const port = server.address().port;
+console.log(`[test] marker server on 127.0.0.1:${port} · existing login: ${hasTunnelState(tsnetDir)}`);
 
-console.log('[test] starting tsnet sidecar → watch for VDS_AUTH_URL …');
-const sc = spawn(sidecar, [], {
-  env: { ...process.env, VDS_LOCAL_PORT: String(stack.port), TSNET_DIR: tsnetDir, TS_HOSTNAME: 'vorratsdatenspeicher' },
-  stdio: 'inherit',
+const bin = sidecarPath({ resourcesPath: null, devRoot: desktopRoot });
+console.log(`[test] sidecar: ${bin ?? 'NOT FOUND'}`);
+
+let done = false;
+const tunnel = startTunnel({
+  localPort: port, stateDir: tsnetDir, binPath: bin, log: m => console.log(`[log] ${m}`),
+  onEvent: async (e) => {
+    console.log('[event]', JSON.stringify(e));
+    if (e.state !== 'up' || done) return;
+    done = true;
+    try {
+      const res = await fetch(e.url, { redirect: 'follow' });
+      const body = (await res.text()).trim();
+      console.log(`[test] GET ${e.url} → ${res.status} · body=${JSON.stringify(body.slice(0, 40))}`);
+      console.log(body === MARKER ? '[test] ✅ PUBLIC URL REACHES THIS MACHINE' : '[test] ❌ wrong body');
+    } catch (err) {
+      console.log(`[test] ❌ public fetch failed: ${err?.message || err}`);
+    }
+    await tunnel.stop();
+    server.close();
+    process.exit(0);
+  },
 });
-sc.on('exit', c => console.log('[test] sidecar exited with', c));
 
-process.on('SIGINT', async () => { try { sc.kill(); } catch {} try { await stack.stop(); } catch {} process.exit(0); });
-await new Promise(() => {});   // stay alive
+setTimeout(async () => { console.log('[test] timeout'); await tunnel.stop(); server.close(); process.exit(1); }, 180_000);

@@ -1,64 +1,118 @@
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import { existsSync, readdirSync } from 'node:fs';
+import path from 'node:path';
 
-// Expose the local desktop instance to the internet via **Tailscale Funnel** — a stable
-// HTTPS `*.ts.net` URL with a real certificate. That's what makes remote phone access work
-// AND what unlocks PWA install + passkeys (both need a secure context). Tailscale terminates
-// TLS on THIS machine and only relays encrypted bytes, so the developer never touches the
-// user's traffic (why Funnel beats a Cloudflare tunnel here). Requires a one-time, free
-// tailnet login on the admin's machine (guided in the setup wizard).
+// Expose the local desktop instance to the internet via **Tailscale Funnel** — a stable HTTPS
+// `*.ts.net` URL with a real certificate. That is what makes remote phone access work AND what
+// unlocks PWA install + passkeys (both need a secure context). TLS terminates on THIS machine and
+// Tailscale only relays ciphertext, so the developer never touches the user's traffic (why Funnel
+// beats a Cloudflare tunnel here).
 //
-// Everything degrades gracefully: no tailscale binary, or not logged in → returns null and
-// the desktop app still runs locally.
+// ⚠️ This drives the BUNDLED tsnet sidecar, not a system `tailscale` install. That was the whole
+// point of the embedded-node route: one installer, no second setup, no OS admin prompt. An earlier
+// version of this file shelled out to the tailscale CLI — it required the user to install and
+// configure Tailscale first, which is exactly the Docker-shaped friction the desktop build exists
+// to remove.
+//
+// Everything degrades gracefully: no sidecar binary, or the user never logs in → the app runs
+// local-only and `reason` says why.
 
-const WIN_PATHS = ['tailscale', 'C:\\Program Files\\Tailscale\\tailscale.exe'];
-const NIX_PATHS = ['tailscale', '/usr/bin/tailscale', '/usr/local/bin/tailscale',
-  '/Applications/Tailscale.app/Contents/MacOS/Tailscale'];
+/** The sidecar's user-visible name. It shows up in the Windows firewall prompt and in macOS's
+ *  "accept incoming connections" dialog, so it must read like the product, not like a binary. */
+const BIN_BASE = 'Vorratsdatenspeicher Verbindung';
+const BIN_NAME = process.platform === 'win32' ? `${BIN_BASE}.exe` : BIN_BASE;
 
-/** Locate the tailscale CLI, or null if it isn't installed. */
-export function findTailscale() {
-  for (const c of (process.platform === 'win32' ? WIN_PATHS : NIX_PATHS)) {
-    try { execFileSync(c, ['version'], { stdio: 'ignore' }); return c; } catch { /* next */ }
-  }
-  return null;
+/** Where the sidecar lives: next to the app in a packaged build, in its source dir in a dev run. */
+export function sidecarPath({ resourcesPath, devRoot }) {
+  const candidates = [
+    resourcesPath ? path.join(resourcesPath, 'tsnet', BIN_NAME) : null,
+    devRoot ? path.join(devRoot, 'tsnet-sidecar', 'bin', BIN_NAME) : null,   // where CI + `go build -o bin/` put it
+    devRoot ? path.join(devRoot, 'tsnet-sidecar', BIN_NAME) : null,          // a hand-built binary next to main.go
+  ].filter(Boolean);
+  return candidates.find(existsSync) || null;
 }
 
-/** The tailnet is up + logged in → return this node's MagicDNS host (no trailing dot), else null. */
-function funnelHost(bin) {
-  try {
-    const status = JSON.parse(execFileSync(bin, ['status', '--json'], { encoding: 'utf8' }));
-    if (status?.BackendState !== 'Running') return null;
-    const host = status?.Self?.DNSName?.replace(/\.$/, '');
-    return host || null;
-  } catch { return null; }
+/** Has this install ever completed a tailnet login? (state dir non-empty → yes.) Lets the shell
+ *  bring the tunnel back up by itself on later launches without ever prompting an unconnected
+ *  user — nobody should be asked to create a Tailscale account by merely opening the app. */
+export function hasTunnelState(stateDir) {
+  try { return readdirSync(stateDir).length > 0; } catch { return false; }
 }
 
 /**
- * Start Funnel for `localPort`. Returns { url, host, stop } on success, or null when Tailscale
- * is unavailable/not logged in (the caller then runs local-only).
+ * Start the tunnel. Returns immediately with a handle; progress arrives through `onEvent`:
+ *   { state: 'starting' }                       spawned, talking to Tailscale
+ *   { state: 'auth',    authUrl }               user must log in (shell opens this in-window)
+ *   { state: 'connecting', url }                logged in, node up, funnel not serving yet
+ *   { state: 'up',      url }                   reachable from the phone
+ *   { state: 'needs_funnel', url, detail, helpUrl }   tailnet has Funnel switched off
+ *   { state: 'error',   reason, detail }        binary missing / crashed
+ *
+ * @param {{ localPort:number, stateDir:string, binPath:string|null,
+ *           onEvent:(e:object)=>void, log?:(m:string)=>void }} opts
  */
-export async function startFunnel(localPort, opts = {}) {
-  const bin = opts.bin || findTailscale();
-  if (!bin) return { available: false, reason: 'not_installed', url: null, host: null, stop: async () => {} };
-  const host = funnelHost(bin);
-  if (!host) return { available: false, reason: 'not_logged_in', url: null, host: null, stop: async () => {} };
-
-  // `tailscale funnel --bg <port>` proxies https://<host>/ → 127.0.0.1:<port> in the background.
-  // CLI syntax has shifted across versions — validate on a real tailnet before shipping.
-  let proc = null;
-  try {
-    proc = spawn(bin, ['funnel', '--bg', String(localPort)], { stdio: 'ignore' });
-  } catch {
-    return { available: false, reason: 'funnel_start_failed', url: null, host, stop: async () => {} };
+export function startTunnel({ localPort, stateDir, binPath, onEvent, log = () => {} }) {
+  if (!binPath) {
+    onEvent({ state: 'error', reason: 'sidecar_missing', detail: BIN_NAME });
+    return { stop: async () => {} };
   }
 
+  let url = null;
+  let stopped = false;
+  const child = spawn(binPath, [], {
+    env: { ...process.env, VDS_LOCAL_PORT: String(localPort), TSNET_DIR: stateDir },
+    stdio: ['pipe', 'pipe', 'pipe'],   // stdin stays open on purpose: closing it tells the sidecar we died
+    windowsHide: true,
+  });
+  onEvent({ state: 'starting' });
+
+  // The sidecar's contract is one `KEY=value` line per event. Buffer partial reads — a 40-line
+  // Tailscale log burst arrives in arbitrary chunks and a split URL would be unopenable.
+  let buf = '';
+  child.stdout.on('data', (chunk) => {
+    buf += chunk.toString();
+    const lines = buf.split('\n');
+    buf = lines.pop() ?? '';
+    for (const line of lines) {
+      const i = line.indexOf('=');
+      if (i < 0) continue;
+      const key = line.slice(0, i).trim();
+      const val = line.slice(i + 1).trim();
+      if (key === 'VDS_AUTH_URL') onEvent({ state: 'auth', authUrl: val });
+      else if (key === 'VDS_PUBLIC_URL') { url = val; onEvent({ state: 'connecting', url }); }
+      else if (key === 'VDS_FUNNEL' && val === 'up') onEvent({ state: 'up', url });
+      else if (key === 'VDS_FUNNEL_ERR') {
+        onEvent({ state: 'needs_funnel', url, detail: val.slice(0, 300), helpUrl: funnelHelpUrl(val) });
+      }
+    }
+  });
+  // Not an event channel — but the only place a Go panic or a Tailscale complaint shows up, and
+  // "the tunnel silently did nothing" is the hardest thing to debug from a user's report.
+  child.stderr.on('data', (c) => log(`tunnel: ${c.toString().trim()}`));
+
+  child.on('exit', (code, signal) => {
+    if (stopped) return;
+    onEvent({ state: 'error', reason: 'sidecar_exited', detail: `code=${code} signal=${signal}` });
+  });
+  child.on('error', (e) => onEvent({ state: 'error', reason: 'sidecar_spawn_failed', detail: String(e?.message || e) }));
+
   return {
-    available: true,
-    reason: 'ok',
-    host,
-    url: `https://${host}`,
     async stop() {
-      try { execFileSync(bin, ['funnel', 'off'], { stdio: 'ignore' }); } catch { /* best effort */ }
-      try { proc?.kill(); } catch { /* already gone */ }
+      stopped = true;
+      // Closing stdin is the sidecar's own shutdown signal (it exits on EOF) and lets it take the
+      // node offline cleanly; the kill is the fallback for a wedged process.
+      try { child.stdin.end(); } catch { /* already gone */ }
+      await new Promise((r) => {
+        const t = setTimeout(() => { try { child.kill(); } catch { /* gone */ } r(); }, 3000);
+        child.once('exit', () => { clearTimeout(t); r(); });
+      });
     },
   };
+}
+
+/** Tailscale's own error text carries the admin-console URL that enables Funnel. Pull it out so
+ *  the UI can offer one link instead of asking the user to read a Go error. */
+function funnelHelpUrl(detail) {
+  const m = /https:\/\/login\.tailscale\.com\/[^\s"']+/.exec(detail || '');
+  return m ? m[0] : 'https://login.tailscale.com/admin/dns';
 }

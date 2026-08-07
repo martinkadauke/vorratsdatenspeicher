@@ -8,6 +8,28 @@
     "copyFailed": "Kopieren fehlgeschlagen",
     "mastodonPrompt": "Deine Mastodon-Instanz? (z. B. mastodon.social)"
   },
+  "phone": {
+    "title": "Handy verbinden",
+    "introBlurb": "Damit kannst du Kassenbons unterwegs mit dem Handy fotografieren und deine Liste im Laden dabeihaben — auch wenn Vorratsdatenspeicher hier auf dem Rechner läuft.",
+    "privacyBlurb": "Die Verbindung läuft verschlüsselt direkt zu diesem Rechner. Deine Belege liegen weiterhin nur hier — niemand sonst kann sie lesen, wir auch nicht.",
+    "connect": "Verbindung einrichten",
+    "starting": "Verbindung wird aufgebaut …",
+    "authWaiting": "Warte auf deine Anmeldung …",
+    "authBlurb": "Es hat sich ein Fenster geöffnet: melde dich dort einmalig an (Google, Microsoft, GitHub oder Apple). Das ist kostenlos und richtet die verschlüsselte Verbindung ein.",
+    "openInBrowser": "Stattdessen im Browser anmelden",
+    "cancel": "Abbrechen",
+    "scanBlurb": "Scanne den Code mit der Kamera deines Handys — die Adresse funktioniert von überall, nicht nur zu Hause.",
+    "pwaHint": "Tipp: Auf dem Handy im Browser-Menü „Zum Home-Bildschirm hinzufügen“ wählen. Dann sieht Vorratsdatenspeicher aus wie eine App und du kannst dich mit Fingerabdruck oder Gesicht anmelden.",
+    "disconnect": "Verbindung trennen",
+    "copied": "Adresse kopiert!",
+    "copyFailed": "Kopieren fehlgeschlagen",
+    "funnelBlurb": "Fast geschafft: In deinem Tailscale-Konto muss der öffentliche Zugriff („Funnel“) noch einmalig freigegeben werden.",
+    "funnelEnable": "Jetzt freigeben",
+    "funnelRetry": "Danach verbindet sich die App von selbst — dieses Fenster kann offen bleiben.",
+    "errorTitle": "Verbindung fehlgeschlagen",
+    "retry": "Nochmal versuchen",
+    "failed": "Das hat nicht geklappt"
+  },
   "nav": {
     "analytics": "Analytics",
     "receipts": "Belege",

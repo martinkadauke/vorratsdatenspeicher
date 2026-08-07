@@ -4,7 +4,6 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node
 import net from 'node:net';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { startFunnel } from './tunnel.mjs';
 
 /** Ask the OS for a free localhost port (avoids colliding with whatever else the user runs). */
 function freePort() {
@@ -99,8 +98,16 @@ export async function boot(opts) {
   // Created up front: the backend only checks existsSync and silently disables photo serving.
   const receiptsDir = path.join(dataDir, 'receipts');
   const updaterDir = path.join(dataDir, 'updater');
+  // The shell↔backend bridge. The backend cannot spawn a Tailscale node (and must not be able to),
+  // and the frontend is a plain web app with no Electron API — so "Handy verbinden" is a request
+  // FILE the shell watches, answered by a status FILE the backend reads back. Deliberately the same
+  // shape as the self-update marker: one mechanism, and the web UI stays identical in both channels.
+  const desktopDir = path.join(dataDir, 'desktop');
+  const tsnetDir = path.join(dataDir, 'tsnet');
   mkdirSync(receiptsDir, { recursive: true });
   mkdirSync(updaterDir, { recursive: true });
+  mkdirSync(desktopDir, { recursive: true });
+  mkdirSync(tsnetDir, { recursive: true });
   const env = {
     ...process.env,
     DATABASE_URL: `postgres://vds:vds@127.0.0.1:${pgPort}/vorratsdatenspeicher`,
@@ -122,6 +129,10 @@ export async function boot(opts) {
     // here and the Electron shell (main.mjs) picks it up. Same protocol as the Docker sidecar.
     SELF_UPDATE: '1',
     SELF_UPDATE_DIR: updaterDir,
+    // Presence of this var is also how the app knows it is the DESKTOP build (the Docker image
+    // never sets it) — it gates the "Handy verbinden" UI, which would be meaningless in a
+    // container that is already reachable over the network.
+    DESKTOP_DIR: desktopDir,
     // Serve the built SPA so the window shows the app, not just the API. In dev that's
     // frontend/dist; a packaged build points this at the bundled frontend.
     PUBLIC_DIR: opts.publicDir || path.resolve(backendRoot, '..', 'frontend', 'dist'),
@@ -131,21 +142,14 @@ export async function boot(opts) {
 
   const child = (forker ?? spawnNode)(backendEntry, env);
 
-  // Optional public exposure via Tailscale Funnel (stable HTTPS → remote phone + PWA + passkeys).
-  // Absent / not-logged-in → the app still runs locally; `tunnel.available` reports why.
-  const tunnel = opts.tunnel === false
-    ? { available: false, reason: 'disabled', url: null, host: null, stop: async () => {} }
-    : await startFunnel(appPort).catch(() => ({ available: false, reason: 'error', url: null, host: null, stop: async () => {} }));
-
   return {
     port: appPort,
     url: `http://127.0.0.1:${appPort}`,
     receiptsDir,
     updaterDir,          // the shell watches this for the in-app update request
-    tunnel,                       // { available, reason, url, host, stop }
-    publicUrl: tunnel.url,        // the HTTPS URL to encode in the connect-phone QR, or null
+    desktopDir,          // …and this for the connect-phone request; it writes tunnel status back
+    tsnetDir,            // the embedded Tailscale node's state (login persists across restarts)
     async stop() {
-      try { await tunnel.stop(); } catch { /* best effort */ }
       try { child.kill(); } catch { /* already gone */ }
       try { await pg.stop(); } catch { /* already stopped */ }
     },

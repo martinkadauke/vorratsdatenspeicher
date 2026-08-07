@@ -8,6 +8,28 @@
     "copyFailed": "Couldn't copy",
     "mastodonPrompt": "Your Mastodon instance? (e.g. mastodon.social)"
   },
+  "phone": {
+    "title": "Connect your phone",
+    "introBlurb": "Photograph receipts while you're out and carry your shopping list into the shop — even though Vorratsdatenspeicher runs here on this computer.",
+    "privacyBlurb": "The connection is encrypted end to end with this computer. Your receipts stay here and nobody else can read them — us included.",
+    "connect": "Set up the connection",
+    "starting": "Setting up the connection …",
+    "authWaiting": "Waiting for you to sign in …",
+    "authBlurb": "A window has opened: sign in there once (Google, Microsoft, GitHub or Apple). It's free and sets up the encrypted connection.",
+    "openInBrowser": "Sign in in the browser instead",
+    "cancel": "Cancel",
+    "scanBlurb": "Scan the code with your phone's camera — the address works from anywhere, not just at home.",
+    "pwaHint": "Tip: on your phone choose “Add to Home Screen” in the browser menu. Vorratsdatenspeicher then looks like an app and you can sign in with your fingerprint or face.",
+    "disconnect": "Disconnect",
+    "copied": "Address copied!",
+    "copyFailed": "Copying failed",
+    "funnelBlurb": "Almost there: public access (“Funnel”) still has to be switched on once in your Tailscale account.",
+    "funnelEnable": "Switch it on",
+    "funnelRetry": "After that the app connects by itself — you can leave this window open.",
+    "errorTitle": "Connection failed",
+    "retry": "Try again",
+    "failed": "That didn't work"
+  },
   "nav": {
     "analytics": "Analytics",
     "receipts": "Receipts",

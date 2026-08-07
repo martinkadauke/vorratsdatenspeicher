@@ -48,6 +48,13 @@ extraResources:
     to: backend/node_modules
   - from: ../frontend/dist
     to: frontend/dist
+  # The Tailscale tunnel sidecar ("Handy verbinden"). Built per-OS by CI into tsnet-sidecar/bin;
+  # the directory is committed (empty) because electron-builder aborts on a missing `from`. A local
+  # build without Go therefore still packages — the app then reports the tunnel as unavailable
+  # instead of failing to install.
+  - from: tsnet-sidecar/bin
+    to: tsnet
+    filter: ['**/*', '!.gitkeep']
 
 # Where electron-updater looks for new versions. Declaring it here is also what makes
 # electron-builder EMIT `latest.yml` / `latest-mac.yml` next to the installers — without those

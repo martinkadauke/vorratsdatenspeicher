@@ -114,6 +114,23 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      # "Handy verbinden": an embedded Tailscale node (tsnet) compiled into the installer, so the
+      # user never installs or configures Tailscale themselves — one download, one app. Must be
+      # built on the target OS like everything else here; the name is user-visible (it is what the
+      # Windows firewall prompt and macOS's incoming-connections dialog show).
+      - name: Build the tunnel sidecar
+        working-directory: desktop/tsnet-sidecar
+        shell: bash
+        run: |
+          mkdir -p bin
+          if [ "$RUNNER_OS" = "Windows" ]; then out="bin/Vorratsdatenspeicher Verbindung.exe";
+          else out="bin/Vorratsdatenspeicher Verbindung"; fi
+          go build -ldflags="-s -w" -o "$out" .
+          ls -la bin
 
       # The desktop bundle ships the built frontend + the built backend. Dev deps are needed to
       # BUILD the backend and are pruned afterwards, so the installer carries runtime deps only.

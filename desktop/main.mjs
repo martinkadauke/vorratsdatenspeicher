@@ -3,6 +3,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { boot } from './boot.mjs';
+import { startTunnel, sidecarPath, hasTunnelState } from './tunnel.mjs';
 
 // ⚠️ MUST run before any app.getPath('userData'): Electron derives userData from the app NAME,
 // which defaults to productName — "Vorratsdatenspeicher Desktop" — giving a path WITH A SPACE.
@@ -29,6 +30,8 @@ const iconPath = app.isPackaged
 
 let stack = null;
 let win = null;
+let tunnel = null;        // handle from startTunnel(), or null when the tunnel is off
+let authWin = null;       // the in-app Tailscale login window, while it is open
 
 /** Everything the app does gets a line here. Without it a packaged failure is invisible: there is
  *  no console attached to a Windows GUI build, so "white screen" was all anyone could report. */
@@ -110,6 +113,107 @@ function watchForUpdateRequest(updaterDir) {
   } catch (e) { log(`could not watch updater dir: ${e}`); }
 }
 
+// ── "Handy verbinden": the shell half of the tunnel bridge ──────────────────────────────────
+// The web UI cannot talk to Electron (it is served over http from the backend and has no preload),
+// and the backend must not be able to spawn a Tailscale node. So the UI writes a REQUEST file that
+// this watcher acts on, and this watcher writes a STATUS file the backend serves back. Same shape
+// as the self-update marker — one bridge mechanism for the whole desktop build.
+
+/** Publish the tunnel state for the backend (and therefore the UI) to read. Written via a temp file
+ *  + rename so a poll can never catch a half-written JSON. */
+function writeTunnelStatus(desktopDir, status) {
+  const file = path.join(desktopDir, 'tunnel-status.json');
+  const body = JSON.stringify({ ...status, at: new Date().toISOString() });
+  try {
+    fs.writeFileSync(`${file}.tmp`, body);
+    fs.renameSync(`${file}.tmp`, file);
+  } catch (e) { log(`could not write tunnel status: ${e}`); }
+  log(`tunnel state: ${status.state}${status.url ? ` (${status.url})` : ''}${status.detail ? ` — ${status.detail}` : ''}`);
+}
+
+/** Show the Tailscale login inside VDS. The promise to the user is "one app, one installation" —
+ *  bouncing them into a browser to set up an account they never asked for breaks it.
+ *  ⚠️ The window deliberately runs with the app-wide scrubbed user agent (see start()): Google
+ *  refuses OAuth from anything that self-identifies as an embedded browser. The dialog also offers
+ *  a plain "open in browser" escape hatch, because an SSO provider can always tighten that check. */
+function openAuthWindow(url) {
+  try {
+    if (authWin && !authWin.isDestroyed()) { authWin.loadURL(url); authWin.focus(); return; }
+    authWin = new BrowserWindow({
+      width: 520, height: 760, title: 'Vorratsdatenspeicher · Verbindung einrichten',
+      icon: iconPath, backgroundColor: '#ffffff', autoHideMenuBar: true,
+      parent: win || undefined, webPreferences: { contextIsolation: true, partition: 'persist:tsauth' },
+    });
+    authWin.on('closed', () => { authWin = null; });
+    authWin.loadURL(url);
+  } catch (e) { log(`auth window failed (${e}) — falling back to the browser`); shell.openExternal(url); }
+}
+
+function closeAuthWindow() {
+  try { if (authWin && !authWin.isDestroyed()) authWin.close(); } catch { /* already gone */ }
+  authWin = null;
+}
+
+function startTunnelFor(stack, { openLogin }) {
+  if (tunnel) return;
+  const binPath = sidecarPath({
+    resourcesPath: app.isPackaged ? process.resourcesPath : null,
+    devRoot: app.isPackaged ? null : __dirname,
+  });
+  log(`starting tunnel (sidecar: ${binPath || 'NOT FOUND'})`);
+  tunnel = startTunnel({
+    localPort: stack.port,
+    stateDir: stack.tsnetDir,
+    binPath,
+    log,
+    onEvent: (e) => {
+      // A resumed session must never pop a login window at the user unprompted; only an explicit
+      // "Handy verbinden" click does. Auto-start on later launches is silent by design.
+      if (e.state === 'auth' && openLogin) openAuthWindow(e.authUrl);
+      if (e.state === 'connecting' || e.state === 'up') closeAuthWindow();
+      if (e.state === 'error') tunnel = null;
+      writeTunnelStatus(stack.desktopDir, e);
+    },
+  });
+}
+
+async function stopTunnel(stack) {
+  const t = tunnel;
+  tunnel = null;
+  closeAuthWindow();
+  if (t) { try { await t.stop(); } catch (e) { log(`tunnel stop failed: ${e}`); } }
+  writeTunnelStatus(stack.desktopDir, { state: 'off' });
+}
+
+function watchDesktopBridge(stack) {
+  const request = path.join(stack.desktopDir, 'tunnel-request');
+  let busy = false;
+
+  // Bring a previously connected instance back up on its own: the phone's saved URL and its
+  // passkeys are bound to this node, so a household that has connected once expects it to just
+  // work after a restart. A never-connected install stays quiet (no account, no prompt).
+  if (hasTunnelState(stack.tsnetDir)) {
+    log('previous tailnet login found — resuming the tunnel');
+    startTunnelFor(stack, { openLogin: false });
+  } else {
+    writeTunnelStatus(stack.desktopDir, { state: 'off' });
+  }
+
+  setInterval(() => {
+    if (busy || !fs.existsSync(request)) return;
+    busy = true;
+    let action = 'start';
+    try { action = (fs.readFileSync(request, 'utf8').split('\n')[0] || 'start').trim(); } catch { /* default */ }
+    try { fs.rmSync(request, { force: true }); } catch { /* consumed anyway */ }
+    log(`tunnel request: ${action}`);
+    Promise.resolve()
+      .then(() => (action === 'stop' ? stopTunnel(stack) : startTunnelFor(stack, { openLogin: true })))
+      .catch((e) => { log(`tunnel request failed: ${e}`); writeTunnelStatus(stack.desktopDir, { state: 'error', reason: 'request_failed', detail: String(e?.message || e) }); })
+      .finally(() => { busy = false; });
+  }, 1000).unref();
+  log(`watching for tunnel requests in ${stack.desktopDir}`);
+}
+
 async function start() {
   // No native menu bar — this is an appliance, not a document editor (removes File/Edit/View/…).
   Menu.setApplicationMenu(null);
@@ -119,6 +223,10 @@ async function start() {
   process.env.APP_VERSION = app.getVersion();
   // Keep the machine reachable for phones while the app is open + plugged in.
   powerSaveBlocker.start('prevent-app-suspension');
+  // Drop "vorratsdatenspeicher-desktop/x.y.z" and "Electron/33.x" from the user agent. Google (and
+  // others) refuse OAuth sign-in from a user agent that announces itself as an embedded browser,
+  // and the Tailscale login we open in-window is exactly that flow. Nothing else reads our UA.
+  app.userAgentFallback = app.userAgentFallback.replace(/ (vorratsdatenspeicher-desktop|Electron)\/[\d.]+/g, '');
 
   const dataDir = app.getPath('userData');
   log(`starting · version=${app.getVersion()} · dataDir=${dataDir}`);
@@ -158,6 +266,9 @@ async function start() {
 
     if (await waitForBackend(stack.url)) {
       log('backend ready — loading UI');
+      // Only now: the bridge needs the port of the backend that actually came up (a retry picks a
+      // new one), and a tunnel pointed at the failed attempt would proxy to nothing.
+      watchDesktopBridge(stack);
       await win.loadURL(stack.url);
       return;
     }
@@ -226,5 +337,14 @@ process.on('uncaughtException', (e) => log(`uncaughtException: ${(e && e.stack) 
 
 app.on('window-all-closed', () => app.quit());
 app.on('before-quit', async (e) => {
-  if (stack) { e.preventDefault(); const s = stack; stack = null; await s.stop(); app.exit(0); }
+  if (stack) {
+    e.preventDefault();
+    const s = stack; stack = null;
+    // Tunnel first: leaving the node online after the backend is gone would publish an HTTPS
+    // address that answers with connection-refused, which reads to a phone as "the app is broken"
+    // rather than "the computer is off".
+    try { await stopTunnel(s); } catch { /* best effort */ }
+    await s.stop();
+    app.exit(0);
+  }
 });

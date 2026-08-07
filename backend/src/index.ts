@@ -52,6 +52,7 @@ import { analyticsRoutes } from './routes/analytics.js';
 import { mailboxRoutes } from './routes/mailbox.js';
 import { demoRoutes } from './routes/demo.js';
 import { feedbackRoutes } from './routes/feedback.js';
+import { desktopRoutes } from './routes/desktop.js';
 import { rescheduleDemoSweep } from './maintenance/demoSweep.js';
 
 /** Wait for Postgres to accept connections before the first query. The app container often
@@ -142,6 +143,9 @@ async function main(): Promise<void> {
     // one-time "create your account" form (POST /api/auth/setup) instead of asking for the
     // default credentials we no longer ship. False forever once the owner account exists.
     needs_account: DEMO_MODE ? false : !(await sql`SELECT 1 FROM users LIMIT 1`).length,
+    // Electron build (the shell sets DESKTOP_DIR). Drives the "Handy verbinden" entry point,
+    // which is meaningless in Docker — a container already answers on the network.
+    desktop: !!process.env.DESKTOP_DIR,
     node: process.version,
     started_at: new Date(Date.now() - process.uptime() * 1000).toISOString(),
   }));
@@ -183,6 +187,7 @@ async function main(): Promise<void> {
   if (!DEMO_MODE) mailboxRoutes(app);
   pushRoutes(app);
   feedbackRoutes(app); // bug-report/feedback — available in all builds (header button)
+  desktopRoutes(app);  // "Handy verbinden" bridge — reports unavailable outside the Electron build
   if (DEMO_MODE) demoRoutes(app);
 
   const receiptsDir = process.env.RECEIPTS_LOCAL_PATH ?? '/receipts';

@@ -6,9 +6,9 @@
 // Usage: node scripts/headless-smoke.mjs [dataDir]
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { rmSync } from 'node:fs';
+import { rmSync, existsSync, readFileSync } from 'node:fs';
 import { boot, resolveSecrets } from '../boot.mjs';
-import { findTailscale } from '../tunnel.mjs';
+import { sidecarPath } from '../tunnel.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const backendEntry = path.resolve(__dirname, '..', '..', 'backend', 'dist', 'index.js');
@@ -58,10 +58,41 @@ try {
   const okSpa = /<div id="root"|<!doctype html/i.test(html);
   console.log('[smoke] GET / (SPA) →', okSpa ? 'OK (index.html served)' : 'NOT SERVED');
 
-  // Informational: whether this machine could serve a Tailscale Funnel (not asserted — needs a tailnet login).
-  console.log('[smoke] tailscale present →', findTailscale() ? 'yes (funnel possible)' : 'no (runs local-only)');
+  // ── the "Handy verbinden" bridge ────────────────────────────────────────────────────────
+  // The shell watches DESKTOP_DIR for a request file and writes the tunnel status back. Prove the
+  // BACKEND half here: it must advertise itself as a desktop build, gate both endpoints behind an
+  // operator token, and actually drop the marker the shell reacts to.
+  const okDesktopFlag = version?.desktop === true;
+  console.log('[smoke] /api/version desktop flag →', okDesktopFlag ? 'OK (true)' : 'MISSING');
 
-  const pass = okSecrets && version?.node && okPasskey && gate.status === 401 && okSpa;
+  const anon = await fetch(`${stack.url}/api/desktop/tunnel`);
+  console.log('[smoke] tunnel status without token →', anon.status, anon.status === 401 ? 'OK (auth-gated)' : 'UNEXPECTED');
+
+  // First-run account creation is public on an instance with no users — that is how the desktop
+  // app onboards its owner, so it doubles as the way to get an operator token here.
+  const setup = await fetch(`${stack.url}/api/auth/setup`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: 'smoke', password: 'smoke-pass-1234' }),
+  }).then(r => r.json()).catch(() => ({}));
+  const token = setup?.token;
+  const auth = { Authorization: `Bearer ${token}` };
+
+  const before = await fetch(`${stack.url}/api/desktop/tunnel`, { headers: auth }).then(r => r.json());
+  console.log('[smoke] tunnel status →', JSON.stringify(before));
+  const okStatus = before?.available === true && before?.state === 'off';
+
+  await fetch(`${stack.url}/api/desktop/tunnel`, {
+    method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'start' }),
+  });
+  const marker = path.join(stack.desktopDir, 'tunnel-request');
+  const okMarker = existsSync(marker) && readFileSync(marker, 'utf8').trim() === 'start';
+  console.log('[smoke] connect request →', okMarker ? 'OK (marker written for the shell)' : 'MARKER MISSING');
+
+  // Informational: is the compiled tunnel sidecar in place? (Absent → the app runs local-only.)
+  console.log('[smoke] tunnel sidecar →', sidecarPath({ resourcesPath: null, devRoot: path.resolve(__dirname, '..') }) ? 'bundled' : 'not built (local-only)');
+
+  const pass = okSecrets && version?.node && okPasskey && gate.status === 401 && okSpa
+    && okDesktopFlag && anon.status === 401 && okStatus && okMarker;
   console.log(pass ? '\n[smoke] ✅ PASS — backend boots on bundled Postgres and serves the app'
                    : '\n[smoke] ❌ FAIL');
   await stack.stop();

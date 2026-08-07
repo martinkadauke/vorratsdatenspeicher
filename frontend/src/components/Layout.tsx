@@ -15,6 +15,7 @@ import { cn } from '../lib/utils';
 import { NAV, MOBILE_PRIMARY, navExtras, mobileTail } from '../lib/nav';
 import { BugReportButton } from './BugReportButton';
 import { RecommendButton } from './RecommendButton';
+import { PhoneConnectButton } from './PhoneConnectButton';
 import { InstallButton } from './InstallButton';
 import { UpdateBanner } from './UpdateBanner';
 
@@ -125,6 +126,10 @@ export function Layout() {
           )}
         </NavLink>
         <div className="flex items-center gap-1">
+          {/* Desktop build only, and it renders itself away everywhere else (Docker answers
+              available:false). Left of the megaphone: connecting your phone is a setup step
+              you take once, not something you do as often as filing a bug. */}
+          <PhoneConnectButton />
           <RecommendButton />
           <BugReportButton variant="header" />
           <NotificationBell />

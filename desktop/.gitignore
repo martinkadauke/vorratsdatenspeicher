@@ -6,3 +6,7 @@ out/
 # Go sidecar build artifacts + runtime state (source + go.mod/sum are committed; the exe is rebuilt)
 tsnet-sidecar/*.exe
 tsnet-sidecar/tsnet-state/
+# The compiled sidecar (~22 MB) is a build output; CI rebuilds it per OS into bin/.
+# The directory itself stays tracked: electron-builder fails on a missing extraResources source.
+tsnet-sidecar/bin/*
+!tsnet-sidecar/bin/.gitkeep
