@@ -1,4 +1,13 @@
 {
+  "recommend": {
+    "title": "Vorratsdatenspeicher weiterempfehlen",
+    "blurb": "Teile VDS mit Freunden & Familie:",
+    "text": "Ich nutze Vorratsdatenspeicher — er liest Kassenbons per KI und behält Ausgaben, Vorrat & Angebote im Blick. Schau's dir an:",
+    "copy": "Link kopieren",
+    "copied": "Link kopiert!",
+    "copyFailed": "Kopieren fehlgeschlagen",
+    "mastodonPrompt": "Deine Mastodon-Instanz? (z. B. mastodon.social)"
+  },
   "nav": {
     "analytics": "Analytics",
     "receipts": "Belege",

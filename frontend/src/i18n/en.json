@@ -1,4 +1,13 @@
 {
+  "recommend": {
+    "title": "Recommend Vorratsdatenspeicher",
+    "blurb": "Share VDS with friends & family:",
+    "text": "I use Vorratsdatenspeicher — it reads receipts with AI and keeps spending, stock & deals in view. Check it out:",
+    "copy": "Copy link",
+    "copied": "Link copied!",
+    "copyFailed": "Couldn't copy",
+    "mastodonPrompt": "Your Mastodon instance? (e.g. mastodon.social)"
+  },
   "nav": {
     "analytics": "Analytics",
     "receipts": "Receipts",

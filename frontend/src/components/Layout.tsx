@@ -14,6 +14,7 @@ import { ConfirmHost } from './Confirm';
 import { cn } from '../lib/utils';
 import { NAV, MOBILE_PRIMARY, navExtras, mobileTail } from '../lib/nav';
 import { BugReportButton } from './BugReportButton';
+import { RecommendButton } from './RecommendButton';
 import { InstallButton } from './InstallButton';
 import { UpdateBanner } from './UpdateBanner';
 
@@ -124,6 +125,7 @@ export function Layout() {
           )}
         </NavLink>
         <div className="flex items-center gap-1">
+          <RecommendButton />
           <BugReportButton variant="header" />
           <NotificationBell />
           {showAdminShortcut && (
