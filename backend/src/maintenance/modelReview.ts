@@ -8,7 +8,7 @@ import cron from 'node-cron';
 import sql from '../db.js';
 import { getConfig, effectiveBaseUrl } from '../config.js';
 import {
-  providerForTask, listModelsForProvider, setTaskAi, type AiTask, type ProviderName,
+  providerForTask, listModelsForProvider, setTaskAi, isVisionModel, type AiTask, type ProviderName,
 } from '../llm/provider.js';
 import { parseLlmJson } from '../llm/ollama.js';
 import { sendMail } from '../mailer.js';
@@ -17,7 +17,15 @@ import { modelReviewEmail } from '../email/templates.js';
 let running = false;
 export function isModelReviewRunning(): boolean { return running; }
 
-const REVIEW_TASKS: AiTask[] = ['recategorize', 'churner_stage1', 'churner_stage2', 'ocr', 'categories_chat'];
+// ⚠️ EVERY configurable task, not a subset. This list used to hold five, so "alle Open-Weights
+// anwenden" left model_review, nlanalytics, bankmatch, statsask, csvmapping and mailreinterpret
+// untouched — sitting on their Anthropic/DeepSeek defaults on an instance with no API key at all.
+// The button then looked broken: it HAD applied, just never to the rows you were looking at.
+// Keep in sync with VALID_TASKS in routes/admin.ts.
+const REVIEW_TASKS: AiTask[] = ['recategorize', 'churner_stage1', 'churner_stage2', 'ocr', 'categories_chat', 'model_review', 'nlanalytics', 'bankmatch', 'statsask', 'csvmapping', 'mailreinterpret'];
+/** Only OCR looks at pictures. Everything else is text in, JSON out — offering it a vision model
+ *  wastes memory and accuracy, which is how qwen2.5vl:7b ended up running the churner. */
+const VISION_TASKS: AiTask[] = ['ocr'];
 const CLOUD_PROVIDERS: ProviderName[] = ['anthropic', 'deepseek', 'openai'];
 
 export interface Candidate { provider: string; model: string; reason: string }
@@ -32,6 +40,12 @@ const TASK_PURPOSE: Record<string, string> = {
   churner_stage2: 'Ordnet kanonische Produkte einer Kategorie zu (einfache Klassifikation, JSON).',
   ocr: 'Vision-OCR von Kassenbon-Fotos zu strukturiertem JSON (braucht ein VISION-fähiges Modell, anspruchsvoll).',
   categories_chat: 'Chat-Assistent zum Bearbeiten der Kategorie-Hierarchie (etwas Reasoning).',
+  model_review: 'Bewertet selbst die Modellwahl für alle Aufgaben (Reasoning über Listen, JSON).',
+  nlanalytics: 'Übersetzt eine Frage in Alltagssprache in eine Dashboard-Spezifikation aus einem festen Katalog (JSON).',
+  bankmatch: 'Schlägt vor, welche Bankbuchung zu welchem Beleg gehört (Textvergleich, JSON).',
+  statsask: 'Setzt aus einer Frage in Alltagssprache die Filter der Statistik-Seite (JSON, rechnet selbst nichts).',
+  csvmapping: 'Erkennt einmalig das Spaltenformat einer Bank-CSV (Struktur-Erkennung, JSON).',
+  mailreinterpret: 'Deutet eine übersprungene Import-Mail anhand einer Nutzer-Anweisung neu (Textverständnis, JSON).',
 };
 
 /** Coarse cost tier so even a small local reviewer model judges price/performance. */
@@ -66,6 +80,13 @@ export async function runModelReview(): Promise<number | null> {
     for (const task of REVIEW_TASKS) {
       const provider = (await getConfig(`ai.${task}.provider` as 'ai.recategorize.provider')) as ProviderName;
       const current = await getConfig(`ai.${task}.model` as 'ai.recategorize.model');
+      // Offer only what the task can actually use. Naming a vision model in a text task's list is
+      // an open invitation to pick it, and the reviewer duly did.
+      const needsVision = VISION_TASKS.includes(task);
+      const taskApiModels = needsVision ? apiModels.filter(m => isVisionModel(m.provider as ProviderName, m.model)) : apiModels;
+      const taskOpenModels = needsVision ? openModels.filter(m => isVisionModel('ollama', m)) : openModels;
+      const taskApiList = taskApiModels.map(m => `${m.provider}/${m.model} [${tier(m.model)}]`).join(', ') || '(keine)';
+      const taskOpenList = taskOpenModels.map(m => `${m} [${tier(m)}]`).join(', ') || '(keine)';
 
       const system =
         'Du bist Experte für LLM-Modellwahl mit klarem Fokus auf PREIS/LEISTUNG. Für die gegebene Aufgabe wählst du '
@@ -92,11 +113,13 @@ export async function runModelReview(): Promise<number | null> {
           api?: { provider?: string; model?: string; reason?: string } | null;
           open?: { model?: string; reason?: string } | null;
         }>(raw);
-        if (res.api?.model && apiModels.some(m => m.model === res.api!.model)) {
-          const prov = apiModels.find(m => m.model === res.api!.model)!.provider;
+        // Validate against the TASK's list, not the global one — otherwise a hallucinated
+        // text-only model would still be accepted for OCR and silently break receipt scanning.
+        if (res.api?.model && taskApiModels.some(m => m.model === res.api!.model)) {
+          const prov = taskApiModels.find(m => m.model === res.api!.model)!.provider;
           api = { provider: prov, model: res.api.model, reason: (res.api.reason ?? '').toString().slice(0, 240) };
         }
-        if (res.open?.model && openModels.includes(res.open.model)) {
+        if (res.open?.model && taskOpenModels.includes(res.open.model)) {
           open = { provider: 'ollama', model: res.open.model, reason: (res.open.reason ?? '').toString().slice(0, 240) };
         }
       } catch { /* skip on LLM/parse error */ }

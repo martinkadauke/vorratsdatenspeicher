@@ -1134,7 +1134,11 @@
     "categories": "Kategorien",
     "defaultLang": "Standard-Sprache",
     "healthy": "erreichbar",
-    "unhealthy": "nicht erreichbar"
+    "unhealthy": "nicht erreichbar",
+    "taskNlanalytics": "Analytics-Fragen",
+    "taskNlanalyticsDesc": "Übersetzt „Was habe ich im Juni für Obst ausgegeben?\" in eine Auswertung. Rechnet selbst nichts.",
+    "taskCsvmapping": "Bank-CSV verstehen",
+    "taskCsvmappingDesc": "Erkennt einmalig, welche Spalte deiner Bank-CSV was bedeutet. Danach läuft der Import ohne KI."
   },
   "profile": {
     "title": "Profil",
@@ -1348,7 +1352,9 @@
       "saved": "Gespeichert",
       "checking": "prüfe…",
       "reachable": "Verbindung erfolgreich",
-      "unreachable": "nicht erreichbar"
+      "unreachable": "nicht erreichbar",
+      "needOllama": "Erst muss deine Ollama-Adresse erreichbar sein und beide Modelle gewählt sein.",
+      "needKey": "Bitte trag noch den API-Key ein — sonst kann die KI nichts tun."
     },
     "household": {
       "title": "Dein Haushalt",
@@ -1416,6 +1422,15 @@
     "done": {
       "title": "Fertig — alles bereit!",
       "body": "Lade jetzt deinen ersten Kassenbon hoch. VDS erkennt Artikel, Preise und Laden automatisch und der Rest ergibt sich von selbst. Viel Spaß!"
+    },
+    "websearch": {
+      "title": "Websuche (optional)",
+      "body": "Für Prospekte, Angebote und Produktbilder durchsucht Vorratsdatenspeicher das Web über eine SearXNG-Instanz — eine Meta-Suchmaschine, die du selbst betreiben oder mitbenutzen kannst.\n\nTrag hier ihre Adresse ein, falls du eine hast.",
+      "field": "SearXNG-Adresse",
+      "checking": "Wird geprüft …",
+      "ok": "Erreichbar — die Websuche funktioniert.",
+      "bad": "Nicht erreichbar. Läuft SearXNG unter dieser Adresse?",
+      "without": "Ohne Websuche funktioniert alles Wesentliche weiter — nur Angebote, Prospekte und automatische Produktbilder bleiben leer. Du kannst die Adresse jederzeit unter Verwaltung nachtragen."
     }
   },
   "tour": {

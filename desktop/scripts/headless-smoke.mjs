@@ -88,6 +88,23 @@ try {
   const okMarker = existsSync(marker) && readFileSync(marker, 'utf8').trim() === 'start';
   console.log('[smoke] connect request →', okMarker ? 'OK (marker written for the shell)' : 'MARKER MISSING');
 
+  // ── one provider for everything, vision only where it is needed ────────────────────────
+  // The wizard's promise: pick Ollama once and EVERY task runs on it, with only the picture-reading
+  // one on a vision model. It was broken twice over — the step needed a second Save click nobody
+  // knew about, and the model review only ever covered five of the eleven tasks — so an instance
+  // with no API key at all sat there with half its tasks pointing at Anthropic.
+  const quick = await fetch(`${stack.url}/api/onboarding/ai-quickset`, {
+    method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider: 'ollama', url: 'http://127.0.0.1:11434', ocr_model: 'qwen2.5vl:7b', ki_model: 'qwen2.5:14b' }),
+  });
+  const cfgAfter = await fetch(`${stack.url}/api/config`, { headers: auth }).then(r => r.json());
+  const providerKeys = Object.keys(cfgAfter).filter(k => /^ai\..+\.provider$/.test(k));
+  const strays = providerKeys.filter(k => cfgAfter[k] !== 'ollama');
+  const okOneProvider = quick.status === 200 && providerKeys.length >= 11 && strays.length === 0;
+  console.log(`[smoke] one provider for all ${providerKeys.length} tasks →`, okOneProvider ? 'OK' : `STRAYS: ${strays.join(', ')}`);
+  const okVisionSplit = cfgAfter['ai.ocr.model'] === 'qwen2.5vl:7b' && cfgAfter['ai.recategorize.model'] === 'qwen2.5:14b';
+  console.log('[smoke] vision model only for OCR →', okVisionSplit ? 'OK' : `ocr=${cfgAfter['ai.ocr.model']} recat=${cfgAfter['ai.recategorize.model']}`);
+
   // ── locked-out recovery ────────────────────────────────────────────────────────────────
   // The shell shows a one-time code in an OS dialog; here we stand in for the shell by writing the
   // file it would write, and prove the backend half: wrong code refused, right code sets the
@@ -121,7 +138,8 @@ try {
 
   const pass = okSecrets && version?.node && okPasskey && gate.status === 401 && okSpa
     && okDesktopFlag && anon.status === 401 && okStatus && okMarker
-    && okRecoverMarker && wrong.status === 403 && okRecovered && okBurned && relogin.status === 200;
+    && okRecoverMarker && wrong.status === 403 && okRecovered && okBurned && relogin.status === 200
+    && okOneProvider && okVisionSplit;
   console.log(pass ? '\n[smoke] ✅ PASS — backend boots on bundled Postgres and serves the app'
                    : '\n[smoke] ❌ FAIL');
   await stack.stop();

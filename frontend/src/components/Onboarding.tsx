@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { useNavigate } from 'react-router-dom';
-import { Sparkles, Bot, Tags, Home, Users, Wallet, Mail, Inbox, PartyPopper, Languages, Plus, Trash2, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
+import { Sparkles, Bot, Globe, Tags, Home, Users, Wallet, Mail, Inbox, PartyPopper, Languages, Plus, Trash2, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
 import { api } from '../api/client';
 import { Button, Input, Select, Label, Switch, Modal, FeedbackIconButton } from './ui';
 import { EmojiSelect } from './EmojiPicker';
@@ -30,6 +30,7 @@ const FULL_STEPS = [
   { icon: Languages, emoji: '🌍', key: 'lang' },
   { icon: Sparkles, emoji: '👋', key: 'welcome' },
   { icon: Bot, emoji: '🤖', key: 'ai' },
+  { icon: Globe, emoji: '🔎', key: 'websearch' },
   { icon: Tags, emoji: '🗂️', key: 'categories' },
   { icon: Home, emoji: '🏡', key: 'household' },
   { icon: Users, emoji: '👨‍👩‍👧‍👦', key: 'family' },
@@ -138,7 +139,16 @@ export function Onboarding() {
   if (!show) return null;
 
   const finish = () => finishMut.mutate();
-  const next = () => (step < STEP_META.length - 1 ? setStep(step + 1) : finish());
+  // ⚠️ A step may hold unsaved input behind its own Save button. "Weiter" used to just advance,
+  // so choosing Ollama in the AI step and pressing Weiter — the obvious thing to do — wrote
+  // NOTHING, and the instance silently kept its mixed defaults (some tasks on Anthropic without
+  // an API key). A step can register a commit here; it returns false to keep the wizard put when
+  // the input cannot be saved yet, so the reason is visible instead of the choice being dropped.
+  const commit = useRef<null | (() => Promise<boolean>)>(null);
+  const next = async () => {
+    if (commit.current && !(await commit.current())) return;
+    if (step < STEP_META.length - 1) setStep(step + 1); else finish();
+  };
   const prev = () => step > 0 && setStep(step - 1);
   const cur = STEP_META[step];
   const Icon = cur.icon;
@@ -201,7 +211,9 @@ export function Onboarding() {
             </div>
           )}
 
-          {cur.key === 'ai' && <AiSetup config={config} t={t} />}
+          {cur.key === 'ai' && <AiSetup config={config} t={t} registerCommit={fn => { commit.current = fn; }} />}
+
+          {cur.key === 'websearch' && <SearxSetup config={config} t={t} registerCommit={fn => { commit.current = fn; }} />}
 
           {cur.key === 'categories' && (
             <div className="flex flex-col gap-2">
@@ -323,7 +335,7 @@ export function Onboarding() {
  *  /api/onboarding/ai-quickset, then re-checks the provider's health so the green
  *  "Verbindung erfolgreich" appears immediately — no click in/out needed. DeepSeek +
  *  per-task mix-and-match live in the admin area only. */
-function AiSetup({ config, t }: { config: Record<string, unknown> | undefined; t: TFunction }) {
+function AiSetup({ config, t, registerCommit }: { config: Record<string, unknown> | undefined; t: TFunction; registerCommit: (fn: null | (() => Promise<boolean>)) => void }) {
   const qc = useQueryClient();
   // Pre-select the provider whose credential is already stored (re-visiting the step).
   const savedProvider = AI_PROVIDERS.find(p => String(config?.[p.cfgKey] ?? '').trim())?.id;
@@ -406,7 +418,7 @@ function AiSetup({ config, t }: { config: Record<string, unknown> | undefined; t
     : !!apiKey.trim();
 
   const save = async () => {
-    if (!chosen || !canSave) return;
+    if (!chosen || !canSave) return false;
     setSaving(true);
     try {
       const body = chosen === 'ollama'
@@ -417,10 +429,29 @@ function AiSetup({ config, t }: { config: Record<string, unknown> | undefined; t
       await qc.invalidateQueries({ queryKey: ['config'] });
       await qc.invalidateQueries({ queryKey: [`${chosen}-health`] });
       toast(t('onboarding.ai.saved'), 'success');
+      return true;
     } catch (e) {
       toast((e as Error).message || t('common.error'), 'error');
+      return false;
     } finally { setSaving(false); }
   };
+
+  // "Weiter" saves this step. Nobody should have to notice that the choice they just made needs a
+  // second, separate click to survive — that is exactly how an instance ended up with Ollama
+  // picked in the wizard and half its tasks still pointing at Anthropic. Nothing chosen → the step
+  // is genuinely optional and we move on; chosen but not yet saveable → stay put and say why,
+  // rather than dropping the input on the floor.
+  useEffect(() => {
+    registerCommit(async () => {
+      if (!chosen || confirmed) return true;
+      if (!canSave) {
+        toast(chosen === 'ollama' ? t('onboarding.ai.needOllama') : t('onboarding.ai.needKey'), 'error');
+        return false;
+      }
+      return await save();
+    });
+    return () => registerCommit(null);
+  });
 
   return (
     <div className="flex flex-col gap-4">
@@ -605,6 +636,69 @@ function ImapStep({ t }: { t: TFunction }) {
       </div>
       {result && <p className={cn('col-span-6 text-xs font-medium', result.ok ? 'text-emerald-600' : 'text-red-500')}>● {result.msg}</p>}
       <div className="col-span-6"><ImapHelp /></div>
+    </div>
+  );
+}
+
+/** Web search (SearXNG). VDS uses it to find shop leaflets, product pictures and — during this very
+ *  wizard — whether a local model can read images. Without it those features are simply blank, which
+ *  is worse than being asked one question here: an instance shipped with an empty `searxng.url` and
+ *  nothing ever said so. Optional on purpose: a household with no instance must still get through
+ *  the wizard, so we explain what stays dark rather than blocking. */
+function SearxSetup({ config, t, registerCommit }: { config: Record<string, unknown> | undefined; t: TFunction; registerCommit: (fn: null | (() => Promise<boolean>)) => void }) {
+  const qc = useQueryClient();
+  const [url, setUrl] = useState(String(config?.['searxng.url'] ?? ''));
+  const [saving, setSaving] = useState(false);
+  const trimmed = url.trim().replace(/\/$/, '');
+
+  const persist = async (value: string) => {
+    await api('/api/config/searxng.url', { method: 'PUT', body: { value } });
+    await qc.invalidateQueries({ queryKey: ['config'] });
+    await qc.invalidateQueries({ queryKey: ['searxng-health'] });
+  };
+
+  // The health probe runs in the BACKEND, so it can only test what the backend has stored — hence
+  // the debounced save while typing, same as the Ollama field.
+  useEffect(() => {
+    if (trimmed === String(config?.['searxng.url'] ?? '')) return;
+    const id = setTimeout(() => { void persist(trimmed).catch(() => {}); }, 700);
+    return () => clearTimeout(id);
+  }, [trimmed]);
+
+  const { data: health, isFetching } = useQuery({
+    queryKey: ['searxng-health', trimmed],
+    queryFn: () => api<{ ok: boolean; error?: string }>('/api/searxng/health'),
+    enabled: !!trimmed,
+    retry: false,
+  });
+  const up = !!health?.ok;
+
+  useEffect(() => {
+    registerCommit(async () => {
+      setSaving(true);
+      try { await persist(trimmed); } catch { /* a wizard step must not trap the user */ }
+      finally { setSaving(false); }
+      return true;
+    });
+    return () => registerCommit(null);
+  });
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div>
+        <Label>{t('onboarding.websearch.field')}</Label>
+        <Input value={url} onChange={e => setUrl(e.target.value)} placeholder="http://192.168.1.10:8080" autoComplete="off"
+          className={cn(trimmed && (up ? 'border-emerald-500 focus:border-emerald-500' : 'border-red-500 focus:border-red-500'))} />
+        {trimmed && (
+          <p className={cn('mt-1 text-xs', up ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500')}>
+            {isFetching ? t('onboarding.websearch.checking') : up ? t('onboarding.websearch.ok') : t('onboarding.websearch.bad')}
+          </p>
+        )}
+        {saving && <p className="mt-1 text-xs text-zinc-400">…</p>}
+      </div>
+      <p className="rounded-xl border-2 border-orange-300 bg-orange-50 p-3 text-xs leading-relaxed text-orange-900 dark:border-orange-700/60 dark:bg-orange-950/30 dark:text-orange-200">
+        {t('onboarding.websearch.without')}
+      </p>
     </div>
   );
 }

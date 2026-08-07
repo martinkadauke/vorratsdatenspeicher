@@ -319,6 +319,10 @@ const AI_TASKS = [
   { key: 'model_review',     i18n: 'admin.taskModelReview',    descI18n: 'admin.taskModelReviewDesc' },
   { key: 'bankmatch',        i18n: 'admin.taskBankmatch',      descI18n: 'admin.taskBankmatchDesc' },
   { key: 'statsask',         i18n: 'admin.taskStatsask',       descI18n: 'admin.taskStatsaskDesc' },
+  // ⚠️ These two existed in the backend all along but had no row here, so they could never be
+  // seen or changed — and quietly stayed on their Anthropic default on a key-less instance.
+  { key: 'nlanalytics',      i18n: 'admin.taskNlanalytics',    descI18n: 'admin.taskNlanalyticsDesc' },
+  { key: 'csvmapping',       i18n: 'admin.taskCsvmapping',     descI18n: 'admin.taskCsvmappingDesc' },
   { key: 'mailreinterpret',  i18n: 'admin.taskMailReinterpret', descI18n: 'admin.taskMailReinterpretDesc' },
 ] as const;
 

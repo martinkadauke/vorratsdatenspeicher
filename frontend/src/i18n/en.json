@@ -1132,7 +1132,11 @@
     "categories": "Categories",
     "defaultLang": "Default language",
     "healthy": "reachable",
-    "unhealthy": "unreachable"
+    "unhealthy": "unreachable",
+    "taskNlanalytics": "Analytics questions",
+    "taskNlanalyticsDesc": "Turns “what did I spend on fruit in June?” into a report. It never does the arithmetic itself.",
+    "taskCsvmapping": "Understanding bank CSVs",
+    "taskCsvmappingDesc": "Works out once what each column of your bank export means. After that the import runs without AI."
   },
   "profile": {
     "title": "Profile",
@@ -1346,7 +1350,9 @@
       "saved": "Saved",
       "checking": "checking…",
       "reachable": "Connection successful",
-      "unreachable": "not reachable"
+      "unreachable": "not reachable",
+      "needOllama": "Your Ollama address has to answer first, and both models need to be picked.",
+      "needKey": "Please enter the API key — without it the AI cannot do anything."
     },
     "household": {
       "title": "Your household",
@@ -1414,6 +1420,15 @@
     "done": {
       "title": "Done — all set!",
       "body": "Upload your first receipt now. VDS detects items, prices and the store automatically, and the rest follows. Enjoy!"
+    },
+    "websearch": {
+      "title": "Web search (optional)",
+      "body": "For leaflets, offers and product pictures, Vorratsdatenspeicher searches the web through a SearXNG instance — a meta search engine you can run yourself or share.\n\nEnter its address here if you have one.",
+      "field": "SearXNG address",
+      "checking": "Checking …",
+      "ok": "Reachable — web search works.",
+      "bad": "Not reachable. Is SearXNG running at this address?",
+      "without": "Without web search everything essential still works — only offers, leaflets and automatic product pictures stay empty. You can add the address later under Administration."
     }
   },
   "tour": {
