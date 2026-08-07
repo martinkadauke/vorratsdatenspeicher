@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import sql, { adminSql, DEMO_MODE } from '../db.js';
+import { isDesktop } from '../desktop.js';
 import { requirePlatformAdmin } from '../auth/plugin.js';
 import { sendMail, smtpConfigured, verifySmtp, invalidateSmtpCheck, type MailAttachment, type MailFailReason } from '../mailer.js';
 import { feedbackEmail, feedbackThanksEmail } from '../email/templates.js';
@@ -51,7 +52,13 @@ type ReportFailReason = MailFailReason | 'consent_missing';
 function buildStamp(hasScreenshot: boolean): string {
   const version = process.env.APP_VERSION || 'dev';
   const sha = (process.env.GIT_SHA || 'unknown').slice(0, 12);
-  return `--\nBuild: ${version} (${sha}) · Modus: ${DEMO_MODE ? 'Demo' : 'Self-Host'} · Screenshot: ${hasScreenshot ? 'ja' : 'nein'}`;
+  // ⚠️ "Self-Host" covered two very different worlds, and which one is the first thing you need to
+  // know: a container behind someone's proxy, or the Electron app with its bundled Postgres,
+  // loopback binding and tunnel. They fail in completely different ways — "the updater is broken"
+  // means the updater SIDECAR in one and electron-updater in the other, and that distinction cost
+  // a round trip on a real report. The platform comes along for the same reason.
+  const mode = DEMO_MODE ? 'Demo' : isDesktop() ? 'Self-Host (Desktop)' : 'Self-Host (Docker)';
+  return `--\nBuild: ${version} (${sha}) · Modus: ${mode} · Screenshot: ${hasScreenshot ? 'ja' : 'nein'} · ${process.platform}`;
 }
 
 /** Bug report / feedback — available in ALL builds (the header "Feedback" button, plus the
