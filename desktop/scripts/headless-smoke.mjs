@@ -88,6 +88,16 @@ try {
   const okMarker = existsSync(marker) && readFileSync(marker, 'utf8').trim() === 'start';
   console.log('[smoke] connect request →', okMarker ? 'OK (marker written for the shell)' : 'MARKER MISSING');
 
+  // ── passkeys need a DOMAIN as the relying-party id ──────────────────────────────────────
+  // An IP literal is not a valid RP ID, so a base URL of http://127.0.0.1:<port> made the browser
+  // refuse every "add a passkey" attempt in the desktop app — with no server-side error to find.
+  const rpOpts = await fetch(`${stack.url}/api/auth/passkey/register/options`, {
+    method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: '{}',
+  }).then(r => r.json()).catch(() => ({}));
+  const rpID = rpOpts?.options?.rp?.id;
+  const okRpID = !!rpID && !/^\d+\.\d+\.\d+\.\d+$/.test(rpID);
+  console.log('[smoke] passkey relying-party id →', okRpID ? `OK (${rpID})` : `INVALID: ${rpID}`);
+
   // ── one provider for everything, vision only where it is needed ────────────────────────
   // The wizard's promise: pick Ollama once and EVERY task runs on it, with only the picture-reading
   // one on a vision model. It was broken twice over — the step needed a second Save click nobody
@@ -139,7 +149,7 @@ try {
   const pass = okSecrets && version?.node && okPasskey && gate.status === 401 && okSpa
     && okDesktopFlag && anon.status === 401 && okStatus && okMarker
     && okRecoverMarker && wrong.status === 403 && okRecovered && okBurned && relogin.status === 200
-    && okOneProvider && okVisionSplit;
+    && okOneProvider && okVisionSplit && okRpID;
   console.log(pass ? '\n[smoke] ✅ PASS — backend boots on bundled Postgres and serves the app'
                    : '\n[smoke] ❌ FAIL');
   await stack.stop();

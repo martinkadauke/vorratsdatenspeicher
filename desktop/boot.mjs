@@ -171,7 +171,10 @@ export async function boot(opts) {
 
   return {
     port: appPort,
-    url: `http://127.0.0.1:${appPort}`,
+    // ⚠️ The WINDOW must load the same origin the backend calls itself, or WebAuthn refuses:
+    // the RP origin has to match exactly. `localhost` also happens to be the only loopback
+    // spelling WebAuthn accepts as an RP ID (an IP literal is not a domain).
+    url: `http://localhost:${appPort}`,
     receiptsDir,
     updaterDir,          // the shell watches this for the in-app update request
     desktopDir,          // …and this for the connect-phone request; it writes tunnel status back

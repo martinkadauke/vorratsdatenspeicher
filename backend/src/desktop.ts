@@ -33,6 +33,11 @@ export function desktopBaseUrl(): string {
   if (!DESKTOP_DIR) return '';
   const tunnel = readBridgeFile<{ state?: string; url?: string }>('tunnel-status.json');
   if (tunnel?.state === 'up' && tunnel.url) return tunnel.url.replace(/\/$/, '');
+  // ⚠️ `localhost`, NOT 127.0.0.1 — and this is not cosmetic. The WebAuthn RP ID has to be a
+  // valid DOMAIN; an IP literal is rejected outright, so with 127.0.0.1 as the base URL the
+  // browser refused every "add a passkey" attempt in the desktop app. `localhost` is a valid RP ID
+  // and is treated as a secure context, so passkeys work with no certificate at all. It resolves
+  // to the loopback address we bind, so nothing else changes.
   const port = process.env.PORT;
-  return port ? `http://127.0.0.1:${port}` : '';
+  return port ? `http://localhost:${port}` : '';
 }

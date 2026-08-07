@@ -329,8 +329,12 @@ function keepLinksInTheBrowser(contents, appOrigin) {
     return { action: 'deny' };   // never a second Electron window
   });
   // Same for a plain link that would navigate the app window away from the app itself.
+  // Both loopback spellings count as "us": the window runs on localhost (WebAuthn needs a domain,
+  // not an IP) while plenty of internal links still say 127.0.0.1.
+  const ours = (u) => u.startsWith(appOrigin) || u.startsWith('data:')
+    || /^http:\/\/(127\.0\.0\.1|localhost|\[::1\]):/.test(u);
   contents.on('will-navigate', (e, url) => {
-    if (url.startsWith(appOrigin) || url.startsWith('data:')) return;
+    if (ours(url)) return;
     e.preventDefault();
     void shell.openExternal(url);
   });
