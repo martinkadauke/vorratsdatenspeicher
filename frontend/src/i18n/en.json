@@ -375,6 +375,17 @@
     "errorNetwork": "Backend unreachable — is the server running?",
     "passkey": "Sign in with a passkey",
     "passkeyError": "Passkey sign-in cancelled or failed.",
+    "setup": {
+      "title": "👋 Welcome — create your account",
+      "intro": "This is your own fresh installation. Pick a username and password — that makes you the admin.",
+      "pwHint": "At least 8 characters. Remember it well — there is no default password.",
+      "emailLabel": "Email address (optional)",
+      "emailHint": "Only for password resets and notifications. You can add it later in your profile.",
+      "submit": "Create account & start →",
+      "inviteNote": "Afterwards you invite other people — there is no open sign-up.",
+      "taken": "An account has already been set up. Please sign in.",
+      "invalid": "Please enter a username and a password (min. 8 characters)."
+    },
     "forgot": "Forgot password?",
     "sendReset": "Request link",
     "forgotSent": "If that email address exists, a reset link has been sent.",

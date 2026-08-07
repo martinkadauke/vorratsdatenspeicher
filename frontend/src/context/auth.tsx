@@ -14,6 +14,8 @@ interface AuthContextValue {
   login: (username: string, password: string) => Promise<void>;
   loginPasskey: () => Promise<void>;
   signup: (email: string, password: string, household: string) => Promise<void>;
+  /** First-run only (off-demo): create the owner account on an instance that has no users yet. */
+  setup: (username: string, password: string, email: string) => Promise<void>;
   logout: () => void;
   refreshUser: () => Promise<void>;
 }
@@ -92,6 +94,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await refreshUser();
   };
 
+  // First run: creates the owner account and signs straight in (token-only response, like signup).
+  const setup = async (username: string, password: string, email: string) => {
+    const res = await api<{ token: string }>('/api/auth/setup', {
+      method: 'POST',
+      body: { username, password, email: email || undefined },
+    });
+    queryClient.clear();
+    setToken(res.token);
+    await refreshUser();
+  };
+
   const logout = () => {
     setToken(null);
     setUser(null);
@@ -99,7 +112,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, demo, login, loginPasskey, signup, logout, refreshUser }}>
+    <AuthContext.Provider value={{ user, loading, demo, login, loginPasskey, signup, setup, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

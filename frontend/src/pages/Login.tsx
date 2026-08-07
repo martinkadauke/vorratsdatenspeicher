@@ -7,10 +7,10 @@ import { api, ApiError } from '../api/client';
 import { passkeySupported } from '../api/passkey';
 import { Button, Input, Label, Card, Spinner } from '../components/ui';
 
-interface VersionInfo { sha: string; ref: string; demo?: boolean; needs_setup?: boolean }
+interface VersionInfo { sha: string; ref: string; demo?: boolean; needs_setup?: boolean; needs_account?: boolean }
 
 export function Login() {
-  const { login, loginPasskey, signup } = useAuth();
+  const { login, loginPasskey, signup, setup } = useAuth();
   const navigate = useNavigate();
   const { t, i18n } = useTranslation();
   const de = i18n.language.startsWith('de');
@@ -53,11 +53,29 @@ export function Login() {
       .then(v => {
         setVersion(v);
         if (v.demo) setMode('signup');
-        // Fresh self-host: prefill the seeded admin username so first login is one step.
-        else if (v.needs_setup) setUsername(prev => prev || 'admin');
       })
       .catch(() => setVersion({ sha: 'unknown', ref: 'unknown' }));
   }, []);
+
+  // Brand-new instance (no users at all): the owner creates their own account here, once.
+  // No default password is shipped any more; afterwards the instance is invite-only.
+  const needsAccount = !demo && !!version?.needs_account;
+  const submitSetup = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      await setup(username.trim(), password, email.trim());
+      navigate('/receipts');
+    } catch (err) {
+      const status = err instanceof ApiError ? err.status : 0;
+      setError(status === 409 ? t('login.setup.taken') : status === 400 ? t('login.setup.invalid') : t('login.errorNetwork'));
+      // Someone else finished setup first → re-read the flag so the form flips to a login.
+      if (status === 409) void api<VersionInfo>('/api/version').then(setVersion).catch(() => { /* keep */ });
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const switchMode = (m: 'login' | 'signup') => { setMode(m); setError(''); };
 
@@ -214,22 +232,34 @@ export function Login() {
           <h1 className="mt-2 text-xl font-bold tracking-tight">{t('login.title')}</h1>
         </div>
 
-        {version.needs_setup && !forgotMode && (
-          <div className="mb-5 rounded-xl border border-emerald-300 bg-emerald-50 px-3.5 py-3 text-[13px] leading-snug text-emerald-900 dark:border-emerald-800/70 dark:bg-emerald-950/40 dark:text-emerald-200">
-            <p className="font-semibold">{de ? '👋 Erste Einrichtung' : '👋 First run'}</p>
-            <p className="mt-1">
-              {de
-                ? 'Melde dich mit den Standard-Zugangsdaten an — danach startet der Einrichtungs-Assistent automatisch:'
-                : 'Sign in with the default credentials — the setup wizard then starts automatically:'}
-            </p>
-            <p className="mt-2 font-mono text-[12px] font-semibold">admin&nbsp;/&nbsp;vorrat-start-2026</p>
-            <p className="mt-1.5 text-[11px] opacity-80">
-              {de ? 'Ändere das Passwort danach im Profil.' : 'Change the password afterwards in your Profile.'}
-            </p>
-          </div>
-        )}
-
-        {forgotMode ? (
+        {/* Brand-new instance: create the owner account, once. No default password is shipped. */}
+        {needsAccount ? (
+          <form onSubmit={submitSetup} className="flex flex-col gap-4">
+            <div className="rounded-xl border border-emerald-300 bg-emerald-50 px-3.5 py-3 text-[13px] leading-snug text-emerald-900 dark:border-emerald-800/70 dark:bg-emerald-950/40 dark:text-emerald-200">
+              <p className="font-semibold">{t('login.setup.title')}</p>
+              <p className="mt-1">{t('login.setup.intro')}</p>
+            </div>
+            <div>
+              <Label>{t('login.username')}</Label>
+              <Input value={username} onChange={e => setUsername(e.target.value)} autoFocus autoCapitalize="none" autoComplete="username" />
+            </div>
+            <div>
+              <Label>{t('login.password')}</Label>
+              <Input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="new-password" />
+              <p className="mt-1 text-[11px] text-zinc-400">{t('login.setup.pwHint')}</p>
+            </div>
+            <div>
+              <Label>{t('login.setup.emailLabel')}</Label>
+              <Input type="email" value={email} onChange={e => setEmail(e.target.value)} autoCapitalize="none" autoComplete="email" placeholder="deine@email.de" />
+              <p className="mt-1 text-[11px] text-zinc-400">{t('login.setup.emailHint')}</p>
+            </div>
+            {error && <p className="text-sm text-red-500">{error}</p>}
+            <Button type="submit" disabled={busy || !username.trim() || password.length < 8} className="w-full py-2.5 text-[15px] font-semibold">
+              {busy ? '…' : t('login.setup.submit')}
+            </Button>
+            <p className="text-center text-[11px] leading-relaxed text-zinc-400">{t('login.setup.inviteNote')}</p>
+          </form>
+        ) : forgotMode ? (
           forgotSent ? (
             <div className="flex flex-col gap-4 text-center">
               <p className="text-sm text-zinc-500">{t('login.forgotSent')}</p>

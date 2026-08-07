@@ -260,7 +260,11 @@ async function writeResetMarker(conn: postgres.Sql, marker: string): Promise<voi
 
 export async function ensureAdmin(): Promise<void> {
   const username = process.env.ADMIN_USERNAME ?? 'admin';
-  const password = process.env.ADMIN_PASSWORD ?? 'vorrat-start-2026';
+  // An explicitly configured password means "seed this admin for me" (compose files, CI, the demo,
+  // ADMIN_RESET recovery). Absent it, a fresh off-demo install seeds NOTHING and the browser asks
+  // the owner to create their own account — see the first-run branch below.
+  const explicitPassword = process.env.ADMIN_PASSWORD;
+  const password = explicitPassword ?? 'vorrat-start-2026';
   const marker = resetMarker(username, password);
   // A reset only counts as "forced" the first time these exact credentials are seen. Same creds
   // on the next reboot → the marker matches → we leave the current (possibly user-changed) hash.
@@ -309,6 +313,15 @@ export async function ensureAdmin(): Promise<void> {
   const [{ count }] = await sql`SELECT COUNT(*)::int AS count FROM users WHERE is_admin = TRUE`;
   if (count > 0 && !force) {
     console.log(`[seed] ${count} admin user(s) exist, not seeding "${username}"`);
+    return;
+  }
+  // FIRST RUN, no preseeded credentials asked for: seed NOTHING. Shipping a documented default
+  // password ("admin"/"vorrat-start-2026") means every self-hosted instance is briefly reachable
+  // with credentials the whole internet knows. Instead the login page detects the empty instance
+  // (/api/version → needs_account) and offers a one-time "create your account" form, which
+  // POST /api/auth/setup accepts exactly once. From then on it is invite-only as before.
+  if (!explicitPassword && !force) {
+    console.log('[seed] no admin yet — first-run account creation armed (no default password shipped)');
     return;
   }
   const hash = await bcrypt.hash(password, 12);

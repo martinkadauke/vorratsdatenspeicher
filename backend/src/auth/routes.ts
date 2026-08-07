@@ -146,6 +146,40 @@ export function authRoutes(app: FastifyInstance): void {
     });
   }
 
+  /** First-run account creation (off-demo). Replaces the shipped default password: a brand-new
+   *  instance has NO users, the login page sees that (/api/version → needs_account) and shows a
+   *  "create your account" form once. After this the instance is invite-only exactly as before.
+   *
+   *  The gate is "no user exists at all", enforced INSIDE the INSERT (`WHERE NOT EXISTS`) so two
+   *  concurrent requests cannot both create an owner — the second inserts 0 rows and gets 409.
+   *  NB: on an instance already exposed to the internet before the owner finishes setup, whoever
+   *  reaches it first becomes the admin. That is inherent to first-run setup and still strictly
+   *  better than shipping credentials the whole internet knows. */
+  if (!DEMO_MODE) {
+    app.post('/api/auth/setup', async (req, reply) => {
+      const { username, password, email } = (req.body ?? {}) as { username?: string; password?: string; email?: string };
+      const name = (username ?? '').trim();
+      const pw = password ?? '';
+      // Stored lowercase to match signup/PATCH /api/me — the email UNIQUE index is case-sensitive.
+      const mail = (email ?? '').trim().toLowerCase() || null;
+      if (!name || !pw) return reply.code(400).send({ error: 'username and password required' });
+      if (name.length > 40) return reply.code(400).send({ error: 'username too long (max 40)' });
+      if (pw.length < 8) return reply.code(400).send({ error: 'password too short (min 8)' });
+      if (mail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(mail)) return reply.code(400).send({ error: 'invalid email' });
+
+      const hash = await bcrypt.hash(pw, 12);
+      const rows = await sql`
+        INSERT INTO users (username, email, password_hash, is_admin, sees_all_konten)
+        SELECT ${name}, ${mail}, ${hash}, TRUE, TRUE
+        WHERE NOT EXISTS (SELECT 1 FROM users)
+        RETURNING id`;
+      if (!rows.length) return reply.code(409).send({ error: 'already_set_up', message: 'Dieses Konto wurde bereits eingerichtet.' });
+
+      req.log.info(`first-run admin "${name}" created`);
+      return { token: signToken(rows[0].id as number) };
+    });
+  }
+
   /** Request a password reset. Always answers ok — no user enumeration. */
   app.post('/api/auth/forgot', async (req) => {
     const { email } = (req.body ?? {}) as { email?: string };

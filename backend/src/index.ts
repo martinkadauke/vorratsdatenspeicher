@@ -136,10 +136,12 @@ async function main(): Promise<void> {
     // several branches share a commit SHA (and thus the same baked image/GIT_REF).
     env: process.env.VDS_ENV ?? null,
     demo: DEMO_MODE,
-    // Off-demo only: true until the first-run wizard is completed. The login page reads this
-    // to show a fresh self-hoster the default-credentials hint so they can get in and reach
-    // the setup wizard (which then flips onboarding.done → this goes false, hint disappears).
+    // Off-demo only: true until the first-run wizard is completed (drives the setup wizard).
     needs_setup: DEMO_MODE ? false : !(await getConfig('onboarding.done')),
+    // Off-demo only: a brand-new instance with NO users at all. The login page turns into a
+    // one-time "create your account" form (POST /api/auth/setup) instead of asking for the
+    // default credentials we no longer ship. False forever once the owner account exists.
+    needs_account: DEMO_MODE ? false : !(await sql`SELECT 1 FROM users LIMIT 1`).length,
     node: process.version,
     started_at: new Date(Date.now() - process.uptime() * 1000).toISOString(),
   }));

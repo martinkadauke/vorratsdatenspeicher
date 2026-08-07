@@ -375,6 +375,17 @@
     "errorNetwork": "Backend nicht erreichbar — läuft der Server?",
     "passkey": "Mit Passkey anmelden",
     "passkeyError": "Passkey-Anmeldung abgebrochen oder fehlgeschlagen.",
+    "setup": {
+      "title": "👋 Willkommen — leg dein Konto an",
+      "intro": "Das ist deine eigene, frische Installation. Wähle Benutzername und Passwort — damit bist du der Admin.",
+      "pwHint": "Mindestens 8 Zeichen. Merk es dir gut — es gibt kein voreingestelltes Passwort.",
+      "emailLabel": "E-Mail-Adresse (optional)",
+      "emailHint": "Nur für Passwort-Zurücksetzen und Benachrichtigungen. Kannst du später im Profil nachtragen.",
+      "submit": "Konto anlegen & loslegen →",
+      "inviteNote": "Danach lädst du weitere Personen per Einladung ein — offene Anmeldung gibt es nicht.",
+      "taken": "Es wurde bereits ein Konto eingerichtet. Bitte melde dich an.",
+      "invalid": "Bitte einen Benutzernamen und ein Passwort (min. 8 Zeichen) angeben."
+    },
     "forgot": "Passwort vergessen?",
     "sendReset": "Link anfordern",
     "forgotSent": "Wenn die E-Mail-Adresse existiert, wurde ein Link zum Zurücksetzen gesendet.",
