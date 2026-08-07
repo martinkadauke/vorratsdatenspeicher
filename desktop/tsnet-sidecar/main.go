@@ -89,6 +89,7 @@ func main() {
 
 	// Wait until authenticated + running, then publish the public hostname.
 	ctx := context.Background()
+	var publicHost string
 	for {
 		st, err := lc.Status(ctx)
 		if err == nil && st != nil {
@@ -97,11 +98,29 @@ func main() {
 				emit("VDS_AUTH_URL", st.AuthURL)
 			}
 			if st.BackendState == "Running" && st.Self != nil {
-				emit("VDS_PUBLIC_URL", "https://"+strings.TrimSuffix(st.Self.DNSName, "."))
+				publicHost = strings.TrimSuffix(st.Self.DNSName, ".")
+				emit("VDS_PUBLIC_URL", "https://"+publicHost)
 				break
 			}
 		}
 		time.Sleep(time.Second)
+	}
+
+	// ⚠️ Fetch the TLS certificate BEFORE serving. Tailscale does not publish a funnel node's public
+	// DNS record until that node holds a certificate for its name, and the node is the one that has
+	// to ask for it (the CLI equivalent is `tailscale cert`). Relying on lazy issuance at the first
+	// TLS handshake cannot work: no certificate → no DNS record → no first handshake. The admin
+	// console showed exactly that dead end — machine Connected, Funnel badge present,
+	// "TLS certificate: No certificate found", and the hostname NXDOMAIN at the authoritative
+	// nameservers. Let's Encrypt takes a few seconds; do it once, up front, and say so.
+	certDomain := strings.TrimSuffix(publicHost, ".")
+	emit("VDS_CERT", "requesting")
+	if _, _, err := lc.CertPair(ctx, certDomain); err != nil {
+		// Not fatal on its own — a cert may already exist in TSNET_DIR from an earlier run, and the
+		// funnel listener below is the real test. Report it so the UI can explain a failure.
+		emit("VDS_CERT_ERR", err.Error())
+	} else {
+		emit("VDS_CERT", "ok")
 	}
 
 	// Funnel: public 443 → local backend. TLS is terminated on THIS machine (the cert lives in
