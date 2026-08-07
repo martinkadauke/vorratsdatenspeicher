@@ -1,4 +1,5 @@
 import sql from './db.js';
+import { desktopBaseUrl } from './desktop.js';
 
 export const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret-change-me';
 export const INTERNAL_SECRET = process.env.INTERNAL_SECRET ?? 'dev-internal-secret';
@@ -206,6 +207,19 @@ export async function getConfig<K extends keyof AppConfig>(key: K): Promise<AppC
   const rows = await sql`SELECT value FROM app_config WHERE key = ${key}`;
   if (!rows.length) return DEFAULTS[key];
   return rows[0].value as AppConfig[K];
+}
+
+/**
+ * The base URL to build links with. An explicitly configured `app.base_url` always wins (that is
+ * the self-hoster behind their own proxy telling us the truth); when it is empty, the desktop build
+ * fills in the address it is actually serving on — see desktopBaseUrl(). Docker keeps the old
+ * behaviour exactly: unset stays unset.
+ *
+ * Use this instead of getConfig('app.base_url') anywhere a HUMAN will click the result.
+ */
+export async function effectiveBaseUrl(): Promise<string> {
+  const stored = (await getConfig('app.base_url')).replace(/\/$/, '');
+  return stored || desktopBaseUrl();
 }
 
 export async function getAllConfig(): Promise<Record<string, unknown>> {

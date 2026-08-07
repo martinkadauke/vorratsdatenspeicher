@@ -68,6 +68,10 @@ publish:
 
 win:
   target: nsis
+nsis:
+  # Uninstalling offers to take the data with it (database, receipt photos, tunnel keys) — see
+  # build/installer.nsh for why it asks first. `include` is what wires that customUnInstall macro in.
+  include: build/installer.nsh
 mac:
   target: dmg
   category: public.app-category.finance

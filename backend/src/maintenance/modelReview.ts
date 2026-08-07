@@ -6,7 +6,7 @@
 import crypto from 'node:crypto';
 import cron from 'node-cron';
 import sql from '../db.js';
-import { getConfig } from '../config.js';
+import { getConfig, effectiveBaseUrl } from '../config.js';
 import {
   providerForTask, listModelsForProvider, setTaskAi, type AiTask, type ProviderName,
 } from '../llm/provider.js';
@@ -124,7 +124,7 @@ export async function runModelReview(): Promise<number | null> {
 async function emailReview(id: number, token: string, proposals: Proposal[]): Promise<void> {
   const supers = await sql`SELECT email FROM users WHERE sees_all_konten = TRUE AND email IS NOT NULL AND email <> ''`;
   if (!supers.length) { console.warn('[model-review] no super-admin email configured'); return; }
-  const base = (await getConfig('app.base_url')).replace(/\/$/, '');
+  const base = (await effectiveBaseUrl()).replace(/\/$/, '');
   const link = (action: string) => `${base}/api/model-review/${id}/decide?token=${token}&action=${action}`;
   const mail = modelReviewEmail({
     proposals,

@@ -1,6 +1,7 @@
-import { app, BrowserWindow, Menu, shell, utilityProcess, powerSaveBlocker } from 'electron';
+import { app, BrowserWindow, Menu, dialog, shell, utilityProcess, powerSaveBlocker } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { boot } from './boot.mjs';
 import { startTunnel, sidecarPath, hasTunnelState } from './tunnel.mjs';
@@ -185,9 +186,51 @@ async function stopTunnel(stack) {
   writeTunnelStatus(stack.desktopDir, { state: 'off' });
 }
 
+/** Locked out of your own machine: hand out a one-time code through a NATIVE dialog.
+ *
+ *  A desktop instance has no working "reset by e-mail" story — it needs SMTP, an inbox, and a link
+ *  that outlives the app — and it does not need one: the owner is sitting at the keyboard. That
+ *  physical presence is the factor, and an OS dialog is the one surface a web page can neither read
+ *  nor fake. The confirm step matters: any local page can POST the request, so the worst it can do
+ *  is raise a prompt the user says no to.
+ *  Ambiguous characters (0/O, 1/I) are left out — this gets read off a screen and typed by hand. */
+async function issueRecoveryCode(stack) {
+  const answer = await dialog.showMessageBox(win ?? undefined, {
+    type: 'question', buttons: ['Code anzeigen', 'Abbrechen'], defaultId: 0, cancelId: 1,
+    title: 'Passwort zurücksetzen',
+    message: 'Passwort für Vorratsdatenspeicher zurücksetzen?',
+    detail: 'Du bekommst einen Einmal-Code, den du im Fenster eingibst. Danach kannst du ein neues Passwort vergeben.',
+  });
+  if (answer.response !== 0) { log('recovery declined in the dialog'); return; }
+
+  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const raw = Array.from(crypto.randomBytes(8), b => A[b % A.length]).join('');
+  const code = `${raw.slice(0, 4)}-${raw.slice(4)}`;
+  const expires = new Date(Date.now() + 10 * 60_000).toISOString();
+  fs.writeFileSync(path.join(stack.desktopDir, 'recover.json'), JSON.stringify({ code, expires }), { mode: 0o600 });
+  log('recovery code issued (valid 10 minutes)');
+
+  await dialog.showMessageBox(win ?? undefined, {
+    type: 'info', buttons: ['OK'], title: 'Dein Einmal-Code',
+    message: code,
+    detail: 'Gib diesen Code im Vorratsdatenspeicher-Fenster ein. Er gilt 10 Minuten und nur ein einziges Mal.',
+  });
+}
+
 function watchDesktopBridge(stack) {
   const request = path.join(stack.desktopDir, 'tunnel-request');
+  const recoverRequest = path.join(stack.desktopDir, 'recover-request');
   let busy = false;
+  let recovering = false;
+
+  setInterval(() => {
+    if (recovering || !fs.existsSync(recoverRequest)) return;
+    recovering = true;
+    try { fs.rmSync(recoverRequest, { force: true }); } catch { /* consumed anyway */ }
+    issueRecoveryCode(stack)
+      .catch(e => log(`recovery failed: ${(e && e.stack) || e}`))
+      .finally(() => { recovering = false; });
+  }, 1000).unref();
 
   // Bring a previously connected instance back up on its own: the phone's saved URL and its
   // passkeys are bound to this node, so a household that has connected once expects it to just

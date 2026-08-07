@@ -3,14 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Fingerprint } from 'lucide-react';
 import { useAuth } from '../context/auth';
-import { api, ApiError } from '../api/client';
+import { api, ApiError, setToken } from '../api/client';
 import { passkeySupported } from '../api/passkey';
 import { Button, Input, Label, Card, Spinner } from '../components/ui';
 
-interface VersionInfo { sha: string; ref: string; demo?: boolean; needs_setup?: boolean; needs_account?: boolean }
+interface VersionInfo { sha: string; ref: string; demo?: boolean; needs_setup?: boolean; needs_account?: boolean; desktop?: boolean }
 
 export function Login() {
-  const { login, loginPasskey, signup, setup } = useAuth();
+  const { login, loginPasskey, signup, setup, refreshUser } = useAuth();
   const navigate = useNavigate();
   const { t, i18n } = useTranslation();
   const de = i18n.language.startsWith('de');
@@ -47,6 +47,10 @@ export function Login() {
   const [busy, setBusy] = useState(false);
   const [forgotMode, setForgotMode] = useState(false);
   const [forgotSent, setForgotSent] = useState(false);
+  // Desktop-only lock-out recovery (see below): code requested → typed back with a new password.
+  const [codeSent, setCodeSent] = useState(false);
+  const [code, setCode] = useState('');
+  const [admins, setAdmins] = useState<string[]>([]);
 
   useEffect(() => {
     api<VersionInfo>('/api/version')
@@ -108,6 +112,50 @@ export function Login() {
       } else {
         setError(t('login.errorNetwork'));
       }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // ── locked out of the app running on your own computer ───────────────────────────────────
+  // The e-mail round trip cannot be the answer here: it needs SMTP set up, a reachable inbox and a
+  // link that survives — and the person is standing in front of the machine. So the app asks the
+  // machine instead: the shell shows a one-time code in a native OS dialog (which no web page can
+  // read) and that code, typed back here, sets a new password.
+  const desktop = !!version?.desktop;
+  const requestCode = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      await api('/api/desktop/recover', { method: 'POST' });
+      const { admins: list } = await api<{ admins: string[] }>('/api/desktop/admins');
+      setAdmins(list);
+      if (list.length && !username) setUsername(list[0]);
+      setCodeSent(true);
+    } catch {
+      setError(t('login.recover.failed'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitRecover = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      const { token } = await api<{ token: string }>('/api/desktop/recover/confirm', {
+        method: 'POST', body: { code, username: username.trim(), password },
+      });
+      setToken(token);
+      await refreshUser();
+      navigate('/receipts');
+    } catch (err) {
+      const status = err instanceof ApiError ? err.status : 0;
+      setError(status === 410 ? t('login.recover.expired')
+        : status === 403 ? t('login.recover.wrongCode')
+        : status === 404 ? t('login.recover.noAdmin')
+        : t('login.recover.failed'));
     } finally {
       setBusy(false);
     }
@@ -259,6 +307,48 @@ export function Login() {
             </Button>
             <p className="text-center text-[11px] leading-relaxed text-zinc-400">{t('login.setup.inviteNote')}</p>
           </form>
+        ) : forgotMode && desktop ? (
+          !codeSent ? (
+            <div className="flex flex-col gap-4">
+              <p className="text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">{t('login.recover.blurb')}</p>
+              {error && <p className="text-sm text-red-500">{error}</p>}
+              <Button onClick={requestCode} disabled={busy}>{busy ? '…' : t('login.recover.request')}</Button>
+              <button type="button" onClick={() => setForgotMode(false)} className="text-xs text-zinc-400 hover:underline">
+                {t('login.backToLogin')}
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={submitRecover} className="flex flex-col gap-4">
+              <p className="text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">{t('login.recover.enterBlurb')}</p>
+              <div>
+                <Label>{t('login.recover.code')}</Label>
+                <Input value={code} onChange={e => setCode(e.target.value.toUpperCase())} autoFocus autoCapitalize="characters"
+                  placeholder="ABCD-EFGH" className="font-mono tracking-widest" />
+              </div>
+              <div>
+                <Label>{t('login.username')}</Label>
+                {admins.length > 1 ? (
+                  <select value={username} onChange={e => setUsername(e.target.value)}
+                    className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900">
+                    {admins.map(a => <option key={a} value={a}>{a}</option>)}
+                  </select>
+                ) : (
+                  <Input value={username} onChange={e => setUsername(e.target.value)} autoCapitalize="none" />
+                )}
+              </div>
+              <div>
+                <Label>{t('login.recover.newPassword')}</Label>
+                <Input type="password" value={password} onChange={e => setPassword(e.target.value)} />
+              </div>
+              {error && <p className="text-sm text-red-500">{error}</p>}
+              <Button type="submit" disabled={busy || code.replace(/[^A-Za-z0-9]/g, '').length < 8 || password.length < 8 || !username.trim()}>
+                {busy ? '…' : t('login.recover.submit')}
+              </Button>
+              <button type="button" onClick={() => { setForgotMode(false); setCodeSent(false); setCode(''); }} className="text-xs text-zinc-400 hover:underline">
+                {t('login.backToLogin')}
+              </button>
+            </form>
+          )
         ) : forgotMode ? (
           forgotSent ? (
             <div className="flex flex-col gap-4 text-center">

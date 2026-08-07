@@ -15,6 +15,33 @@ function freePort() {
   });
 }
 
+/** Can we still have the port we used last time? */
+function portFree(port) {
+  return new Promise((resolve) => {
+    const srv = net.createServer();
+    srv.once('error', () => resolve(false));
+    srv.listen(port, '127.0.0.1', () => srv.close(() => resolve(true)));
+  });
+}
+
+/**
+ * The app's port, STABLE across restarts. A fresh free port every launch looked harmless but
+ * quietly broke everything that stores a URL: the password-reset mail, invite links, a browser
+ * bookmark, an installed PWA — all of them pointed at a port that no longer existed by the time
+ * anyone clicked. So: remember the port, reuse it whenever it is still available, and only move on
+ * if something else took it (still never a hardcoded port — a stray server must not lock us out).
+ */
+async function stablePort(dataDir) {
+  const file = path.join(dataDir, 'port.json');
+  try {
+    const { port } = JSON.parse(readFileSync(file, 'utf8'));
+    if (Number.isInteger(port) && await portFree(port)) return port;
+  } catch { /* first run, or the file is unreadable → pick a fresh one */ }
+  const port = await freePort();
+  try { mkdirSync(dataDir, { recursive: true }); writeFileSync(file, JSON.stringify({ port })); } catch { /* not fatal */ }
+  return port;
+}
+
 /** Is a PID currently alive? (signal 0 probes without killing; EPERM means alive-but-not-ours.) */
 function pidAlive(pid) {
   try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
@@ -56,7 +83,7 @@ export async function boot(opts) {
   const { dataDir, backendEntry, secrets, forker } = opts;
   // Free ports by default — a fixed port collides with whatever else the user runs (a stray
   // python -m http.server on 8899 is exactly what bit us). The window/tunnel use stack.port.
-  const appPort = opts.appPort || await freePort();
+  const appPort = opts.appPort || await stablePort(dataDir);
   const pgPort = opts.pgPort || await freePort();
   const pgDataDir = path.join(dataDir, 'pgdata');
 

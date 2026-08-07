@@ -19,7 +19,11 @@ export function registerAuth(app: FastifyInstance): void {
     if (['/api/health', '/api/ready', '/api/version', '/api/auth/login', '/api/auth/signup', '/api/auth/forgot', '/api/auth/reset', '/api/auth/token-info',
          '/api/auth/passkey/login/options', '/api/auth/passkey/login/verify',
          // First-run owner creation: no JWT can exist yet. Self-gated on "no user exists".
-         '/api/auth/setup'].includes(url)) return;
+         '/api/auth/setup',
+         // Desktop lock-out recovery: by definition nobody can present a token here. The factor is
+         // physical — the shell shows a one-time code in an OS dialog no web page can read — and
+         // every one of these is inert unless DESKTOP_DIR is set (i.e. never in Docker).
+         '/api/desktop/recover', '/api/desktop/recover/confirm', '/api/desktop/admins'].includes(url)) return;
     // public, token-protected email link (model-review approve/reject from the mail)
     if (req.method === 'GET' && /^\/api\/model-review\/\d+\/decide$/.test(url)) return;
     // signed one-time backup download link (authorised by the ?s= HMAC, not a JWT)

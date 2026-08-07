@@ -5,7 +5,7 @@ import sql, { adminSql, DEMO_MODE } from '../db.js';
 import { signToken, resolvedEmoji } from './plugin.js';
 import { sendMail } from '../mailer.js';
 import { resetEmail, newHouseholdEmail } from '../email/templates.js';
-import { getConfig } from '../config.js';
+import { getConfig, effectiveBaseUrl } from '../config.js';
 import { seedDemoHousehold } from '../demo/seedHousehold.js';
 
 export async function createAuthToken(userId: number, kind: 'invite' | 'reset', hours: number): Promise<string> {
@@ -188,7 +188,7 @@ export function authRoutes(app: FastifyInstance): void {
       if (rows.length) {
         try {
           const token = await createAuthToken(rows[0].id, 'reset', 2);
-          const base = await getConfig('app.base_url');
+          const base = await effectiveBaseUrl();
           const mail = resetEmail({ username: rows[0].username, link: `${base}/reset?token=${token}`, validity: '2 Stunden' });
           await sendMail(email, mail.subject, mail.text, mail.html);
         } catch (e) {

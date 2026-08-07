@@ -6,7 +6,7 @@
 // Usage: node scripts/headless-smoke.mjs [dataDir]
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { rmSync, existsSync, readFileSync } from 'node:fs';
+import { rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { boot, resolveSecrets } from '../boot.mjs';
 import { sidecarPath } from '../tunnel.mjs';
 
@@ -88,11 +88,40 @@ try {
   const okMarker = existsSync(marker) && readFileSync(marker, 'utf8').trim() === 'start';
   console.log('[smoke] connect request →', okMarker ? 'OK (marker written for the shell)' : 'MARKER MISSING');
 
+  // ── locked-out recovery ────────────────────────────────────────────────────────────────
+  // The shell shows a one-time code in an OS dialog; here we stand in for the shell by writing the
+  // file it would write, and prove the backend half: wrong code refused, right code sets the
+  // password once and burns itself.
+  await fetch(`${stack.url}/api/desktop/recover`, { method: 'POST' });
+  const okRecoverMarker = existsSync(path.join(stack.desktopDir, 'desktop' === 'desktop' ? 'recover-request' : ''));
+  console.log('[smoke] recovery request →', okRecoverMarker ? 'OK (shell would show the dialog)' : 'MARKER MISSING');
+
+  const recoverFile = path.join(stack.desktopDir, 'recover.json');
+  writeFileSync(recoverFile, JSON.stringify({ code: 'ABCD-EFGH', expires: new Date(Date.now() + 600000).toISOString() }));
+  const post = (body) => fetch(`${stack.url}/api/desktop/recover/confirm`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const wrong = await post({ code: 'ZZZZ-ZZZZ', username: 'smoke', password: 'brand-new-pass' });
+  console.log('[smoke] recovery wrong code →', wrong.status, wrong.status === 403 ? 'OK (refused)' : 'UNEXPECTED');
+
+  const right = await post({ code: 'abcd-efgh', username: 'smoke', password: 'brand-new-pass' });
+  const okRecovered = right.status === 200 && !!(await right.clone().json()).token;
+  console.log('[smoke] recovery right code →', right.status, okRecovered ? 'OK (token issued)' : 'UNEXPECTED');
+  const okBurned = !existsSync(recoverFile);
+  console.log('[smoke] code burned after use →', okBurned ? 'OK' : 'STILL ON DISK');
+
+  const relogin = await fetch(`${stack.url}/api/auth/login`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: 'smoke', password: 'brand-new-pass' }),
+  });
+  console.log('[smoke] login with the new password →', relogin.status, relogin.status === 200 ? 'OK' : 'FAILED');
+
   // Informational: is the compiled tunnel sidecar in place? (Absent → the app runs local-only.)
   console.log('[smoke] tunnel sidecar →', sidecarPath({ resourcesPath: null, devRoot: path.resolve(__dirname, '..') }) ? 'bundled' : 'not built (local-only)');
 
   const pass = okSecrets && version?.node && okPasskey && gate.status === 401 && okSpa
-    && okDesktopFlag && anon.status === 401 && okStatus && okMarker;
+    && okDesktopFlag && anon.status === 401 && okStatus && okMarker
+    && okRecoverMarker && wrong.status === 403 && okRecovered && okBurned && relogin.status === 200;
   console.log(pass ? '\n[smoke] ✅ PASS — backend boots on bundled Postgres and serves the app'
                    : '\n[smoke] ❌ FAIL');
   await stack.stop();

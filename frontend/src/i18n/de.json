@@ -411,7 +411,19 @@
     "forgot": "Passwort vergessen?",
     "sendReset": "Link anfordern",
     "forgotSent": "Wenn die E-Mail-Adresse existiert, wurde ein Link zum Zurücksetzen gesendet.",
-    "backToLogin": "Zurück zur Anmeldung"
+    "backToLogin": "Zurück zur Anmeldung",
+    "recover": {
+      "blurb": "Vorratsdatenspeicher läuft auf diesem Rechner — du brauchst dafür keine E-Mail. Fordere einen Einmal-Code an: er erscheint gleich in einem Fenster von Windows bzw. macOS.",
+      "request": "Einmal-Code anfordern",
+      "enterBlurb": "Gib den Code aus dem Fenster ein und vergib ein neues Passwort. Der Code gilt 10 Minuten.",
+      "code": "Einmal-Code",
+      "newPassword": "Neues Passwort (mind. 8 Zeichen)",
+      "submit": "Passwort setzen und anmelden",
+      "wrongCode": "Der Code stimmt nicht. Prüfe die Eingabe — nach fünf Fehlversuchen musst du einen neuen anfordern.",
+      "expired": "Der Code ist abgelaufen. Fordere einen neuen an.",
+      "noAdmin": "Diesen Benutzer gibt es nicht (oder er ist kein Administrator).",
+      "failed": "Das hat nicht geklappt."
+    }
   },
   "reset": {
     "title": "Passwort zurücksetzen",

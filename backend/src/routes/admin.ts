@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import { writeFile, mkdir } from 'node:fs/promises';
 import sql, { DEMO_MODE } from '../db.js';
 import { requireAdmin, requireOperator } from '../auth/plugin.js';
-import { getAllConfig, setConfig, getConfig, isHouseholdConfigKey, scopeConfigForHousehold } from '../config.js';
+import { getAllConfig, setConfig, getConfig, effectiveBaseUrl, isHouseholdConfigKey, scopeConfigForHousehold } from '../config.js';
 import { rescheduleChurner } from '../churner/scheduler.js';
 import { rescheduleSupermarket } from '../supermarket/scheduler.js';
 import { rescheduleModelReview } from '../maintenance/modelReview.js';
@@ -290,7 +290,7 @@ export function adminRoutes(app: FastifyInstance): void {
     }
 
     const token = await createAuthToken(userId, 'invite', 7 * 24);
-    const baseUrl = await getConfig('app.base_url');
+    const baseUrl = await effectiveBaseUrl();
     const link = `${baseUrl}/reset?token=${token}`;
 
     let emailed = false;
@@ -349,7 +349,7 @@ export function adminRoutes(app: FastifyInstance): void {
       if (!claim.ok) return reply.code(429).send({ error: aiLimitMessage(claim.max) });
     }
     const token = await createAuthToken(id, 'invite', 7 * 24);
-    const baseUrl = await getConfig('app.base_url');
+    const baseUrl = await effectiveBaseUrl();
     const link = `${baseUrl}/reset?token=${token}`;
     let emailed = false;
     try {
@@ -375,7 +375,7 @@ export function adminRoutes(app: FastifyInstance): void {
       if (!claim.ok) return reply.code(429).send({ error: aiLimitMessage(claim.max) });
     }
     const token = await createAuthToken(id, 'reset', 24);
-    const base = await getConfig('app.base_url');
+    const base = await effectiveBaseUrl();
     const link = `${base}/reset?token=${token}`;
     let emailed = false;
     if (rows[0].email) {

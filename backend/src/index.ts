@@ -8,7 +8,7 @@ import sql, { adminSql, DEMO_MODE, migrate, ensureAdmin, ensureCashKonten, ensur
 import { initSearch } from './lib/search.js';
 import { checkSecrets } from './lib/checkSecrets.js';
 import { backfillAliases, backfillArtikelOcrKey } from './lib/canonicalAlias.js';
-import { PORT, getConfig } from './config.js';
+import { PORT, getConfig, effectiveBaseUrl } from './config.js';
 import { setEmailBaseUrl } from './email/templates.js';
 import { registerAuth } from './auth/plugin.js';
 import { authRoutes } from './auth/routes.js';
@@ -267,7 +267,7 @@ async function main(): Promise<void> {
   await rescheduleSupermarket();
   await rescheduleModelReview();
   if (!DEMO_MODE) await rescheduleReminders();     // per-user reminders need a household scope a cron lacks on demo
-  setEmailBaseUrl(await getConfig('app.base_url')); // hosted logo URL for emails
+  setEmailBaseUrl(await effectiveBaseUrl()); // hosted logo URL for emails
   if (!DEMO_MODE) await rescheduleMailImport();   // no IMAP polling on the demo — see above
   await rescheduleDropfolder();
   if (DEMO_MODE) await rescheduleDemoSweep();

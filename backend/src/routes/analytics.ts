@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import sql, { DEMO_MODE } from '../db.js';
-import { getConfig } from '../config.js';
+import { getConfig, effectiveBaseUrl } from '../config.js';
 import { claimDemoAi, aiLimitMessage } from '../demo/limits.js';
 import { sendMail, smtpConfigured } from '../mailer.js';
 import { runAnalyticsQuery } from '../analytics/query.js';
@@ -84,7 +84,7 @@ export function analyticsRoutes(app: FastifyInstance): void {
       dashboard?: { title?: string; summary?: string; tiles?: Array<{ type?: string; title?: string; rows?: Array<{ bucket?: string; dims?: (string | null)[]; value?: number }>; columns?: { value?: { unit?: string; label?: string } } }> };
     };
     const periodLabel = typeof body.periodLabel === 'string' ? body.periodLabel.slice(0, 80) : '';
-    const appUrl = (await getConfig('app.base_url')) || '';
+    const appUrl = (await effectiveBaseUrl()) || '';
 
     try {
       let input: ReportInput;

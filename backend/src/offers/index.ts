@@ -3,7 +3,7 @@
 // and a confidence, to guard against hallucination. Found offers are stored and
 // the subscribers get an email digest + an in-app "Angebote für dich" view.
 import sql from '../db.js';
-import { getConfig } from '../config.js';
+import { getConfig, effectiveBaseUrl } from '../config.js';
 import { householdGeo, zipFromAddress, regionFromAddress } from '../lib/household.js';
 import { providerForTask } from '../llm/provider.js';
 import { parseLlmJson } from '../llm/ollama.js';
@@ -239,7 +239,7 @@ export async function sendOfferDigests(): Promise<void> {
     FROM offer WHERE notified = FALSE AND found_at > NOW() - INTERVAL '2 days'
   ` as unknown as OfferRow[];
   if (!fresh.length) return;
-  const appUrl = await getConfig('app.base_url');
+  const appUrl = await effectiveBaseUrl();
   const emailEnabled = await getConfig('offers.email_enabled'); // global admin kill-switches
   const pushEnabled = await getConfig('offers.push_enabled');
 

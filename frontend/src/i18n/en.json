@@ -411,7 +411,19 @@
     "forgot": "Forgot password?",
     "sendReset": "Request link",
     "forgotSent": "If that email address exists, a reset link has been sent.",
-    "backToLogin": "Back to login"
+    "backToLogin": "Back to login",
+    "recover": {
+      "blurb": "Vorratsdatenspeicher runs on this computer — no e-mail needed. Request a one-time code: it appears right away in a Windows or macOS dialog.",
+      "request": "Request a one-time code",
+      "enterBlurb": "Type the code from the dialog and choose a new password. The code is valid for 10 minutes.",
+      "code": "One-time code",
+      "newPassword": "New password (at least 8 characters)",
+      "submit": "Set password and sign in",
+      "wrongCode": "That code is wrong. Check it — after five tries you'll need a new one.",
+      "expired": "The code has expired. Request a new one.",
+      "noAdmin": "No such user (or they are not an administrator).",
+      "failed": "That didn't work."
+    }
   },
   "reset": {
     "title": "Reset password",

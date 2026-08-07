@@ -12,7 +12,7 @@ import type {
   AuthenticationResponseJSON,
 } from '@simplewebauthn/server';
 import sql from '../db.js';
-import { getConfig } from '../config.js';
+import { getConfig, effectiveBaseUrl } from '../config.js';
 import { signToken } from './plugin.js';
 
 /** Relying-party identity. RP-ID = the canonical hostname (no scheme/port), origin = the full
@@ -20,7 +20,7 @@ import { signToken } from './plugin.js';
  *  Electron+Tunnel build this is the stable Tailscale-Funnel hostname for every device (the one
  *  RP-ID all passkeys are bound to). Self-hosters behind their own proxy get it from base_url. */
 async function rpConfig(): Promise<{ rpID: string; origin: string; rpName: string }> {
-  const base = (await getConfig('app.base_url')) || 'http://localhost';
+  const base = (await effectiveBaseUrl()) || 'http://localhost';
   let hostname = 'localhost';
   let origin = base;
   try { const u = new URL(base); hostname = u.hostname; origin = u.origin; } catch { /* keep localhost defaults */ }
