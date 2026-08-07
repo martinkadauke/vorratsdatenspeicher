@@ -92,7 +92,18 @@ function watchForUpdateRequest(updaterDir) {
       // pretending to update and dying half-way.
       if (process.platform === 'darwin') { log('update requested on macOS (unsigned) → opening downloads'); openDownloads(); return; }
 
-      const { autoUpdater } = await import('electron-updater');
+      // ⚠️ NOT `const { autoUpdater } = await import(...)`. electron-updater is CommonJS and
+      // publishes autoUpdater through `Object.defineProperty(exports, 'autoUpdater', { get })`
+      // whose body is `_autoUpdater || doLoadAutoUpdater()`. Node's CJS named-export detection only
+      // recognises the simple `return X.Y` getter form, so this one name — and only this one, its
+      // siblings like NsisUpdater use the simple form — comes back UNDEFINED. That is what made
+      // every "Jetzt aktualisieren" click in 0.18–0.20 die with
+      // "Cannot set properties of undefined (setting 'autoDownload')" and fall back to the
+      // downloads page. Verified under real Electron: the namespace has no `autoUpdater`; the
+      // object lives on `.default`.
+      const updaterModule = await import('electron-updater');
+      const autoUpdater = updaterModule.autoUpdater ?? updaterModule.default?.autoUpdater;
+      if (!autoUpdater) throw new Error('electron-updater exposed no autoUpdater');
       autoUpdater.autoDownload = true;
       autoUpdater.logger = { info: log, warn: log, error: log, debug: () => {} };
       autoUpdater.on('update-not-available', () => log('update requested but none available'));
