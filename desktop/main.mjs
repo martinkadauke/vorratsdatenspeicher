@@ -268,6 +268,29 @@ function watchDesktopBridge(stack) {
   log(`watching for tunnel requests in ${stack.desktopDir}`);
 }
 
+/** Send every outward link to the user's own browser.
+ *
+ *  A `target="_blank"` in a normal page opens a new browser tab; inside Electron it opens a bare
+ *  Chromium window with no address bar, no bookmarks, no logged-in session — so "Vorratsdatenspeicher
+ *  weiterempfehlen → Reddit" dumped the user into a stripped window they were not signed in to.
+ *  Anything that is not this app belongs in the browser they actually use.
+ *
+ *  ⚠️ Only the app window is wired up. The Tailscale login window is deliberately in-app (that is
+ *  the whole "one app, no detour" promise) and is created by us with loadURL, not window.open, so
+ *  it never passes through here. */
+function keepLinksInTheBrowser(contents, appOrigin) {
+  contents.setWindowOpenHandler(({ url }) => {
+    if (/^(https?|mailto):/i.test(url)) void shell.openExternal(url);
+    return { action: 'deny' };   // never a second Electron window
+  });
+  // Same for a plain link that would navigate the app window away from the app itself.
+  contents.on('will-navigate', (e, url) => {
+    if (url.startsWith(appOrigin) || url.startsWith('data:')) return;
+    e.preventDefault();
+    void shell.openExternal(url);
+  });
+}
+
 async function start() {
   // No native menu bar — this is an appliance, not a document editor (removes File/Edit/View/…).
   Menu.setApplicationMenu(null);
@@ -320,6 +343,7 @@ async function start() {
 
     if (await waitForBackend(stack.url)) {
       log('backend ready — loading UI');
+      keepLinksInTheBrowser(win.webContents, stack.url);
       // Only now: the bridge needs the port of the backend that actually came up (a retry picks a
       // new one), and a tunnel pointed at the failed attempt would proxy to nothing.
       watchDesktopBridge(stack);
