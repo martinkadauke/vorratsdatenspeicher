@@ -1,17 +1,35 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { Fingerprint } from 'lucide-react';
 import { useAuth } from '../context/auth';
 import { api, ApiError } from '../api/client';
+import { passkeySupported } from '../api/passkey';
 import { Button, Input, Label, Card, Spinner } from '../components/ui';
 
 interface VersionInfo { sha: string; ref: string; demo?: boolean; needs_setup?: boolean }
 
 export function Login() {
-  const { login, signup } = useAuth();
+  const { login, loginPasskey, signup } = useAuth();
   const navigate = useNavigate();
   const { t, i18n } = useTranslation();
   const de = i18n.language.startsWith('de');
+  const [pkBusy, setPkBusy] = useState(false);
+  const canPasskey = passkeySupported();
+
+  const doPasskey = async () => {
+    setPkBusy(true);
+    setError('');
+    try {
+      await loginPasskey();
+      navigate('/receipts');
+    } catch {
+      // user cancelled, no passkey on this device, or verification failed → gentle hint
+      setError(t('login.passkeyError'));
+    } finally {
+      setPkBusy(false);
+    }
+  };
 
   // Resolve the version (and its demo flag) before choosing a mode, so the demo
   // signup-first flow never flashes the plain login form (or vice-versa).
@@ -168,6 +186,12 @@ export function Login() {
               <Button type="submit" disabled={busy || !username || !password} className="w-full">
                 {t('login.submit')}
               </Button>
+              {canPasskey && (
+                <button type="button" onClick={doPasskey} disabled={pkBusy}
+                  className="flex w-full items-center justify-center gap-2 rounded-lg border border-zinc-300 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800">
+                  <Fingerprint size={16} /> {t('login.passkey')}
+                </button>
+              )}
               <div className="pt-1 text-center">
                 <button type="button" onClick={() => switchMode('signup')} className="text-sm font-medium text-emerald-600 hover:underline dark:text-emerald-500">
                   {de ? 'Neu hier? Eigenen Haushalt anlegen →' : 'New here? Create your own household →'}
@@ -239,6 +263,12 @@ export function Login() {
             <Button type="submit" disabled={busy || !username || !password}>
               {t('login.submit')}
             </Button>
+            {canPasskey && (
+              <button type="button" onClick={doPasskey} disabled={pkBusy}
+                className="flex items-center justify-center gap-2 rounded-lg border border-zinc-300 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800">
+                <Fingerprint size={16} /> {t('login.passkey')}
+              </button>
+            )}
             <button type="button" onClick={() => setForgotMode(true)} className="text-xs text-zinc-400 hover:underline">
               {t('login.forgot')}
             </button>

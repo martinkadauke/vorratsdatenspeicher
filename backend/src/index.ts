@@ -12,6 +12,7 @@ import { PORT, getConfig } from './config.js';
 import { setEmailBaseUrl } from './email/templates.js';
 import { registerAuth } from './auth/plugin.js';
 import { authRoutes } from './auth/routes.js';
+import { webauthnRoutes } from './auth/webauthn.js';
 import { receiptRoutes } from './routes/receipts.js';
 import { articleRoutes } from './routes/articles.js';
 import { categoryRoutes } from './routes/categories.js';
@@ -144,6 +145,7 @@ async function main(): Promise<void> {
   }));
 
   authRoutes(app);
+  webauthnRoutes(app);
   receiptRoutes(app);
   articleRoutes(app);
   categoryRoutes(app);

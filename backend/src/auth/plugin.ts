@@ -16,7 +16,8 @@ export function registerAuth(app: FastifyInstance): void {
   app.addHook('onRequest', async (req, reply) => {
     const url = req.url.split('?')[0];
     if (!url.startsWith('/api/')) return;
-    if (['/api/health', '/api/ready', '/api/version', '/api/auth/login', '/api/auth/signup', '/api/auth/forgot', '/api/auth/reset', '/api/auth/token-info'].includes(url)) return;
+    if (['/api/health', '/api/ready', '/api/version', '/api/auth/login', '/api/auth/signup', '/api/auth/forgot', '/api/auth/reset', '/api/auth/token-info',
+         '/api/auth/passkey/login/options', '/api/auth/passkey/login/verify'].includes(url)) return;
     // public, token-protected email link (model-review approve/reject from the mail)
     if (req.method === 'GET' && /^\/api\/model-review\/\d+\/decide$/.test(url)) return;
     // signed one-time backup download link (authorised by the ?s= HMAC, not a JWT)

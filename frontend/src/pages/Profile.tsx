@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { LogOut, Sparkles, Inbox, Bell, ChevronDown, ChevronRight, Paperclip, Undo2, Mail } from 'lucide-react';
+import { LogOut, Sparkles, Inbox, Bell, ChevronDown, ChevronRight, Paperclip, Undo2, Mail, Fingerprint } from 'lucide-react';
 import { api, ApiError } from '../api/client';
+import { passkeySupported, listPasskeys, registerPasskey, deletePasskey } from '../api/passkey';
 import { MailForwardHelp } from '../components/MailForwardHelp';
 import { ImapHelp } from '../components/ImapHelp';
 import { useAuth } from '../context/auth';
@@ -147,6 +148,8 @@ export function Profile() {
         </Button>
       </Card>
 
+      <PasskeySettings />
+
       <Card className="flex flex-col gap-3 p-4">
         <h2 className="text-base font-semibold">{t('profile.helpHeading')}</h2>
         <Button
@@ -264,6 +267,71 @@ function PushSettings() {
         </>
       ) : (
         <p className="text-xs text-zinc-500">{t('profile.push.unsupported')}</p>
+      )}
+    </Card>
+  );
+}
+
+/** Passkeys (WebAuthn): passwordless, phishing-resistant login. The user adds one per device
+ *  (Face ID / fingerprint / device PIN); VDS stores only the public key. Needs a secure context
+ *  (HTTPS or localhost) — on a plain-http LAN address the browser reports it unsupported. */
+function PasskeySettings() {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const supported = passkeySupported();
+  const { data } = useQuery({ queryKey: ['passkeys'], queryFn: listPasskeys, enabled: supported });
+  const [busy, setBusy] = useState(false);
+  const keys = data ?? [];
+
+  const add = async () => {
+    setBusy(true);
+    try {
+      await registerPasskey();
+      await qc.invalidateQueries({ queryKey: ['passkeys'] });
+      toast(t('profile.passkey.added'), 'success');
+    } catch (e) {
+      const msg = (e as Error).message ?? '';
+      toast(/already registered/i.test(msg) ? t('profile.passkey.dupe') : t('profile.passkey.addFailed'), 'error');
+    } finally { setBusy(false); }
+  };
+
+  const del = async (id: number) => {
+    if (!(await confirm({ title: t('profile.passkey.removeTitle'), message: t('profile.passkey.removeConfirm'), confirmLabel: t('profile.passkey.remove'), cancelLabel: t('common.cancel'), danger: true }))) return;
+    await deletePasskey(id);
+    await qc.invalidateQueries({ queryKey: ['passkeys'] });
+  };
+
+  return (
+    <Card className="flex flex-col gap-3 p-4">
+      <div className="flex items-center gap-2">
+        <Fingerprint size={16} className="text-emerald-600 dark:text-emerald-500" />
+        <h2 className="text-base font-semibold">{t('profile.passkey.heading')}</h2>
+      </div>
+      <p className="text-xs text-zinc-500">{t('profile.passkey.intro')}</p>
+      {!supported ? (
+        <p className="text-xs text-zinc-500">{t('profile.passkey.unsupported')}</p>
+      ) : (
+        <>
+          {keys.length > 0 && (
+            <ul className="flex flex-col divide-y divide-zinc-100 dark:divide-zinc-800">
+              {keys.map(k => (
+                <li key={k.id} className="flex items-center justify-between gap-2 py-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">{k.device_name || 'Passkey'}</p>
+                    <p className="text-[11px] text-zinc-400">
+                      {t('profile.passkey.addedOn', { date: new Date(k.created_at).toLocaleDateString() })}
+                      {k.last_used_at && ` · ${t('profile.passkey.lastUsed', { date: new Date(k.last_used_at).toLocaleDateString() })}`}
+                    </p>
+                  </div>
+                  <button onClick={() => del(k.id)} className="shrink-0 text-xs text-red-500 hover:underline">{t('profile.passkey.remove')}</button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <Button variant="secondary" onClick={add} disabled={busy}>
+            <Fingerprint size={14} /> {busy ? t('common.saving') : t('profile.passkey.add')}
+          </Button>
+        </>
       )}
     </Card>
   );

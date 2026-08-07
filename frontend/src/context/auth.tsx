@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api, getToken, setToken } from '../api/client';
+import { loginWithPasskey } from '../api/passkey';
 import type { User } from '../api/types';
 import { setLanguage } from '../i18n';
 
@@ -11,6 +12,7 @@ interface AuthContextValue {
    *  household admin). Always false off-demo (dev/prod), so demo UI never renders there. */
   demo: boolean;
   login: (username: string, password: string) => Promise<void>;
+  loginPasskey: () => Promise<void>;
   signup: (email: string, password: string, household: string) => Promise<void>;
   logout: () => void;
   refreshUser: () => Promise<void>;
@@ -69,6 +71,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     applyUser(res.user);
   };
 
+  // Passwordless login: the passkey verify returns only a token (like signup), so set it
+  // then load the user via /api/auth/me.
+  const loginPasskey = async () => {
+    const token = await loginWithPasskey();
+    queryClient.clear();
+    setToken(token);
+    await refreshUser();
+  };
+
   // Open signup (demo only): creates a brand-new household + its admin, returns only a
   // token (no user body), so we set the token then load the user via /api/auth/me.
   const signup = async (email: string, password: string, household: string) => {
@@ -88,7 +99,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, demo, login, signup, logout, refreshUser }}>
+    <AuthContext.Provider value={{ user, loading, demo, login, loginPasskey, signup, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

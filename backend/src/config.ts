@@ -54,6 +54,10 @@ export interface AppConfig {
   'searxng.url': string;
   'app.default_lang': string;
   'app.base_url': string;
+  // Passkeys/WebAuthn: RP-ID (hostname, no scheme/port) + expected origin. Empty = derive from
+  // app.base_url. Set explicitly on the Electron+Tunnel build to the stable Tailscale-Funnel host.
+  'webauthn.rp_id': string;
+  'webauthn.origin': string;
   'smtp.host': string;
   'smtp.port': number;
   'smtp.secure': boolean;
@@ -160,6 +164,8 @@ const DEFAULTS: AppConfig = {
   'searxng.url': '',
   'app.default_lang': 'de',
   'app.base_url': '',
+  'webauthn.rp_id': '',
+  'webauthn.origin': '',
   'smtp.host': '',
   'smtp.port': 587,
   'smtp.secure': false,
