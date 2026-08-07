@@ -127,12 +127,17 @@ jobs:
         working-directory: backend
         run: npm ci --omit=dev
 
+      # extraMetadata.version stamps the RELEASE version into the packaged app: it names the
+      # artifacts (…Setup 1.0.16.exe, not the stale 1.0.0 from desktop/package.json) and is what
+      # app.getVersion() — and therefore the in-app version/update check — reports at runtime.
       - name: Build installer
         working-directory: desktop
+        shell: bash          # same syntax on both runners (windows-latest defaults to pwsh)
         env:
           # Skip electron-builder's auto-publish; the assets are uploaded explicitly below.
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: npm ci && npx electron-builder --publish never
+          VDS_VERSION: ${{ needs.build.outputs.version }}
+        run: npm ci && npx electron-builder --publish never --config.extraMetadata.version="$VDS_VERSION"
 
       # Attach to the (draft) GitHub Release the build job created, so one tag yields the Docker
       # image AND the desktop installers — and /download can read them straight from the API.

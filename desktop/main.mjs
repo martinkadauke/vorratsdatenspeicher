@@ -25,6 +25,10 @@ let win = null;
 async function start() {
   // No native menu bar — this is an appliance, not a document editor (removes File/Edit/View/…).
   Menu.setApplicationMenu(null);
+  // Let the bundled backend report the real release version (/api/version → drives the in-app
+  // "update available" check). CI stamps it via electron-builder's extraMetadata.version, so
+  // app.getVersion() is the release number; a dev run just reports package.json's.
+  process.env.APP_VERSION = app.getVersion();
   // Keep the machine reachable for phones while the app is open + plugged in.
   powerSaveBlocker.start('prevent-app-suspension');
 
