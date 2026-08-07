@@ -324,7 +324,9 @@ async function start() {
     autoHideMenuBar: true,   // belt-and-suspenders on top of setApplicationMenu(null)
     webPreferences: { contextIsolation: true },
   });
-  await win.loadURL(splashUrl());
+  // A cluster that already exists means this is NOT a first run, however long ago it was made.
+  const firstRun = !fs.existsSync(path.join(dataDir, 'pgdata', 'PG_VERSION'));
+  await win.loadURL(splashUrl(firstRun ? 'first' : 'normal'));
 
   // One automatic retry. The first launch after an install has been seen to leave the database
   // half-started; restarting the app by hand fixed it, so do that FOR the user instead of
@@ -354,29 +356,49 @@ async function start() {
     if (attempt === 1) {
       try { await stack.stop(); } catch (e) { log(`teardown before retry failed: ${e}`); }
       stack = null;
-      await win.loadURL(splashUrl(true));
+      await win.loadURL(splashUrl('retry'));
     }
   }
   throw new Error('Die Datenbank ist auch beim zweiten Versuch nicht gestartet.');
 }
 
-/** What the user looks at while the database is being prepared. Inline data URL — no extra file
- *  to bundle, and it renders before anything else exists. */
-function splashUrl(retrying = false) {
+/** What the user looks at while the app comes up. Inline data URL — no extra file to bundle, and
+ *  it renders before anything else exists.
+ *
+ *  ⚠️ Three different situations, three different texts. Saying "the database is being created,
+ *  this takes about a minute" on EVERY launch is both wrong and alarming: it is true exactly once,
+ *  and a returning user reads it as "it is doing that again?". A normal start takes a few seconds
+ *  and deserves nothing more than the product standing there calmly. */
+function splashUrl(mode = 'normal') {
+  const line = mode === 'retry'
+    ? 'Der erste Versuch hat nicht geklappt — die App probiert es gerade noch einmal.'
+    : mode === 'first'
+      ? 'Beim allerersten Start wird deine Datenbank angelegt. Das dauert etwa eine Minute — danach geht es immer schnell.'
+      : 'einen Moment …';
+  const head = mode === 'first' ? 'Vorratsdatenspeicher wird eingerichtet' : 'Vorratsdatenspeicher';
+  // The receipt is the product's own visual language (see the website): paper, a dashed tear-off
+  // edge, monospace. Cheaper and better than a logo we cannot load from a data: URL.
   const html = `<!doctype html><meta charset="utf-8"><style>
-    @keyframes p{0%{transform:translateX(-100%)}100%{transform:translateX(400%)}}
+    @keyframes p{0%{transform:translateX(-120%)}100%{transform:translateX(420%)}}
+    @keyframes in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+    *{box-sizing:border-box}
     body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;
-      background:#f4eee0;color:#2c2620;font:16px/1.6 ui-monospace,Consolas,monospace}
-    .w{text-align:center;max-width:32rem;padding:24px}
-    h1{font-size:19px;margin:0 0 10px;letter-spacing:.02em}
-    p{margin:0;color:#5f584c;font-size:14px}
-    .bar{margin:22px auto 0;width:220px;height:4px;background:#e0d8c4;border-radius:2px;overflow:hidden}
-    .bar i{display:block;width:25%;height:100%;background:#3d6a4e;animation:p 1.4s ease-in-out infinite}
-    </style><div class="w">
-    <h1>Vorratsdatenspeicher wird vorbereitet</h1>
-    <p>${retrying
-      ? 'Der erste Versuch hat nicht geklappt — die App probiert es gerade noch einmal.'
-      : 'Beim ersten Start wird die Datenbank angelegt. Das dauert etwa eine Minute — das Fenster bleibt so lange offen.'}</p>
+      background:#f4eee0;color:#2c2620;font:15px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace}
+    .r{width:min(21rem,80vw);padding:26px 26px 22px;background:#fffdf7;border-radius:3px;
+      box-shadow:0 1px 2px rgba(44,38,32,.06),0 8px 28px rgba(44,38,32,.10);
+      animation:in .45s ease-out both;text-align:center;
+      /* torn-off bottom edge */
+      -webkit-mask:radial-gradient(6px at 6px 100%,#0000 98%,#000) -6px 0/12px 100% repeat-x;
+      mask:radial-gradient(6px at 6px 100%,#0000 98%,#000) -6px 0/12px 100% repeat-x}
+    h1{font-size:15px;font-weight:700;margin:0;letter-spacing:.06em;text-transform:uppercase}
+    .rule{margin:14px 0;border-top:1px dashed #d9d0bb}
+    p{margin:0;color:#6b6355;font-size:12.5px;letter-spacing:.01em}
+    .bar{margin:18px auto 2px;width:150px;height:3px;background:#e7dfcb;border-radius:2px;overflow:hidden}
+    .bar i{display:block;width:22%;height:100%;background:#3d6a4e;animation:p 1.5s ease-in-out infinite}
+    </style><div class="r">
+    <h1>${head}</h1>
+    <div class="rule"></div>
+    <p>${line}</p>
     <div class="bar"><i></i></div></div>`;
   return 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
 }
