@@ -95,6 +95,12 @@ export async function boot(opts) {
   // backendEntry = <backendRoot>/dist/index.js → migrations live at <backendRoot>/migrations.
   // The forked child's cwd is not the backend root, so point migrate() at them explicitly.
   const backendRoot = path.dirname(path.dirname(backendEntry));
+  // Writable, per-install locations for everything the container would get as a mounted volume.
+  // Created up front: the backend only checks existsSync and silently disables photo serving.
+  const receiptsDir = path.join(dataDir, 'receipts');
+  const updaterDir = path.join(dataDir, 'updater');
+  mkdirSync(receiptsDir, { recursive: true });
+  mkdirSync(updaterDir, { recursive: true });
   const env = {
     ...process.env,
     DATABASE_URL: `postgres://vds:vds@127.0.0.1:${pgPort}/vorratsdatenspeicher`,
@@ -102,6 +108,16 @@ export async function boot(opts) {
     JWT_SECRET: jwt,
     INTERNAL_SECRET: internal,
     MIGRATIONS_DIR: path.join(backendRoot, 'migrations'),
+    // ⚠️ Receipt photos default to the DOCKER path `/receipts` — on Windows that resolves to
+    // C:\receipts, which does not exist and cannot be created without admin, so every photo
+    // upload failed ("Foto speichern fehlgeschlagen") and photo serving switched itself off.
+    // Same failure family as the spaced data dir: a container-only absolute path leaking into
+    // the desktop build. Keep them beside the database, inside the app's own data directory.
+    RECEIPTS_LOCAL_PATH: receiptsDir,
+    // Lets the in-app "Jetzt aktualisieren" button reach us: the backend drops a marker file
+    // here and the Electron shell (main.mjs) picks it up. Same protocol as the Docker sidecar.
+    SELF_UPDATE: '1',
+    SELF_UPDATE_DIR: updaterDir,
     // Serve the built SPA so the window shows the app, not just the API. In dev that's
     // frontend/dist; a packaged build points this at the bundled frontend.
     PUBLIC_DIR: opts.publicDir || path.resolve(backendRoot, '..', 'frontend', 'dist'),

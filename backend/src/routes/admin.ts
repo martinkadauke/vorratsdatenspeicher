@@ -124,16 +124,25 @@ export function adminRoutes(app: FastifyInstance): void {
     // Strict semver: a release someone forgot to flag as pre-release (1.2.0-rc1) must not
     // be treated as stable.
     const stable = releases.filter(r => !r.draft && !r.prerelease && /^v?\d+\.\d+\.\d+$/.test(r.tag_name));
-    const newest = [...stable].sort((a, b) => cmpSemver(b.tag_name, a.tag_name))[0] ?? null;
-    const newer = [...stable].filter(r => cmpSemver(r.tag_name, current) > 0)
-      .sort((a, b) => cmpSemver(b.tag_name, a.tag_name));
+    const at = (r: GhRelease) => Date.parse(r.published_at ?? '') || 0;
+    const byDate = [...stable].sort((a, b) => at(b) - at(a));
+    const mine = stable.find(r => r.tag_name.replace(/^v/, '') === current) ?? null;
+    // ⚠️ "Newer" means PUBLISHED LATER, not semver-greater. The project deliberately renumbered
+    // 1.0.16 → 0.17.0, and pure semver then ranks the OLD release higher: a 0.17.0 install was
+    // offered "Version 1.0.16 verfügbar" — an update banner pointing at a downgrade. Publication
+    // order is the honest answer. Semver remains the fallback for a build whose own version is
+    // not in the list at all (custom tag, deleted release).
+    const newer = mine
+      ? byDate.filter(r => at(r) > at(mine))
+      : byDate.filter(r => cmpSemver(r.tag_name, current) > 0);
+    const target = newer[0] ?? null;
     return {
       channel: 'release' as const,
       current,
-      latest: newest ? newest.tag_name.replace(/^v/, '') : current,
-      update_available: newer.length > 0,
-      url: newest?.html_url ?? null,
-      published_at: newest?.published_at ?? null,
+      latest: target ? target.tag_name.replace(/^v/, '') : current,
+      update_available: !!target,
+      url: (target ?? byDate[0])?.html_url ?? null,
+      published_at: target?.published_at ?? null,
       // true only if the operator added the updater sidecar → the UI may offer one-click update.
       self_update: selfUpdateEnabled(),
       notes: newer.map(r => ({
