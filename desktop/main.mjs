@@ -127,33 +127,70 @@ async function start() {
   // plainly instead of failing three steps later with an empty error.
   if (/\s/.test(dataDir)) throw new Error(`Der Datenpfad enthält ein Leerzeichen, damit kommt die mitgelieferte Datenbank nicht zurecht:\n${dataDir}`);
 
-  stack = await boot({
-    dataDir,
-    backendEntry,
-    // No fixed port — boot picks a free one (a stray server on 8899 must not break us).
-    // Electron forks Node via utilityProcess so the child uses Electron's runtime, not a system node.
-    forker: (entry, env) => utilityProcess.fork(entry, [], { env, stdio: 'inherit' }),
-  });
-  log(`backend booting on ${stack.url}`);
-  watchForUpdateRequest(stack.updaterDir);
-
+  // The window comes up FIRST, showing what is happening. Creating the cluster and running every
+  // migration takes ~50s on a warm machine and longer on a cold one; doing that behind an empty
+  // window is exactly what "wieder nur weisser screen" was. Nobody should have to guess whether
+  // the app is working or broken.
   win = new BrowserWindow({
     width: 1200,
     height: 820,
     title: 'Vorratsdatenspeicher Desktop',
     icon: iconPath,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#f4eee0',
     autoHideMenuBar: true,   // belt-and-suspenders on top of setApplicationMenu(null)
     webPreferences: { contextIsolation: true },
   });
+  await win.loadURL(splashUrl());
 
-  // Wait for the backend to answer before showing the app, so the user never sees a blank/refused
-  // page. A FIRST run has to create the cluster and run every migration, which on a cold or slow
-  // machine takes well over a minute — hence the generous budget.
-  const ready = await waitForBackend(stack.url);
-  if (!ready) throw new Error('Die Datenbank ist nicht rechtzeitig gestartet. Bitte die App neu starten.');
-  log('backend ready — loading UI');
-  await win.loadURL(stack.url);
+  // One automatic retry. The first launch after an install has been seen to leave the database
+  // half-started; restarting the app by hand fixed it, so do that FOR the user instead of
+  // handing them a dead window.
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    stack = await boot({
+      dataDir,
+      backendEntry,
+      // No fixed port — boot picks a free one (a stray server on 8899 must not break us).
+      // Electron forks Node via utilityProcess so the child uses Electron's runtime, not a system node.
+      forker: (entry, env) => utilityProcess.fork(entry, [], { env, stdio: 'inherit' }),
+    });
+    log(`backend booting on ${stack.url} (attempt ${attempt})`);
+    if (attempt === 1) watchForUpdateRequest(stack.updaterDir);
+
+    if (await waitForBackend(stack.url)) {
+      log('backend ready — loading UI');
+      await win.loadURL(stack.url);
+      return;
+    }
+
+    log(`backend did not come up on attempt ${attempt}`);
+    if (attempt === 1) {
+      try { await stack.stop(); } catch (e) { log(`teardown before retry failed: ${e}`); }
+      stack = null;
+      await win.loadURL(splashUrl(true));
+    }
+  }
+  throw new Error('Die Datenbank ist auch beim zweiten Versuch nicht gestartet.');
+}
+
+/** What the user looks at while the database is being prepared. Inline data URL — no extra file
+ *  to bundle, and it renders before anything else exists. */
+function splashUrl(retrying = false) {
+  const html = `<!doctype html><meta charset="utf-8"><style>
+    @keyframes p{0%{transform:translateX(-100%)}100%{transform:translateX(400%)}}
+    body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;
+      background:#f4eee0;color:#2c2620;font:16px/1.6 ui-monospace,Consolas,monospace}
+    .w{text-align:center;max-width:32rem;padding:24px}
+    h1{font-size:19px;margin:0 0 10px;letter-spacing:.02em}
+    p{margin:0;color:#5f584c;font-size:14px}
+    .bar{margin:22px auto 0;width:220px;height:4px;background:#e0d8c4;border-radius:2px;overflow:hidden}
+    .bar i{display:block;width:25%;height:100%;background:#3d6a4e;animation:p 1.4s ease-in-out infinite}
+    </style><div class="w">
+    <h1>Vorratsdatenspeicher wird vorbereitet</h1>
+    <p>${retrying
+      ? 'Der erste Versuch hat nicht geklappt — die App probiert es gerade noch einmal.'
+      : 'Beim ersten Start wird die Datenbank angelegt. Das dauert etwa eine Minute — das Fenster bleibt so lange offen.'}</p>
+    <div class="bar"><i></i></div></div>`;
+  return 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
 }
 
 async function waitForBackend(base, tries = 360) {   // 360 × 500ms = 3 minutes
