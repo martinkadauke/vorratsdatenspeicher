@@ -49,6 +49,16 @@ extraResources:
   - from: ../frontend/dist
     to: frontend/dist
 
+# Where electron-updater looks for new versions. Declaring it here is also what makes
+# electron-builder EMIT `latest.yml` / `latest-mac.yml` next to the installers — without those
+# metadata files the in-app "Jetzt aktualisieren" button has nothing to read (v0.17.0 shipped
+# without them). CI uploads them alongside the installers; publishing itself stays manual
+# (`--publish never`), so nothing is pushed to GitHub by the build.
+publish:
+  provider: github
+  owner: martinkadauke
+  repo: vorratsdatenspeicher
+
 win:
   target: nsis
 mac:

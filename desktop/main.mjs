@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, utilityProcess, powerSaveBlocker } from 'electron';
+import { app, BrowserWindow, Menu, shell, utilityProcess, powerSaveBlocker } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -60,6 +60,56 @@ function showFailure(err) {
   } catch (e) { console.error(e); }
 }
 
+/** The in-app "Jetzt aktualisieren" button, for the desktop build.
+ *
+ *  Reuses the EXISTING protocol rather than inventing a second one: the backend's
+ *  POST /api/self-update drops a marker file in SELF_UPDATE_DIR (that is how the Docker updater
+ *  sidecar is triggered too), and here the shell watches for it and runs electron-updater. So the
+ *  same button, the same endpoint and the same banner serve both channels.
+ *
+ *  ⚠️ Auto-update needs the `latest.yml` / `latest-mac.yml` metadata that electron-builder only
+ *  emits when a `publish` block exists — v0.17.0 shipped without it, so the first version this can
+ *  actually update FROM is the next release.
+ *  ⚠️ macOS refuses to auto-install an UNSIGNED update (Squirrel.Mac verifies the signature). We
+ *  detect that and send the user to the download page instead of failing silently. */
+function watchForUpdateRequest(updaterDir) {
+  const marker = path.join(updaterDir, 'request');
+  let running = false;
+
+  const openDownloads = () => shell.openExternal('https://github.com/martinkadauke/vorratsdatenspeicher/releases/latest');
+
+  const run = async () => {
+    if (running) return;
+    running = true;
+    try {
+      fs.rmSync(marker, { force: true });        // consume it, so one click = one attempt
+      if (!app.isPackaged) { log('update requested but this is a dev run — ignoring'); return; }
+      // An unsigned .app cannot be replaced in place; hand over to the browser instead of
+      // pretending to update and dying half-way.
+      if (process.platform === 'darwin') { log('update requested on macOS (unsigned) → opening downloads'); openDownloads(); return; }
+
+      const { autoUpdater } = await import('electron-updater');
+      autoUpdater.autoDownload = true;
+      autoUpdater.logger = { info: log, warn: log, error: log, debug: () => {} };
+      autoUpdater.on('update-not-available', () => log('update requested but none available'));
+      autoUpdater.on('error', (e) => { log(`update failed: ${(e && e.message) || e}`); openDownloads(); });
+      autoUpdater.on('update-downloaded', () => { log('update downloaded — restarting to install'); setImmediate(() => autoUpdater.quitAndInstall()); });
+      log('checking for updates …');
+      await autoUpdater.checkForUpdates();
+    } catch (e) {
+      log(`update trigger failed: ${(e && e.stack) || e}`);
+      openDownloads();
+    } finally { running = false; }
+  };
+
+  try {
+    // fs.watch can miss/duplicate events across platforms; a cheap poll is the reliable floor for
+    // a file that appears at most once per user click.
+    setInterval(() => { if (fs.existsSync(marker)) void run(); }, 1500).unref();
+    log(`watching for update requests in ${updaterDir}`);
+  } catch (e) { log(`could not watch updater dir: ${e}`); }
+}
+
 async function start() {
   // No native menu bar — this is an appliance, not a document editor (removes File/Edit/View/…).
   Menu.setApplicationMenu(null);
@@ -85,6 +135,7 @@ async function start() {
     forker: (entry, env) => utilityProcess.fork(entry, [], { env, stdio: 'inherit' }),
   });
   log(`backend booting on ${stack.url}`);
+  watchForUpdateRequest(stack.updaterDir);
 
   win = new BrowserWindow({
     width: 1200,

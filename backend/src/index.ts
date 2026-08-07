@@ -267,7 +267,11 @@ async function main(): Promise<void> {
   await rescheduleDropfolder();
   if (DEMO_MODE) await rescheduleDemoSweep();
 
-  await app.listen({ port: PORT, host: '0.0.0.0' });
+  // 0.0.0.0 is right INSIDE a container (that is how the port mapping reaches it), but wrong for
+  // an app running on someone's own machine: it would put the household's receipts on every
+  // network interface for anyone on the WLAN to find. BIND_HOST lets the desktop build pin it to
+  // loopback; remote access there is an explicit feature (the tunnel), never a side effect.
+  await app.listen({ port: PORT, host: process.env.BIND_HOST || '0.0.0.0' });
   app.log.info(`Vorratsdatenspeicher listening on :${PORT}`);
 }
 

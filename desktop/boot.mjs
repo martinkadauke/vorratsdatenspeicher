@@ -114,6 +114,10 @@ export async function boot(opts) {
     // Same failure family as the spaced data dir: a container-only absolute path leaking into
     // the desktop build. Keep them beside the database, inside the app's own data directory.
     RECEIPTS_LOCAL_PATH: receiptsDir,
+    // Loopback only. Without this the app answered on every network interface, so anyone on the
+    // same WLAN could open the household's receipts — the opposite of what a "runs on your own
+    // computer" app should do. Reaching it from a phone is the tunnel's job, deliberately.
+    BIND_HOST: '127.0.0.1',
     // Lets the in-app "Jetzt aktualisieren" button reach us: the backend drops a marker file
     // here and the Electron shell (main.mjs) picks it up. Same protocol as the Docker sidecar.
     SELF_UPDATE: '1',
@@ -136,6 +140,8 @@ export async function boot(opts) {
   return {
     port: appPort,
     url: `http://127.0.0.1:${appPort}`,
+    receiptsDir,
+    updaterDir,          // the shell watches this for the in-app update request
     tunnel,                       // { available, reason, url, host, stop }
     publicUrl: tunnel.url,        // the HTTPS URL to encode in the connect-phone QR, or null
     async stop() {
