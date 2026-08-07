@@ -26,9 +26,13 @@ files:
   - package.json
   - node_modules/**/*
 
-asarUnpack:
-  - node_modules/@embedded-postgres/**   # native initdb/postgres binaries — must be real files
-  - node_modules/embedded-postgres/**
+# asar OFF on purpose. embedded-postgres resolves initdb/postgres/pg_ctl from its own platform
+# package's module location; inside an asar that path points INTO the archive, and you cannot
+# spawn an executable from a virtual filesystem → the packaged app died with
+# "spawn …\initdb.exe ENOENT". asarUnpack does not help because the library computes the packed
+# path itself and offers no override. The app payload here is glue code plus native binaries, so
+# there is nothing an archive would buy us; backend/frontend already ship as extraResources.
+asar: false
 
 # The existing backend + frontend build, copied verbatim next to the app (no rebuild). `from` is
 # relative to this desktop/ dir. backend/package.json is required so Node treats dist/*.js as ESM
