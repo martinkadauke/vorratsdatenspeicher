@@ -189,7 +189,9 @@ async function main(): Promise<void> {
   // forever), but index.html points at the current hashes and MUST always be
   // revalidated — otherwise a browser keeps loading an old bundle after a deploy
   // (the cause of "I don't see the new feature" / stale-data ghosts).
-  const publicDir = path.join(process.cwd(), 'public');
+  // Default cwd/public (the Docker image copies the frontend build there). PUBLIC_DIR lets the
+  // Electron desktop build point at the bundled SPA (cwd is unpredictable when embedded).
+  const publicDir = process.env.PUBLIC_DIR || path.join(process.cwd(), 'public');
   if (existsSync(publicDir)) {
     await app.register(fastifyStatic, {
       root: publicDir,

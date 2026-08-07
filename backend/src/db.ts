@@ -177,7 +177,9 @@ export async function migrate(): Promise<void> {
     filename TEXT PRIMARY KEY,
     applied_at TIMESTAMP DEFAULT NOW()
   )`;
-  const dir = path.join(process.cwd(), 'migrations');
+  // Default is cwd/migrations (the Docker image runs from /app). MIGRATIONS_DIR lets an embedder
+  // (the Electron desktop build, where cwd is unpredictable) point at the bundled migrations.
+  const dir = process.env.MIGRATIONS_DIR || path.join(process.cwd(), 'migrations');
   if (!existsSync(dir)) {
     console.warn(`[migrate] no migrations directory at ${dir}, skipping`);
     return;
