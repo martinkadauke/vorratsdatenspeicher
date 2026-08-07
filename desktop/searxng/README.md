@@ -3,6 +3,30 @@
 **Status: researched and de-risked, NOT wired up.** Everything in this directory works; what is
 missing is a Python runtime and the CI/boot plumbing. Written so this can be picked up cold.
 
+## ⚠️ Erst lesen: der Nutzen ist kleiner als gedacht (2026-08-08)
+
+Martin bemerkte, dass Angebote in der Desktop-App **funktionieren**, obwohl `searxng.url` leer ist.
+Er hat recht, und die ursprüngliche Begründung dieses Dokuments war falsch:
+
+**Angebote laufen primär über Marktguru**, eine echte Angebots-API mit strukturierten Daten
+(`offers/index.ts:151`). Sie braucht nur die Postleitzahl aus der Haushaltsadresse — keine
+Websuche. SearXNG ist dort nur die *Rückfallebene*, wenn Marktguru nichts liefert.
+
+Ohne SearXNG fehlen tatsächlich nur:
+
+| | |
+|---|---|
+| Produkt- und Kettenlogos | Bildersuche (`churner/index.ts:588`, `:643`) |
+| Churner-Recherche | unbekannte Artikelnamen nachschlagen (`churner/index.ts:187`, `:441`) |
+| „Kann dieses Ollama-Modell Bilder?" | Web-Prüfung im Assistenten (`routes/onboarding.ts:144`) |
+| Ladenprofile | offizielle Website finden (`stores/enrich.ts:98`) |
+| Angebote ohne Marktguru-Abdeckung | die Rückfallebene greift dann nicht |
+
+**Vor dem Bauen also neu abwägen:** rechtfertigen Logos, Namensrecherche und ein paar Randfälle
++70–90 MB pro Installer und eine mitgelieferte Python-Laufzeit? Die Alternative, die Martin
+ursprünglich verworfen hat (Suche direkt im Node-Backend, 0 MB), sieht mit dieser Information
+anders aus. Der Rest dieses Dokuments bleibt gültig, falls die Antwort weiterhin „ja, bündeln" ist.
+
 ## Why
 
 VDS uses web search for shop leaflets, offers, product pictures and the model-capability lookups.
