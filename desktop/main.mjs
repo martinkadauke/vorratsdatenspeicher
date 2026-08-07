@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, dialog, shell, utilityProcess, powerSaveBlocker } from 'electron';
+import { app, BrowserWindow, Menu, dialog, globalShortcut, shell, utilityProcess, powerSaveBlocker } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
@@ -336,6 +336,32 @@ function keepLinksInTheBrowser(contents, appOrigin) {
   });
 }
 
+/** Say something when the WINDOW breaks, and give the user a way out.
+ *
+ *  ⚠️ After an in-place update the window came up black — and the log had nothing to say, because
+ *  it only ever recorded the backend. A renderer that dies, fails to load or hangs is invisible
+ *  from the main process unless you ask, and "black screen" is then all anyone can report. Ask.
+ *
+ *  The reload accelerator matters for the same reason: removing the menu bar (this is an appliance,
+ *  not a document editor) also removed Ctrl+R, so a blank window could only be escaped by quitting
+ *  the whole app. Registered on the window, so it cannot leak into other applications. */
+function watchRenderer(w) {
+  const wc = w.webContents;
+  wc.on('did-fail-load', (_e, code, desc, url) => log(`renderer failed to load: ${code} ${desc} (${url})`));
+  wc.on('render-process-gone', (_e, details) => {
+    log(`RENDERER GONE: ${details?.reason} (exitCode ${details?.exitCode}) — reloading`);
+    try { wc.reload(); } catch (e) { log(`reload after crash failed: ${e}`); }
+  });
+  wc.on('unresponsive', () => log('renderer unresponsive'));
+  wc.on('responsive', () => log('renderer responsive again'));
+  w.on('focus', () => {
+    for (const key of ['CommandOrControl+R', 'F5']) {
+      try { globalShortcut.register(key, () => wc.reload()); } catch { /* another app may hold it */ }
+    }
+  });
+  w.on('blur', () => globalShortcut.unregisterAll());
+}
+
 async function start() {
   // No native menu bar — this is an appliance, not a document editor (removes File/Edit/View/…).
   Menu.setApplicationMenu(null);
@@ -391,6 +417,7 @@ async function start() {
     if (await waitForBackend(stack.url)) {
       log('backend ready — loading UI');
       keepLinksInTheBrowser(win.webContents, stack.url);
+      watchRenderer(win);
       // Only now: the bridge needs the port of the backend that actually came up (a retry picks a
       // new one), and a tunnel pointed at the failed attempt would proxy to nothing.
       watchDesktopBridge(stack);
