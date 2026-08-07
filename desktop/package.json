@@ -2,6 +2,7 @@
   "name": "vorratsdatenspeicher-desktop",
   "version": "1.0.0",
   "private": true,
+  "productName": "Vorratsdatenspeicher Desktop",
   "description": "VDS as a desktop app (Electron): bundles Postgres + serves the existing backend/frontend locally — no Docker, no server setup.",
   "license": "AGPL-3.0-only",
   "type": "module",

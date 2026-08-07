@@ -12,7 +12,7 @@
 # migrations and PUBLIC_DIR=<resources>/frontend/dist from it — hence the extraResources map.
 
 appId: com.vorratsdatenspeicher.desktop
-productName: Vorratsdatenspeicher
+productName: Vorratsdatenspeicher Desktop
 directories:
   output: out
   buildResources: build

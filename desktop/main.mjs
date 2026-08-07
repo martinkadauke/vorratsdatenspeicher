@@ -39,7 +39,7 @@ async function start() {
   win = new BrowserWindow({
     width: 1200,
     height: 820,
-    title: 'Vorratsdatenspeicher',
+    title: 'Vorratsdatenspeicher Desktop',
     icon: iconPath,
     backgroundColor: '#ffffff',
     autoHideMenuBar: true,   // belt-and-suspenders on top of setApplicationMenu(null)

@@ -4,5 +4,5 @@ node_modules/
 dist/
 out/
 # Go sidecar build artifacts + runtime state (source + go.mod/sum are committed; the exe is rebuilt)
-tsnet-sidecar/vds-tsnet-sidecar.exe
+tsnet-sidecar/*.exe
 tsnet-sidecar/tsnet-state/

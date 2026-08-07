@@ -42,9 +42,11 @@ func main() {
 	if dir == "" {
 		dir = "./tsnet-state"
 	}
+	// The name the user sees in Tailscale (device list + the join prompt). Must read like the
+	// product, not like an internal binary. Tailscale lowercases/hyphenates it for the hostname.
 	host := os.Getenv("TS_HOSTNAME")
 	if host == "" {
-		host = "vorratsdatenspeicher"
+		host = "Vorratsdatenspeicher-Desktop"
 	}
 
 	s := &tsnet.Server{
