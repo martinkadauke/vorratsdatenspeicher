@@ -86,7 +86,15 @@ export function startTunnel({ localPort, stateDir, binPath, onEvent, log = () =>
       // Whether the node got its own certificate is the one HONEST answer to "does this tailnet
       // permit HTTPS". Without it the shell can only guess from a failed probe — and it guessed
       // wrong, telling people to switch on a setting that was already on.
-      else if (key === 'VDS_CERT') { if (val === 'ok') certOk = true; }
+      else if (key === 'VDS_CERT') {
+        if (val === 'ok') certOk = true;
+        else {
+          // Issuance is retried for ~10 minutes because it can only succeed AFTER the user grants
+          // consent. That is a long time to show nothing, so pass the count through.
+          const m = /requesting (\d+)\/(\d+)/.exec(val);
+          if (m) onEvent({ state: 'cert', url, attempt: Number(m[1]), attempts: Number(m[2]) });
+        }
+      }
       else if (key === 'VDS_CERT_ERR') certOk = false;
       else if (key === 'VDS_FUNNEL' && val === 'up') onEvent({ state: 'up', url, certOk });
       // Tailscale's own one-click consent page: enables BOTH tailnet prerequisites at once.

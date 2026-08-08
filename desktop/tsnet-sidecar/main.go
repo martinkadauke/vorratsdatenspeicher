@@ -137,14 +137,32 @@ func main() {
 	// console showed exactly that dead end — machine Connected, Funnel badge present,
 	// "TLS certificate: No certificate found", and the hostname NXDOMAIN at the authoritative
 	// nameservers. Let's Encrypt takes a few seconds; do it once, up front, and say so.
+	//
+	// ⚠️ And RETRY it, with the same patience as the funnel listener below. Asking once was a real
+	// bug with a nasty shape: on a brand-new tailnet HTTPS is off, so the single attempt fails
+	// seconds after start — long before the user has clicked the consent link that turns it on.
+	// The funnel loop then succeeds the moment they do click, the app reports "up", and everything
+	// looks fine — except no certificate was ever issued, so Tailscale never publishes the DNS
+	// record and the address resolves nowhere. Observed in the field: machine Connected, funnel
+	// serving, "TLS certificate: No certificate found", NXDOMAIN. The one step that has to happen
+	// AFTER the consent click was the only one that never happened twice.
 	certDomain := strings.TrimSuffix(publicHost, ".")
-	emit("VDS_CERT", "requesting")
-	if _, _, err := lc.CertPair(ctx, certDomain); err != nil {
-		// Not fatal on its own — a cert may already exist in TSNET_DIR from an earlier run, and the
-		// funnel listener below is the real test. Report it so the UI can explain a failure.
-		emit("VDS_CERT_ERR", err.Error())
-	} else {
-		emit("VDS_CERT", "ok")
+	const certAttempts = 40 // ~10 minutes, matching the funnel loop below
+	var certLastErr string
+	for attempt := 1; attempt <= certAttempts; attempt++ {
+		emit("VDS_CERT", fmt.Sprintf("requesting %d/%d", attempt, certAttempts))
+		if _, _, err := lc.CertPair(ctx, certDomain); err == nil {
+			emit("VDS_CERT", "ok")
+			break
+		} else if err.Error() != certLastErr {
+			// Only on change: the parent turns every line into a status write, and forty identical
+			// "HTTPS is not enabled" lines say nothing the first one did not.
+			certLastErr = err.Error()
+			emit("VDS_CERT_ERR", certLastErr)
+		}
+		if attempt < certAttempts {
+			time.Sleep(15 * time.Second)
+		}
 	}
 
 	// Funnel: public 443 → local backend. TLS is terminated on THIS machine (the cert lives in

@@ -57,7 +57,9 @@
     "verifyPatience2": "Beim allerersten Mal dauert das ein paar Minuten: die Adresse muss weltweit bekannt gemacht und ein Zertifikat ausgestellt werden. Du kannst das Fenster offen lassen.",
     "welcomeDetour": "Landest du stattdessen auf einer Willkommensseite von Tailscale? Das passiert nur beim allerersten Mal, und es gibt einen Ausweg, den man leicht übersieht: unten auf der Seite steht „Skip the introduction“ — darauf klicken. Sonst wartet diese Seite auf ein zweites Gerät, das du gar nicht brauchst. Danach hier nochmal auf den grünen Knopf.",
     "propagating": "Deine Adresse wird gerade weltweit bekannt gemacht …",
-    "propagatingHint": "Das Zertifikat ist da, alles ist richtig eingestellt — jetzt muss sich nur noch der Name im Internet herumsprechen. Das dauert manchmal ein paar Minuten. Du kannst das Fenster offen lassen oder später wiederkommen; VDS meldet sich, sobald es so weit ist."
+    "propagatingHint": "Das Zertifikat ist da, alles ist richtig eingestellt — jetzt muss sich nur noch der Name im Internet herumsprechen. Das dauert manchmal ein paar Minuten. Du kannst das Fenster offen lassen oder später wiederkommen; VDS meldet sich, sobald es so weit ist.",
+    "cert": "Zertifikat für deine Adresse wird angefordert …",
+    "certHint": "Das gelingt erst, wenn die Freischaltung oben erledigt ist — VDS fragt zehn Minuten lang immer wieder nach und macht dann von allein weiter."
   },
   "nav": {
     "analytics": "Analytics",
