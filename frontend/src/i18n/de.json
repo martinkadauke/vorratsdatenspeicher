@@ -54,7 +54,8 @@
     "freshLinkHint": "Setzt nur die Tailscale-Anmeldung dieses Rechners zurück. Deine Belege und Daten bleiben unberührt — das Handy bekommt danach eine neue Adresse.",
     "verifyProgress": "Versuch {{attempt}} von {{attempts}}",
     "verifyPatience": "Das läuft noch.",
-    "verifyPatience2": "Beim allerersten Mal dauert das ein paar Minuten: die Adresse muss weltweit bekannt gemacht und ein Zertifikat ausgestellt werden. Du kannst das Fenster offen lassen."
+    "verifyPatience2": "Beim allerersten Mal dauert das ein paar Minuten: die Adresse muss weltweit bekannt gemacht und ein Zertifikat ausgestellt werden. Du kannst das Fenster offen lassen.",
+    "welcomeDetour": "Landest du stattdessen auf einer Willkommensseite von Tailscale? Das passiert nur beim allerersten Mal: ein neues Konto wird dort einmal durchgeschleust. Klick sie durch — die Umfrage beantworten, und „Add your first device“ kannst du überspringen, dein Rechner ist längst verbunden. Danach hier nochmal auf den grünen Knopf; dann kommst du auf der richtigen Seite an."
   },
   "nav": {
     "analytics": "Analytics",

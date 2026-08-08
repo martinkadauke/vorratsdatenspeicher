@@ -191,6 +191,15 @@ export function PhoneConnectPanel() {
           >
             <ExternalLink size={15} /> {data?.oneClick ? t('phone.consentEnable') : t(state === 'needs_funnel' ? 'phone.funnelEnable' : 'phone.httpsEnable')}
           </a>
+          {/* ⚠️ A BRAND-NEW tailnet bounces every admin-console URL to /admin/welcome until its
+              owner has been through Tailscale's onboarding once — including the consent link above,
+              which is an admin-console URL like any other. It is not mislinked; it is intercepted.
+              We cannot skip someone else's onboarding, so say what it looks like and what to do. */}
+          {data?.oneClick && (
+            <p className="mb-2 rounded-xl bg-zinc-100 p-3 text-[11px] leading-relaxed text-zinc-600 dark:bg-zinc-800/60 dark:text-zinc-300">
+              {t('phone.welcomeDetour')}
+            </p>
+          )}
           <p className="text-center text-[11px] text-zinc-400">{t('phone.funnelRetry')}</p>
         </>
       )}
