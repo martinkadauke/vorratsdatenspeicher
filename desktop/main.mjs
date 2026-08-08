@@ -180,8 +180,15 @@ function closeAuthWindow() {
  *
  *  Retries, because two slow things happen on first exposure: the DNS record appearing, and
  *  Let's Encrypt issuing the certificate on the first request. */
-async function verifyPubliclyReachable(url, log) {
-  for (let attempt = 1; attempt <= 8; attempt++) {
+const REACH_ATTEMPTS = 8;
+
+async function verifyPubliclyReachable(url, log, onAttempt) {
+  for (let attempt = 1; attempt <= REACH_ATTEMPTS; attempt++) {
+    // ⚠️ Report the attempt, always. A fresh funnel name has to reach public DNS and get a
+    // certificate issued, so the honest worst case here is ~3½ minutes — and a spinner with no
+    // number on it is indistinguishable from a hang. The user waits happily if they can see
+    // progress; they reinstall the app if they cannot.
+    onAttempt?.(attempt, REACH_ATTEMPTS);
     try {
       // Any HTTP answer proves the name resolves and the funnel terminates somewhere real; the
       // status code is the app's business, not ours.
@@ -191,7 +198,7 @@ async function verifyPubliclyReachable(url, log) {
       const msg = String(e?.cause?.code || e?.message || e);
       log(`tunnel reachability attempt ${attempt}: ${msg}`);
       // ENOTFOUND/EAI_AGAIN = the name is not in public DNS → the HTTPS switch, not a slow network.
-      if (attempt === 8) return { ok: false, dns: /ENOTFOUND|EAI_AGAIN|getaddrinfo/i.test(msg), detail: msg.slice(0, 200) };
+      if (attempt === REACH_ATTEMPTS) return { ok: false, dns: /ENOTFOUND|EAI_AGAIN|getaddrinfo/i.test(msg), detail: msg.slice(0, 200) };
       await new Promise(r => setTimeout(r, attempt * 4000));
     }
   }
@@ -220,8 +227,10 @@ function startTunnelFor(stack, { openLogin }) {
       // "up" from the sidecar means "permitted", not "reachable" — check before we hand the user
       // a QR code. Show the checking state meanwhile so the dialog is never silently stuck.
       if (e.state === 'up' && e.url) {
-        writeTunnelStatus(stack.desktopDir, { state: 'verifying', url: e.url });
-        void verifyPubliclyReachable(e.url, log).then(res => {
+        writeTunnelStatus(stack.desktopDir, { state: 'verifying', url: e.url, attempt: 1, attempts: REACH_ATTEMPTS });
+        void verifyPubliclyReachable(e.url, log, (attempt, attempts) => {
+          if (tunnel) writeTunnelStatus(stack.desktopDir, { state: 'verifying', url: e.url, attempt, attempts });
+        }).then(res => {
           if (!tunnel) return;                       // stopped while we were probing
           if (res.ok) return writeTunnelStatus(stack.desktopDir, e);
           writeTunnelStatus(stack.desktopDir, {

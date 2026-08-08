@@ -35,6 +35,11 @@ interface TunnelStatus {
   consentText?: string;
   reason?: string;
   detail?: string;
+  /** Reachability probe progress. A fresh funnel address has to reach public DNS and get a
+   *  certificate, so this legitimately runs for minutes — and a spinner with no number on it
+   *  looks broken long before it is. */
+  attempt?: number;
+  attempts?: number;
 }
 
 /** States where something is actively happening — poll fast, and don't offer "connect" again. */
@@ -125,6 +130,14 @@ export function PhoneConnectPanel() {
             <Loader2 size={16} className="animate-spin text-emerald-600" />
             {state === 'auth' ? t('phone.authWaiting') : state === 'verifying' ? t('phone.verifying') : t('phone.starting')}
           </p>
+          {state === 'verifying' && (
+            <p className="mb-4 text-center text-[11px] leading-relaxed text-zinc-400">
+              {data?.attempt && data?.attempts
+                ? t('phone.verifyProgress', { attempt: data.attempt, attempts: data.attempts })
+                : t('phone.verifyPatience')}
+              <br />{t('phone.verifyPatience2')}
+            </p>
+          )}
           {state === 'auth' && (
             <>
               <p className="mb-3 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">{t('phone.authBlurb')}</p>
