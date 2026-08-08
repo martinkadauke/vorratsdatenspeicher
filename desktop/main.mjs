@@ -32,6 +32,7 @@ const iconPath = app.isPackaged
 let stack = null;
 let win = null;
 let tunnel = null;        // handle from startTunnel(), or null when the tunnel is off
+let probeGen = 0;         // only the newest reachability probe may write a verdict
 let authWin = null;       // the in-app Tailscale login window, while it is open
 
 /** Everything the app does gets a line here. Without it a packaged failure is invisible: there is
@@ -241,11 +242,19 @@ function startTunnelFor(stack, { openLogin }) {
       // "up" from the sidecar means "permitted", not "reachable" — check before we hand the user
       // a QR code. Show the checking state meanwhile so the dialog is never silently stuck.
       if (e.state === 'up' && e.url) {
+        // ⚠️ "up" can be announced twice: once when the funnel starts serving, and again when the
+        // certificate arrives afterwards (the address only becomes resolvable then). Without a
+        // generation guard both probes run at once — and the OLDER one still believes there is no
+        // certificate, so when it gives up it writes "enable HTTPS in your account" over the newer,
+        // correct verdict. Observed in the log: two interleaved attempt counters. Last writer wins,
+        // and the last writer was the one that knew least.
+        const gen = ++probeGen;
+        const current = () => tunnel && gen === probeGen;
         writeTunnelStatus(stack.desktopDir, { state: 'verifying', url: e.url, attempt: 1, attempts: REACH_ATTEMPTS });
         void verifyPubliclyReachable(e.url, log, (attempt, attempts) => {
-          if (tunnel) writeTunnelStatus(stack.desktopDir, { state: 'verifying', url: e.url, attempt, attempts });
+          if (current()) writeTunnelStatus(stack.desktopDir, { state: 'verifying', url: e.url, attempt, attempts });
         }).then(async res => {
-          if (!tunnel) return;                       // stopped while we were probing
+          if (!current()) { log(`tunnel probe #${gen} superseded — dropping its verdict`); return; }
           if (res.ok) return writeTunnelStatus(stack.desktopDir, e);
 
           // ⚠️ Do NOT accuse the tailnet settings when the node HAS its certificate. Tailscale
@@ -256,9 +265,9 @@ function startTunnelFor(stack, { openLogin }) {
           if (e.certOk) {
             writeTunnelStatus(stack.desktopDir, { state: 'propagating', url: e.url, attempt: 0, attempts: SLOW_ATTEMPTS });
             const arrived = await keepTryingQuietly(e.url, log, (attempt, attempts) => {
-              if (tunnel) writeTunnelStatus(stack.desktopDir, { state: 'propagating', url: e.url, attempt, attempts });
+              if (current()) writeTunnelStatus(stack.desktopDir, { state: 'propagating', url: e.url, attempt, attempts });
             });
-            if (!tunnel) return;
+            if (!current()) return;
             if (arrived) return writeTunnelStatus(stack.desktopDir, { state: 'up', url: e.url });
           }
           writeTunnelStatus(stack.desktopDir, {
