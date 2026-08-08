@@ -108,7 +108,11 @@ function watchForUpdateRequest(updaterDir) {
       autoUpdater.logger = { info: log, warn: log, error: log, debug: () => {} };
       autoUpdater.on('update-not-available', () => log('update requested but none available'));
       autoUpdater.on('error', (e) => { log(`update failed: ${(e && e.message) || e}`); openDownloads(); });
-      autoUpdater.on('update-downloaded', () => { log('update downloaded — restarting to install'); setImmediate(() => autoUpdater.quitAndInstall()); });
+      autoUpdater.on('update-downloaded', () => {
+        log('update downloaded — stopping the database, then restarting to install');
+        // Stop OURSELVES first: quitAndInstall does not wait for before-quit.
+        void shutdownStack(stack).finally(() => setImmediate(() => autoUpdater.quitAndInstall()));
+      });
       log('checking for updates …');
       await autoUpdater.checkForUpdates();
     } catch (e) {
@@ -232,6 +236,23 @@ function startTunnelFor(stack, { openLogin }) {
       writeTunnelStatus(stack.desktopDir, e);
     },
   });
+}
+
+/** Shut the stack down exactly once, from wherever the app is leaving.
+ *
+ *  ⚠️ There are two exits, and only one of them used to do this. `autoUpdater.quitAndInstall()`
+ *  tears the app down on its own schedule, so the bundled Postgres was still running when the
+ *  process went away — which is why every update left a stale postmaster.pid for the next start to
+ *  clean up. Stopping deliberately here means the database closes properly on both paths. */
+let shuttingDown = null;
+function shutdownStack(s) {
+  if (!s) return Promise.resolve();
+  shuttingDown ??= (async () => {
+    try { await stopTunnel(s); } catch (e) { log(`tunnel stop failed: ${e}`); }
+    try { await s.stop(); } catch (e) { log(`stack stop failed: ${e}`); }
+    log('stack stopped');
+  })();
+  return shuttingDown;
 }
 
 async function stopTunnel(stack) {
@@ -406,9 +427,18 @@ async function start() {
     autoHideMenuBar: true,   // belt-and-suspenders on top of setApplicationMenu(null)
     webPreferences: { contextIsolation: true },
   });
-  // A cluster that already exists means this is NOT a first run, however long ago it was made.
+  // Which of the three situations is this? A cluster that already exists means it is not a first
+  // run; a version that differs from last time means we just updated, and THAT start is slow again
+  // because the new release runs its database migrations. Saying "einen Moment" while that happens
+  // is how a 40-second wait looks like a hang.
+  const stamp = path.join(dataDir, 'last-version');
   const firstRun = !fs.existsSync(path.join(dataDir, 'pgdata', 'PG_VERSION'));
-  await win.loadURL(splashUrl(firstRun ? 'first' : 'normal'));
+  let previous = null;
+  try { previous = fs.readFileSync(stamp, 'utf8').trim(); } catch { /* first run, or never written */ }
+  const updated = !firstRun && !!previous && previous !== app.getVersion();
+  try { fs.writeFileSync(stamp, app.getVersion()); } catch { /* not fatal */ }
+  log(`splash mode: ${firstRun ? 'first' : updated ? `updated (${previous} → ${app.getVersion()})` : 'normal'}`);
+  await win.loadURL(splashUrl(firstRun ? 'first' : updated ? 'updated' : 'normal'));
 
   // One automatic retry. The first launch after an install has been seen to leave the database
   // half-started; restarting the app by hand fixed it, so do that FOR the user instead of
@@ -457,8 +487,12 @@ function splashUrl(mode = 'normal') {
     ? 'Der erste Versuch hat nicht geklappt — die App probiert es gerade noch einmal.'
     : mode === 'first'
       ? 'Beim allerersten Start wird deine Datenbank angelegt. Das dauert etwa eine Minute — danach geht es immer schnell.'
-      : 'einen Moment …';
-  const head = mode === 'first' ? 'Vorratsdatenspeicher wird eingerichtet' : 'Vorratsdatenspeicher';
+      : mode === 'updated'
+        ? 'Die neue Version richtet deine Daten ein. Das passiert nur nach einem Update und dauert einen Augenblick länger.'
+        : 'einen Moment …';
+  const head = mode === 'first' ? 'Vorratsdatenspeicher wird eingerichtet'
+    : mode === 'updated' ? 'Vorratsdatenspeicher wurde aktualisiert'
+    : 'Vorratsdatenspeicher';
   // The receipt is the product's own visual language (see the website): paper, a dashed tear-off
   // edge, monospace. Cheaper and better than a logo we cannot load from a data: URL.
   const html = `<!doctype html><meta charset="utf-8"><style>
@@ -514,7 +548,17 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(start).catch(showFailure);
 }
 // embedded-postgres rejects with `undefined`; catch those too so nothing is ever swallowed.
-process.on('unhandledRejection', (e) => log(`unhandledRejection: ${(e && e.stack) || e}`));
+process.on('unhandledRejection', (e) => {
+  // ⚠️ Known and harmless: embedded-postgres registers its own process-exit hook
+  // (AsyncExitHook(gracefulShutdown)) and calls a `done` callback that the installed version of
+  // async-exit-hook never passes — so shutting down always ended in a stack trace that looked like
+  // a crash. We stop Postgres deliberately in shutdownStack() before this ever runs, so the hook
+  // has nothing left to do. Log it in one line rather than letting it dominate the file.
+  if (/done is not a function/.test(String(e?.message ?? ''))) {
+    return log('embedded-postgres exit hook misfired (known beta bug) — database already stopped by us');
+  }
+  log(`unhandledRejection: ${(e && e.stack) || e}`);
+});
 process.on('uncaughtException', (e) => log(`uncaughtException: ${(e && e.stack) || e}`));
 
 app.on('window-all-closed', () => app.quit());
@@ -522,11 +566,10 @@ app.on('before-quit', async (e) => {
   if (stack) {
     e.preventDefault();
     const s = stack; stack = null;
-    // Tunnel first: leaving the node online after the backend is gone would publish an HTTPS
-    // address that answers with connection-refused, which reads to a phone as "the app is broken"
-    // rather than "the computer is off".
-    try { await stopTunnel(s); } catch { /* best effort */ }
-    await s.stop();
+    // Tunnel first inside shutdownStack: leaving the node online after the backend is gone would
+    // publish an HTTPS address that answers with connection-refused, which reads to a phone as
+    // "the app is broken" rather than "the computer is off".
+    await shutdownStack(s);
     app.exit(0);
   }
 });

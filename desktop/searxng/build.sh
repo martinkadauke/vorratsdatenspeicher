@@ -17,9 +17,11 @@
 set -euo pipefail
 
 OUT="${1:-bin}"
-# SearXNG cuts no conventional releases; master is what everyone runs. Pin a commit here once we
-# want reproducible builds — a moving target means an installer that changes without us noticing.
-REF="${SEARXNG_REF:-master}"
+# ⚠️ A COMMIT, never `master`. SearXNG cuts no releases at all — master is what everyone runs — so
+# tracking it would mean two VDS builds a day apart contain different SearXNG, with no way to say
+# afterwards which. That breaks reproducible builds, bug reports and rollback in one go.
+# Bump this deliberately at each 0.x release; see docs/DRITTANBIETER.md.
+REF="${SEARXNG_REF:-b023a28bab8839dba9eac96e9a51cc91bbd0a267}"   # 2026-08-06
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
@@ -30,11 +32,13 @@ cd "$OUT"
 # colon is illegal in an NTFS path, so the checkout aborts on Windows — including on the
 # windows-latest runner. The tarball lets us extract only the parts we run.
 echo "== fetching SearXNG ($REF) =="
-curl -sSL -o src.tar.gz "https://codeload.github.com/searxng/searxng/tar.gz/refs/heads/$REF"
+curl -sSL -o src.tar.gz "https://codeload.github.com/searxng/searxng/tar.gz/$REF"
 tar -xzf src.tar.gz --wildcards '*/searx/*' '*/requirements.txt'
-mv "searxng-$REF/searx" .
-mv "searxng-$REF/requirements.txt" .
-rm -rf "searxng-$REF" src.tar.gz
+# The tarball's top directory is searxng-<ref>; with a commit ref that is the full sha.
+top=$(ls -d searxng-*/ | head -1)
+mv "$top/searx" .
+mv "$top/requirements.txt" .
+rm -rf "$top" src.tar.gz
 test -f searx/webapp.py || { echo "::error::searx/webapp.py missing after extract"; exit 1; }
 
 # `--target` (not a venv): a venv bakes absolute paths into pyvenv.cfg and its scripts, so it
