@@ -1,5 +1,18 @@
 import { getConfig } from '../config.js';
 
+/** Is a web search available at all?
+ *
+ *  ⚠️ An unset URL must be a QUIET no, not an exception. Web search is an enhancement here — the
+ *  churner's stage 1 already proposes a name and the icons are decoration — but throwing made it
+ *  behave like a dependency: the per-article guard caught the error and abandoned that article
+ *  entirely, so on any instance without SearXNG the very items that needed help were the ones that
+ *  never got a canonical name at all, run after run, one logged error each. Desktop installs have
+ *  no SearXNG at all, which is exactly the case this punished hardest. */
+async function searchBase(): Promise<string | null> {
+  const base = (await getConfig('searxng.url'))?.trim();
+  return base ? base.replace(/\/$/, '') : null;
+}
+
 export interface SearchHit {
   title: string;
   content: string;
@@ -7,7 +20,8 @@ export interface SearchHit {
 }
 
 export async function searxngSearch(query: string): Promise<SearchHit[]> {
-  const base = await getConfig('searxng.url');
+  const base = await searchBase();
+  if (!base) return [];
   const params = new URLSearchParams({
     q: `${query} produkt deutschland`,
     format: 'json',
@@ -26,7 +40,8 @@ export async function searxngSearch(query: string): Promise<SearchHit[]> {
 
 /** Raw web search with the query passed through verbatim (no extra keywords). */
 export async function searxngSearchRaw(query: string): Promise<SearchHit[]> {
-  const base = await getConfig('searxng.url');
+  const base = await searchBase();
+  if (!base) return [];
   const params = new URLSearchParams({ q: query, format: 'json', language: 'de' });
   const res = await fetch(`${base}/search?${params}`, { signal: AbortSignal.timeout(20_000) });
   if (!res.ok) throw new Error(`SearXNG HTTP ${res.status}`);
@@ -37,7 +52,8 @@ export async function searxngSearchRaw(query: string): Promise<SearchHit[]> {
 }
 
 export async function searxngImageSearch(query: string): Promise<{ src: string; thumb: string; title: string }[]> {
-  const base = await getConfig('searxng.url');
+  const base = await searchBase();
+  if (!base) return [];
   const params = new URLSearchParams({
     q: query,
     format: 'json',
