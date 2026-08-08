@@ -24,6 +24,9 @@ export function registerAuth(app: FastifyInstance): void {
          // physical — the shell shows a one-time code in an OS dialog no web page can read — and
          // every one of these is inert unless DESKTOP_DIR is set (i.e. never in Docker).
          '/api/desktop/recover', '/api/desktop/recover/confirm', '/api/desktop/admins'].includes(url)) return;
+    // Member invite: the invited person has no account yet — that is the whole point. Both routes
+    // are useless without the long token in the path AND the 4-digit code from a second channel.
+    if (/^\/api\/invite\/[^/]+(\/redeem)?$/.test(url)) return;
     // public, token-protected email link (model-review approve/reject from the mail)
     if (req.method === 'GET' && /^\/api\/model-review\/\d+\/decide$/.test(url)) return;
     // signed one-time backup download link (authorised by the ?s= HMAC, not a JWT)

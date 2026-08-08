@@ -22,6 +22,14 @@ async function waitFor(base, tries = 90) {
   throw new Error('backend never became ready');
 }
 
+/** POST a redemption; returns the parsed body, or the status when `statusOnly`. */
+async function redeem2(base, token, body, statusOnly = false) {
+  const r = await fetch(`${base}/api/invite/${token}/redeem`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  return statusOnly ? r.status : r.json().catch(() => ({}));
+}
+
 let stack;
 try {
   // Secrets must be stable across boots (else every restart silently logs everyone out).
@@ -133,6 +141,48 @@ try {
     && !famActive.some(m => m.id === kidId)
     && famAll.some(m => m.id === kidId && (m.konto_ids ?? []).includes(kontoId));
   console.log('[smoke] leaving archives, keeps ownership →', okArchive ? 'OK' : `BROKEN (${JSON.stringify(del)})`);
+
+  // ── inviting a household member ─────────────────────────────────────────────────────────
+  // The invited person creates their OWN account: the admin never learns their e-mail and never
+  // picks their password. Two factors on two channels — long token in the link, 4 digits spoken.
+  const invMemberId = await mk('SmokeLena');
+  const inv = await fetch(`${stack.url}/api/invites`, {
+    method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ member_id: invMemberId, make_admin: false }),
+  }).then(r => r.json());
+  const okInvite = !!inv?.token && /^\d{4}$/.test(inv?.code ?? '');
+  console.log('[smoke] invite created →', okInvite ? `OK (code ${inv.code})` : JSON.stringify(inv));
+
+  // The public link must greet by name but NEVER leak the second factor.
+  const peek = await fetch(`${stack.url}/api/invite/${inv.token}`).then(r => r.json());
+  const okPeek = peek?.valid === true && peek?.member === 'SmokeLena' && !('code' in peek);
+  console.log('[smoke] link reveals the name, not the code →', okPeek ? 'OK' : JSON.stringify(peek));
+
+  // Wrong codes must run out. Four digits are only safe because this counter is real and in the DB.
+  const redeem = (body) => fetch(`${stack.url}/api/invite/${inv.token}/redeem`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const wrongCode = String((Number(inv.code) + 1) % 10000).padStart(4, '0');
+  let lastWrong;
+  for (let i = 0; i < 5; i++) lastWrong = await redeem({ code: wrongCode, username: 'lena', password: 'lena-pass-1234' });
+  const locked = await redeem({ code: inv.code, username: 'lena', password: 'lena-pass-1234' });
+  const okLocked = lastWrong.status === 403 && locked.status === 403;
+  console.log('[smoke] five wrong codes kill the invite →', okLocked ? 'OK (even the right code is refused after)' : `w=${lastWrong.status} right=${locked.status}`);
+
+  // A fresh invite, redeemed properly: the member gains a login, nothing else changes.
+  const inv2 = await fetch(`${stack.url}/api/invites`, {
+    method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ member_id: invMemberId }),
+  }).then(r => r.json());
+  const good = await redeem2(stack.url, inv2.token, { code: inv2.code, username: 'lena', password: 'lena-pass-1234' });
+  const famInv = await fetch(`${stack.url}/api/family`, { headers: auth }).then(r => r.json());
+  const lena = famInv.find(m => m.id === invMemberId);
+  const okRedeem = !!good?.token && lena?.user_id != null;
+  console.log('[smoke] invited person owns the member →', okRedeem ? 'OK' : `token=${!!good?.token} user_id=${lena?.user_id}`);
+
+  // And it is single-use.
+  const again = await redeem2(stack.url, inv2.token, { code: inv2.code, username: 'lena2', password: 'lena-pass-1234' }, true);
+  console.log('[smoke] invite is single-use →', again === 404 ? 'OK' : `status ${again}`);
 
   // ── passkeys need a DOMAIN as the relying-party id ──────────────────────────────────────
   // An IP literal is not a valid RP ID, so a base URL of http://127.0.0.1:<port> made the browser
