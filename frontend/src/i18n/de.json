@@ -1360,7 +1360,11 @@
       "reachable": "Verbindung erfolgreich",
       "unreachable": "nicht erreichbar",
       "needOllama": "Erst muss deine Ollama-Adresse erreichbar sein und beide Modelle gewählt sein.",
-      "needKey": "Bitte trag noch den API-Key ein — sonst kann die KI nichts tun."
+      "needKey": "Bitte trag noch den API-Key ein — sonst kann die KI nichts tun.",
+      "keyChecking": "Schlüssel wird geprüft …",
+      "keyOk": "Schlüssel funktioniert.",
+      "keyBad": "Der Schlüssel wird nicht akzeptiert. Vertippt oder abgelaufen?",
+      "saving": "wird eingerichtet …"
     },
     "household": {
       "title": "Dein Haushalt",
@@ -1601,6 +1605,10 @@
       "enabled": "Push aktiviert 🔔",
       "denied": "Benachrichtigungen sind im Browser blockiert. Erlaube sie in den Website-Einstellungen.",
       "failed": "Push konnte nicht aktiviert werden."
+    },
+    "bDesktop": {
+      "title": "Hol dir dein Handy dazu 📱",
+      "body": "Belege fotografiert man mit dem Handy, nicht am Schreibtisch. Vorratsdatenspeicher kann dein Handy direkt anbinden — verschlüsselt, ohne dass deine Daten diesen Rechner verlassen."
     }
   },
   "update": {

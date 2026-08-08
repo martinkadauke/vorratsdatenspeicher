@@ -8,11 +8,15 @@ import { useAuth } from '../context/auth';
 import { pushSupported, enablePush } from '../lib/push';
 import { toast } from './Toast';
 import { Button, Input } from './ui';
+import { PhoneConnectPanel, useTunnel } from './PhoneConnectButton';
 
 /** Global onboarding-coach driver (FB-01) — mounted once in Layout, off-demo only. Handles
  *  the route-agnostic stages B (VDS aufs Handy) and C (Push aktivieren); Stage A lives on the
  *  receipt page. Strictly sequential: B needs A dismissed, C needs B dismissed. */
 export function Coach() {
+  // Only the Electron build has a tunnel to offer; in Docker this is false and the branch below
+  // never runs, so the same component serves both channels.
+  const desktopBuild = useTunnel(false).enabled;
   const { enabled, coach, dismiss } = useCoach();
   const { pathname } = useLocation();
   const [navCount, setNavCount] = useState(0);
@@ -30,6 +34,15 @@ export function Coach() {
       && coach.events.pruefen_visited && coach.milestones.artikelname_set && navCount >= 2
       && phoneInstallRelevant()) {
     return <StageB onDone={() => dismiss.mutate('B')} onLater={() => snooze('B')} />;
+  }
+  // Same milestone, desktop wording: there the address in StageB is loopback and useless, but the
+  // app HAS a way to the phone — the tunnel behind "Handy verbinden". Suppressing the card without
+  // offering that (which is what shipped yesterday) means a desktop user scans five receipts on a
+  // laptop and is never told the feature exists.
+  if (done('A') && !done('B') && !soft('B')
+      && coach.events.pruefen_visited && coach.milestones.artikelname_set && navCount >= 2
+      && !phoneInstallRelevant() && !isInstalledPwa() && desktopBuild) {
+    return <StageBDesktop onDone={() => dismiss.mutate('B')} onLater={() => snooze('B')} />;
   }
   // Stage C: right after B is dismissed, and only where the browser can actually do push
   // (iOS only supports it once VDS is installed as a PWA — i.e. after Stage B).
@@ -67,6 +80,20 @@ function phoneInstallRelevant(): boolean {
  *  promise the browser cannot keep — and on a desktop it is simply the wrong device. */
 function pushOfferRelevant(): boolean {
   return isPhone() && isInstalledPwa();
+}
+
+/** The desktop build's version of "put VDS on your phone": one button, which opens the very
+ *  dialog the header carries. No instructions to recite — the tunnel does the work. */
+function StageBDesktop({ onDone, onLater }: { onDone: () => void; onLater: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <CoachMark title={t('coach.bDesktop.title')} cta={t('coach.common.gotIt')} onCta={onDone} onLater={onLater}>
+      <div className="flex flex-col gap-3">
+        <p>{t('coach.bDesktop.body')}</p>
+        <PhoneConnectPanel />
+      </div>
+    </CoachMark>
+  );
 }
 
 function StageB({ onDone, onLater }: { onDone: () => void; onLater: () => void }) {

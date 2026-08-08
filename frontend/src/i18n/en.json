@@ -1358,7 +1358,11 @@
       "reachable": "Connection successful",
       "unreachable": "not reachable",
       "needOllama": "Your Ollama address has to answer first, and both models need to be picked.",
-      "needKey": "Please enter the API key — without it the AI cannot do anything."
+      "needKey": "Please enter the API key — without it the AI cannot do anything.",
+      "keyChecking": "Checking the key …",
+      "keyOk": "The key works.",
+      "keyBad": "That key is not accepted. Mistyped or expired?",
+      "saving": "setting up …"
     },
     "household": {
       "title": "Your household",
@@ -1599,6 +1603,10 @@
       "enabled": "Push enabled 🔔",
       "denied": "Notifications are blocked in your browser. Allow them in the site settings.",
       "failed": "Couldn't enable push."
+    },
+    "bDesktop": {
+      "title": "Bring your phone along 📱",
+      "body": "Receipts get photographed with a phone, not at a desk. Vorratsdatenspeicher can connect yours directly — encrypted, and your data never leaves this computer."
     }
   },
   "update": {

@@ -103,7 +103,8 @@ export function monthLabel(year: number, month: number, lang = 'de'): string {
 }
 
 /** Render a (subset of) cron expressions as human-readable schedule text.
- *  Supports daily "M H * * *", "M H * * D" (weekday), "0 *​/N * * *" intervals.
+ *  Supports daily "M H * * *", "M H * * D" (weekday), and step intervals of the form
+ *  "0 <asterisk>/N * * *" (every N hours).
  *  Falls back to the raw expression for everything else. */
 export function cronToHuman(cron: string, lang = 'de'): string {
   const parts = cron.trim().split(/\s+/);

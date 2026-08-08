@@ -163,15 +163,19 @@ export function Onboarding() {
     onError: (e: Error) => toast(e.message, 'error'),
   });
 
-  if (!show) return null;
-
-  const finish = () => finishMut.mutate();
+  // ⚠️ EVERY hook must sit ABOVE this line. `show` flips to false the instant the wizard finishes
+  // (refreshUser sets onboarding_done), so any hook below would be skipped on that render —
+  // "rendered fewer hooks than expected", React #300, tree unmounted, black window. That is
+  // exactly what "Los geht's" did.
   // ⚠️ A step may hold unsaved input behind its own Save button. "Weiter" used to just advance,
   // so choosing Ollama in the AI step and pressing Weiter — the obvious thing to do — wrote
   // NOTHING, and the instance silently kept its mixed defaults (some tasks on Anthropic without
   // an API key). A step can register a commit here; it returns false to keep the wizard put when
   // the input cannot be saved yet, so the reason is visible instead of the choice being dropped.
   const commit = useRef<null | (() => Promise<boolean>)>(null);
+  if (!show) return null;
+
+  const finish = () => finishMut.mutate();
   const next = async () => {
     if (commit.current && !(await commit.current())) return;
     if (step < STEP_META.length - 1) setStep(step + 1); else finish();
@@ -437,6 +441,32 @@ function AiSetup({ config, t, registerCommit }: { config: Record<string, unknown
   }, [url, urlSaved, chosen]);
 
   // Live reachability of the Ollama socket — drives the red/green field, before any saving.
+  // ⚠️ The key has to be STORED before anything can test it — the health check runs in the BACKEND
+  // and can only try what it has. Same debounce as the Ollama URL below. Without this the field
+  // could never go green, which is exactly what the first-run report said: a correct, working key
+  // left the box as grey as an empty one, and the only feedback was a Save button nobody expects
+  // in a wizard.
+  useEffect(() => {
+    if (!chosen || chosen === 'ollama') return;
+    const key = apiKey.trim();
+    if (!key) return;
+    const id = setTimeout(() => {
+      void api(`/api/config/${AI_PROVIDERS.find(p => p.id === chosen)!.cfgKey}`, { method: 'PUT', body: { value: key } })
+        .then(() => { void qc.invalidateQueries({ queryKey: ['ai-health', chosen] }); })
+        .catch(() => { /* typing mid-key; the next keystroke tries again */ });
+    }, 700);
+    return () => clearTimeout(id);
+  }, [apiKey, chosen]);
+
+  const keyHealth = useQuery({
+    queryKey: ['ai-health', chosen],
+    queryFn: () => api<{ ok: boolean; error?: string }>(`/api/ai/health?provider=${chosen}`),
+    enabled: !!chosen && chosen !== 'ollama' && !!apiKey.trim(),
+    retry: false,
+    staleTime: 5_000,
+  });
+  const keyOk = !!keyHealth.data?.ok;
+
   const ollamaHealth = useQuery({
     queryKey: ['ollama-health', urlSaved],
     queryFn: () => api<{ ok: boolean; error?: string }>('/api/ai/health?provider=ollama'),
@@ -481,7 +511,16 @@ function AiSetup({ config, t, registerCommit }: { config: Record<string, unknown
   // model names nobody has verified against a machine that may not exist.
   const canSave = chosen === 'ollama'
     ? !!(ollamaUp && ocrModel.trim() && kiModel.trim())
-    : !!apiKey.trim();
+    : !!(apiKey.trim() && keyOk);
+
+  // No Save button: the moment the credential is PROVEN to work, point every task at it. That is
+  // how the admin area behaves, and a wizard that silently needs one more click is worse than one
+  // that has no button at all.
+  useEffect(() => {
+    if (!chosen || confirmed || saving) return;
+    if (chosen === 'ollama' ? !(ollamaUp && ocrModel.trim() && kiModel.trim()) : !keyOk) return;
+    void save();
+  }, [chosen, keyOk, ollamaUp, ocrModel, kiModel, confirmed, saving]);
 
   const save = async () => {
     if (!chosen || !canSave) return false;
@@ -546,7 +585,15 @@ function AiSetup({ config, t, registerCommit }: { config: Record<string, unknown
             </button>
           </div>
           <Input type="password" autoComplete="off" placeholder={chosen === 'openai' ? 'sk-…' : 'sk-ant-…'}
-            value={apiKey} onChange={e => { setApiKey(e.target.value); setConfirmed(false); }} />
+            value={apiKey} onChange={e => { setApiKey(e.target.value); setConfirmed(false); }}
+            className={cn(apiKey.trim() && !keyHealth.isFetching && (keyOk
+              ? 'border-emerald-500 focus:border-emerald-500'
+              : 'border-red-500 focus:border-red-500'))} />
+          {!!apiKey.trim() && (
+            <p className={cn('text-xs', keyHealth.isFetching ? 'text-zinc-400' : keyOk ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500')}>
+              {keyHealth.isFetching ? t('onboarding.ai.keyChecking') : keyOk ? t('onboarding.ai.keyOk') : t('onboarding.ai.keyBad')}
+            </p>
+          )}
           <p className="text-[11px] leading-relaxed text-zinc-400">{t('onboarding.ai.keyHint', { name: chosen === 'openai' ? 'OpenAI' : 'Anthropic' })}</p>
         </div>
       )}
@@ -623,7 +670,9 @@ function AiSetup({ config, t, registerCommit }: { config: Record<string, unknown
 
       {chosen && (
         <div className="flex flex-wrap items-center gap-3">
-          <Button type="button" onClick={save} disabled={!canSave || saving}>{saving ? '…' : t('onboarding.ai.save')}</Button>
+          {/* No Save button on purpose — see the effect above. What is left is the confirmation
+              that the whole thing is wired, which only appears once it actually is. */}
+          {saving && <span className="text-xs text-zinc-400">{t('onboarding.ai.saving')}</span>}
           {confirmed && (
             <span title={health?.error ?? ''} className={cn('flex items-center gap-1.5 text-xs font-medium',
               healthLoading || !health ? 'text-zinc-400' : health.ok ? 'text-emerald-600' : 'text-red-500')}>
