@@ -32,7 +32,9 @@
     "verifying": "Checking whether the address is reachable from outside …",
     "httpsBlurb": "Almost there: HTTPS certificates still have to be switched on in your Tailscale account. Until then your address cannot be found on the internet at all.",
     "httpsEnable": "Switch it on in Tailscale",
-    "unreachableBlurb": "The address exists but is not answering. Trying again usually helps — issuing the certificate can take a moment."
+    "unreachableBlurb": "The address exists but is not answering. Trying again usually helps — issuing the certificate can take a moment.",
+    "consentBlurb": "One step left: Tailscale needs to grant public access once. A single click does it — the page takes care of everything, nothing to find or type.",
+    "consentEnable": "Grant access"
   },
   "nav": {
     "analytics": "Analytics",

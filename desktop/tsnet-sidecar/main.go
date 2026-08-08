@@ -10,6 +10,9 @@
 //   VDS_PUBLIC_URL=<url>   node is up → the https://…ts.net address (for the connect-phone QR)
 //   VDS_FUNNEL=up          funnel serving; traffic proxies to the local backend
 //   VDS_FUNNEL_ERR=<msg>   funnel refused (usually: HTTPS/Funnel not yet enabled for the tailnet)
+//   VDS_CONSENT_URL=<url>  ONE click enables both tailnet prerequisites — show this, not a how-to
+//   VDS_CONSENT_TEXT=<s>   Tailscale's own wording for what that click does
+//   VDS_CERT=requesting|ok · VDS_CERT_ERR=<msg>   the node fetching its own certificate
 //
 // Env: VDS_LOCAL_PORT (backend port, required) · TSNET_DIR (state dir, persists login) ·
 //      TS_HOSTNAME (node name).
@@ -104,6 +107,27 @@ func main() {
 			}
 		}
 		time.Sleep(time.Second)
+	}
+
+	// ── the one click that replaces two admin-console procedures ────────────────────────────
+	// Funnel needs two TAILNET-WIDE things: HTTPS certificates enabled, and a `funnel` nodeAttr in
+	// the policy file. Both are owner-only, and we cannot set them for the user: Tailscale has no
+	// consumer-style OAuth consent, and creating an API client is itself an admin-console chore —
+	// so "automating" it would be harder than the thing it automates.
+	//
+	// But Tailscale ships exactly the flow we want and the CLI already uses it: QueryFeature
+	// returns a CONSENT URL that enables BOTH requirements at once, with one click, in the user's
+	// own browser. That turns "open the DNS page, find HTTPS Certificates, enable; then open the
+	// ACL page, switch to the JSON editor, paste a nodeAttrs block" — which is what we were asking
+	// of people last night — into a single link we hand them.
+	//
+	// ShouldWait means the enablement is quick and we can just keep waiting; the funnel retry loop
+	// below does that anyway, so the app recovers on its own the moment they click.
+	if info, err := lc.QueryFeature(ctx, "funnel"); err != nil {
+		emit("VDS_CONSENT_ERR", err.Error())
+	} else if !info.Complete && info.URL != "" {
+		emit("VDS_CONSENT_TEXT", info.Text)
+		emit("VDS_CONSENT_URL", info.URL)
 	}
 
 	// ⚠️ Fetch the TLS certificate BEFORE serving. Tailscale does not publish a funnel node's public

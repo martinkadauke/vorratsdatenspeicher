@@ -58,6 +58,8 @@ export function startTunnel({ localPort, stateDir, binPath, onEvent, log = () =>
   }
 
   let url = null;
+  let consentUrl = null;
+  let consentText = null;
   let stopped = false;
   const child = spawn(binPath, [], {
     env: { ...process.env, VDS_LOCAL_PORT: String(localPort), TSNET_DIR: stateDir },
@@ -81,8 +83,21 @@ export function startTunnel({ localPort, stateDir, binPath, onEvent, log = () =>
       if (key === 'VDS_AUTH_URL') onEvent({ state: 'auth', authUrl: val });
       else if (key === 'VDS_PUBLIC_URL') { url = val; onEvent({ state: 'connecting', url }); }
       else if (key === 'VDS_FUNNEL' && val === 'up') onEvent({ state: 'up', url });
+      // Tailscale's own one-click consent page: enables BOTH tailnet prerequisites at once.
+      // Held until the funnel actually fails, so a tailnet that is already set up never sees it.
+      else if (key === 'VDS_CONSENT_URL') consentUrl = val;
+      else if (key === 'VDS_CONSENT_TEXT') consentText = val;
       else if (key === 'VDS_FUNNEL_ERR') {
-        onEvent({ state: 'needs_funnel', url, detail: val.slice(0, 300), helpUrl: funnelHelpUrl(val) });
+        onEvent({
+          state: 'needs_funnel',
+          url,
+          detail: val.slice(0, 300),
+          // Prefer the consent link — one click, both requirements, no admin-console navigation.
+          // The old deep link stays as the fallback for a tailnet where QueryFeature said nothing.
+          helpUrl: consentUrl || funnelHelpUrl(val),
+          oneClick: !!consentUrl,
+          consentText: consentText || undefined,
+        });
       }
     }
   });

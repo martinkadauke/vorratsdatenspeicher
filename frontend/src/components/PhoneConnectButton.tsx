@@ -27,6 +27,10 @@ interface TunnelStatus {
   url?: string | null;
   authUrl?: string;
   helpUrl?: string;
+  /** True when helpUrl is Tailscale's own consent page: ONE click enables everything that is
+   *  missing. Without it we can only link into the admin console and describe what to look for. */
+  oneClick?: boolean;
+  consentText?: string;
   reason?: string;
   detail?: string;
 }
@@ -137,13 +141,15 @@ export function PhoneConnectPanel() {
       {(state === 'needs_funnel' || state === 'needs_https' || state === 'unreachable') && (
         <>
           <p className="mb-3 flex gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-[11px] leading-relaxed text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/30 dark:text-amber-200">
-            <AlertTriangle size={26} className="shrink-0" /> {t(state === 'needs_funnel' ? 'phone.funnelBlurb' : state === 'needs_https' ? 'phone.httpsBlurb' : 'phone.unreachableBlurb')}
+            <AlertTriangle size={26} className="shrink-0" /> {data?.oneClick && state !== 'unreachable'
+              ? t('phone.consentBlurb')
+              : t(state === 'needs_funnel' ? 'phone.funnelBlurb' : state === 'needs_https' ? 'phone.httpsBlurb' : 'phone.unreachableBlurb')}
           </p>
           <a
             href={data?.helpUrl || 'https://login.tailscale.com/admin/dns'} target="_blank" rel="noopener noreferrer"
             className="mb-2 flex items-center justify-center gap-2 rounded-xl bg-emerald-600 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700"
           >
-            <ExternalLink size={15} /> {t(state === 'needs_funnel' ? 'phone.funnelEnable' : 'phone.httpsEnable')}
+            <ExternalLink size={15} /> {data?.oneClick ? t('phone.consentEnable') : t(state === 'needs_funnel' ? 'phone.funnelEnable' : 'phone.httpsEnable')}
           </a>
           <p className="text-center text-[11px] text-zinc-400">{t('phone.funnelRetry')}</p>
         </>
