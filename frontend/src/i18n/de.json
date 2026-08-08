@@ -15,7 +15,7 @@
     "connect": "Verbindung einrichten",
     "starting": "Verbindung wird aufgebaut …",
     "authWaiting": "Warte auf deine Anmeldung …",
-    "authBlurb": "In deinem Browser hat sich die Anmeldung geöffnet: melde dich dort einmalig an (Google, Microsoft, GitHub oder Apple). Das ist kostenlos. Danach einfach hierher zurückwechseln — den Rest macht VDS allein.",
+    "authBlurb": "In deinem Browser hat sich die Anmeldung geöffnet. Wähle dort am besten Google, Microsoft, Apple oder GitHub — damit wird dein kostenloses Konto gleich miterstellt. Danach einfach hierher zurückwechseln; den Rest macht VDS allein.",
     "openInBrowser": "Anmeldeseite erneut öffnen",
     "cancel": "Abbrechen",
     "scanBlurb": "Scanne den Code mit der Kamera deines Handys — die Adresse funktioniert von überall, nicht nur zu Hause.",
@@ -47,7 +47,9 @@
     "inviteDone": "Fertig",
     "inviteMessage": "Hallo {{name}}, hier ist dein Zugang zu unserem Vorratsdatenspeicher:",
     "inviteCopied": "Nachricht kopiert!",
-    "inviteHasAccount": "Diese Person hat schon einen Zugang."
+    "inviteHasAccount": "Diese Person hat schon einen Zugang.",
+    "accountHint": "Dafür brauchst du ein kostenloses Konto bei Tailscale. Am einfachsten geht es mit einem Konto, das du schon hast — wähle auf der nächsten Seite Google, Microsoft, Apple oder GitHub. Damit entsteht dein Konto in einem Schritt. Der Weg über eine E-Mail-Adresse funktioniert nur, wenn du dort bereits registriert bist.",
+    "noAccountYet": "Noch kein Tailscale-Konto? Hier kostenlos anlegen — danach oben erneut anmelden."
   },
   "nav": {
     "analytics": "Analytics",

@@ -101,8 +101,14 @@ export function PhoneConnectPanel() {
       {state === 'off' && (
         <>
           <p className="mb-3 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">{t('phone.introBlurb')}</p>
-          <p className="mb-4 flex gap-2 rounded-xl bg-emerald-50 p-3 text-[11px] leading-relaxed text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">
+          <p className="mb-3 flex gap-2 rounded-xl bg-emerald-50 p-3 text-[11px] leading-relaxed text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">
             <ShieldCheck size={26} className="shrink-0" /> {t('phone.privacyBlurb')}
+          </p>
+          {/* ⚠️ Tailscale's page is a SIGN-IN form, not a sign-up one. A first-timer who picks
+              "continue with email" gets "Sorry, we couldn't log you in" and no idea why. We cannot
+              change their page — but this is the last screen we own before they land on it. */}
+          <p className="mb-4 rounded-xl border-2 border-orange-300 bg-orange-50 p-3 text-[11px] leading-relaxed text-orange-900 dark:border-orange-700/60 dark:bg-orange-950/30 dark:text-orange-200">
+            {t('phone.accountHint')}
           </p>
           <button
             onClick={() => act.mutate('start')} disabled={act.isPending}
@@ -132,6 +138,12 @@ export function PhoneConnectPanel() {
                   <ExternalLink size={14} /> {t('phone.openInBrowser')}
                 </a>
               )}
+              {/* For the person who just hit "we couldn't log you in": create the free account
+                  first, then come back and reopen the link above. */}
+              <a href="https://login.tailscale.com/start" target="_blank" rel="noopener noreferrer"
+                className="mb-3 block text-center text-[11px] text-zinc-500 underline decoration-dotted dark:text-zinc-400">
+                {t('phone.noAccountYet')}
+              </a>
             </>
           )}
           <button onClick={() => act.mutate('stop')} className="w-full rounded-xl border border-zinc-300 py-2 text-xs font-medium text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
