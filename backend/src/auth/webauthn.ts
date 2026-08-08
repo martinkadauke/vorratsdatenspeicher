@@ -13,20 +13,47 @@ import type {
 } from '@simplewebauthn/server';
 import sql from '../db.js';
 import { getConfig, effectiveBaseUrl } from '../config.js';
+import { desktopBaseUrl } from '../desktop.js';
 import { signToken } from './plugin.js';
 
-/** Relying-party identity. RP-ID = the canonical hostname (no scheme/port), origin = the full
- *  origin (WITH port). Both are derived from app.base_url and overridable via config — on the
- *  Electron+Tunnel build this is the stable Tailscale-Funnel hostname for every device (the one
- *  RP-ID all passkeys are bound to). Self-hosters behind their own proxy get it from base_url. */
-async function rpConfig(): Promise<{ rpID: string; origin: string; rpName: string }> {
-  const base = (await effectiveBaseUrl()) || 'http://localhost';
-  let hostname = 'localhost';
-  let origin = base;
-  try { const u = new URL(base); hostname = u.hostname; origin = u.origin; } catch { /* keep localhost defaults */ }
-  const rpID = (await getConfig('webauthn.rp_id')) || hostname;
-  const rpOrigin = (await getConfig('webauthn.origin')) || origin;
-  return { rpID, origin: rpOrigin, rpName: 'Vorratsdatenspeicher' };
+/** Relying-party identity, derived from the origin the REQUEST actually came from.
+ *
+ *  ⚠️ Not from a single global base URL, and that distinction is the whole bug: the desktop build
+ *  prefers the public tunnel address for anything a human will click in an e-mail — correct there —
+ *  but the window itself runs on http://localhost:<port>. WebAuthn requires the RP ID to be a
+ *  registrable suffix of the page's OWN domain, so a tunnel-derived RP ID made the browser refuse
+ *  every registration on the desktop, before a single byte reached us. No server error to find,
+ *  just a red toast.
+ *
+ *  Only origins we recognise are honoured, so a stray Origin header cannot make us mint
+ *  credentials for someone else's domain. An explicit config override still wins — that is the
+ *  self-hoster behind their own proxy telling us the truth.
+ *
+ *  ⚠️ Consequence worth knowing: a passkey is bound to ONE RP ID. One created at the computer
+ *  (localhost) does not work through the tunnel and vice versa. That is inherent to WebAuthn and
+ *  mostly harmless — every device registers its own passkey anyway.
+ */
+async function rpConfig(req?: { headers: Record<string, unknown> }): Promise<{ rpID: string; origin: string; rpName: string }> {
+  const cfgID = await getConfig('webauthn.rp_id');
+  const cfgOrigin = await getConfig('webauthn.origin');
+  if (cfgID && cfgOrigin) return { rpID: cfgID, origin: cfgOrigin, rpName: 'Vorratsdatenspeicher' };
+
+  const hostOf = (u: string): { id: string; origin: string } | null => {
+    try { const x = new URL(u); return { id: x.hostname, origin: x.origin }; } catch { return null; }
+  };
+
+  // Everything this instance may legitimately be reached at.
+  const allowed = [await effectiveBaseUrl(), desktopBaseUrl(), await getConfig('app.base_url')]
+    .filter(Boolean).map(hostOf).filter((v): v is { id: string; origin: string } => !!v);
+  // Loopback is always us — the desktop window lives there, and it is a secure context.
+  const reqOrigin = String(req?.headers?.origin ?? '');
+  const fromReq = hostOf(reqOrigin);
+  const isLoopback = !!fromReq && ['localhost', '127.0.0.1', '[::1]', '::1'].includes(fromReq.id);
+
+  const match = fromReq && (isLoopback || allowed.some(a => a.origin === fromReq.origin)) ? fromReq : null;
+  const fallback = allowed[0] ?? hostOf('http://localhost')!;
+  const chosen = match ?? fallback;
+  return { rpID: cfgID || chosen.id, origin: cfgOrigin || chosen.origin, rpName: 'Vorratsdatenspeicher' };
 }
 
 /** Store a challenge server-side; the random handle is echoed back by the client on verify.
@@ -55,7 +82,7 @@ export function webauthnRoutes(app: FastifyInstance): void {
   // ── Register a new passkey for the signed-in user ──────────────────────────
   app.post('/api/auth/passkey/register/options', async (req) => {
     const user = req.user!;
-    const { rpID, rpName } = await rpConfig();
+    const { rpID, rpName } = await rpConfig(req);
     const existing = await sql`SELECT credential_id, transports FROM webauthn_credential WHERE user_id = ${user.id}`;
     const options = await generateRegistrationOptions({
       rpName,
@@ -80,7 +107,7 @@ export function webauthnRoutes(app: FastifyInstance): void {
     if (!challengeId || !response) return reply.code(400).send({ error: 'missing fields' });
     const ch = await takeChallenge(challengeId, 'register');
     if (!ch || ch.userId !== user.id) return reply.code(400).send({ error: 'challenge expired' });
-    const { rpID, origin } = await rpConfig();
+    const { rpID, origin } = await rpConfig(req);
     let verification;
     try {
       verification = await verifyRegistrationResponse({
@@ -106,8 +133,8 @@ export function webauthnRoutes(app: FastifyInstance): void {
   });
 
   // ── Passwordless login (public — usernameless / discoverable credential) ───
-  app.post('/api/auth/passkey/login/options', async () => {
-    const { rpID } = await rpConfig();
+  app.post('/api/auth/passkey/login/options', async (req) => {
+    const { rpID } = await rpConfig(req);
     const options = await generateAuthenticationOptions({ rpID, userVerification: 'preferred', allowCredentials: [] });
     const challengeId = await storeChallenge('authenticate', options.challenge, null);
     return { options, challengeId };
@@ -121,7 +148,7 @@ export function webauthnRoutes(app: FastifyInstance): void {
     const rows = await sql`SELECT id, user_id, public_key, counter, transports FROM webauthn_credential WHERE credential_id = ${response.id}`;
     if (!rows.length) return reply.code(401).send({ error: 'unknown credential' });
     const row = rows[0];
-    const { rpID, origin } = await rpConfig();
+    const { rpID, origin } = await rpConfig(req);
     let verification;
     try {
       verification = await verifyAuthenticationResponse({

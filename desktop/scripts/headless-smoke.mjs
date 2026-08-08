@@ -144,6 +144,19 @@ try {
   const okRpID = !!rpID && !/^\d+\.\d+\.\d+\.\d+$/.test(rpID);
   console.log('[smoke] passkey relying-party id →', okRpID ? `OK (${rpID})` : `INVALID: ${rpID}`);
 
+  // ⚠️ The RP id must follow the PAGE, not a global base URL. On the desktop the window runs on
+  // localhost while the tunnel address is the one we put in e-mails — deriving from the latter
+  // made the browser refuse every registration, with nothing on the server to see. Same instance,
+  // two origins, two answers.
+  const rpFor = async (origin) => (await fetch(`${stack.url}/api/auth/passkey/register/options`, {
+    method: 'POST', headers: { ...auth, 'Content-Type': 'application/json', Origin: origin }, body: '{}',
+  }).then(r => r.json()).catch(() => ({})))?.options?.rp?.id;
+  const rpLocal = await rpFor(stack.url);
+  const rpOther = await rpFor('https://example-tunnel.ts.net');
+  const okRpFollowsOrigin = rpLocal === 'localhost' && rpOther !== 'example-tunnel.ts.net';
+  console.log('[smoke] rp id follows the page origin →',
+    okRpFollowsOrigin ? `OK (localhost→${rpLocal}, unknown origin→${rpOther})` : `WRONG (${rpLocal} / ${rpOther})`);
+
   // ── one provider for everything, vision only where it is needed ────────────────────────
   // The wizard's promise: pick Ollama once and EVERY task runs on it, with only the picture-reading
   // one on a vision model. It was broken twice over — the step needed a second Save click nobody
