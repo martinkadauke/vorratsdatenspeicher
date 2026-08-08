@@ -181,6 +181,20 @@ function closeAuthWindow() {
  *  Retries, because two slow things happen on first exposure: the DNS record appearing, and
  *  Let's Encrypt issuing the certificate on the first request. */
 const REACH_ATTEMPTS = 8;
+// After the quick probe gives up, keep going quietly for another ~10 minutes. A funnel name that
+// has just been created has to reach public DNS resolvers worldwide, and that is simply slower
+// than any impatience threshold worth having.
+const SLOW_ATTEMPTS = 30;
+
+async function keepTryingQuietly(url, log, onAttempt) {
+  for (let attempt = 1; attempt <= SLOW_ATTEMPTS; attempt++) {
+    await new Promise(r => setTimeout(r, 20_000));
+    onAttempt?.(attempt, SLOW_ATTEMPTS);
+    try { await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(12_000) }); return true; }
+    catch (e) { log(`tunnel propagation attempt ${attempt}: ${String(e?.cause?.code || e?.message || e)}`); }
+  }
+  return false;
+}
 
 async function verifyPubliclyReachable(url, log, onAttempt) {
   for (let attempt = 1; attempt <= REACH_ATTEMPTS; attempt++) {
@@ -230,9 +244,23 @@ function startTunnelFor(stack, { openLogin }) {
         writeTunnelStatus(stack.desktopDir, { state: 'verifying', url: e.url, attempt: 1, attempts: REACH_ATTEMPTS });
         void verifyPubliclyReachable(e.url, log, (attempt, attempts) => {
           if (tunnel) writeTunnelStatus(stack.desktopDir, { state: 'verifying', url: e.url, attempt, attempts });
-        }).then(res => {
+        }).then(async res => {
           if (!tunnel) return;                       // stopped while we were probing
           if (res.ok) return writeTunnelStatus(stack.desktopDir, e);
+
+          // ⚠️ Do NOT accuse the tailnet settings when the node HAS its certificate. Tailscale
+          // only issues one if HTTPS is enabled there, so a cert in hand proves the setting is on
+          // and the failure is a slow DNS record, not a missing switch. Guessing otherwise sent a
+          // user into the admin console after a setting that was already enabled — and the console
+          // is where every bad afternoon of this project has started.
+          if (e.certOk) {
+            writeTunnelStatus(stack.desktopDir, { state: 'propagating', url: e.url, attempt: 0, attempts: SLOW_ATTEMPTS });
+            const arrived = await keepTryingQuietly(e.url, log, (attempt, attempts) => {
+              if (tunnel) writeTunnelStatus(stack.desktopDir, { state: 'propagating', url: e.url, attempt, attempts });
+            });
+            if (!tunnel) return;
+            if (arrived) return writeTunnelStatus(stack.desktopDir, { state: 'up', url: e.url });
+          }
           writeTunnelStatus(stack.desktopDir, {
             state: res.dns ? 'needs_https' : 'unreachable',
             url: e.url,

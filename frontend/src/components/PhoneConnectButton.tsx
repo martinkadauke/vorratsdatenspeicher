@@ -22,7 +22,7 @@ import { cn } from '../lib/utils';
 // Docker builds never see this — the backend answers `available:false` there, and the button in
 // the header is not rendered at all.
 
-type TunnelState = 'off' | 'starting' | 'auth' | 'connecting' | 'verifying' | 'up' | 'needs_funnel' | 'needs_https' | 'unreachable' | 'error' | 'unavailable';
+type TunnelState = 'off' | 'starting' | 'auth' | 'connecting' | 'verifying' | 'propagating' | 'up' | 'needs_funnel' | 'needs_https' | 'unreachable' | 'error' | 'unavailable';
 interface TunnelStatus {
   available: boolean;
   state: TunnelState;
@@ -43,7 +43,7 @@ interface TunnelStatus {
 }
 
 /** States where something is actively happening — poll fast, and don't offer "connect" again. */
-const BUSY: TunnelState[] = ['starting', 'auth', 'connecting', 'verifying'];
+const BUSY: TunnelState[] = ['starting', 'auth', 'connecting', 'verifying', 'propagating'];
 
 /** Is this the Electron build (and may this user drive the tunnel)? Both the header button and the
  *  onboarding coach need the answer, and react-query dedupes the shared keys. */
@@ -128,8 +128,16 @@ export function PhoneConnectPanel() {
         <>
           <p className="mb-3 flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-200">
             <Loader2 size={16} className="animate-spin text-emerald-600" />
-            {state === 'auth' ? t('phone.authWaiting') : state === 'verifying' ? t('phone.verifying') : t('phone.starting')}
+            {state === 'auth' ? t('phone.authWaiting')
+             : state === 'verifying' ? t('phone.verifying')
+             : state === 'propagating' ? t('phone.propagating')
+             : t('phone.starting')}
           </p>
+          {state === 'propagating' && (
+            <p className="mb-4 text-center text-[11px] leading-relaxed text-zinc-400">
+              {t('phone.propagatingHint')}
+            </p>
+          )}
           {state === 'verifying' && (
             <p className="mb-4 text-center text-[11px] leading-relaxed text-zinc-400">
               {data?.attempt && data?.attempts

@@ -55,7 +55,9 @@
     "verifyProgress": "Attempt {{attempt}} of {{attempts}}",
     "verifyPatience": "Still working.",
     "verifyPatience2": "The very first time this takes a few minutes: the address has to become known worldwide and a certificate has to be issued. You can leave this window open.",
-    "welcomeDetour": "Ending up on a Tailscale welcome page instead? That only happens the very first time, and there is a way out that is easy to miss: at the bottom of the page there is “Skip the introduction” — click it. Otherwise that page waits for a second device you do not need. Then press the green button here again."
+    "welcomeDetour": "Ending up on a Tailscale welcome page instead? That only happens the very first time, and there is a way out that is easy to miss: at the bottom of the page there is “Skip the introduction” — click it. Otherwise that page waits for a second device you do not need. Then press the green button here again.",
+    "propagating": "Your address is being published worldwide …",
+    "propagatingHint": "The certificate is in place and everything is configured correctly — the name just has to spread across the internet. That sometimes takes a few minutes. Leave this window open or come back later; VDS will say when it is ready."
   },
   "nav": {
     "analytics": "Analytics",

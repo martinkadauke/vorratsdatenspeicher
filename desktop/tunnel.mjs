@@ -67,6 +67,7 @@ export function startTunnel({ localPort, stateDir, binPath, onEvent, log = () =>
     windowsHide: true,
   });
   onEvent({ state: 'starting' });
+  let certOk = false;
 
   // The sidecar's contract is one `KEY=value` line per event. Buffer partial reads — a 40-line
   // Tailscale log burst arrives in arbitrary chunks and a split URL would be unopenable.
@@ -82,7 +83,12 @@ export function startTunnel({ localPort, stateDir, binPath, onEvent, log = () =>
       const val = line.slice(i + 1).trim();
       if (key === 'VDS_AUTH_URL') onEvent({ state: 'auth', authUrl: val });
       else if (key === 'VDS_PUBLIC_URL') { url = val; onEvent({ state: 'connecting', url }); }
-      else if (key === 'VDS_FUNNEL' && val === 'up') onEvent({ state: 'up', url });
+      // Whether the node got its own certificate is the one HONEST answer to "does this tailnet
+      // permit HTTPS". Without it the shell can only guess from a failed probe — and it guessed
+      // wrong, telling people to switch on a setting that was already on.
+      else if (key === 'VDS_CERT') { if (val === 'ok') certOk = true; }
+      else if (key === 'VDS_CERT_ERR') certOk = false;
+      else if (key === 'VDS_FUNNEL' && val === 'up') onEvent({ state: 'up', url, certOk });
       // Tailscale's own one-click consent page: enables BOTH tailnet prerequisites at once.
       // Held until the funnel actually fails, so a tailnet that is already set up never sees it.
       else if (key === 'VDS_CONSENT_URL') consentUrl = val;
