@@ -133,17 +133,20 @@ export function PhoneConnectPanel() {
                 // then the in-app login is a dead end with no way out.
                 <a
                   href={data.authUrl} target="_blank" rel="noopener noreferrer"
-                  className="mb-3 flex items-center justify-center gap-2 rounded-xl border border-zinc-300 py-2 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:text-zinc-200"
+                  className="mb-3 flex items-center justify-center gap-2 rounded-xl bg-zinc-900 py-2.5 text-xs font-semibold text-white dark:bg-white dark:text-zinc-900"
                 >
                   <ExternalLink size={14} /> {t('phone.openInBrowser')}
                 </a>
               )}
-              {/* For the person who just hit "we couldn't log you in": create the free account
-                  first, then come back and reopen the link above. */}
-              <a href="https://login.tailscale.com/start" target="_blank" rel="noopener noreferrer"
-                className="mb-3 block text-center text-[11px] text-zinc-500 underline decoration-dotted dark:text-zinc-400">
-                {t('phone.noAccountYet')}
-              </a>
+              {/* ⚠️ Do NOT offer a link to Tailscale's sign-up here. It leaves this flow: the
+                  account gets created, but the DEVICE does not — and Tailscale then walks the new
+                  user through a survey and "add your first device", which asks for a phone app
+                  nobody needs, because the device waiting to be added is this very button.
+                  The link above already creates the account when a provider is used, so the only
+                  thing worth saying is: come back here. */}
+              <p className="mb-3 rounded-xl bg-zinc-100 p-3 text-[11px] leading-relaxed text-zinc-600 dark:bg-zinc-800/60 dark:text-zinc-300">
+                {t('phone.strandedHint')}
+              </p>
             </>
           )}
           <button onClick={() => act.mutate('stop')} className="w-full rounded-xl border border-zinc-300 py-2 text-xs font-medium text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">

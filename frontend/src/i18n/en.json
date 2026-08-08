@@ -15,7 +15,7 @@
     "connect": "Set up the connection",
     "starting": "Setting up the connection …",
     "authWaiting": "Waiting for you to sign in …",
-    "authBlurb": "The sign-in page has opened in your browser. Pick Google, Microsoft, Apple or GitHub there — that creates your free account along the way. Then just switch back here; VDS does the rest by itself.",
+    "authBlurb": "The sign-in page has opened in your browser. Pick Google, Microsoft, Apple or GitHub there — also if you have no Tailscale account yet; it gets created along the way. Then come back here; VDS does the rest by itself.",
     "openInBrowser": "Open the sign-in page again",
     "cancel": "Cancel",
     "scanBlurb": "Scan the code with your phone's camera — the address works from anywhere, not just at home.",
@@ -48,8 +48,8 @@
     "inviteMessage": "Hi {{name}}, here is your access to our Vorratsdatenspeicher:",
     "inviteCopied": "Message copied!",
     "inviteHasAccount": "That person already has a login.",
-    "accountHint": "This needs a free Tailscale account. The easiest route is one you already have — pick Google, Microsoft, Apple or GitHub on the next page and the account is created in one step. Signing in with an e-mail address only works if you are already registered there.",
-    "noAccountYet": "No Tailscale account yet? Create one free here — then sign in above again."
+    "accountHint": "This needs a free Tailscale account — but there is nothing to register beforehand. Just pick Google, Microsoft, Apple or GitHub on the next page: that creates the account and the connection in one step. Only signing in with an e-mail address requires an existing account.",
+    "strandedHint": "Ended up on a survey or on “Add your first device” instead? You can ignore that — the device is this one, and it is already waiting. Click “Open the sign-in page again” above and just confirm."
   },
   "nav": {
     "analytics": "Analytics",
