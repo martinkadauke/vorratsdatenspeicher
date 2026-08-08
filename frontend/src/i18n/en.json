@@ -49,7 +49,9 @@
     "inviteCopied": "Message copied!",
     "inviteHasAccount": "That person already has a login.",
     "accountHint": "This needs a free Tailscale account — but there is nothing to register beforehand. Just pick Google, Microsoft, Apple or GitHub on the next page: that creates the account and the connection in one step. Only signing in with an e-mail address requires an existing account.",
-    "strandedHint": "Ended up on a survey or on “Add your first device” instead? You can ignore that — the device is this one, and it is already waiting. Click “Open the sign-in page again” above and just confirm."
+    "strandedHint": "Ended up on a survey or on “Add your first device” instead? You can ignore that — the device is this one, and it is already waiting. Click “Open the sign-in page again” above and just confirm.",
+    "freshLink": "Link no longer working? Get a new one",
+    "freshLinkHint": "Resets only this computer's Tailscale sign-in. Your receipts and data are untouched — the phone gets a new address afterwards."
   },
   "nav": {
     "analytics": "Analytics",

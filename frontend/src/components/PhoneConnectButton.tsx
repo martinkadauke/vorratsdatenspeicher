@@ -72,7 +72,7 @@ export function PhoneConnectPanel() {
   const { data, refetch } = useTunnel(true);
 
   const act = useMutation({
-    mutationFn: (action: 'start' | 'stop') => api('/api/desktop/tunnel', { method: 'POST', body: { action } }),
+    mutationFn: (action: 'start' | 'stop' | 'reset') => api('/api/desktop/tunnel', { method: 'POST', body: { action } }),
     onSuccess: () => { void refetch(); },
     onError: () => toast(t('phone.failed'), 'error'),
   });
@@ -147,6 +147,16 @@ export function PhoneConnectPanel() {
               <p className="mb-3 rounded-xl bg-zinc-100 p-3 text-[11px] leading-relaxed text-zinc-600 dark:bg-zinc-800/60 dark:text-zinc-300">
                 {t('phone.strandedHint')}
               </p>
+              {/* A sign-in link is bound to the node key on disk and goes stale — trivially so for
+                  a first-timer who leaves to create an account. Without this the panel would keep
+                  offering a dead link and the only escape would be reinstalling. */}
+              <button
+                onClick={() => act.mutate('reset')} disabled={act.isPending}
+                className="mb-1 w-full rounded-xl border border-zinc-300 py-2 text-[11px] font-medium text-zinc-600 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300"
+              >
+                {t('phone.freshLink')}
+              </button>
+              <p className="mb-3 text-center text-[10px] leading-relaxed text-zinc-400">{t('phone.freshLinkHint')}</p>
             </>
           )}
           <button onClick={() => act.mutate('stop')} className="w-full rounded-xl border border-zinc-300 py-2 text-xs font-medium text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">

@@ -263,6 +263,31 @@ async function stopTunnel(stack) {
   writeTunnelStatus(stack.desktopDir, { state: 'off' });
 }
 
+/** Forget this machine's tailnet login and start over.
+ *
+ *  The sign-in link Tailscale hands out is tied to the node key on disk and does not stay valid
+ *  forever — and "forever" is easily reached by a first-timer, who may go and create a Google
+ *  account, answer a survey, and come back ten minutes later. Until now the panel would keep
+ *  offering that dead link, `stop`/`start` would hand back the same one (the state directory
+ *  survives both), and the only real escape was reinstalling the app.
+ *
+ *  Wiping the state directory is what makes the next start hand out a FRESH link. It is safe:
+ *  nothing in there is the user's data — it is this node's identity in a tailnet, which is exactly
+ *  what they are asking to redo. The phone's saved address changes with it, which is why this is
+ *  offered as an explicit way out and never done automatically. */
+async function resetTunnel(stack) {
+  await stopTunnel(stack);
+  try {
+    fs.rmSync(stack.tsnetDir, { recursive: true, force: true });
+    log('tailnet state wiped — the next start will ask for a fresh sign-in');
+  } catch (e) {
+    log(`tailnet state wipe failed: ${e}`);
+    writeTunnelStatus(stack.desktopDir, { state: 'error', reason: 'reset_failed', detail: String(e?.message || e) });
+    return;
+  }
+  startTunnelFor(stack, { openLogin: true });
+}
+
 /** Locked out of your own machine: hand out a one-time code through a NATIVE dialog.
  *
  *  A desktop instance has no working "reset by e-mail" story — it needs SMTP, an inbox, and a link
@@ -327,7 +352,9 @@ function watchDesktopBridge(stack) {
     try { fs.rmSync(request, { force: true }); } catch { /* consumed anyway */ }
     log(`tunnel request: ${action}`);
     Promise.resolve()
-      .then(() => (action === 'stop' ? stopTunnel(stack) : startTunnelFor(stack, { openLogin: true })))
+      .then(() => (action === 'stop' ? stopTunnel(stack)
+                 : action === 'reset' ? resetTunnel(stack)
+                 : startTunnelFor(stack, { openLogin: true })))
       .catch((e) => { log(`tunnel request failed: ${e}`); writeTunnelStatus(stack.desktopDir, { state: 'error', reason: 'request_failed', detail: String(e?.message || e) }); })
       .finally(() => { busy = false; });
   }, 1000).unref();

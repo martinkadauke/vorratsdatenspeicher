@@ -96,6 +96,22 @@ try {
   const okMarker = existsSync(marker) && readFileSync(marker, 'utf8').trim() === 'start';
   console.log('[smoke] connect request →', okMarker ? 'OK (marker written for the shell)' : 'MARKER MISSING');
 
+  // `reset` is the way out of a stale sign-in link. It travels the same file bridge, so the whole
+  // failure mode is "the action silently falls back to start" — which looks like nothing happening
+  // and is invisible to tsc. An unknown action MUST still fall back, hence both halves.
+  rmSync(marker, { force: true });
+  await fetch(`${stack.url}/api/desktop/tunnel`, {
+    method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'reset' }),
+  });
+  const okReset = existsSync(marker) && readFileSync(marker, 'utf8').trim() === 'reset';
+  rmSync(marker, { force: true });
+  await fetch(`${stack.url}/api/desktop/tunnel`, {
+    method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'wipe-everything' }),
+  });
+  const okClosedSet = existsSync(marker) && readFileSync(marker, 'utf8').trim() === 'start';
+  console.log('[smoke] fresh-link request →', okReset ? 'OK (reset reaches the shell)' : 'RESET LOST',
+              '| unknown action →', okClosedSet ? 'OK (falls back to start)' : 'CLOSED SET LEAKS');
+
   // ── household members own the bank accounts ─────────────────────────────────────────────
   // A member is the PERSON; a login is optional (children, pets) and an account belongs to the
   // person, not to the login. Migration 110 moved ownership accordingly, so prove the chain:
@@ -256,7 +272,7 @@ try {
   console.log('[smoke] tunnel sidecar →', sidecarPath({ resourcesPath: null, devRoot: path.resolve(__dirname, '..') }) ? 'bundled' : 'not built (local-only)');
 
   const pass = okSecrets && version?.node && okPasskey && gate.status === 401 && okSpa
-    && okDesktopFlag && anon.status === 401 && okStatus && okMarker
+    && okDesktopFlag && anon.status === 401 && okStatus && okMarker && okReset && okClosedSet
     && okRecoverMarker && wrong.status === 403 && okRecovered && okBurned && relogin.status === 200
     && okOneProvider && okVisionSplit && okRpID
     && me?.member_id === meId && okOnlyOne && okJoint && okArchive;

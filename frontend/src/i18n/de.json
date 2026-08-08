@@ -49,7 +49,9 @@
     "inviteCopied": "Nachricht kopiert!",
     "inviteHasAccount": "Diese Person hat schon einen Zugang.",
     "accountHint": "Dafür brauchst du ein kostenloses Konto bei Tailscale — du musst dich aber nirgends vorher registrieren. Wähle auf der nächsten Seite einfach Google, Microsoft, Apple oder GitHub: damit entstehen Konto und Freigabe in einem Schritt. Nur der Weg über eine E-Mail-Adresse setzt ein bestehendes Konto voraus.",
-    "strandedHint": "Bist du stattdessen bei einer Umfrage oder bei „Add your first device“ gelandet? Das kannst du ignorieren — das Gerät ist dieses hier, und es wartet schon. Klick oben auf „Anmeldeseite erneut öffnen“, dann musst du nur noch bestätigen."
+    "strandedHint": "Bist du stattdessen bei einer Umfrage oder bei „Add your first device“ gelandet? Das kannst du ignorieren — das Gerät ist dieses hier, und es wartet schon. Klick oben auf „Anmeldeseite erneut öffnen“, dann musst du nur noch bestätigen.",
+    "freshLink": "Link funktioniert nicht mehr? Neuen anfordern",
+    "freshLinkHint": "Setzt nur die Tailscale-Anmeldung dieses Rechners zurück. Deine Belege und Daten bleiben unberührt — das Handy bekommt danach eine neue Adresse."
   },
   "nav": {
     "analytics": "Analytics",

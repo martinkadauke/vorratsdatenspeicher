@@ -47,7 +47,10 @@ export function desktopRoutes(app: FastifyInstance): void {
   app.post<{ Body: { action?: string } }>('/api/desktop/tunnel', { preHandler: requireOperator }, async (req, reply) => {
     if (DEMO_MODE) return reply.code(403).send({ error: 'forbidden' });
     if (!desktopBuild()) return reply.code(409).send({ error: 'not_desktop' });
-    const action = req.body?.action === 'stop' ? 'stop' : 'start';
+    // Closed set, re-validated by the shell. `reset` forgets this node's tailnet identity so the
+    // next start yields a fresh sign-in link — the way out when the old one has gone stale.
+    const asked = req.body?.action;
+    const action = asked === 'stop' ? 'stop' : asked === 'reset' ? 'reset' : 'start';
     try {
       await mkdir(DESKTOP_DIR, { recursive: true });
       await writeFile(path.join(DESKTOP_DIR, 'tunnel-request'), `${action}\n`, 'utf8');
