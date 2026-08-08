@@ -1788,5 +1788,15 @@
     "failed": "That didn't work.",
     "deadTitle": "This invitation is no longer valid",
     "deadBody": "It has been used, has expired, or was answered incorrectly too often. Please ask your household for a new one."
+  },
+  "install": {
+    "title": "Put Vorratsdatenspeicher on your phone",
+    "body": "As an app on your home screen VDS opens without the browser bar, keeps you signed in, and only then are notifications possible.",
+    "cta": "Add to home screen",
+    "later": "Later",
+    "iosPre": "Tap",
+    "iosMid": "below, then",
+    "iosPost": "“Add to Home Screen”.",
+    "manual": "Open your browser menu and choose “Install app” or “Add to Home screen”."
   }
 }

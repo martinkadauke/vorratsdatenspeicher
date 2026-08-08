@@ -9,6 +9,7 @@ import { pushSupported, enablePush } from '../lib/push';
 import { toast } from './Toast';
 import { Button, Input } from './ui';
 import { PhoneConnectPanel, useTunnel } from './PhoneConnectButton';
+import { isInstalledPwa, isPhone } from '../lib/device';
 
 /** Global onboarding-coach driver (FB-01) — mounted once in Layout, off-demo only. Handles
  *  the route-agnostic stages B (VDS aufs Handy) and C (Push aktivieren); Stage A lives on the
@@ -45,7 +46,10 @@ export function Coach() {
   // app before we ask for anything.
   if (done('A') && !done('B') && !soft('B')
       && readyForPhone && navSinceReady >= 3
-      && phoneInstallRelevant()) {
+      // ⚠️ Not on the phone itself: this stage mails a "how to get VDS onto your phone" guide,
+      // which is the wrong thing to offer someone already holding the phone. There, the install
+      // prompt does the job, immediately and without waiting for milestones.
+      && !isPhone() && phoneInstallRelevant()) {
     return <StageB onDone={() => dismiss.mutate('B')} onLater={() => snooze('B')} />;
   }
   // Same milestone, desktop wording: there the address in StageB is loopback and useless, but the
@@ -65,18 +69,6 @@ export function Coach() {
   return null;
 }
 
-/** Running as an installed PWA (home-screen icon), rather than in a browser tab. */
-function isInstalledPwa(): boolean {
-  if (typeof window === 'undefined') return false;
-  return !!window.matchMedia?.('(display-mode: standalone)').matches
-    || (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
-}
-
-/** A touch device at phone size — not a laptop with a touchscreen. */
-function isPhone(): boolean {
-  if (typeof window === 'undefined') return false;
-  return !!window.matchMedia?.('(pointer: coarse)').matches && window.innerWidth <= 900;
-}
 
 /** "Put VDS on your phone" — pointless once it IS on the phone, and impossible to act on when the
  *  address it hands out only resolves on this one machine (the desktop build binds to loopback by

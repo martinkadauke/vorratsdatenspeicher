@@ -1790,5 +1790,15 @@
     "failed": "Das hat nicht geklappt.",
     "deadTitle": "Diese Einladung gilt nicht mehr",
     "deadBody": "Sie wurde bereits benutzt, ist abgelaufen oder wurde zu oft falsch beantwortet. Bitte deinen Haushalt um eine neue."
+  },
+  "install": {
+    "title": "Vorratsdatenspeicher aufs Handy legen",
+    "body": "Als App auf dem Startbildschirm startet VDS ohne Browserleiste, du bleibst angemeldet, und Benachrichtigungen werden dadurch erst möglich.",
+    "cta": "Zum Startbildschirm hinzufügen",
+    "later": "Später",
+    "iosPre": "Tippe unten auf",
+    "iosMid": "und dann auf",
+    "iosPost": "„Zum Home-Bildschirm“.",
+    "manual": "Öffne das Menü deines Browsers und wähle „App installieren“ oder „Zum Startbildschirm hinzufügen“."
   }
 }

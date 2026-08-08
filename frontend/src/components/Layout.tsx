@@ -17,6 +17,7 @@ import { BugReportButton } from './BugReportButton';
 import { RecommendButton } from './RecommendButton';
 import { PhoneConnectButton } from './PhoneConnectButton';
 import { InstallButton } from './InstallButton';
+import { PwaInstallPrompt } from './PwaInstallPrompt';
 import { UpdateBanner } from './UpdateBanner';
 
 /** Colour-coded environment badge keyed on the runtime VDS_ENV (prod/stage/dev),
@@ -194,6 +195,9 @@ export function Layout() {
 
       {/* Demo-only floating CTAs: "Get VDS" install guide + a bug-report button on every page. */}
       {demo && <><InstallButton /><BugReportButton /></>}
+      {/* Every channel: a phone is a phone whether it reached the demo, a Docker self-host,
+          or a desktop instance through the tunnel. Renders nothing on anything else. */}
+      <PwaInstallPrompt />
       <Onboarding />
       <Coach />
       <Tour open={tourOpen} onClose={() => setTourOpen(false)} />
