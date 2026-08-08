@@ -55,7 +55,7 @@
     "verifyProgress": "Attempt {{attempt}} of {{attempts}}",
     "verifyPatience": "Still working.",
     "verifyPatience2": "The very first time this takes a few minutes: the address has to become known worldwide and a certificate has to be issued. You can leave this window open.",
-    "welcomeDetour": "Ending up on a Tailscale welcome page instead? That only happens the very first time: a new account is sent through it once. Click your way through — answer the survey, and you can skip “Add your first device”, your computer has long been connected. Then press the green button here again; this time you will land on the right page."
+    "welcomeDetour": "Ending up on a Tailscale welcome page instead? That only happens the very first time, and there is a way out that is easy to miss: at the bottom of the page there is “Skip the introduction” — click it. Otherwise that page waits for a second device you do not need. Then press the green button here again."
   },
   "nav": {
     "analytics": "Analytics",
