@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { api, ApiError } from '../api/client';
@@ -19,19 +19,32 @@ export function Coach() {
   const desktopBuild = useTunnel(false).enabled;
   const { enabled, coach, dismiss } = useCoach();
   const { pathname } = useLocation();
-  const [navCount, setNavCount] = useState(0);
   const [snoozed, setSnoozed] = useState<Set<string>>(new Set());   // session-only soft closes
-  useEffect(() => { setNavCount(n => n + 1); }, [pathname]);
+
+  // ⚠️ Count navigations AFTER the milestones are met, not since the app opened. Counting from
+  // mount meant the card almost always appeared inside Prüfen — the two navigations were spent
+  // getting there and confirming a name, so it popped in the middle of that work. Three moves
+  // afterwards puts it wherever the user has actually gone next, which is the point: it is an
+  // offer to make later, not an interruption of the task that earned it.
+  const readyForPhone = !!coach?.dismissed.includes('A')
+    && !!coach?.events.pruefen_visited && !!coach?.milestones.artikelname_set;
+  const [navSinceReady, setNavSinceReady] = useState(0);
+  const lastPath = useRef(pathname);
+  useEffect(() => {
+    if (lastPath.current === pathname) return;   // mount, or a re-render on the same route
+    lastPath.current = pathname;
+    if (readyForPhone) setNavSinceReady(n => n + 1);
+  }, [pathname, readyForPhone]);
 
   if (!enabled || !coach) return null;
   const done = (s: string) => coach.dismissed.includes(s);
   const soft = (s: string) => snoozed.has(s);
   const snooze = (s: string) => setSnoozed(prev => { const n = new Set(prev); n.add(s); return n; });
 
-  // Stage B: A dismissed + Prüfen visited + ≥1 Artikelname set + a couple of navigations
-  // (the nav grace stops it popping the instant an article name is confirmed).
+  // Stage B: a receipt scanned and an article name confirmed — then three moves elsewhere in the
+  // app before we ask for anything.
   if (done('A') && !done('B') && !soft('B')
-      && coach.events.pruefen_visited && coach.milestones.artikelname_set && navCount >= 2
+      && readyForPhone && navSinceReady >= 3
       && phoneInstallRelevant()) {
     return <StageB onDone={() => dismiss.mutate('B')} onLater={() => snooze('B')} />;
   }
@@ -40,7 +53,7 @@ export function Coach() {
   // offering that (which is what shipped yesterday) means a desktop user scans five receipts on a
   // laptop and is never told the feature exists.
   if (done('A') && !done('B') && !soft('B')
-      && coach.events.pruefen_visited && coach.milestones.artikelname_set && navCount >= 2
+      && readyForPhone && navSinceReady >= 3
       && !phoneInstallRelevant() && !isInstalledPwa() && desktopBuild) {
     return <StageBDesktop onDone={() => dismiss.mutate('B')} onLater={() => snooze('B')} />;
   }
