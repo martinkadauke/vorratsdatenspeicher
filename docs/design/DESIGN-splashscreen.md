@@ -130,6 +130,63 @@ Papier hell und der Hintergrund wird dunkel: ein beleuchteter Bon auf dunklem Ti
 
 ---
 
+---
+
+## Variante B: der Bon druckt mit, was wirklich passiert
+
+Martins Idee, und in einem Punkt besser als die obige: statt einer *Liste vorformulierter Schritte*
+druckt der Bon die **echten Zeilen, die beim Start entstehen** — als Positionen, in der Reihenfolge,
+in der sie anfallen. Wo keine anfallen, steht die aktuelle Tätigkeit.
+
+```
+        VORRATSDATENSPEICHER
+        08.08.2026      01:12
+     ---------------------------
+     Datenbank starten      0,4s
+     Migrationen 109..112   6,1s
+     Benutzer laden         0,1s
+     Suchindex              0,3s
+     ---------------------------
+```
+
+Warum das trägt: eine erfundene Fortschrittsliste ist immer gelogen — sie zeigt Schritte, die es
+vielleicht gar nicht gibt, und verschweigt den einen, der gerade klemmt. Echte Zeilen können das
+nicht. **Bleibt der Bon bei „Migrationen" stehen, weißt du sofort, wo es hängt** — und wir auch,
+wenn jemand ein Foto davon schickt.
+
+### Was dafür fehlt (und was es nebenbei repariert)
+
+⚠️ **Heute sehen wir diese Zeilen selbst nicht.** `boot.mjs` startet das Backend mit
+`stdio: 'inherit'` — in einem Windows-GUI-Build führt das ins Nichts. Genau deshalb stand in der
+Logdatei gestern Nacht ausschließlich, was die Hülle selbst geschrieben hat, und das Backend
+schwieg über eine Stunde Fehlersuche hinweg.
+
+Für diese Variante müsste `stdio` auf `pipe` und die Zeilen an zwei Stellen gehen:
+
+1. **auf den Bon** (gefiltert, gekürzt, in Alltagssprache übersetzt)
+2. **in die Logdatei** — und das ist der eigentliche Gewinn: die Diagnoselücke von gestern wäre zu.
+
+Ein Feature, das nebenbei das Werkzeug schärft, mit dem man es debuggt, ist ein gutes Feature.
+
+### Übersetzen, nicht durchreichen
+
+Rohes `pino`-JSON auf einem Kassenbon wäre albern. Der Bon zeigt eine **kuratierte Auswahl** mit
+verständlichen Namen und der gemessenen Dauer; die Rohzeile geht ins Log. Faustregel: was ein
+Mensch nicht deuten kann, gehört nicht auf den Bon — aber es gehört protokolliert.
+
+⚠️ Log-Zeilen enthalten Pfade und Benutzernamen. Auf einem eigenen Rechner harmlos, auf einem
+geteilten Bildschirm weniger; die Kürzung ist also nicht nur Kosmetik.
+
+### Als eine von mehreren Startanimationen
+
+Martins Gedanke, und er passt zum Rest: **die Darstellung darf variieren, die Information nicht.**
+Mal der mitschreibende Bon, mal der kurze mit der Haushalts-Zahl, mal nur der Abriss. Was nie
+variiert: dass ein Fehler sichtbar wird und dass die Wartezeit erklärt ist.
+
+Sinnvolle Aufteilung: **erster Start und Start nach einem Update** bekommen immer den
+mitschreibenden Bon — dort dauert es lange, dort will man sehen, dass etwas passiert. Der Alltag
+(zwei Sekunden) bekommt die kurze Fassung, und die Haushalts-Zahl bleibt das seltene Extra.
+
 ## Offen für Martin
 
 - **Die Zahl ist vor dem Login sichtbar.** Auf einem privaten Rechner harmlos, in einer WG oder im
@@ -140,5 +197,7 @@ Papier hell und der Hintergrund wird dunkel: ein beleuchteter Bon auf dunklem Ti
 - Zeichensatz einbetten oder System-Monospace?
 - Jeder 10. Start — oder lieber an besondere Momente knüpfen (erster Start im Monat, Jahrestag des
   ersten Belegs, nach einem Rekord-Einkauf)? Seltener heißt wertvoller.
+- Variante A (vorformulierte Schritte) oder **B** (echte Log-Zeilen)? Ich halte B für die bessere:
+  sie kann nicht lügen, und sie schließt nebenbei die Diagnoselücke von gestern Nacht.
 - Soll der Bon auch beim **Beenden** abgeschnitten werden? Schön symmetrisch, verlängert das
   Schließen aber um 300 ms — und nichts nervt mehr als eine App, die sich langsam verabschiedet.
