@@ -1377,7 +1377,9 @@
     "family": {
       "title": "Wer gehört zum Haushalt?",
       "body": "Lege Personen an, um Verbrauch und Ausgaben zuzuordnen. Emoji per Klick wählen. Optional.",
-      "namePlaceholder": "Name"
+      "namePlaceholder": "Name",
+      "thatsMe": "Das bin ich",
+      "taken": "Diese Person gehört schon zu einem anderen Zugang."
     },
     "konten": {
       "title": "Konten",
@@ -1389,7 +1391,8 @@
         "karte": "Karte",
         "kreditkarte": "Kreditkarte",
         "paypal": "PayPal"
-      }
+      },
+      "owners": "Gehört:"
     },
     "categories": {
       "title": "Kategorien-Detailgrad",

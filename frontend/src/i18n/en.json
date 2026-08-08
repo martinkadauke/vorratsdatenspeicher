@@ -1375,7 +1375,9 @@
     "family": {
       "title": "Who's in the household?",
       "body": "Add people to attribute consumption and spending. Pick an emoji by clicking. Optional.",
-      "namePlaceholder": "Name"
+      "namePlaceholder": "Name",
+      "thatsMe": "That's me",
+      "taken": "That person already belongs to a different login."
     },
     "konten": {
       "title": "Accounts",
@@ -1387,7 +1389,8 @@
         "karte": "Card",
         "kreditkarte": "Credit card",
         "paypal": "PayPal"
-      }
+      },
+      "owners": "Belongs to:"
     },
     "categories": {
       "title": "Category detail level",

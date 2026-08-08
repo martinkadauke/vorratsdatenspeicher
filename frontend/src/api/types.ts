@@ -149,8 +149,14 @@ export interface FamilyMember {
   name: string;
   color: string | null;
   emoji: string | null;
+  /** The login this person uses, if they have one at all — children and pets do not. */
   user_id: number | null;
+  username?: string | null;
   sort_order: number;
+  /** Set once someone leaves the household: hidden from every picker, history untouched. */
+  archived_at?: string | null;
+  /** Bank accounts this person owns (n:m — a joint account lists several owners). */
+  konto_ids?: number[];
 }
 
 export interface SpendingNode {

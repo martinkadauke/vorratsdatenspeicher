@@ -113,6 +113,21 @@ export function Onboarding() {
     onError: (e: Error) => toast(e.message, 'error'),
   });
   const delFam = useMutation({ mutationFn: (id: number) => api(`/api/family/${id}`, { method: 'DELETE' }), onSuccess: () => void qc.invalidateQueries({ queryKey: ['family'] }) });
+  // "Das bin ich": links THIS login to that person. The backend moves the flag (and clears the old
+  // one) in a transaction, because the database allows it on exactly one member per user.
+  const thatsMe = useMutation({
+    mutationFn: (id: number) => api(`/api/family/${id}/thats-me`, { method: 'POST' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['family'] }),
+    onError: (e: Error) => toast(e.message === 'member_taken' ? t('onboarding.family.taken') : e.message, 'error'),
+  });
+  // Who owns a bank account. Sent as the WHOLE set — the UI edits checkboxes, and a partial update
+  // would leave the server guessing what was deliberately unchecked.
+  const setOwners = useMutation({
+    mutationFn: (b: { kontoId: number; memberIds: number[] }) =>
+      api(`/api/family/konto/${b.kontoId}/owners`, { method: 'PUT', body: { member_ids: b.memberIds } }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['family'] }),
+    onError: (e: Error) => toast(e.message, 'error'),
+  });
   const patchFam = useMutation({ mutationFn: (b: { id: number; body: { name?: string; emoji?: string } }) => api(`/api/family/${b.id}`, { method: 'PATCH', body: b.body }), onSuccess: () => void qc.invalidateQueries({ queryKey: ['family'] }), onError: (e: Error) => toast(e.message, 'error') });
 
   const invKonten = () => void qc.invalidateQueries({ queryKey: ['konten-admin'] });
@@ -258,6 +273,18 @@ export function Onboarding() {
                   <EmojiSelect value={m.emoji || '🙂'} onChange={e => patchFam.mutate({ id: m.id, body: { emoji: e } })} />
                   <Input className="flex-1" defaultValue={m.name}
                     onBlur={e => { const v = e.target.value.trim(); if (v && v !== m.name) patchFam.mutate({ id: m.id, body: { name: v } }); }} />
+                  {/* Exactly one person is the one sitting here. That link is what ties this login
+                      to a person, and the person to their bank accounts. */}
+                  <button
+                    type="button" onClick={() => thatsMe.mutate(m.id)} disabled={thatsMe.isPending}
+                    title={t('onboarding.family.thatsMe')} aria-pressed={m.user_id === user?.id}
+                    className={cn('shrink-0 rounded-lg px-2 py-1.5 text-[11px] font-medium transition-colors',
+                      m.user_id === user?.id
+                        ? 'bg-emerald-600 text-white'
+                        : 'border border-zinc-300 text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700')}
+                  >
+                    {t('onboarding.family.thatsMe')}
+                  </button>
                   <button onClick={() => delFam.mutate(m.id)} className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30"><Trash2 size={15} /></button>
                 </div>
               ))}
@@ -274,7 +301,8 @@ export function Onboarding() {
           {cur.key === 'konten' && (
             <div className="flex flex-col gap-2">
               {(konten ?? []).map(k => (
-                <div key={k.id} className="flex items-center gap-2">
+                <div key={k.id} className="flex flex-col">
+                  <div className="flex items-center gap-2">
                   <Input className="flex-1" defaultValue={k.name}
                     onBlur={e => e.target.value.trim() && e.target.value !== k.name && patchKonto.mutate({ id: k.id, body: { name: e.target.value.trim() } })} />
                   <Select className="w-32" value={k.account_type} onChange={e => patchKonto.mutate({ id: k.id, body: { account_type: e.target.value } })}>
@@ -283,6 +311,32 @@ export function Onboarding() {
                   {k.is_shared
                     ? <span className="w-8 shrink-0 text-center text-xs text-emerald-600" title={t('onboarding.konten.shared')}>🏠</span>
                     : <button onClick={() => delKonto.mutate(k.id)} className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30"><Trash2 size={15} /></button>}
+                  </div>
+                  {/* Who this account belongs to. A household account belongs to everyone by
+                      definition, so it is not asked. Several owners are normal — a joint giro
+                      account is the rule, not the exception. */}
+                  {!k.is_shared && !!(family ?? []).length && (
+                    <div className="mb-1 flex flex-wrap items-center gap-1 pl-1">
+                      <span className="mr-1 text-[11px] text-zinc-400">{t('onboarding.konten.owners')}</span>
+                      {(family ?? []).map(m => {
+                        const owns = (m.konto_ids ?? []).includes(k.id);
+                        return (
+                          <button
+                            key={m.id} type="button" disabled={setOwners.isPending}
+                            onClick={() => setOwners.mutate({
+                              kontoId: k.id,
+                              memberIds: (family ?? []).filter(x => x.id === m.id ? !owns : (x.konto_ids ?? []).includes(k.id)).map(x => x.id),
+                            })}
+                            className={cn('rounded-full px-2 py-0.5 text-[11px] transition-colors',
+                              owns ? 'bg-emerald-600 text-white'
+                                   : 'border border-zinc-300 text-zinc-500 hover:border-emerald-400 dark:border-zinc-700')}
+                          >
+                            {m.emoji || '🙂'} {m.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               ))}
               <div className="mt-1 flex items-center gap-2 border-t border-zinc-100 pt-2 dark:border-zinc-800">
