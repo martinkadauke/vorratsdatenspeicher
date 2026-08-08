@@ -59,7 +59,10 @@
     "propagating": "Your address is being published worldwide …",
     "propagatingHint": "The certificate is in place and everything is configured correctly — the name just has to spread across the internet. That sometimes takes a few minutes. Leave this window open or come back later; VDS will say when it is ready.",
     "cert": "Requesting the certificate for your address …",
-    "certHint": "This can only succeed once the approval above is done — VDS keeps asking for ten minutes and then carries on by itself."
+    "certHint": "This can only succeed once the approval above is done — VDS keeps asking for ten minutes and then carries on by itself.",
+    "notPublished": "Everything on your side is correct: the connection is running and the certificate has been issued. Tailscale just has not published your address on the internet yet — that happens on their side and can take longer for new accounts. There is nothing for you to configure. Try again in a few minutes.",
+    "retryNow": "Check again",
+    "stop": "Disconnect"
   },
   "nav": {
     "analytics": "Analytics",

@@ -22,7 +22,7 @@ import { cn } from '../lib/utils';
 // Docker builds never see this — the backend answers `available:false` there, and the button in
 // the header is not rendered at all.
 
-type TunnelState = 'off' | 'starting' | 'auth' | 'connecting' | 'cert' | 'verifying' | 'propagating' | 'up' | 'needs_funnel' | 'needs_https' | 'unreachable' | 'error' | 'unavailable';
+type TunnelState = 'off' | 'starting' | 'auth' | 'connecting' | 'cert' | 'verifying' | 'propagating' | 'up' | 'needs_funnel' | 'needs_https' | 'unreachable' | 'not_published' | 'error' | 'unavailable';
 interface TunnelStatus {
   available: boolean;
   state: TunnelState;
@@ -189,6 +189,25 @@ export function PhoneConnectPanel() {
           )}
           <button onClick={() => act.mutate('stop')} className="w-full rounded-xl border border-zinc-300 py-2 text-xs font-medium text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
             {t('phone.cancel')}
+          </button>
+        </>
+      )}
+
+      {/* Everything on both sides is correct and the address still does not exist publicly.
+          Nothing here is the user's to fix, so this state offers understanding and a retry —
+          not a link into an admin console where there is nothing to change. */}
+      {state === 'not_published' && (
+        <>
+          <p className="mb-3 flex gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-[11px] leading-relaxed text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/30 dark:text-amber-200">
+            <AlertTriangle size={26} className="shrink-0" /> {t('phone.notPublished')}
+          </p>
+          <button onClick={() => act.mutate('start')} disabled={act.isPending}
+            className="mb-2 w-full rounded-xl bg-emerald-600 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
+            {t('phone.retryNow')}
+          </button>
+          <button onClick={() => act.mutate('stop')}
+            className="w-full rounded-xl border border-zinc-300 py-2 text-xs font-medium text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
+            {t('phone.stop')}
           </button>
         </>
       )}

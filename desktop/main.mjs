@@ -269,6 +269,12 @@ function startTunnelFor(stack, { openLogin }) {
             });
             if (!current()) return;
             if (arrived) return writeTunnelStatus(stack.desktopDir, { state: 'up', url: e.url });
+            // ⚠️ Still nothing after ten more minutes — and the certificate still proves the
+            // settings are right. Falling through here would have restored the very accusation
+            // this whole branch exists to prevent. Observed in the field, verified against ts.net's
+            // own authoritative nameservers: funnel serving, certificate issued, and the hostname
+            // simply never published. That is Tailscale's side, and saying so is the honest end.
+            return writeTunnelStatus(stack.desktopDir, { state: 'not_published', url: e.url, detail: res.detail });
           }
           writeTunnelStatus(stack.desktopDir, {
             state: res.dns ? 'needs_https' : 'unreachable',

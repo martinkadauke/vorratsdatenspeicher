@@ -59,7 +59,10 @@
     "propagating": "Deine Adresse wird gerade weltweit bekannt gemacht …",
     "propagatingHint": "Das Zertifikat ist da, alles ist richtig eingestellt — jetzt muss sich nur noch der Name im Internet herumsprechen. Das dauert manchmal ein paar Minuten. Du kannst das Fenster offen lassen oder später wiederkommen; VDS meldet sich, sobald es so weit ist.",
     "cert": "Zertifikat für deine Adresse wird angefordert …",
-    "certHint": "Das gelingt erst, wenn die Freischaltung oben erledigt ist — VDS fragt zehn Minuten lang immer wieder nach und macht dann von allein weiter."
+    "certHint": "Das gelingt erst, wenn die Freischaltung oben erledigt ist — VDS fragt zehn Minuten lang immer wieder nach und macht dann von allein weiter.",
+    "notPublished": "Alles auf deiner Seite steht richtig: die Verbindung läuft und das Zertifikat ist ausgestellt. Aber Tailscale hat deine Adresse noch nicht im Internet veröffentlicht — das passiert auf deren Seite und kann bei neuen Konten länger dauern. Du musst nichts einstellen. Versuch es in ein paar Minuten noch einmal.",
+    "retryNow": "Nochmal prüfen",
+    "stop": "Verbindung beenden"
   },
   "nav": {
     "analytics": "Analytics",
