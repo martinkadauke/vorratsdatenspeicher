@@ -52,6 +52,7 @@ import { analyticsRoutes } from './routes/analytics.js';
 import { mailboxRoutes } from './routes/mailbox.js';
 import { demoRoutes } from './routes/demo.js';
 import { feedbackRoutes } from './routes/feedback.js';
+import { watchTunnelReady } from './desktopNotify.js';
 import { desktopRoutes } from './routes/desktop.js';
 import { inviteRoutes } from './routes/invite.js';
 import { rescheduleDemoSweep } from './maintenance/demoSweep.js';
@@ -280,6 +281,11 @@ async function main(): Promise<void> {
   // loopback; remote access there is an explicit feature (the tunnel), never a side effect.
   await app.listen({ port: PORT, host: process.env.BIND_HOST || '0.0.0.0' });
   app.log.info(`Vorratsdatenspeicher listening on :${PORT}`);
+
+  // Desktop only, and self-gating: the shell drops a marker when the tunnel address finally
+  // answers — possibly hours later — and this turns that into a mail, so nobody has to sit and
+  // watch a panel. Inert in Docker, where there is no shell to leave one.
+  watchTunnelReady(m => app.log.info(m));
 }
 
 main().catch(err => {

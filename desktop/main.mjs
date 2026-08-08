@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, dialog, globalShortcut, shell, utilityProcess, powerSaveBlocker } from 'electron';
+import { app, BrowserWindow, Menu, dialog, globalShortcut, shell, utilityProcess, powerSaveBlocker, Notification } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
@@ -187,6 +187,43 @@ const REACH_ATTEMPTS = 8;
 // than any impatience threshold worth having.
 const SLOW_ATTEMPTS = 30;
 
+/** The long watch: after the ten patient minutes are spent, keep asking every five for half a day.
+ *  Tailscale publishes funnel hostnames on its own schedule — reports of hours are common — so the
+ *  only alternatives to this are lying about the state or making the user poll by hand. */
+async function watchForever(url, log, stillMine) {
+  const EVERY = 5 * 60_000, UNTIL = 12 * 60 * 60_000;
+  for (let waited = 0; waited < UNTIL; waited += EVERY) {
+    await new Promise(r => setTimeout(r, EVERY));
+    if (!stillMine()) return false;
+    try {
+      await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(12_000) });
+      log(`tunnel became reachable after ${Math.round((waited + EVERY) / 60_000)} more minutes`);
+      return true;
+    } catch { /* still nothing; that is the normal case here */ }
+  }
+  log('tunnel never became reachable within twelve hours — giving up the watch');
+  return false;
+}
+
+/** Tell the user, wherever they are. The OS notification reaches them at this machine; the marker
+ *  file is picked up by the backend, which owns the mail configuration and can write to them. */
+function announceReady(stack, url) {
+  try {
+    fs.writeFileSync(path.join(stack.desktopDir, 'tunnel-ready.json'), JSON.stringify({ url, at: new Date().toISOString() }), 'utf8');
+  } catch (e) { log(`could not hand the ready marker to the backend: ${e}`); }
+  try {
+    if (Notification.isSupported()) {
+      const n = new Notification({
+        title: 'Dein Handy kann jetzt verbinden',
+        body: 'Die Adresse ist online. Öffne "Handy verbinden" für den QR-Code.',
+      });
+      n.on('click', () => { if (win) { win.show(); win.focus(); } });
+      n.show();
+    }
+  } catch (e) { log(`notification failed: ${e}`); }
+  log(`tunnel ready announced: ${url}`);
+}
+
 async function keepTryingQuietly(url, log, onAttempt) {
   for (let attempt = 1; attempt <= SLOW_ATTEMPTS; attempt++) {
     await new Promise(r => setTimeout(r, 20_000));
@@ -274,7 +311,16 @@ function startTunnelFor(stack, { openLogin }) {
             // this whole branch exists to prevent. Observed in the field, verified against ts.net's
             // own authoritative nameservers: funnel serving, certificate issued, and the hostname
             // simply never published. That is Tailscale's side, and saying so is the honest end.
-            return writeTunnelStatus(stack.desktopDir, { state: 'not_published', url: e.url, detail: res.detail });
+            writeTunnelStatus(stack.desktopDir, { state: 'not_published', url: e.url, detail: res.detail });
+            // Waiting is unavoidable; sitting in front of it is not. Keep checking quietly for
+            // hours, and when the address finally answers, say so where the user actually is —
+            // an OS notification here, and a mail from the backend if they set SMTP up. No
+            // restart, no "try again" ritual: the panel is driven by this same status file.
+            const answered = await watchForever(e.url, log, () => current());
+            if (!current() || !answered) return;
+            writeTunnelStatus(stack.desktopDir, { state: 'up', url: e.url });
+            announceReady(stack, e.url);
+            return;
           }
           writeTunnelStatus(stack.desktopDir, {
             state: res.dns ? 'needs_https' : 'unreachable',
