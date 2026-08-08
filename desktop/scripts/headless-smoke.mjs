@@ -88,6 +88,52 @@ try {
   const okMarker = existsSync(marker) && readFileSync(marker, 'utf8').trim() === 'start';
   console.log('[smoke] connect request →', okMarker ? 'OK (marker written for the shell)' : 'MARKER MISSING');
 
+  // ── household members own the bank accounts ─────────────────────────────────────────────
+  // A member is the PERSON; a login is optional (children, pets) and an account belongs to the
+  // person, not to the login. Migration 110 moved ownership accordingly, so prove the chain:
+  // member -> "das bin ich" -> user, and member <-> account as n:m.
+  const mk = async (name) => (await fetch(`${stack.url}/api/family`, {
+    method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ name }),
+  }).then(r => r.json())).id;
+  const meId = await mk('SmokeMartin');
+  const kidId = await mk('SmokeKind');
+
+  await fetch(`${stack.url}/api/family/${meId}/thats-me`, { method: 'POST', headers: auth });
+  const me = await fetch(`${stack.url}/api/family/me`, { headers: auth }).then(r => r.json());
+  console.log('[smoke] "das bin ich" →', me?.member_id === meId ? 'OK' : `WRONG (${JSON.stringify(me)})`);
+
+  // Moving it to another member must MOVE it, not fail on the unique index.
+  await fetch(`${stack.url}/api/family/${kidId}/thats-me`, { method: 'POST', headers: auth });
+  const moved = await fetch(`${stack.url}/api/family/me`, { headers: auth }).then(r => r.json());
+  const fam1 = await fetch(`${stack.url}/api/family`, { headers: auth }).then(r => r.json());
+  const stillOnOld = fam1.find(m => m.id === meId)?.user_id;
+  const okOnlyOne = moved?.member_id === kidId && stillOnOld == null;
+  console.log('[smoke] only ONE member may be me →', okOnlyOne ? 'OK (moved, old one cleared)' : `BROKEN (me=${moved?.member_id}, old=${stillOnOld})`);
+  await fetch(`${stack.url}/api/family/${meId}/thats-me`, { method: 'POST', headers: auth });
+
+  // Joint account: one account, two owners.
+  const kontoId = (await fetch(`${stack.url}/api/admin/konten`, {
+    method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'Smoke Gemeinschaftskonto', is_shared: false, account_type: 'giro' }),
+  }).then(r => r.json())).id;
+  await fetch(`${stack.url}/api/family/konto/${kontoId}/owners`, {
+    method: 'PUT', headers: { ...auth, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ member_ids: [meId, kidId] }),
+  });
+  const fam2 = await fetch(`${stack.url}/api/family`, { headers: auth }).then(r => r.json());
+  const owners = fam2.filter(m => (m.konto_ids ?? []).includes(kontoId)).map(m => m.name).sort();
+  const okJoint = owners.length === 2;
+  console.log('[smoke] joint account has n owners →', okJoint ? `OK (${owners.join(', ')})` : `GOT ${JSON.stringify(owners)}`);
+
+  // Leaving the household must ARCHIVE (the member owns something), not delete.
+  const del = await fetch(`${stack.url}/api/family/${kidId}`, { method: 'DELETE', headers: auth }).then(r => r.json());
+  const famActive = await fetch(`${stack.url}/api/family`, { headers: auth }).then(r => r.json());
+  const famAll = await fetch(`${stack.url}/api/family?archived=1`, { headers: auth }).then(r => r.json());
+  const okArchive = del?.archived === true
+    && !famActive.some(m => m.id === kidId)
+    && famAll.some(m => m.id === kidId && (m.konto_ids ?? []).includes(kontoId));
+  console.log('[smoke] leaving archives, keeps ownership →', okArchive ? 'OK' : `BROKEN (${JSON.stringify(del)})`);
+
   // ── passkeys need a DOMAIN as the relying-party id ──────────────────────────────────────
   // An IP literal is not a valid RP ID, so a base URL of http://127.0.0.1:<port> made the browser
   // refuse every "add a passkey" attempt in the desktop app — with no server-side error to find.
@@ -149,7 +195,8 @@ try {
   const pass = okSecrets && version?.node && okPasskey && gate.status === 401 && okSpa
     && okDesktopFlag && anon.status === 401 && okStatus && okMarker
     && okRecoverMarker && wrong.status === 403 && okRecovered && okBurned && relogin.status === 200
-    && okOneProvider && okVisionSplit && okRpID;
+    && okOneProvider && okVisionSplit && okRpID
+    && me?.member_id === meId && okOnlyOne && okJoint && okArchive;
   console.log(pass ? '\n[smoke] ✅ PASS — backend boots on bundled Postgres and serves the app'
                    : '\n[smoke] ❌ FAIL');
   await stack.stop();
