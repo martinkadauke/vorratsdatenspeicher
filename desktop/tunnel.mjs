@@ -75,11 +75,19 @@ export function startTunnel({ localPort, stateDir, binPath, onEvent, log = () =>
    *  QueryFeature reporting "not complete" is authoritative — we do not need to wait for the funnel
    *  to fail before saying so, and waiting is what stranded someone at "attempt 8 of 40" with the
    *  enabling button nowhere on screen. */
-  const consentPending = () => !!consentUrl && !funnelUp;
-  const showConsent = (detail) => onEvent({
-    state: 'needs_funnel', url, detail, helpUrl: consentUrl, oneClick: true, consentText,
-    attempt: certAttempt || undefined, attempts: certAttempts || undefined,
-  });
+  /** ⚠️ STICKY. Once the tailnet has told us it is not ready, that stays on screen until the funnel
+   *  actually comes up — because it names the user's next action, and nothing we are doing in the
+   *  background is more important than that.
+   *
+   *  0.34 tied this to the presence of a one-click consent URL. When Tailscale did not hand one out,
+   *  the card was emitted once by the funnel error and then overwritten fifteen seconds later by the
+   *  next certificate tick, and again, and again — so the only thing a new user ever saw was a
+   *  counter, with the enabling step blinking past once and vanishing. */
+  let blocked = null;
+  const emitBlocked = (extra = {}) => {
+    blocked = { ...(blocked ?? { state: 'needs_funnel', url }), ...extra, url };
+    onEvent({ ...blocked, attempt: certAttempt || undefined, attempts: certAttempts || undefined });
+  };
 
   // The sidecar's contract is one `KEY=value` line per event. Buffer partial reads — a 40-line
   // Tailscale log burst arrives in arbitrary chunks and a split URL would be unopenable.
@@ -93,6 +101,10 @@ export function startTunnel({ localPort, stateDir, binPath, onEvent, log = () =>
       if (i < 0) continue;
       const key = line.slice(0, i).trim();
       const val = line.slice(i + 1).trim();
+      // ⚠️ Log the raw event. Only stderr was recorded, so the sidecar's own account of what it
+      // asked Tailscale and what came back — the decisive evidence every single time today — was
+      // the one thing no bug report could contain.
+      if (key.startsWith('VDS_')) log(`tunnel< ${key}=${val.slice(0, 300)}`);
       if (key === 'VDS_AUTH_URL') onEvent({ state: 'auth', authUrl: val });
       else if (key === 'VDS_PUBLIC_URL') { url = val; onEvent({ state: 'connecting', url }); }
       // Whether the node got its own certificate is the one HONEST answer to "does this tailnet
@@ -110,17 +122,25 @@ export function startTunnel({ localPort, stateDir, binPath, onEvent, log = () =>
           const m = /requesting (\d+)\/(\d+)/.exec(val);
           if (m) {
             certAttempt = Number(m[1]); certAttempts = Number(m[2]);
-            if (consentPending()) showConsent();
+            // Progress never replaces an outstanding instruction; it rides along inside it.
+            if (blocked && !funnelUp) emitBlocked();
             else onEvent({ state: 'cert', url, attempt: certAttempt, attempts: certAttempts });
           }
         }
       }
       else if (key === 'VDS_CERT_ERR') certOk = false;
-      else if (key === 'VDS_FUNNEL' && val === 'up') { funnelUp = true; onEvent({ state: 'up', url, certOk }); }
+      else if (key === 'VDS_FUNNEL' && val === 'up') { funnelUp = true; blocked = null; onEvent({ state: 'up', url, certOk }); }
       // Tailscale's own one-click consent page: enables BOTH tailnet prerequisites at once.
       // Shown the moment we have it — a tailnet that is already set up never produces one.
-      else if (key === 'VDS_CONSENT_URL') { consentUrl = val; if (!funnelUp) showConsent(); }
+      else if (key === 'VDS_CONSENT_URL') {
+        consentUrl = val;
+        if (!funnelUp) emitBlocked({ helpUrl: consentUrl, oneClick: true, consentText });
+      }
       else if (key === 'VDS_CONSENT_TEXT') consentText = val;
+      // Tailscale could not tell us what this tailnet is missing. Not fatal — the funnel error
+      // below still carries a deep link — but it is the difference between one click and a guided
+      // detour, so it must reach the log instead of vanishing.
+      else if (key === 'VDS_CONSENT_ERR') log(`tunnel: consent query failed: ${val.slice(0, 200)}`);
       else if (key === 'VDS_FUNNEL_ERR') {
         onEvent({
           state: 'needs_funnel',
