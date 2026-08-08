@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import QRCode from 'qrcode';
-import { Smartphone, X as XIcon, Link as LinkIcon, ExternalLink, ShieldCheck, Loader2, AlertTriangle } from 'lucide-react';
+import { Smartphone, X as XIcon, Link as LinkIcon, ExternalLink, ShieldCheck, Loader2, AlertTriangle, UserPlus, Share2 } from 'lucide-react';
+import type { FamilyMember } from '../api/types';
 import { api } from '../api/client';
 import { useAuth } from '../context/auth';
 import { toast } from './Toast';
 import { useEscapeLayer, useScrollLock } from './ui';
+import { cn } from '../lib/utils';
 
 // "Handy verbinden" — the desktop build's answer to "how do I photograph a receipt with my phone
 // when VDS runs on my computer?". The Electron shell brings up an embedded Tailscale node and
@@ -165,7 +167,8 @@ export function PhoneConnectPanel() {
             <LinkIcon size={14} /> <span className="truncate">{url}</span>
           </button>
           <p className="mb-4 rounded-xl bg-zinc-50 p-3 text-[11px] leading-relaxed text-zinc-500 dark:bg-zinc-800/60 dark:text-zinc-400">{t('phone.pwaHint')}</p>
-          <button onClick={() => act.mutate('stop')} className="w-full rounded-xl border border-zinc-300 py-2 text-xs font-medium text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
+          <InviteSection url={url} />
+          <button onClick={() => act.mutate('stop')} className="mt-3 w-full rounded-xl border border-zinc-300 py-2 text-xs font-medium text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
             {t('phone.disconnect')}
           </button>
         </>
@@ -181,6 +184,108 @@ export function PhoneConnectPanel() {
         </>
       )}
     </>
+  );
+}
+
+/** "Weitere Haushaltsmitglieder einladen" — only reachable once the tunnel is up, because the link
+ *  we are about to share has to work from the invitee's phone.
+ *
+ *  The person is chosen FIRST, from the members who do not have a login yet: an invite belongs to a
+ *  person, which is what keeps "one member, at most one account" true and hands the new user their
+ *  bank accounts without a separate step.
+ *
+ *  ⚠️ The link is shared; the four digits are NOT. They stay on this screen (and in the admin's
+ *  user list) to be passed on by voice. Putting both in the same message would make the code
+ *  decoration — anyone who reads the message would have everything. */
+function InviteSection({ url }: { url: string | null }) {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [memberId, setMemberId] = useState<number | null>(null);
+  const [makeAdmin, setMakeAdmin] = useState(false);
+  const [created, setCreated] = useState<{ token: string; code: string; member: string } | null>(null);
+
+  const { data: family } = useQuery({
+    queryKey: ['family'],
+    queryFn: () => api<FamilyMember[]>('/api/family'),
+    enabled: open,
+  });
+  const invitable = (family ?? []).filter(m => m.user_id == null);
+
+  const create = useMutation({
+    mutationFn: () => api<{ token: string; code: string; member: string }>('/api/invites', {
+      method: 'POST', body: { member_id: memberId, make_admin: makeAdmin },
+    }),
+    onSuccess: (d) => { setCreated(d); void qc.invalidateQueries({ queryKey: ['invites'] }); },
+    onError: (e: Error) => toast(e.message === 'already_has_account' ? t('phone.inviteHasAccount') : e.message, 'error'),
+  });
+
+  const link = created && url ? `${url}/einladung/${created.token}` : '';
+  const share = async () => {
+    const text = t('phone.inviteMessage', { name: created?.member ?? '' });
+    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+      try { await navigator.share({ text: `${text} ${link}` }); return; } catch { /* cancelled */ }
+    }
+    try { await navigator.clipboard.writeText(`${text} ${link}`); toast(t('phone.inviteCopied'), 'success'); }
+    catch { toast(link, 'info', 8000); }
+  };
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)}
+        className="mt-1 flex w-full items-center justify-center gap-2 rounded-xl border border-zinc-300 py-2 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:text-zinc-200">
+        <UserPlus size={14} /> {t('phone.inviteOthers')}
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-1 rounded-xl border border-zinc-200 p-3 dark:border-zinc-800">
+      {!created ? (
+        <>
+          <p className="mb-2 text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-400">{t('phone.inviteIntro')}</p>
+          {invitable.length ? (
+            <>
+              <div className="mb-2 flex flex-wrap gap-1">
+                {invitable.map(m => (
+                  <button key={m.id} type="button" onClick={() => setMemberId(m.id)}
+                    className={cn('rounded-full px-2.5 py-1 text-[11px] transition-colors',
+                      memberId === m.id ? 'bg-emerald-600 text-white' : 'border border-zinc-300 text-zinc-600 dark:border-zinc-700 dark:text-zinc-300')}>
+                    {m.emoji || '🙂'} {m.name}
+                  </button>
+                ))}
+              </div>
+              <label className="mb-3 flex items-center gap-2 text-[11px] text-zinc-500">
+                <input type="checkbox" checked={makeAdmin} onChange={e => setMakeAdmin(e.target.checked)} />
+                {t('phone.inviteAdmin')}
+              </label>
+              <button onClick={() => create.mutate()} disabled={!memberId || create.isPending}
+                className="w-full rounded-xl bg-emerald-600 py-2 text-xs font-semibold text-white disabled:opacity-60">
+                {t('phone.inviteCreate')}
+              </button>
+            </>
+          ) : (
+            <p className="text-[11px] text-zinc-400">{t('phone.inviteNobody')}</p>
+          )}
+        </>
+      ) : (
+        <>
+          <p className="mb-2 text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+            {t('phone.inviteReady', { name: created.member })}
+          </p>
+          <div className="mb-3 rounded-lg bg-zinc-50 p-3 text-center dark:bg-zinc-800/60">
+            <div className="text-[10px] uppercase tracking-wide text-zinc-400">{t('phone.inviteCodeLabel')}</div>
+            <div className="font-mono text-2xl font-bold tracking-[0.3em]">{created.code}</div>
+            <div className="mt-1 text-[10px] leading-relaxed text-zinc-500">{t('phone.inviteCodeHint')}</div>
+          </div>
+          <button onClick={share} className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-2.5 text-sm font-semibold text-white">
+            <Share2 size={15} /> {t('phone.inviteShare')}
+          </button>
+          <button onClick={() => { setCreated(null); setMemberId(null); setOpen(false); }}
+            className="mt-2 w-full py-1 text-[11px] text-zinc-400">{t('phone.inviteDone')}</button>
+        </>
+      )}
+    </div>
   );
 }
 

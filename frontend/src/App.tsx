@@ -3,6 +3,7 @@ import { useAuth } from './context/auth';
 import { Layout } from './components/Layout';
 import { Login } from './pages/Login';
 import { Reset } from './pages/Reset';
+import { Einladung } from './pages/Einladung';
 import { Receipts } from './pages/Receipts';
 import { ReceiptDetailPage } from './pages/ReceiptDetailPage';
 import { Positionen } from './pages/Positionen';
@@ -60,6 +61,8 @@ export function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/reset" element={<Reset />} />
+        {/* Public: the invited person creates their own account here (link + spoken code). */}
+        <Route path="/einladung/:token" element={<Einladung />} />
         <Route element={<Protected><Layout /></Protected>}>
           <Route path="/" element={<Navigate to="/receipts" replace />} />
           <Route path="/receipts" element={<Receipts />} />

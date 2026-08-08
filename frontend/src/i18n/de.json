@@ -34,7 +34,20 @@
     "httpsEnable": "In Tailscale freischalten",
     "unreachableBlurb": "Die Adresse existiert, antwortet aber nicht. Meist hilft es, gleich noch einmal zu probieren — manchmal dauert die Ausstellung des Zertifikats einen Moment.",
     "consentBlurb": "Noch ein Schritt: Tailscale muss dir den öffentlichen Zugriff einmalig freigeben. Ein Klick genügt — die Seite erledigt alles Nötige auf einmal, du musst nichts suchen oder eintragen.",
-    "consentEnable": "Freigabe erteilen"
+    "consentEnable": "Freigabe erteilen",
+    "inviteOthers": "Weitere Haushaltsmitglieder einladen",
+    "inviteIntro": "Wen möchtest du einladen? Die Person legt ihren Zugang selbst an — du brauchst weder ihre E-Mail-Adresse noch ein Passwort für sie.",
+    "inviteAdmin": "Darf auch verwalten (Admin)",
+    "inviteCreate": "Einladung erstellen",
+    "inviteNobody": "Alle Haushaltsmitglieder haben schon einen Zugang. Lege zuerst ein weiteres Mitglied an.",
+    "inviteReady": "Einladung für {{name}} ist fertig.",
+    "inviteCodeLabel": "Code",
+    "inviteCodeHint": "Diesen Code NICHT mitschicken — sag ihn persönlich oder am Telefon. Er gilt 30 Minuten.",
+    "inviteShare": "Link teilen",
+    "inviteDone": "Fertig",
+    "inviteMessage": "Hallo {{name}}, hier ist dein Zugang zu unserem Vorratsdatenspeicher:",
+    "inviteCopied": "Nachricht kopiert!",
+    "inviteHasAccount": "Diese Person hat schon einen Zugang."
   },
   "nav": {
     "analytics": "Analytics",
@@ -1144,7 +1157,10 @@
     "taskNlanalytics": "Analytics-Fragen",
     "taskNlanalyticsDesc": "Übersetzt „Was habe ich im Juni für Obst ausgegeben?\" in eine Auswertung. Rechnet selbst nichts.",
     "taskCsvmapping": "Bank-CSV verstehen",
-    "taskCsvmappingDesc": "Erkennt einmalig, welche Spalte deiner Bank-CSV was bedeutet. Danach läuft der Import ohne KI."
+    "taskCsvmappingDesc": "Erkennt einmalig, welche Spalte deiner Bank-CSV was bedeutet. Danach läuft der Import ohne KI.",
+    "inviteCodeIs": "Code zum Weitersagen:",
+    "inviteCodeDead": "Abgelaufen — bitte neu einladen.",
+    "inviteRevoke": "Einladung zurückziehen"
   },
   "profile": {
     "title": "Profil",
@@ -1741,5 +1757,23 @@
     "scrollLeft": "Nach links",
     "scrollRight": "Nach rechts",
     "feedback": "Fehler / Feedback melden"
+  },
+  "invite": {
+    "hello": "Hallo {{name}}!",
+    "intro": "Richte hier deinen eigenen Zugang zum Haushalt ein. Dein Passwort kennt nur du.",
+    "code": "Code aus der Einladung",
+    "codeHint": "Die vier Ziffern, die dir persönlich genannt wurden.",
+    "username": "Benutzername",
+    "password": "Passwort (mind. 8 Zeichen)",
+    "email": "E-Mail (optional)",
+    "emailHint": "Nur für Benachrichtigungen und falls du dein Passwort vergisst.",
+    "submit": "Zugang anlegen",
+    "wrongCode": "Der Code stimmt nicht. Nach fünf Fehlversuchen verfällt die Einladung.",
+    "locked": "Zu viele Fehlversuche — bitte um eine neue Einladung.",
+    "expired": "Diese Einladung ist abgelaufen.",
+    "nameTaken": "Dieser Benutzername ist schon vergeben.",
+    "failed": "Das hat nicht geklappt.",
+    "deadTitle": "Diese Einladung gilt nicht mehr",
+    "deadBody": "Sie wurde bereits benutzt, ist abgelaufen oder wurde zu oft falsch beantwortet. Bitte deinen Haushalt um eine neue."
   }
 }

@@ -34,7 +34,20 @@
     "httpsEnable": "Switch it on in Tailscale",
     "unreachableBlurb": "The address exists but is not answering. Trying again usually helps — issuing the certificate can take a moment.",
     "consentBlurb": "One step left: Tailscale needs to grant public access once. A single click does it — the page takes care of everything, nothing to find or type.",
-    "consentEnable": "Grant access"
+    "consentEnable": "Grant access",
+    "inviteOthers": "Invite other household members",
+    "inviteIntro": "Who would you like to invite? They create their own login — you need neither their e-mail nor a password for them.",
+    "inviteAdmin": "May administer too (admin)",
+    "inviteCreate": "Create invitation",
+    "inviteNobody": "Every household member already has a login. Add another member first.",
+    "inviteReady": "The invitation for {{name}} is ready.",
+    "inviteCodeLabel": "Code",
+    "inviteCodeHint": "Do NOT send this code along — say it in person or on the phone. Valid for 30 minutes.",
+    "inviteShare": "Share the link",
+    "inviteDone": "Done",
+    "inviteMessage": "Hi {{name}}, here is your access to our Vorratsdatenspeicher:",
+    "inviteCopied": "Message copied!",
+    "inviteHasAccount": "That person already has a login."
   },
   "nav": {
     "analytics": "Analytics",
@@ -1142,7 +1155,10 @@
     "taskNlanalytics": "Analytics questions",
     "taskNlanalyticsDesc": "Turns “what did I spend on fruit in June?” into a report. It never does the arithmetic itself.",
     "taskCsvmapping": "Understanding bank CSVs",
-    "taskCsvmappingDesc": "Works out once what each column of your bank export means. After that the import runs without AI."
+    "taskCsvmappingDesc": "Works out once what each column of your bank export means. After that the import runs without AI.",
+    "inviteCodeIs": "Code to pass on:",
+    "inviteCodeDead": "Expired — please invite again.",
+    "inviteRevoke": "Withdraw invitation"
   },
   "profile": {
     "title": "Profile",
@@ -1739,5 +1755,23 @@
     "scrollLeft": "Scroll left",
     "scrollRight": "Scroll right",
     "feedback": "Report a bug / feedback"
+  },
+  "invite": {
+    "hello": "Hello {{name}}!",
+    "intro": "Set up your own access to the household here. Only you will know your password.",
+    "code": "Code from the invitation",
+    "codeHint": "The four digits you were told in person.",
+    "username": "Username",
+    "password": "Password (at least 8 characters)",
+    "email": "E-mail (optional)",
+    "emailHint": "Only for notifications and in case you forget your password.",
+    "submit": "Create my access",
+    "wrongCode": "That code is wrong. After five tries the invitation expires.",
+    "locked": "Too many failed tries — ask for a new invitation.",
+    "expired": "This invitation has expired.",
+    "nameTaken": "That username is already taken.",
+    "failed": "That didn't work.",
+    "deadTitle": "This invitation is no longer valid",
+    "deadBody": "It has been used, has expired, or was answered incorrectly too often. Please ask your household for a new one."
   }
 }

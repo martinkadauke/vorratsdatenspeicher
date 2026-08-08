@@ -972,6 +972,50 @@ function CategoriesLinkSection() {
 }
 
 // ── Users (invite-only) ──────────────────────────────────────────────────
+/** Household members who have been invited but have not created their account yet.
+ *
+ *  They cannot appear in the user list because there IS no user yet — that is the point of the new
+ *  invite. So they get their own rows, in the same place, carrying the one thing the admin needs
+ *  to hand over: the four digits. ⚠️ The code lives HERE and nowhere else — never in the shared
+ *  message — which is what makes an intercepted link insufficient. */
+function PendingMemberInvites() {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const { data } = useQuery({
+    queryKey: ['invites'],
+    queryFn: () => api<{ id: number; member: string; code: string; expired: boolean; attempts: number }[]>('/api/invites'),
+    refetchInterval: 30_000,
+  });
+  const revoke = useMutation({
+    mutationFn: (id: number) => api(`/api/invites/${id}`, { method: 'DELETE' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['invites'] }),
+  });
+  if (!data?.length) return null;
+  return (
+    <>
+      {data.map(i => (
+        <div key={i.id} className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50/50 px-2.5 py-2 dark:border-amber-900/50 dark:bg-amber-950/20">
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-center gap-1.5 truncate font-medium">
+              <span className="truncate">{i.member}</span>
+              <span className="shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">
+                {i.expired ? t('admin.inviteExpired') : t('admin.invitePending')}
+              </span>
+            </div>
+            <div className="text-xs text-zinc-500 dark:text-zinc-400">
+              {i.expired
+                ? t('admin.inviteCodeDead')
+                : <>{t('admin.inviteCodeIs')} <b className="font-mono tracking-widest">{i.code}</b></>}
+            </div>
+          </div>
+          <button onClick={() => revoke.mutate(i.id)} title={t('admin.inviteRevoke')}
+            className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30"><Trash2 size={15} /></button>
+        </div>
+      ))}
+    </>
+  );
+}
+
 function UsersSection() {
   const { t } = useTranslation();
   const qc = useQueryClient();
@@ -1017,6 +1061,7 @@ function UsersSection() {
   return (
     <Section title={t('admin.users')}>
       <div className="flex flex-col gap-2">
+        <PendingMemberInvites />
         {users?.map(u => {
           const isSelf = u.id === me?.id;
           return (
