@@ -15,8 +15,6 @@ export function Login() {
   const { t, i18n } = useTranslation();
   const de = i18n.language.startsWith('de');
   const [pkBusy, setPkBusy] = useState(false);
-  const canPasskey = passkeySupported();
-
   const doPasskey = async () => {
     setPkBusy(true);
     setError('');
@@ -35,6 +33,11 @@ export function Login() {
   // signup-first flow never flashes the plain login form (or vice-versa).
   const [version, setVersion] = useState<VersionInfo | null>(null);
   const demo = !!version?.demo;
+  // ⚠️ Below `demo`, never above it. The demo build registers no passkey routes at all, so the
+  // button would lead into a 404 that reads as "this app is broken" — but reading `demo` before
+  // its declaration is a ReferenceError at render, which is the exact shape of the two black
+  // windows this project shipped today.
+  const canPasskey = passkeySupported() && !demo;
 
   // Demo: ~all traffic is first-time visitors, so open on sign-up (create household);
   // logging in is the rare, secondary path. Off-demo: classic login.

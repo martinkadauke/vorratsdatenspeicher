@@ -11,7 +11,7 @@ import type {
   RegistrationResponseJSON,
   AuthenticationResponseJSON,
 } from '@simplewebauthn/server';
-import sql from '../db.js';
+import sql, { DEMO_MODE } from '../db.js';
 import { getConfig, effectiveBaseUrl } from '../config.js';
 import { desktopBaseUrl } from '../desktop.js';
 import { signToken } from './plugin.js';
@@ -45,12 +45,24 @@ async function rpConfig(req?: { headers: Record<string, unknown> }): Promise<{ r
   // Everything this instance may legitimately be reached at.
   const allowed = [await effectiveBaseUrl(), desktopBaseUrl(), await getConfig('app.base_url')]
     .filter(Boolean).map(hostOf).filter((v): v is { id: string; origin: string } => !!v);
-  // Loopback is always us — the desktop window lives there, and it is a secure context.
   const reqOrigin = String(req?.headers?.origin ?? '');
   const fromReq = hostOf(reqOrigin);
   const isLoopback = !!fromReq && ['localhost', '127.0.0.1', '[::1]', '::1'].includes(fromReq.id);
 
-  const match = fromReq && (isLoopback || allowed.some(a => a.origin === fromReq.origin)) ? fromReq : null;
+  // ⚠️ An HTTPS request from a real domain IS this instance, whatever the configured base URL
+  // says. Requiring a match against that list broke every Docker self-host reached through a
+  // reverse proxy — the common case, not an exotic one: with app.base_url pointing at a LAN
+  // address, the fallback made the RP ID an IP, which browsers reject outright, so passkeys failed
+  // identically in the desktop browser and the phone's PWA with nothing in any log.
+  //
+  // Trusting the origin here is not a hole. A browser only ever offers a page's OWN domain as the
+  // RP ID, so this cannot mint a credential for a domain the caller does not already control, and
+  // an assertion is still verified against the RP ID the credential was created with. Secure
+  // context is required, which is what WebAuthn demands anyway — plus loopback, the one plain-HTTP
+  // origin browsers treat as secure, and where the desktop window lives.
+  const trustworthy = !!fromReq && (isLoopback || fromReq.origin.startsWith('https://'));
+
+  const match = fromReq && (trustworthy || allowed.some(a => a.origin === fromReq.origin)) ? fromReq : null;
   const fallback = allowed[0] ?? hostOf('http://localhost')!;
   const chosen = match ?? fallback;
   return { rpID: cfgID || chosen.id, origin: cfgOrigin || chosen.origin, rpName: 'Vorratsdatenspeicher' };
@@ -79,6 +91,13 @@ async function takeChallenge(id: string, purpose: 'register' | 'authenticate'): 
  *  global auth hook (logged-in user); the two login routes are public (added to the hook's
  *  allow-list in plugin.ts). Passwords remain the recovery path, so passkeys are purely additive. */
 export function webauthnRoutes(app: FastifyInstance): void {
+  // ⚠️ Not on the public demo. A passkey binds a real device's authenticator to a throwaway
+  // household that gets wiped nightly — the credential outlives the account it belongs to and
+  // shows up in the person's password manager forever. Registering nothing is cleaner than
+  // refusing at every route, and the two login routes stay out of the auth allow-list's reach
+  // by simply not existing.
+  if (DEMO_MODE) return;
+
   // ── Register a new passkey for the signed-in user ──────────────────────────
   app.post('/api/auth/passkey/register/options', async (req) => {
     const user = req.user!;

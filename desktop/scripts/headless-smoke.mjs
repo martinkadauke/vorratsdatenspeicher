@@ -217,11 +217,21 @@ try {
   const rpFor = async (origin) => (await fetch(`${stack.url}/api/auth/passkey/register/options`, {
     method: 'POST', headers: { ...auth, 'Content-Type': 'application/json', Origin: origin }, body: '{}',
   }).then(r => r.json()).catch(() => ({})))?.options?.rp?.id;
+  // Three cases, because the rule has three halves and only one of them was ever tested:
+  //   loopback      → itself   (the desktop window, plain HTTP but a secure context)
+  //   any HTTPS host→ itself   (EVERY Docker self-host behind a reverse proxy — this was broken:
+  //                             with app.base_url pointing elsewhere the RP ID fell back to that
+  //                             host, an IP in the field, which browsers reject outright)
+  //   plain HTTP    → NOT itself (an insecure stranger may not choose what we mint credentials for)
   const rpLocal = await rpFor(stack.url);
-  const rpOther = await rpFor('https://example-tunnel.ts.net');
-  const okRpFollowsOrigin = rpLocal === 'localhost' && rpOther !== 'example-tunnel.ts.net';
+  const rpProxied = await rpFor('https://vds.example.org');
+  const rpInsecure = await rpFor('http://stranger.example');
+  const okRpFollowsOrigin = rpLocal === 'localhost'
+    && rpProxied === 'vds.example.org'
+    && rpInsecure !== 'stranger.example';
   console.log('[smoke] rp id follows the page origin →',
-    okRpFollowsOrigin ? `OK (localhost→${rpLocal}, unknown origin→${rpOther})` : `WRONG (${rpLocal} / ${rpOther})`);
+    okRpFollowsOrigin ? `OK (loopback→${rpLocal}, https→${rpProxied}, plain http→${rpInsecure})`
+                      : `WRONG (${rpLocal} / ${rpProxied} / ${rpInsecure})`);
 
   // ── one provider for everything, vision only where it is needed ────────────────────────
   // The wizard's promise: pick Ollama once and EVERY task runs on it, with only the picture-reading
