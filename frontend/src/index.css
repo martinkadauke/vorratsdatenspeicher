@@ -5,6 +5,12 @@
 @layer base {
   html {
     -webkit-tap-highlight-color: transparent;
+    /* ⚠️ Both axes stated explicitly. Setting only one to a non-visible value promotes the other
+       to `auto`, which is how a content div quietly became a second scroll container and left a
+       scrollbar parked on the right of the desktop window even at full screen. The page scroller
+       is the page; nothing inside it should compete. */
+    overflow-x: clip;
+    overflow-y: auto;
   }
   body {
     @apply bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100;

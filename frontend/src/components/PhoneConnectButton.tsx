@@ -215,6 +215,13 @@ export function PhoneConnectPanel() {
               {t('phone.welcomeDetour')}
             </p>
           )}
+          {/* The certificate retry runs while this button waits to be pressed — saying so turns a
+              silent ten-minute countdown into "we are still trying, and this is what unblocks it". */}
+          {data?.attempt ? (
+            <p className="mb-1 text-center text-[11px] text-zinc-400">
+              {t('phone.cert')} {t('phone.verifyProgress', { attempt: data.attempt, attempts: data.attempts })}
+            </p>
+          ) : null}
           <p className="text-center text-[11px] text-zinc-400">{t('phone.funnelRetry')}</p>
         </>
       )}

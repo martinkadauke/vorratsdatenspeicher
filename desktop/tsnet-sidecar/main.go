@@ -29,12 +29,19 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"tailscale.com/tsnet"
 )
 
+// ⚠️ Two goroutines emit (the certificate retry runs alongside the funnel loop), and interleaved
+// Printfs would splice two events into one unparseable line.
+var emitMu sync.Mutex
+
 func emit(key, val string) {
+	emitMu.Lock()
+	defer emitMu.Unlock()
 	// Newlines would split one event into two lines and desync the parent's line parser.
 	fmt.Printf("%s=%s\n", key, strings.NewReplacer("\r", " ", "\n", " ").Replace(val))
 	os.Stdout.Sync()
@@ -146,24 +153,33 @@ func main() {
 	// record and the address resolves nowhere. Observed in the field: machine Connected, funnel
 	// serving, "TLS certificate: No certificate found", NXDOMAIN. The one step that has to happen
 	// AFTER the consent click was the only one that never happened twice.
+	//
+	// ⚠️ ALONGSIDE the funnel loop, never before it. Version 0.33 ran this first and dead-ended
+	// people: the certificate cannot be issued until the tailnet has HTTPS enabled, which happens
+	// when the user clicks the consent link — and that link is surfaced by the funnel loop BELOW.
+	// So the app spent ten minutes counting doomed attempts while withholding the one button that
+	// would have made them succeed, and by the time it appeared the retries were spent. Running
+	// them concurrently is what makes both true at once: ask patiently, show the button at once.
 	certDomain := strings.TrimSuffix(publicHost, ".")
-	const certAttempts = 40 // ~10 minutes, matching the funnel loop below
-	var certLastErr string
-	for attempt := 1; attempt <= certAttempts; attempt++ {
-		emit("VDS_CERT", fmt.Sprintf("requesting %d/%d", attempt, certAttempts))
-		if _, _, err := lc.CertPair(ctx, certDomain); err == nil {
-			emit("VDS_CERT", "ok")
-			break
-		} else if err.Error() != certLastErr {
-			// Only on change: the parent turns every line into a status write, and forty identical
-			// "HTTPS is not enabled" lines say nothing the first one did not.
-			certLastErr = err.Error()
-			emit("VDS_CERT_ERR", certLastErr)
+	go func() {
+		const certAttempts = 40 // ~10 minutes, matching the funnel loop
+		var certLastErr string
+		for attempt := 1; attempt <= certAttempts; attempt++ {
+			emit("VDS_CERT", fmt.Sprintf("requesting %d/%d", attempt, certAttempts))
+			if _, _, err := lc.CertPair(ctx, certDomain); err == nil {
+				emit("VDS_CERT", "ok")
+				return
+			} else if err.Error() != certLastErr {
+				// Only on change: the parent turns every line into a status write, and forty
+				// identical "HTTPS is not enabled" lines say nothing the first one did not.
+				certLastErr = err.Error()
+				emit("VDS_CERT_ERR", certLastErr)
+			}
+			if attempt < certAttempts {
+				time.Sleep(15 * time.Second)
+			}
 		}
-		if attempt < certAttempts {
-			time.Sleep(15 * time.Second)
-		}
-	}
+	}()
 
 	// Funnel: public 443 → local backend. TLS is terminated on THIS machine (the cert lives in
 	// TSNET_DIR), so the relay only sees encrypted bytes.

@@ -68,6 +68,18 @@ export function startTunnel({ localPort, stateDir, binPath, onEvent, log = () =>
   });
   onEvent({ state: 'starting' });
   let certOk = false;
+  let funnelUp = false;
+  let certAttempt = 0, certAttempts = 0;
+
+  /** The consent link is the user's ONE action, so it outranks any progress we might show.
+   *  QueryFeature reporting "not complete" is authoritative — we do not need to wait for the funnel
+   *  to fail before saying so, and waiting is what stranded someone at "attempt 8 of 40" with the
+   *  enabling button nowhere on screen. */
+  const consentPending = () => !!consentUrl && !funnelUp;
+  const showConsent = (detail) => onEvent({
+    state: 'needs_funnel', url, detail, helpUrl: consentUrl, oneClick: true, consentText,
+    attempt: certAttempt || undefined, attempts: certAttempts || undefined,
+  });
 
   // The sidecar's contract is one `KEY=value` line per event. Buffer partial reads — a 40-line
   // Tailscale log burst arrives in arbitrary chunks and a split URL would be unopenable.
@@ -87,19 +99,27 @@ export function startTunnel({ localPort, stateDir, binPath, onEvent, log = () =>
       // permit HTTPS". Without it the shell can only guess from a failed probe — and it guessed
       // wrong, telling people to switch on a setting that was already on.
       else if (key === 'VDS_CERT') {
-        if (val === 'ok') certOk = true;
-        else {
+        if (val === 'ok') {
+          certOk = true;
+          // The funnel may well have come up before the certificate did. Re-announce so the shell
+          // probes again — the address only becomes resolvable once the certificate exists.
+          if (funnelUp) onEvent({ state: 'up', url, certOk });
+        } else {
           // Issuance is retried for ~10 minutes because it can only succeed AFTER the user grants
-          // consent. That is a long time to show nothing, so pass the count through.
+          // consent. Show the count — but never INSTEAD of the button that ends the waiting.
           const m = /requesting (\d+)\/(\d+)/.exec(val);
-          if (m) onEvent({ state: 'cert', url, attempt: Number(m[1]), attempts: Number(m[2]) });
+          if (m) {
+            certAttempt = Number(m[1]); certAttempts = Number(m[2]);
+            if (consentPending()) showConsent();
+            else onEvent({ state: 'cert', url, attempt: certAttempt, attempts: certAttempts });
+          }
         }
       }
       else if (key === 'VDS_CERT_ERR') certOk = false;
-      else if (key === 'VDS_FUNNEL' && val === 'up') onEvent({ state: 'up', url, certOk });
+      else if (key === 'VDS_FUNNEL' && val === 'up') { funnelUp = true; onEvent({ state: 'up', url, certOk }); }
       // Tailscale's own one-click consent page: enables BOTH tailnet prerequisites at once.
-      // Held until the funnel actually fails, so a tailnet that is already set up never sees it.
-      else if (key === 'VDS_CONSENT_URL') consentUrl = val;
+      // Shown the moment we have it — a tailnet that is already set up never produces one.
+      else if (key === 'VDS_CONSENT_URL') { consentUrl = val; if (!funnelUp) showConsent(); }
       else if (key === 'VDS_CONSENT_TEXT') consentText = val;
       else if (key === 'VDS_FUNNEL_ERR') {
         onEvent({
