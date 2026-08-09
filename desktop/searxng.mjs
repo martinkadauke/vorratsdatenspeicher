@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 
 // The bundled web search: an embedded SearXNG with its own CPython, assembled by
 // desktop/searxng/build.sh and shipped in the installer beside the Postgres and Tailscale
@@ -16,7 +17,9 @@ import crypto from 'node:crypto';
 export function bundlePath({ resourcesPath, devRoot }) {
   const dir = resourcesPath
     ? path.join(resourcesPath, 'searxng')
-    : path.join(devRoot ?? path.dirname(new URL(import.meta.url).pathname), 'searxng', 'bin');
+    // ⚠️ fileURLToPath, never URL.pathname: on Windows the latter yields "/C:/..." with a leading
+    //    slash, which every fs call then fails on. Only reachable when a caller omits devRoot.
+    : path.join(devRoot ?? path.dirname(fileURLToPath(import.meta.url)), 'searxng', 'bin');
   return fs.existsSync(path.join(dir, 'searx', 'webapp.py')) ? dir : null;
 }
 
