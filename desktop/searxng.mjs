@@ -62,9 +62,21 @@ export function startSearxng({ stateDir, bundleDir, port, log = () => {} }) {
   // per-boot: the key must not be shared, and the port is whatever was free this time.
   const template = fs.readFileSync(path.join(bundleDir, 'settings.yml'), 'utf8');
   const settings = path.join(stateDir, 'settings.yml');
-  fs.writeFileSync(settings, template
-    .replace('__SECRET_KEY__', secretFor(stateDir))
-    .replace('__PORT__', String(port)), { mode: 0o600 });
+  // ⚠️ GLOBAL. String.replace with a string pattern replaces the FIRST occurrence only — and the
+  // template's own explanatory comment names both placeholders, so it ate them: the secret and the
+  // port were substituted into a comment while the real settings kept "__PORT__", and SearXNG died
+  // on int('__PORT__') at every launch. The comment explaining the substitution consumed it.
+  const filled = template
+    .replace(/__SECRET_KEY__/g, secretFor(stateDir))
+    .replace(/__PORT__/g, String(port));
+  // And prove it, because the failure mode is a config file that looks plausible: the process
+  // starts, dies immediately, and the app reports "no search" with the reason four levels deep in
+  // a Python traceback.
+  if (/__[A-Z_]+__/.test(filled)) {
+    log(`searxng: settings still contain a placeholder after substitution — refusing to start`);
+    return null;
+  }
+  fs.writeFileSync(settings, filled, { mode: 0o600 });
 
   const child = spawn(py, ['-m', 'searx.webapp'], {
     cwd: stateDir,
@@ -83,9 +95,15 @@ export function startSearxng({ stateDir, bundleDir, port, log = () => {} }) {
   // ⚠️ Engines failing to register individually (brave 429, startpage captcha) is NORMAL — SearXNG
   // aggregates whatever answered. Only the process dying matters, so the noise is logged at all
   // but never treated as failure.
+  // ⚠️ Per LINE, and generously. Slicing each CHUNK to 300 characters truncated the one thing that
+  // mattered: a Python traceback arrives as a single chunk, so the exception type and message —
+  // the last lines — were cut off, leaving only "Traceback (most recent call last)". Diagnosing
+  // the placeholder bug above meant running the packaged bundle by hand to see an error the log
+  // had already been handed.
   const tap = (s) => s.on('data', (c) => {
-    const line = c.toString().trim();
-    if (line) log(`searxng: ${line.slice(0, 300)}`);
+    for (const line of c.toString().split(/\r?\n/)) {
+      if (line.trim()) log(`searxng: ${line.slice(0, 500)}`);
+    }
   });
   tap(child.stdout); tap(child.stderr);
   child.on('exit', (code, signal) => log(`searxng: exited code=${code} signal=${signal}`));

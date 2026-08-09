@@ -1,7 +1,12 @@
-# Template. The Electron shell copies this into the per-install data dir and replaces
-# __SECRET_KEY__ and __PORT__ at boot — the key must be generated PER INSTALL (a constant shipped
-# in the installer would be identical on every machine in the world), and the port is whatever
-# boot.mjs found free.
+# Template. The Electron shell copies this into the per-install data dir and fills in the two
+# placeholders below at boot: the key must be generated PER INSTALL (a constant shipped in the
+# installer would be identical on every machine in the world), and the port is whatever boot.mjs
+# found free.
+#
+# ⚠️ Do NOT spell the placeholder tokens out in this comment. They were named here once, and since
+# the shell replaced only the first occurrence, the substitution landed in this very line while the
+# real settings below kept theirs — SearXNG then died on int() of a placeholder at every launch.
+# The replace is global now, but naming them here would still write the secret into a comment.
 #
 # This exact shape was verified to start SearXNG and answer
 #   GET /search?q=rewe+prospekt&format=json  ->  200 with real results
