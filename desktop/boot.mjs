@@ -4,6 +4,8 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node
 import net from 'node:net';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import { bundlePath, startSearxng, selfTest } from './searxng.mjs';
 
 /** Ask the OS for a free localhost port (avoids colliding with whatever else the user runs). */
 function freePort() {
@@ -131,10 +133,28 @@ export async function boot(opts) {
   // shape as the self-update marker: one mechanism, and the web UI stays identical in both channels.
   const desktopDir = path.join(dataDir, 'desktop');
   const tsnetDir = path.join(dataDir, 'tsnet');
+  const searxngDir = path.join(dataDir, 'searxng');
   mkdirSync(receiptsDir, { recursive: true });
   mkdirSync(updaterDir, { recursive: true });
   mkdirSync(desktopDir, { recursive: true });
   mkdirSync(tsnetDir, { recursive: true });
+  mkdirSync(searxngDir, { recursive: true });
+
+  // The bundled web search. Started here beside Postgres because it is the same kind of thing: a
+  // service the container gets from docker-compose and the desktop has to bring along itself.
+  // Opt-out via `searxng: false` (the smoke, which must not spend a minute booting a scraper).
+  const searxngBundle = opts.searxng === false ? null : bundlePath({
+    resourcesPath: opts.resourcesPath ?? null,
+    devRoot: path.dirname(fileURLToPath(import.meta.url)),
+  });
+  const searxngPort = searxngBundle ? await freePort() : 0;
+  const searxng = searxngBundle
+    ? startSearxng({ stateDir: searxngDir, bundleDir: searxngBundle, port: searxngPort, log: opts.log })
+    : null;
+  // ⚠️ Not blocking. SearXNG needs a few seconds to load its engines and nothing the user does in
+  // that time needs it — but the result must reach the log, because a bundle that starts and
+  // returns nothing is otherwise indistinguishable from one that works.
+  if (searxng) void selfTest(searxng.url, opts.log ?? (() => {}));
   const env = {
     ...process.env,
     DATABASE_URL: `postgres://vds:vds@127.0.0.1:${pgPort}/vorratsdatenspeicher`,
@@ -163,6 +183,11 @@ export async function boot(opts) {
     // Serve the built SPA so the window shows the app, not just the API. In dev that's
     // frontend/dist; a packaged build points this at the bundled frontend.
     PUBLIC_DIR: opts.publicDir || path.resolve(backendRoot, '..', 'frontend', 'dist'),
+    // The address of our own bundled search. A FACT of this build, not a setting — same reasoning
+    // as DESKTOP_DIR and RECEIPTS_LOCAL_PATH: the port is chosen fresh at every boot, so storing it
+    // in app_config would be stale the moment the app restarts. Absent when there is no bundle,
+    // which the backend reads as "no web search" and skips quietly.
+    ...(searxng ? { SEARXNG_URL: searxng.url } : {}),
     // never DEMO on the desktop — single household, no RLS/two-role topology.
     DEMO_MODE: '',
   };
@@ -179,8 +204,10 @@ export async function boot(opts) {
     updaterDir,          // the shell watches this for the in-app update request
     desktopDir,          // …and this for the connect-phone request; it writes tunnel status back
     tsnetDir,            // the embedded Tailscale node's state (login persists across restarts)
+    searxngUrl: searxng?.url ?? null,
     async stop() {
       try { child.kill(); } catch { /* already gone */ }
+      try { searxng?.stop(); } catch { /* already gone */ }
       try { await pg.stop(); } catch { /* already stopped */ }
     },
   };

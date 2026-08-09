@@ -9,7 +9,13 @@ import { getConfig } from '../config.js';
  *  never got a canonical name at all, run after run, one logged error each. Desktop installs have
  *  no SearXNG at all, which is exactly the case this punished hardest. */
 async function searchBase(): Promise<string | null> {
-  const base = (await getConfig('searxng.url'))?.trim();
+  // ⚠️ The desktop build ships its OWN SearXNG and hands us its address in the environment. That
+  // is a fact of the running install, not a preference: the port is chosen fresh at every boot, so
+  // a value stored in app_config would be stale after the first restart — the same reasoning that
+  // makes effectiveBaseUrl() prefer the live tunnel address over a configured one. Docker never
+  // sets it, so self-hosters keep pointing us at their own instance exactly as before.
+  const fact = process.env.SEARXNG_URL?.trim();
+  const base = (fact || (await getConfig('searxng.url')))?.trim();
   return base ? base.replace(/\/$/, '') : null;
 }
 
@@ -73,7 +79,9 @@ export async function searxngImageSearch(query: string): Promise<{ src: string; 
 
 export async function searxngHealth(): Promise<{ ok: boolean; error?: string }> {
   try {
-    const base = await getConfig('searxng.url');
+    // Through the same resolver as every real query, or the health check would report on a
+    // different instance than the one the app actually uses.
+    const base = await searchBase();
     if (!base) return { ok: false, error: 'nicht konfiguriert' };
     const res = await fetch(`${base}/search?q=test&format=json`, { signal: AbortSignal.timeout(8_000) });
     if (!res.ok) return { ok: false, error: `HTTP ${res.status} — ist format=json in settings.yml erlaubt?` };

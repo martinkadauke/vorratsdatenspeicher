@@ -64,6 +64,14 @@ extraResources:
   - from: tsnet-sidecar/bin
     to: tsnet
     filter: ['**/*', '!.gitkeep']
+  # The bundled web search: SearXNG plus its own CPython, assembled per-OS by
+  # searxng/build.sh (CI). Same arrangement as the sidecar above — committed empty so a checkout
+  # that never ran the build still packages, and the app then simply has no web search rather than
+  # failing to install. This is the biggest single thing in the installer (~150 MB unpacked); the
+  # build script prunes debug symbols, Tcl/Tk, IDLE and CPython's test suite to get there.
+  - from: searxng/bin
+    to: searxng
+    filter: ['**/*', '!.gitkeep']
 
 # Where electron-updater looks for new versions. Declaring it here is also what makes
 # electron-builder EMIT `latest.yml` / `latest-mac.yml` next to the installers — without those

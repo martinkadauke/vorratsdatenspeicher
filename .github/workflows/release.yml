@@ -132,6 +132,15 @@ jobs:
           go build -ldflags="-s -w" -o "$out" .
           ls -la bin
 
+      # The bundled web search, assembled per OS exactly like the sidecar above. Its own script
+      # because the assembly is fiddly (a tarball, never a clone — four files in the SearXNG repo
+      # carry a colon and Windows cannot check them out) and it ends by proving the result imports,
+      # so a broken bundle fails the BUILD instead of shipping as a silently searchless app.
+      - name: Build the bundled web search
+        working-directory: desktop
+        shell: bash
+        run: bash searxng/build.sh searxng/bin
+
       # The desktop bundle ships the built frontend + the built backend. Dev deps are needed to
       # BUILD the backend and are pruned afterwards, so the installer carries runtime deps only.
       - name: Build frontend

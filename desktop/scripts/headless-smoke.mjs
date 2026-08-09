@@ -7,6 +7,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { boot, resolveSecrets } from '../boot.mjs';
 import { sidecarPath } from '../tunnel.mjs';
 
@@ -43,8 +44,22 @@ try {
 
   console.log('[smoke] starting bundled Postgres + backend (no Docker) …');
   // Free ports (no fixed 8899/54329 — those can collide with whatever else is running).
-  // tunnel:false so the test never starts a real Funnel on a machine that happens to run Tailscale.
-  stack = await boot({ dataDir, backendEntry, tunnel: false });
+  // ⚠️ A STUB search, not the real bundle. The desktop build ships SearXNG and hands the backend
+  // its address in SEARXNG_URL; what can silently break is that HANDOVER — a renamed variable, a
+  // resolver that still reads app_config first — and that is what this proves, in milliseconds and
+  // without a scraper. Booting the real one would take half a minute and make the test depend on
+  // Google's mood. boot() spreads process.env, so setting it here reaches the backend.
+  const searchStub = createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ results: [{ title: 'Stub-Treffer', content: 'x', url: 'https://example.org/x' }] }));
+  });
+  await new Promise(r => searchStub.listen(0, '127.0.0.1', r));
+  searchStub.unref();          // ⚠️ or the script never exits: a listening server keeps the loop alive
+  process.env.SEARXNG_URL = `http://127.0.0.1:${searchStub.address().port}`;
+
+  // tunnel:false so the test never starts a real Funnel on a machine that happens to run Tailscale;
+  // searxng:false for the same reason — this run must not spawn a Python web app.
+  stack = await boot({ dataDir, backendEntry, tunnel: false, searxng: false });
   console.log('[smoke] chose port', stack.port);
 
   const version = await waitFor(stack.url);
@@ -111,6 +126,14 @@ try {
   const okClosedSet = existsSync(marker) && readFileSync(marker, 'utf8').trim() === 'start';
   console.log('[smoke] fresh-link request →', okReset ? 'OK (reset reaches the shell)' : 'RESET LOST',
               '| unknown action →', okClosedSet ? 'OK (falls back to start)' : 'CLOSED SET LEAKS');
+
+  // ── the bundled web search reaches the backend ─────────────────────────────────────────
+  // Health goes through the same resolver as every real query, so a green answer here means the
+  // address the app WOULD search on is the one it was handed.
+  const health = await fetch(`${stack.url}/api/searxng/health`, { headers: auth }).then(r => r.json()).catch(() => ({}));
+  const okSearch = health?.ok === true;
+  console.log('[smoke] bundled search reaches the backend →',
+    okSearch ? 'OK (env fact wins over config)' : `HANDOVER BROKEN (${JSON.stringify(health)})`);
 
   // ── household members own the bank accounts ─────────────────────────────────────────────
   // A member is the PERSON; a login is optional (children, pets) and an account belongs to the
@@ -282,7 +305,7 @@ try {
   console.log('[smoke] tunnel sidecar →', sidecarPath({ resourcesPath: null, devRoot: path.resolve(__dirname, '..') }) ? 'bundled' : 'not built (local-only)');
 
   const pass = okSecrets && version?.node && okPasskey && gate.status === 401 && okSpa
-    && okDesktopFlag && anon.status === 401 && okStatus && okMarker && okReset && okClosedSet
+    && okDesktopFlag && anon.status === 401 && okStatus && okMarker && okReset && okClosedSet && okSearch
     && okRecoverMarker && wrong.status === 403 && okRecovered && okBurned && relogin.status === 200
     && okOneProvider && okVisionSplit && okRpID
     && me?.member_id === meId && okOnlyOne && okJoint && okArchive;

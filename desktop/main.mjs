@@ -572,6 +572,10 @@ async function start() {
     stack = await boot({
       dataDir,
       backendEntry,
+      // Where the bundled sidecars live once packaged; null in a dev checkout, where boot falls
+      // back to the repo layout.
+      resourcesPath: app.isPackaged ? process.resourcesPath : null,
+      log,
       // No fixed port — boot picks a free one (a stray server on 8899 must not break us).
       // Electron forks Node via utilityProcess so the child uses Electron's runtime, not a system node.
       forker: (entry, env) => utilityProcess.fork(entry, [], { env, stdio: 'inherit' }),
