@@ -514,6 +514,11 @@ function watchRenderer(w) {
     for (const key of ['CommandOrControl+R', 'F5']) {
       try { globalShortcut.register(key, () => wc.reload()); } catch { /* another app may hold it */ }
     }
+    // ⚠️ F12 opens the developer tools. A packaged Electron app has no menu bar and therefore no
+    // way in — which is why a visual report ("there is still a scrollbar") could only be answered
+    // by rebuilding the situation here and hoping it matched. One keystroke turns a description
+    // into a measurement. Third diagnostic gap closed today, and the cheapest of them.
+    try { globalShortcut.register('F12', () => wc.toggleDevTools()); } catch { /* held elsewhere */ }
   });
   w.on('blur', () => globalShortcut.unregisterAll());
 }
