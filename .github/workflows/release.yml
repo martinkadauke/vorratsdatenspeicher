@@ -99,7 +99,9 @@ jobs:
   # bundled Postgres so a non-technical user just downloads and double-clicks. Each OS must build
   # on its own runner (an Apple installer cannot be produced on Windows). Unsigned on purpose —
   # code signing is a DEVELOPER cost; users never pay either way. Windows shows a SmartScreen
-  # "more info → run anyway" prompt and macOS needs right-click → Open until notarisation is added.
+  # "more info → run anyway" prompt. macOS is ad-hoc signed (mac.sign) so it STARTS at all on Apple
+  # Silicon, and shows a one-time Gatekeeper warning that is cleared under System Settings →
+  # Privacy & Security → "Open Anyway". ⚠️ Not ctrl-click → Open: Apple removed that in macOS 15.
   desktop:
     needs: build
     strategy:
@@ -167,10 +169,27 @@ jobs:
         working-directory: desktop
         shell: bash          # same syntax on both runners (windows-latest defaults to pwsh)
         env:
-          # Skip electron-builder's auto-publish; the assets are uploaded explicitly below.
+          # ⚠️ This has NOTHING to do with publishing — that is `--publish never` below. It stops
+          # electron-builder picking up a stray certificate from the runner keychain. What the old
+          # comment hid: it also meant NO signature at all, and an unsigned arm64 app is reported by
+          # macOS as "damaged", so no Mac could ever open our build. desktop/scripts/adhoc-sign.mjs
+          # now supplies an ad-hoc signature independently of this flag.
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
           VDS_VERSION: ${{ needs.build.outputs.version }}
         run: npm ci && npx electron-builder --publish never --config.extraMetadata.version="$VDS_VERSION"
+
+      # ⚠️ Prove the signature exists. Signing is the difference between an installer that works on
+      # a Mac and one that cannot be opened at all, and its absence was invisible for every release
+      # so far — the build was green each time. `codesign --verify` fails the build instead.
+      - name: Verify the mac app is really signed
+        if: runner.os == 'macOS'
+        working-directory: desktop
+        shell: bash
+        run: |
+          app=(out/mac-arm64/*.app)
+          echo "verifying: ${app[0]}"
+          codesign -dv --verbose=4 "${app[0]}"
+          codesign --verify --deep --strict --verbose=2 "${app[0]}"
 
       # Attach to the (draft) GitHub Release the build job created, so one tag yields the Docker
       # image AND the desktop installers — and /download can read them straight from the API.

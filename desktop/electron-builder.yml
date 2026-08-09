@@ -97,6 +97,11 @@ nsis:
 mac:
   target: dmg
   category: public.app-category.finance
+  # ⚠️ MANDATORY, not cosmetic. On Apple Silicon macOS refuses to run arm64 code that carries no
+  # valid signature and reports it as "damaged" — which is why every macOS build so far could be
+  # installed and never opened. Ad-hoc costs nothing and needs no Apple account; electron-builder
+  # 25.x cannot do it on its own, hence the hook. See scripts/adhoc-sign.mjs.
+  sign: ./scripts/adhoc-sign.mjs
 linux:
   target: AppImage
   category: Utility
