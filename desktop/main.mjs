@@ -539,10 +539,19 @@ async function start() {
 
   const dataDir = app.getPath('userData');
   log(`starting · version=${app.getVersion()} · dataDir=${dataDir}`);
-  // The bundled Postgres cannot live under a path containing a space (initdb exits 1). setName()
-  // above prevents it, but a user profile like "C:\Users\Max Mustermann" would too — so say it
+  // ⚠️ WINDOWS ONLY — and that qualifier is the entire point. On Windows the bundled initdb exits 1
+  // under a path containing a space, so a profile like "C:\Users\Max Mustermann" has to be reported
   // plainly instead of failing three steps later with an empty error.
-  if (/\s/.test(dataDir)) throw new Error(`Der Datenpfad enthält ein Leerzeichen, damit kommt die mitgelieferte Datenbank nicht zurecht:\n${dataDir}`);
+  //
+  // On macOS the standard data directory is ~/Library/Application Support/… — a space nobody can
+  // avoid. So this guard refused to start on EVERY Mac, before anything else ran: the app could
+  // never have worked there, signature or no signature. Measured on a real Mac Studio (macOS 26.3,
+  // arm64) with the binary out of this very bundle: initdb creates a cluster in
+  // "/tmp/vds test mit leerzeichen/data" without complaint. The limitation is Windows', not
+  // Postgres', and stating it as a universal truth cost macOS every release so far.
+  if (process.platform === 'win32' && /\s/.test(dataDir)) {
+    throw new Error(`Der Datenpfad enthält ein Leerzeichen, damit kommt die mitgelieferte Datenbank nicht zurecht:\n${dataDir}`);
+  }
 
   // The window comes up FIRST, showing what is happening. Creating the cluster and running every
   // migration takes ~50s on a warm machine and longer on a cold one; doing that behind an empty
