@@ -28,10 +28,15 @@ directories:
 
 # What goes into the app bundle (app.asar). The desktop glue + its node_modules (embedded-postgres
 # wrapper); the actual PG binary is unpacked below because you can't exec from inside an asar.
+# ⚠️ EVERY shell module has to be listed. This is an allow-list, not a directory copy, so adding
+# an import in boot.mjs without adding the file here produces an app that installs perfectly and
+# then dies on startup with a module-not-found — invisible in every local test, because a dev
+# checkout has the file sitting right there. v0.37.0 shipped exactly that and had to be withdrawn.
 files:
   - main.mjs
   - boot.mjs
   - tunnel.mjs
+  - searxng.mjs
   - package.json
   - node_modules/**/*
 

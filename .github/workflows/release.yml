@@ -153,6 +153,13 @@ jobs:
         working-directory: backend
         run: npm ci --omit=dev
 
+      # ⚠️ BEFORE packaging. electron-builder's files: is an allow-list, so an import added to the
+      # shell without a matching entry builds green and dies on the user's first launch. v0.37.0
+      # shipped that and had to be withdrawn; this turns it into a failed build instead.
+      - name: Check that every shell module is packaged
+        working-directory: desktop
+        run: node scripts/check-packaging.mjs
+
       # extraMetadata.version stamps the RELEASE version into the packaged app: it names the
       # artifacts (…Setup 1.0.16.exe, not the stale 1.0.0 from desktop/package.json) and is what
       # app.getVersion() — and therefore the in-app version/update check — reports at runtime.

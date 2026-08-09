@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { execFileSync } from 'node:child_process';
 import { boot, resolveSecrets } from '../boot.mjs';
 import { sidecarPath } from '../tunnel.mjs';
 
@@ -35,6 +36,10 @@ let stack;
 try {
   // Secrets must be stable across boots (else every restart silently logs everyone out).
   const secDir = path.resolve(__dirname, '..', '.smoke-secrets');
+  // Static, instant, and the one check this suite could never make by running things: whether the
+  // installer would even contain the modules we just booted.
+  execFileSync(process.execPath, [path.join(__dirname, 'check-packaging.mjs')], { stdio: 'inherit' });
+
   rmSync(secDir, { recursive: true, force: true });
   const s1 = resolveSecrets(secDir);
   const s2 = resolveSecrets(secDir);
