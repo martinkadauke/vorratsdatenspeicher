@@ -60,9 +60,10 @@
     "propagatingHint": "The certificate is in place and everything is configured correctly — the name just has to spread across the internet. That sometimes takes a few minutes. Leave this window open or come back later; VDS will say when it is ready.",
     "cert": "Requesting the certificate for your address …",
     "certHint": "This can only succeed once the approval above is done — VDS keeps asking for ten minutes and then carries on by itself.",
-    "notPublished": "Everything on your side is correct: the connection is running and the certificate has been issued. Tailscale just has not published your address on the internet yet — that happens on their side and can take longer for new accounts. There is nothing for you to configure. Try again in a few minutes.",
-    "retryNow": "Check again",
-    "stop": "Disconnect"
+    "notPublished": "Everything on your side is correct: the connection is up and the certificate has been issued. All that is missing is Tailscale publishing your address on the internet — that happens on their side and, for new accounts, tends to take half an hour to an hour, sometimes longer.\n\nThere is nothing to do and nothing to restart. Vorratsdatenspeicher keeps looking in the background and will tell you the moment it is ready — here, by notification, and by e-mail if you set one up. Feel free to put the app aside.",
+    "retryNow": "Check now anyway",
+    "stop": "Disconnect",
+    "retryHint": "Not needed — it keeps looking regardless. Restarting the connection would only begin the search again from scratch."
   },
   "nav": {
     "analytics": "Analytics",

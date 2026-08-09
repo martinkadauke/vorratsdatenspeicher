@@ -60,9 +60,10 @@
     "propagatingHint": "Das Zertifikat ist da, alles ist richtig eingestellt — jetzt muss sich nur noch der Name im Internet herumsprechen. Das dauert manchmal ein paar Minuten. Du kannst das Fenster offen lassen oder später wiederkommen; VDS meldet sich, sobald es so weit ist.",
     "cert": "Zertifikat für deine Adresse wird angefordert …",
     "certHint": "Das gelingt erst, wenn die Freischaltung oben erledigt ist — VDS fragt zehn Minuten lang immer wieder nach und macht dann von allein weiter.",
-    "notPublished": "Alles auf deiner Seite steht richtig: die Verbindung läuft und das Zertifikat ist ausgestellt. Aber Tailscale hat deine Adresse noch nicht im Internet veröffentlicht — das passiert auf deren Seite und kann bei neuen Konten länger dauern. Du musst nichts einstellen. Versuch es in ein paar Minuten noch einmal.",
-    "retryNow": "Nochmal prüfen",
-    "stop": "Verbindung beenden"
+    "notPublished": "Alles auf deiner Seite steht richtig: die Verbindung läuft, das Zertifikat ist ausgestellt. Es fehlt nur noch, dass Tailscale deine Adresse im Internet bekannt macht — das passiert auf deren Seite und dauert bei neuen Konten erfahrungsgemäß eine halbe bis ganze Stunde, manchmal länger.\n\nDu musst nichts tun und nichts neu starten. Vorratsdatenspeicher sucht im Hintergrund weiter und meldet sich, sobald es so weit ist — hier im Fenster, per Benachrichtigung, und per E-Mail, falls du eine eingerichtet hast. Du kannst die App ruhig zur Seite legen.",
+    "retryNow": "Trotzdem jetzt nachsehen",
+    "stop": "Verbindung beenden",
+    "retryHint": "Nicht nötig — es läuft ohnehin weiter. Ein Neustart der Verbindung würde die laufende Suche nur von vorn beginnen."
   },
   "nav": {
     "analytics": "Analytics",
