@@ -64,7 +64,15 @@ else echo "::error::no interpreter in the extracted runtime"; ls -R python | hea
 # windows-latest runner. The tarball lets us extract only the parts we run.
 echo "== fetching SearXNG ($REF) =="
 curl -sSL -o src.tar.gz "https://codeload.github.com/searxng/searxng/tar.gz/$REF"
-tar -xzf src.tar.gz --wildcards '*/searx/*' '*/requirements.txt'
+# ⚠️ --wildcards is GNU-only; macOS ships BSD tar and fails outright ("Option --wildcards is not
+# supported"). BSD tar globs extraction patterns by default, GNU tar needs to be told. Extracting
+# everything instead is NOT an option — the colon-bearing files above are the reason we are
+# picking parts out of a tarball in the first place.
+if tar --version 2>/dev/null | grep -qi 'gnu tar'; then
+  tar -xzf src.tar.gz --wildcards '*/searx/*' '*/requirements.txt'
+else
+  tar -xzf src.tar.gz '*/searx/*' '*/requirements.txt'
+fi
 # The tarball's top directory is searxng-<ref>; with a commit ref that is the full sha.
 top=$(ls -d searxng-*/ | head -1)
 mv "$top/searx" .
