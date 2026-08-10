@@ -6,6 +6,17 @@ import './index.css';
 import { App } from './App';
 import { AuthProvider } from './context/auth';
 
+// ⚠️ Pinch-Zoom auf iOS abschalten. Safari ignoriert `user-scalable=no` im viewport-Tag seit
+// iOS 10 bewusst — die einzige verbliebene Handhabe sind diese drei Ereignisse. Ohne sie bleibt
+// das Zoomen genau dort möglich, wo es am meisten stört: in der PWA auf dem Telefon, beim Wischen
+// durch Belegpositionen.
+//
+// Absichtlich NUR Pinch: der Browser-Zoom am Desktop (Strg+Rad, Seitenzoom) bleibt unangetastet,
+// weil er dort eine echte Notwendigkeit ist und keine Fehlbedienung.
+for (const ereignis of ['gesturestart', 'gesturechange', 'gestureend']) {
+  document.addEventListener(ereignis, (e) => e.preventDefault(), { passive: false });
+}
+
 // Dark mode default before first paint (overridden by user preference after login)
 const storedDark = localStorage.getItem('vds_dark');
 document.documentElement.classList.toggle('dark', storedDark !== 'false');

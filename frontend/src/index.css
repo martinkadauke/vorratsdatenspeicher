@@ -5,6 +5,9 @@
 @layer base {
   html {
     -webkit-tap-highlight-color: transparent;
+    /* Kein Doppeltipp-Zoom. `manipulation` erlaubt Scrollen und Wischen weiter, nimmt aber die
+       300ms-Wartezeit und die versehentliche Vergrösserung beim schnellen Doppeltippen. */
+    touch-action: manipulation;
     /* ⚠️ Both axes stated explicitly. Setting only one to a non-visible value promotes the other
        to `auto`, which is how a content div quietly became a second scroll container and left a
        scrollbar parked on the right of the desktop window even at full screen. The page scroller
