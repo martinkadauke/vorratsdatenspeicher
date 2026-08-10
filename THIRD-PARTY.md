@@ -12,9 +12,24 @@ Docker image under `node_modules/<pkg>/LICENSE`. A machine-generated SBOM can be
 |---|---|---|
 | [Node.js](https://nodejs.org) | JS runtime | MIT |
 | [PostgreSQL 16](https://www.postgresql.org) | database (shipped as the official `postgres:16` image, unmodified) | PostgreSQL License |
-| [SearXNG](https://github.com/searxng/searxng) | metasearch engine (optional web-search for the churner + store enrichment; shipped as the official image, **unmodified**) | **AGPL-3.0-or-later** |
+| [SearXNG](https://github.com/searxng/searxng) | metasearch engine — web search for the churner + store enrichment. **Docker:** you run the official image yourself, we only call it. **Desktop:** we ship an assembly of it (see below), which makes this the licence that binds us hardest. | **AGPL-3.0-or-later** |
 | [Ollama](https://ollama.com) | local model server (optional; you run it, we only call its API) | MIT |
 | [Caddy](https://caddyserver.com) | reverse proxy (demo only) | Apache-2.0 |
+
+## Shipped inside the desktop installer
+
+⚠️ The Docker image *calls* the services above; the desktop installer **redistributes** the
+components below. That is a different legal situation, and it is why they are listed separately.
+
+| Component | Role | License |
+|---|---|---|
+| [Electron](https://electronjs.org) (incl. Chromium, Node.js) | the application shell | MIT (Chromium: BSD-3-Clause + others) |
+| [embedded-postgres](https://github.com/leinelissen/embedded-postgres) + PostgreSQL 17 binaries | the bundled database — no Docker needed | Apache-2.0 / PostgreSQL License |
+| [SearXNG](https://github.com/searxng/searxng) | bundled web search. ⚠️ **Not** the official image: we assemble it from a pinned commit and add one file, `desktop/searxng/pwd.py`, without which it cannot start on Windows. **AGPL-3.0 obliges us to offer that assembly's source** — it is in this repository under `desktop/searxng/` (build script, shim, settings, pinned commit). | **AGPL-3.0-or-later** |
+| [python-build-standalone](https://github.com/astral-sh/python-build-standalone) (CPython 3.12) | the interpreter SearXNG runs on | Python Software Foundation License (CPython) / MPL-2.0 (build tooling) |
+| SearXNG's Python dependencies (flask, httpx, lxml, msgspec, babel …) | installed into the bundle by `desktop/searxng/build.sh` | each its own — predominantly BSD/MIT/Apache-2.0; `requirements.txt` in the bundle names every one |
+| [tailscale.com/tsnet](https://tailscale.com) | the embedded Tailscale node behind "connect your phone" | BSD-3-Clause |
+| [electron-builder](https://www.electron.build) / [@electron/osx-sign](https://github.com/electron/osx-sign) | packaging and the ad-hoc macOS signature (build-time) | MIT |
 
 ## Data sources
 
