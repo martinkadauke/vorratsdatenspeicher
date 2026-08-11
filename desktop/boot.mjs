@@ -93,9 +93,25 @@ export async function boot(opts) {
   // ("lock file already exists"). If the PID it names is dead, the lock is stale → remove it.
   // If a live process still holds the data dir, leave it (don't stomp a running DB).
   const pidFile = path.join(pgDataDir, 'postmaster.pid');
+  const readPid = () => {
+    try { return parseInt((readFileSync(pidFile, 'utf8').split('\n')[0] || '').trim(), 10); }
+    catch { return NaN; }
+  };
   if (existsSync(pidFile)) {
-    const pid = parseInt((readFileSync(pidFile, 'utf8').split('\n')[0] || '').trim(), 10);
+    // ⚠️ A LIVE pid here is usually not "a second VDS is running" — it is the one the user just
+    // closed, still shutting down. From the field: closed 06:26:51, reopened 06:26:57, Postgres
+    // refused the data directory and the app died. Six seconds is exactly how fast somebody
+    // reopens an app they closed by accident, so "leave a live pid alone" turned an ordinary
+    // action into a broken start. Give the predecessor a moment to let go.
+    for (let waited = 0; waited < 20_000 && existsSync(pidFile); waited += 500) {
+      const pid = readPid();
+      if (!Number.isFinite(pid) || !pidAlive(pid)) break;      // gone → the lock is stale
+      if (waited === 0) opts.log?.('a previous Postgres still holds the data directory — waiting for it to exit');
+      await new Promise(r => setTimeout(r, 500));
+    }
+    const pid = readPid();
     if (!Number.isFinite(pid) || !pidAlive(pid)) rmSync(pidFile, { force: true });
+    else opts.log?.(`Postgres pid ${pid} still alive after 20s — starting anyway; it may refuse the directory`);
   }
 
   const pg = new EmbeddedPostgres({

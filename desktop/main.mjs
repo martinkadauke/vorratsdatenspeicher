@@ -44,8 +44,43 @@ function log(msg) {
   console.log(line.trim());
 }
 
-/** Replace the blank window with something a human can act on. embedded-postgres rejects with
- *  `undefined` on failure, so the message has to survive a useless error object. */
+/** What can still be said when embedded-postgres rejects with nothing at all.
+ *
+ *  ⚠️ "FATAL: unbekannter Fehler" is the line a user was asked to send us: it records THAT
+ *  something broke and nothing about WHAT. The pieces below cost nothing to read and name the two
+ *  realistic causes on the spot — a predecessor still holding the data directory, or Postgres
+ *  refusing and saying why in its own log rather than in the exception. */
+function describeBootFailure(err, dataDir) {
+  // ⚠️ Eigene Prüfung statt pidAlive aus boot.mjs: das ist dort nicht exportiert, und ein
+  //    ReferenceError ausgerechnet im Fehlerpfad würde die Diagnose durch einen zweiten Absturz
+  //    ersetzen. Signal 0 sendet nichts, es fragt nur "gibt es diesen Prozess".
+  const lebt = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const teile = [String((err && (err.stack || err.message)) || err || "(die Datenbank meldete keinen Grund)")];
+  try {
+    const pidFile = path.join(dataDir, "pgdata", "postmaster.pid");
+    if (fs.existsSync(pidFile)) {
+      const pid = parseInt((fs.readFileSync(pidFile, "utf8").split("\n")[0] || "").trim(), 10);
+      teile.push(`postmaster.pid vorhanden (pid ${pid}, ${Number.isFinite(pid) && lebt(pid) ? "LÄUFT NOCH" : "tot"})`);
+    } else {
+      teile.push("postmaster.pid: nicht vorhanden");
+    }
+  } catch (e) { teile.push(`pid-Datei nicht lesbar: ${e?.message ?? e}`); }
+  // Postgres schreibt seinen echten Grund in sein eigenes Log, nicht in die Ausnahme.
+  for (const rel of ["pgdata/log", "pgdata/pg_log"]) {
+    try {
+      const dir = path.join(dataDir, rel);
+      const neueste = fs.readdirSync(dir).map(f => path.join(dir, f))
+        .map(f => ({ f, t: fs.statSync(f).mtimeMs })).sort((a, b) => b.t - a.t)[0];
+      if (neueste) {
+        const zeilen = fs.readFileSync(neueste.f, "utf8").trim().split(/\r?\n/).slice(-6);
+        teile.push(`aus ${path.basename(neueste.f)}:` + "\n  " + zeilen.join("\n  "));
+      }
+    } catch { /* kein Log-Verzeichnis — bei embedded-postgres der Normalfall */ }
+  }
+  return teile.join("\n");
+}
+
+/** Replace the blank window with something a human can act on. */
 function showFailure(err) {
   const detail = String((err && (err.stack || err.message)) || err || 'unbekannter Fehler');
   log(`FATAL: ${detail}`);
@@ -582,7 +617,14 @@ async function start() {
   // One automatic retry. The first launch after an install has been seen to leave the database
   // half-started; restarting the app by hand fixed it, so do that FOR the user instead of
   // handing them a dead window.
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  // ⚠️ DREI Versuche, und der try umfasst boot() selbst. Bisher fing diese Schleife nur den Fall
+  // "Backend kam nicht hoch" — warf boot() dagegen (Postgres startet nicht), flog die Ausnahme an
+  // der Schleife vorbei direkt in den Fehlerdialog. Genau das passierte einem Nutzer, der die App
+  // schloss und sechs Sekunden später wieder öffnete: ein Zustand, der sich von selbst löst,
+  // beendete die App endgültig.
+  let letzterFehler = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+   try {
     stack = await boot({
       dataDir,
       backendEntry,
@@ -604,18 +646,27 @@ async function start() {
       // Only now: the bridge needs the port of the backend that actually came up (a retry picks a
       // new one), and a tunnel pointed at the failed attempt would proxy to nothing.
       watchDesktopBridge(stack);
-      await win.loadURL(stack.url);
+      await loadWithRetry(win, stack.url);
       return;
     }
 
     log(`backend did not come up on attempt ${attempt}`);
-    if (attempt === 1) {
-      try { await stack.stop(); } catch (e) { log(`teardown before retry failed: ${e}`); }
+   } catch (e) {
+    // embedded-postgres rejects with `undefined` on failure, so the error alone says nothing.
+    // Collect what the machine can still tell us instead of writing "unknown error" into a log
+    // the user is then asked to send us.
+    letzterFehler = e;
+    log(`start attempt ${attempt} failed: ${describeBootFailure(e, dataDir)}`);
+   }
+    if (attempt < 3) {
+      try { await stack?.stop(); } catch (e2) { log(`teardown before retry failed: ${e2}`); }
       stack = null;
-      await win.loadURL(splashUrl('retry'));
+      try { await win.loadURL(splashUrl('retry')); } catch { /* window may be gone */ }
+      await new Promise(r => setTimeout(r, attempt * 3000));   // let the predecessor finish dying
     }
   }
-  throw new Error('Die Datenbank ist auch beim zweiten Versuch nicht gestartet.');
+  throw new Error('Die Datenbank ist auch beim dritten Versuch nicht gestartet.\n\n'
+    + describeBootFailure(letzterFehler, dataDir));
 }
 
 /** What the user looks at while the app comes up. Inline data URL — no extra file to bundle, and
@@ -661,6 +712,27 @@ function splashUrl(mode = 'normal') {
     <p>${line}</p>
     <div class="bar"><i></i></div></div>`;
   return 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
+}
+
+/** Load the app into the window, and do not die of a sleeping laptop.
+ *
+ *  ⚠️ From a real user log: "renderer failed to load: -331 ERR_NETWORK_IO_SUSPENDED", and one
+ *  second later FATAL. That code means the OS suspended network I/O — the machine went to standby
+ *  mid-load. Closing a lid is not a fault, but it ended the app, and the user was then asked to
+ *  send in a log. These codes describe a MOMENT, not a broken install, so we wait the moment out.
+ *
+ *  Anything else — a genuinely dead backend — still throws on the last try, where it belongs. */
+async function loadWithRetry(fenster, url, versuche = 5) {
+  const voruebergehend = /ERR_NETWORK_IO_SUSPENDED|ERR_CONNECTION_REFUSED|ERR_CONNECTION_RESET|ERR_EMPTY_RESPONSE|ERR_NETWORK_CHANGED|ERR_ABORTED/;
+  for (let i = 1; i <= versuche; i++) {
+    try { return await fenster.loadURL(url); }
+    catch (e) {
+      const text = String(e?.message ?? e);
+      if (i === versuche || !voruebergehend.test(text)) throw e;
+      log(`loading the UI failed (${text.split("(")[0].trim()}) — retry ${i}/${versuche - 1} in 2s`);
+      await new Promise(r => setTimeout(r, 2000));
+    }
+  }
 }
 
 async function waitForBackend(base, tries = 360) {   // 360 × 500ms = 3 minutes
