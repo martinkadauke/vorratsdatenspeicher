@@ -5,6 +5,7 @@ import bcrypt from 'bcryptjs';
 import { requireOperator, signToken } from '../auth/plugin.js';
 import sql, { DEMO_MODE } from '../db.js';
 import { DESKTOP_DIR, isDesktop, readBridgeFile } from '../desktop.js';
+import { setConfig } from '../config.js';
 
 // ── Desktop bridge: "Handy verbinden" ───────────────────────────────────────────────────────
 // Only the Electron build sets DESKTOP_DIR; in Docker these endpoints report unavailable and do
@@ -56,6 +57,17 @@ export function desktopRoutes(app: FastifyInstance): void {
       await writeFile(path.join(DESKTOP_DIR, 'tunnel-request'), `${action}\n`, 'utf8');
     } catch (e) {
       return reply.code(500).send({ error: 'shell_unreachable', detail: String((e as Error)?.message ?? e).slice(0, 200) });
+    }
+    // Remember the person, not just the state. The shell resumes a known tunnel on its own at
+    // every start, so its status file cannot answer "who set this up" — only this request can,
+    // and it arrives with a JWT. A household that sees a phone connected deserves to know which
+    // of them opened it. `stop` deliberately leaves the record alone: it says who set it up, not
+    // who touched it last, and switching the tunnel off is not a reason to forget that.
+    if (action === 'start' && req.user?.id) {
+      try {
+        await setConfig('tunnel.enabled_by', req.user.id, req.user.id);
+        await setConfig('tunnel.enabled_at', new Date().toISOString(), req.user.id);
+      } catch { /* bookkeeping — never let it fail the thing the user actually asked for */ }
     }
     return { ok: true, action };
   });

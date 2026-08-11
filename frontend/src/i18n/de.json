@@ -1004,6 +1004,8 @@
     "addUser": "Benutzer anlegen",
     "invite": "Einladen",
     "invitePending": "Einladung ausstehend",
+    "tunnelSetup": "Handy-Verbindung",
+    "tunnelSetupBy": "Hat die Verbindung zum Handy am {{date}} eingerichtet",
     "inviteExpired": "Einladung abgelaufen",
     "resendInvite": "Einladung erneut senden",
     "inviteEmail": "E-Mail des neuen Mitglieds",

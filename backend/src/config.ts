@@ -53,6 +53,12 @@ export interface AppConfig {
   //  'all_new'        — never AI-auto-apply; every new name goes to Prüfen
   'churner.hitl_mode': string;
   'searxng.url': string;
+  // Who last switched the phone tunnel on, and when. Written by the desktop bridge from the
+  // JWT of whoever clicked — the shell can resume a tunnel by itself at boot, but only a person
+  // can ask for one, and that is the person the household sees in Nutzerverwaltung.
+  // 0 / '' = nobody has ever asked (every Docker install, and a desktop before first use).
+  'tunnel.enabled_by': number;
+  'tunnel.enabled_at': string;
   'app.default_lang': string;
   'app.base_url': string;
   // Passkeys/WebAuthn: RP-ID (hostname, no scheme/port) + expected origin. Empty = derive from
@@ -163,6 +169,8 @@ const DEFAULTS: AppConfig = {
   'churner.batch_size': 200,
   'churner.hitl_mode': 'guarded',
   'searxng.url': '',
+  'tunnel.enabled_by': 0,
+  'tunnel.enabled_at': '',
   'app.default_lang': 'de',
   'app.base_url': '',
   'webauthn.rp_id': '',

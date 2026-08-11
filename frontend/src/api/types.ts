@@ -21,6 +21,11 @@ export interface User {
   created_at?: string;
   invite_pending?: boolean;
   invite_expired?: boolean;
+  /** Set on exactly the user who switched the phone tunnel on (desktop build only) — the
+   *  ISO timestamp of when they did. Undefined on everyone else, and on every Docker install. */
+  tunnel_setup_at?: string | null;
+  /** The household member linked to this account, if any. */
+  member_name?: string | null;
 }
 
 // Account nature. Only these two have importable bank statements → a receipt on such

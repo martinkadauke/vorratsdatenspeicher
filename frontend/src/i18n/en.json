@@ -1004,6 +1004,8 @@
     "addUser": "Add user",
     "invite": "Invite",
     "invitePending": "Invitation pending",
+    "tunnelSetup": "Phone link",
+    "tunnelSetupBy": "Set up the phone connection on {{date}}",
     "inviteExpired": "Invitation expired",
     "resendInvite": "Resend invitation",
     "inviteEmail": "Email of the new member",

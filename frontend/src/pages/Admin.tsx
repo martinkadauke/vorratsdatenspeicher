@@ -1069,7 +1069,16 @@ function UsersSection() {
               <div className="min-w-0 flex-1">
                 <div className="flex min-w-0 items-center gap-1.5 truncate font-medium">
                   <span className="truncate">{u.username}</span>
+                  {u.member_name && u.member_name !== u.username && (
+                    <span className="shrink-0 text-xs font-normal text-zinc-400">· {u.member_name}</span>
+                  )}
                   {isSelf && <span className="text-xs font-normal text-zinc-400">({t('admin.you')})</span>}
+                  {u.tunnel_setup_at && (
+                    <span
+                      className="shrink-0 rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 dark:bg-sky-950/50 dark:text-sky-300"
+                      title={t('admin.tunnelSetupBy', { date: new Date(u.tunnel_setup_at).toLocaleDateString() })}
+                    >📱 {t('admin.tunnelSetup')}</span>
+                  )}
                   {u.invite_pending && (
                     <span className="shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">{t('admin.invitePending')}</span>
                   )}

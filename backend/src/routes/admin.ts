@@ -254,7 +254,20 @@ export function adminRoutes(app: FastifyInstance): void {
           EXISTS (SELECT 1 FROM auth_token t WHERE t.user_id = u.id AND t.kind = 'invite')
           AND NOT EXISTS (SELECT 1 FROM auth_token t WHERE t.user_id = u.id AND t.kind = 'invite' AND t.used_at IS NOT NULL)
           AND NOT EXISTS (SELECT 1 FROM auth_token t WHERE t.user_id = u.id AND t.kind = 'invite' AND t.used_at IS NULL AND t.expires_at > NOW())
-        ) AS invite_expired
+        ) AS invite_expired,
+        -- Who opened the phone tunnel. app_config holds one id, so at most one row carries a
+        -- timestamp here — the household reads it as a badge on that person, not as a column.
+        -- The #>> operator unwraps the JSONB scalar to text; a Docker install has no such key
+        -- at all and gets NULL, which is what "nobody ever set this up" should look like.
+        -- Off on the demo on purpose: app_config is platform-global while users is RLS-scoped,
+        -- so a stored id would match a DIFFERENT household's user of the same number. The demo
+        -- has no tunnel and no write path to that key, but a cross-tenant mislabel is not a bug
+        -- worth leaving one accident away.
+        CASE WHEN ${!DEMO_MODE}
+              AND (SELECT value #>> '{}' FROM app_config WHERE key = 'tunnel.enabled_by') = u.id::text
+             THEN (SELECT value #>> '{}' FROM app_config WHERE key = 'tunnel.enabled_at') END AS tunnel_setup_at,
+        -- The person behind the account, when there is one: the household knows "Lena", not "lena2".
+        (SELECT f.name FROM family_member f WHERE f.user_id = u.id ORDER BY f.id LIMIT 1) AS member_name
       FROM users u
       ORDER BY u.id`;
   });
