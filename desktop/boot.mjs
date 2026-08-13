@@ -146,7 +146,7 @@ export async function boot(opts) {
   const fresh = !existsSync(path.join(pgDataDir, 'PG_VERSION'));
   if (fresh) await pg.initialise();
   try {
-    await pg.start();
+    await startPostgres(pg, pgSaid, opts.log);
   } catch (e) {
     // ⚠️ embedded-postgres rejects with NO value here — literally `reject()` — when the server
     // exits before reporting readiness. That undefined is where "unbekannter Fehler" came from.
@@ -261,6 +261,90 @@ export async function boot(opts) {
 }
 
 /**
+ * Start the server, and clear the one obstacle Postgres tells us how to clear.
+ *
+ * From a user's machine, verbatim:
+ *
+ *     FATAL: pre-existing shared memory block is still in use
+ *     HINT:  Check if there are any old server processes still running, and terminate them.
+ *
+ * A force-killed postmaster can leave its background workers (checkpointer, walwriter,
+ * autovacuum) running, and while ONE of them lives it holds the cluster's shared memory — so
+ * Postgres refuses to open that data directory again. Not for a moment: that app was dead for
+ * three days, across a full uninstall and reinstall, because the obstacle was a process and the
+ * installer only removes files. A reboot would have fixed it, which is a miserable thing to have
+ * to know. Postgres names the remedy in its own hint, so do exactly that and try once more.
+ *
+ * The clean shutdown above is what stops these orphans being created; this is for the machines
+ * where one already exists — and for whatever else force-kills a postmaster (a crash, Task
+ * Manager, an antivirus product).
+ */
+async function startPostgres(pg, pgSaid, log) {
+  try {
+    await pg.start();
+  } catch (e) {
+    if (!pgSaid.some(l => /pre-existing shared memory block/i.test(l))) throw e;
+    const killed = await terminateOurPostgres(log);
+    if (!killed) throw e;
+    log?.(`removed ${killed} leftover Postgres process(es) holding the old shared memory — retrying`);
+    pgSaid.length = 0;
+    await pg.start();                       // a second refusal is reported with its own reason
+  }
+}
+
+/**
+ * Terminate Postgres processes belonging to THIS install, and only those.
+ *
+ * Matched by executable path, not by name: a user may well run their own PostgreSQL, and killing
+ * someone's actual database server while trying to fix ours would be an unforgivable way to
+ * "repair" an app. Our binary lives inside the installation directory, so the path is proof of
+ * ownership.
+ *
+ * Windows only — the other platforms get SIGINT from the library and never orphan this way.
+ *
+ * @returns how many processes were terminated.
+ */
+export async function terminateOurPostgres(log) {
+  if (process.platform !== 'win32') return 0;
+  try {
+    const ours = (await pgBinaries()).postgres?.toLowerCase();
+    if (!ours) return 0;
+    // wmic is gone on current Windows 11, so ask CIM. One spawn, and only on the failure path.
+    const out = execFileSync('powershell', ['-NoProfile', '-NonInteractive', '-Command',
+      "Get-CimInstance Win32_Process -Filter \"Name='postgres.exe'\" | " +
+      "ForEach-Object { \"$($_.ProcessId)|$($_.ExecutablePath)\" }"],
+      { encoding: 'utf8', windowsHide: true });
+    let killed = 0;
+    for (const line of out.split(/\r?\n/)) {
+      const [pidText, exePath] = line.split('|');
+      const pid = parseInt((pidText || '').trim(), 10);
+      if (!Number.isFinite(pid) || !exePath) continue;
+      if (exePath.trim().toLowerCase() !== ours) continue;            // someone else's Postgres
+      try {
+        execFileSync('taskkill', ['/F', '/PID', String(pid)], { stdio: 'ignore', windowsHide: true });
+        killed++;
+      } catch { /* already gone between listing and killing */ }
+    }
+    return killed;
+  } catch (e) {
+    log?.(`could not look for leftover Postgres processes: ${String(e?.message ?? e).slice(0, 160)}`);
+    return 0;
+  }
+}
+
+/**
+ * The Postgres binaries this install ships — the same lookup embedded-postgres does internally.
+ * Its package `exports` field blocks both a deep import of that helper and require.resolve of the
+ * platform package's package.json (which silently returned null here and made the repair a no-op),
+ * so the platform package itself is imported: it exports the three paths directly.
+ */
+async function pgBinaries() {
+  const plat = process.platform === 'win32' ? 'windows' : process.platform;
+  const mod = await import(`@embedded-postgres/${plat}-${process.arch}`);
+  return mod.default ?? mod;
+}
+
+/**
  * Does this pid belong to a Postgres process, or merely to *a* process? postmaster.pid records a
  * number, and a number outlives the thing it named — on Windows especially, where pids are handed
  * out again quickly. Unknown → treated as Postgres: a needless wait is cheap, and mistaking a real
@@ -301,11 +385,7 @@ function pidIsPostgres(pid) {
 async function shutdownPostgres(pgDataDir, log) {
   if (!existsSync(path.join(pgDataDir, 'postmaster.pid'))) return true;   // already down
   try {
-    // Same resolution embedded-postgres uses internally; its package exports block a deep import
-    // of that helper, so the platform package is loaded directly. win32 is spelled "windows".
-    const plat = process.platform === 'win32' ? 'windows' : process.platform;
-    const mod = await import(`@embedded-postgres/${plat}-${process.arch}`);
-    const pgCtl = (mod.default ?? mod).pg_ctl;
+    const pgCtl = (await pgBinaries()).pg_ctl;
     if (!pgCtl || !existsSync(pgCtl)) return false;
     const code = await new Promise((resolve) => {
       const p = spawn(pgCtl, ['-D', pgDataDir, '-m', 'fast', '-w', '-t', '20', 'stop'],
