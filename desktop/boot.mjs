@@ -1,5 +1,5 @@
 import EmbeddedPostgres from 'embedded-postgres';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
@@ -98,22 +98,28 @@ export async function boot(opts) {
     catch { return NaN; }
   };
   if (existsSync(pidFile)) {
-    // ⚠️ A LIVE pid here is usually not "a second VDS is running" — it is the one the user just
-    // closed, still shutting down. From the field: closed 06:26:51, reopened 06:26:57, Postgres
-    // refused the data directory and the app died. Six seconds is exactly how fast somebody
-    // reopens an app they closed by accident, so "leave a live pid alone" turned an ordinary
-    // action into a broken start. Give the predecessor a moment to let go.
+    // ⚠️ "Alive" is not the question — "is it OURS" is. Until the clean shutdown below, every
+    // close left this file behind naming a dead pid, and Windows recycles pids fast: waiting on
+    // a live stranger would stall EVERY launch for the full timeout and change nothing.
+    // Measured against real Postgres 17: a lock file naming a live NON-Postgres process does not
+    // stop the server at all. So wait only for an actual predecessor Postgres — the case that is
+    // real (closed 06:26:51, reopened 06:26:57) and the only one where waiting buys anything.
     for (let waited = 0; waited < 20_000 && existsSync(pidFile); waited += 500) {
       const pid = readPid();
-      if (!Number.isFinite(pid) || !pidAlive(pid)) break;      // gone → the lock is stale
+      if (!Number.isFinite(pid) || !pidAlive(pid) || !pidIsPostgres(pid)) break;
       if (waited === 0) opts.log?.('a previous Postgres still holds the data directory — waiting for it to exit');
       await new Promise(r => setTimeout(r, 500));
     }
     const pid = readPid();
     if (!Number.isFinite(pid) || !pidAlive(pid)) rmSync(pidFile, { force: true });
-    else opts.log?.(`Postgres pid ${pid} still alive after 20s — starting anyway; it may refuse the directory`);
+    else if (pidIsPostgres(pid)) opts.log?.(`Postgres pid ${pid} still alive after 20s — starting anyway; it may refuse the directory`);
   }
 
+  // Postgres explains every refusal in plain words on stderr, and embedded-postgres hands those
+  // words to onLog — whose default is `console.log`. In a packaged Electron app that is a closed
+  // pipe. Four identical crash reports came in reading "unbekannter Fehler" while the sentence
+  // that explains them was being printed into a void. The database gets a voice in our log.
+  const pgSaid = [];
   const pg = new EmbeddedPostgres({
     databaseDir: pgDataDir,
     user: 'vds',
@@ -123,12 +129,33 @@ export async function boot(opts) {
     // MUST be UTF8 — VDS's SQL + data carry umlauts, emoji and box-drawing chars. On Windows
     // initdb otherwise defaults to the OS locale (e.g. WIN1252), which can't represent them.
     initdbFlags: ['--encoding=UTF8', '--locale=C'],
+    onLog: (msg) => {
+      // Line by line: a Postgres traceback arrives as one chunk, and a length-capped chunk cuts
+      // off exactly the last line — which is the one naming the reason.
+      for (const line of String(msg).split(/\r?\n/)) {
+        const text = line.trim();
+        if (!text) continue;
+        pgSaid.push(text);
+        if (pgSaid.length > 40) pgSaid.shift();
+        opts.log?.(`postgres: ${text.slice(0, 500)}`);
+      }
+    },
   });
 
   // initdb only on first run; a persistent cluster is reused across restarts (data survives).
   const fresh = !existsSync(path.join(pgDataDir, 'PG_VERSION'));
   if (fresh) await pg.initialise();
-  await pg.start();
+  try {
+    await pg.start();
+  } catch (e) {
+    // ⚠️ embedded-postgres rejects with NO value here — literally `reject()` — when the server
+    // exits before reporting readiness. That undefined is where "unbekannter Fehler" came from.
+    // Everything needed to name the cause is in pgSaid; carry it into the error instead.
+    const reasons = pgSaid.filter(l => /FATAL|PANIC|error:|could not|denied|no space/i.test(l));
+    const detail = (reasons.length ? reasons : pgSaid).slice(-5).join('\n');
+    throw new Error(`Die Datenbank hat den Start abgebrochen.${detail ? `\n\n${detail}` : ''}`,
+      e instanceof Error ? { cause: e } : undefined);
+  }
   if (fresh) {
     try { await pg.createDatabase('vorratsdatenspeicher'); } catch { /* already exists */ }
   }
@@ -224,9 +251,78 @@ export async function boot(opts) {
     async stop() {
       try { child.kill(); } catch { /* already gone */ }
       try { searxng?.stop(); } catch { /* already gone */ }
-      try { await pg.stop(); } catch { /* already stopped */ }
+      // ⚠️ Do NOT fall through to pg.stop() once pg_ctl has done the job: its stop() awaits an
+      // 'exit' event it subscribes to AFTER the fact, and a process that has already exited never
+      // emits one again — the await would hang forever, on the path that closes the app.
+      const clean = await shutdownPostgres(pgDataDir, opts.log);
+      if (!clean) { try { await pg.stop(); } catch { /* already stopped */ } }
     },
   };
+}
+
+/**
+ * Does this pid belong to a Postgres process, or merely to *a* process? postmaster.pid records a
+ * number, and a number outlives the thing it named — on Windows especially, where pids are handed
+ * out again quickly. Unknown → treated as Postgres: a needless wait is cheap, and mistaking a real
+ * database for a stranger is not.
+ */
+function pidIsPostgres(pid) {
+  try {
+    const out = process.platform === 'win32'
+      ? execFileSync('tasklist', ['/FI', `PID eq ${pid}`, '/NH', '/FO', 'CSV'], { encoding: 'utf8', windowsHide: true })
+      : execFileSync('ps', ['-p', String(pid), '-o', 'comm='], { encoding: 'utf8' });
+    // tasklist prints an "INFO: No tasks…" line rather than failing when the pid is gone.
+    if (/no tasks/i.test(out) || !out.trim()) return false;
+    return /postgres/i.test(out);
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Shut the database down the way Postgres wants to be shut down.
+ *
+ * embedded-postgres's own stop() runs `taskkill /f /t` on Windows — TerminateProcess, the exact
+ * thing a database must never receive. (Its else-branch sends SIGINT, so Mac and Linux were fine
+ * and only Windows users had a cluster killed mid-write.) Measured, not assumed: after that stop,
+ * postmaster.pid was still on disk and the next start said
+ *
+ *     database system was not properly shut down; automatic recovery in progress
+ *
+ * — on every single close. Recovery usually succeeds, which is why nobody noticed for months; a
+ * database that is force-killed a hundred times is still playing the odds every launch.
+ *
+ * `pg_ctl -m fast` is the documented way: it stops accepting connections, rolls back open
+ * transactions, checkpoints, and exits. It comes out of the same package as the server binary,
+ * so there is no path to guess and no second Postgres to install.
+ *
+ * @returns true when the server is verifiably down (caller must then NOT call pg.stop()).
+ */
+async function shutdownPostgres(pgDataDir, log) {
+  if (!existsSync(path.join(pgDataDir, 'postmaster.pid'))) return true;   // already down
+  try {
+    // Same resolution embedded-postgres uses internally; its package exports block a deep import
+    // of that helper, so the platform package is loaded directly. win32 is spelled "windows".
+    const plat = process.platform === 'win32' ? 'windows' : process.platform;
+    const mod = await import(`@embedded-postgres/${plat}-${process.arch}`);
+    const pgCtl = (mod.default ?? mod).pg_ctl;
+    if (!pgCtl || !existsSync(pgCtl)) return false;
+    const code = await new Promise((resolve) => {
+      const p = spawn(pgCtl, ['-D', pgDataDir, '-m', 'fast', '-w', '-t', '20', 'stop'],
+        { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+      let err = '';
+      p.stderr?.on('data', (c) => { err += String(c); });
+      p.on('error', () => resolve(-1));
+      p.on('close', (c) => { if (c !== 0 && err.trim()) log?.(`pg_ctl stop: ${err.trim().slice(0, 300)}`); resolve(c); });
+      // A shutdown must not be able to hang the quit. -t 20 already bounds pg_ctl; this bounds
+      // pg_ctl itself failing to return, and hands the fallback its turn.
+      setTimeout(() => { try { p.kill(); } catch { /* gone */ } resolve(-1); }, 25_000).unref?.();
+    });
+    if (code === 0) { log?.('database shut down cleanly'); return true; }
+  } catch (e) {
+    log?.(`clean shutdown unavailable (${String(e?.message ?? e).slice(0, 120)}) — falling back`);
+  }
+  return false;
 }
 
 /** Default forker for non-Electron contexts (the headless smoke): run the backend under Node. */
