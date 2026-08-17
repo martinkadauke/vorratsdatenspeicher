@@ -16,7 +16,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const backendEntry = path.resolve(__dirname, '..', '..', 'backend', 'dist', 'index.js');
 const dataDir = process.argv[2] || path.resolve(__dirname, '..', '.smoke-data');
 
-async function waitFor(base, tries = 90) {
+// 90 tries = 45 s, which a FIRST run against an empty data directory sometimes misses: it has to
+// initdb a cluster and apply every migration before the first request is served. Observed twice
+// here — cold run red, immediate re-run green — i.e. the test was stricter than the app, which
+// waits far longer and tells the user "first run creates the database". A dead backend still
+// fails, two minutes later; a slow first boot no longer does.
+async function waitFor(base, tries = 240) {
   for (let i = 0; i < tries; i++) {
     try { const r = await fetch(`${base}/api/version`); if (r.ok) return await r.json(); } catch { /* not up */ }
     await new Promise(r => setTimeout(r, 500));

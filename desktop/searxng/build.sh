@@ -46,8 +46,23 @@ case "$(uname -s)|$(uname -m)" in
   Darwin\|x86_64)        PY_PLAT=x86_64-apple-darwin ;;
   *) echo "::error::no pinned Python for $(uname -s)/$(uname -m)"; exit 1 ;;
 esac
+# ⚠️ --fail, and a retry. Without --fail curl happily writes an ERROR PAGE into the target file and
+# exits 0; the failure then surfaces four lines later as "gzip: stdin: not in gzip format", which
+# describes our tar's confusion rather than the event. A release build died exactly that way when
+# GitHub answered 429 to both runners at once. Now a bad response says so — and a rate limit, the
+# one failure that reliably fixes itself, is waited out instead of failing a release.
+fetch() {   # fetch <target-file> <url>
+  curl -sSL --fail --retry 5 --retry-delay 3 --retry-all-errors -o "$1" "$2" \
+    || { echo "::error::download failed: $2"; exit 1; }
+  # Prove it is an archive before handing it to tar: a 200 with an HTML body is still not a tarball.
+  case "$(od -An -tx1 -N2 "$1" | tr -d ' \n')" in
+    1f8b) ;;
+    *) echo "::error::$2 did not return a gzip archive — first bytes: $(od -An -c -N16 "$1")"; exit 1 ;;
+  esac
+}
+
 echo "== fetching CPython $PY_VER ($PY_PLAT) =="
-curl -sSL -o py.tar.gz \
+fetch py.tar.gz \
   "https://github.com/astral-sh/python-build-standalone/releases/download/$PY_REL/cpython-$PY_VER+$PY_REL-$PY_PLAT-install_only.tar.gz"
 tar -xzf py.tar.gz          # unpacks a top-level python/
 rm -f py.tar.gz
@@ -63,7 +78,7 @@ else echo "::error::no interpreter in the extracted runtime"; ls -R python | hea
 # colon is illegal in an NTFS path, so the checkout aborts on Windows — including on the
 # windows-latest runner. The tarball lets us extract only the parts we run.
 echo "== fetching SearXNG ($REF) =="
-curl -sSL -o src.tar.gz "https://codeload.github.com/searxng/searxng/tar.gz/$REF"
+fetch src.tar.gz "https://codeload.github.com/searxng/searxng/tar.gz/$REF"
 # ⚠️ --wildcards is GNU-only; macOS ships BSD tar and fails outright ("Option --wildcards is not
 # supported"). BSD tar globs extraction patterns by default, GNU tar needs to be told. Extracting
 # everything instead is NOT an option — the colon-bearing files above are the reason we are
@@ -118,23 +133,29 @@ cp "$SRC_DIR/settings.yml" settings.yml
 # importing against the template only ever proves that check works.
 echo "== verifying =="
 sed -e "s/__SECRET_KEY__/verify-only-never-shipped/" -e "s/__PORT__/18099/" settings.yml > .verify.yml
-# PYTHONPYCACHEPREFIX exactly as searxng.mjs sets it at runtime — this import IS the rehearsal.
-SEARXNG_SETTINGS_PATH="$PWD/.verify.yml" PYTHONPATH="$PWD/lib:$PWD" PYTHONPYCACHEPREFIX="$PWD/.verify-cache" \
+# ⚠️ THE BUNDLE MUST STAY EXACTLY AS IT WILL BE SIGNED. Python's default is a __pycache__ directory
+# next to every module it imports, and PYTHONPATH points into the app bundle — so on macOS the app
+# broke its OWN code signature merely by starting, and the second launch was refused by Gatekeeper:
+# "is damaged and can't be opened. You should move it to the Trash." It worked once, then told the
+# user to delete it.
+#
+# The test is not "are there any .pyc files here" — the bundled CPython legitimately ships its
+# standard library precompiled, and those are signed along with everything else and never rewritten.
+# The test is whether IMPORTING ADDS ANYTHING. So: take stock, run the same import the app runs with
+# the same cache redirect the app uses, and compare. A build that would ship a self-destructing app
+# fails right here.
+BEFORE=$(find . -type f | LC_ALL=C sort)
+SEARXNG_SETTINGS_PATH="$PWD/.verify.yml" PYTHONPATH="$PWD/lib:$PWD" \
+  PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/vds-verify-pycache" \
   "$PYBIN" -c "import searx.webapp; print('   searx.webapp imports OK')"
-rm -rf .verify.yml .verify-cache
-
-# ⚠️ THE BUNDLE MUST STAY EXACTLY AS SIGNED. Python's default is a __pycache__ directory next to
-# every module it imports, and PYTHONPATH points into the app bundle — so on macOS the app broke
-# its OWN code signature by starting, and the second launch was refused by Gatekeeper with "is
-# damaged and can't be opened. You should move it to the Trash." It worked once, then told the
-# user to delete it. The import above proves the redirect works on this interpreter; this proves
-# nothing slipped past it. A build that would ship a self-destructing app fails here instead.
-STRAY=$(find . -name '__pycache__' -o -name '*.pyc' | head -5)
-if [ -n "$STRAY" ]; then
-  echo "::error::bytecode caches inside the bundle — the app would break its own signature on macOS:"
-  echo "$STRAY"
+ADDED=$(comm -13 <(printf '%s\n' "$BEFORE") <(find . -type f | LC_ALL=C sort))
+rm -rf .verify.yml "${TMPDIR:-/tmp}/vds-verify-pycache"
+if [ -n "$ADDED" ]; then
+  echo "::error::importing wrote into the bundle — on macOS this breaks the code signature and the"
+  echo "::error::app is refused as \"damaged\" on its SECOND launch. Files added:"
+  printf '%s\n' "$ADDED" | sed -n '1,10p'
   exit 1
 fi
-echo "   bundle is free of bytecode caches"
+echo "   the import added nothing to the bundle"
 
 echo "== done: $(du -sh . | cut -f1) =="
