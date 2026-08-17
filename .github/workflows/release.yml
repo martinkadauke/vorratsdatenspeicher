@@ -162,6 +162,13 @@ jobs:
         working-directory: desktop
         run: node scripts/check-packaging.mjs
 
+      # The disk image has no drag target, so the app installing itself IS the install. Its
+      # decisions are pure functions precisely so they can be proven here, on either runner,
+      # without a Mac or a mounted image.
+      - name: Check the self-install decisions
+        working-directory: desktop
+        run: node scripts/check-selfinstall.mjs
+
       # extraMetadata.version stamps the RELEASE version into the packaged app: it names the
       # artifacts (…Setup 1.0.16.exe, not the stale 1.0.0 from desktop/package.json) and is what
       # app.getVersion() — and therefore the in-app version/update check — reports at runtime.

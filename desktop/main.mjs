@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { boot } from './boot.mjs';
 import { startTunnel, sidecarPath, hasTunnelState } from './tunnel.mjs';
+import { selfInstall } from './selfInstall.mjs';
 
 // ⚠️ MUST run before any app.getPath('userData'): Electron derives userData from the app NAME,
 // which defaults to productName — "Vorratsdatenspeicher Desktop" — giving a path WITH A SPACE.
@@ -559,6 +560,11 @@ function watchRenderer(w) {
 }
 
 async function start() {
+  // Before anything expensive or visible: if we are running from the mounted disk image, put
+  // ourselves into Applications and hand over to the copy. Doing it here rather than at module
+  // load keeps dialogs legal (they need a ready app) and costs one filesystem check otherwise.
+  if (await selfInstall({ app, dialog, log })) { app.quit(); return; }
+
   // No native menu bar — this is an appliance, not a document editor (removes File/Edit/View/…).
   Menu.setApplicationMenu(null);
   // Let the bundled backend report the real release version (/api/version → drives the in-app

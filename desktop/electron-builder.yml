@@ -37,6 +37,7 @@ files:
   - boot.mjs
   - tunnel.mjs
   - searxng.mjs
+  - selfInstall.mjs
   - package.json
   - node_modules/**/*
 
@@ -102,6 +103,24 @@ mac:
   # installed and never opened. Ad-hoc costs nothing and needs no Apple account; electron-builder
   # 25.x cannot do it on its own, hence the hook. See scripts/adhoc-sign.mjs.
   sign: ./scripts/adhoc-sign.mjs
+
+# Double-click to install: ONE icon in the disk image and no /Applications drag target, because
+# the app copies ITSELF into Applications on first launch and relaunches from there (see
+# selfInstall.mjs). The drag step is the one people skip — and then they run VDS from the mounted
+# image for weeks and lose it the moment they eject.
+#
+# ⚠️ This is unrelated to the "Apple could not verify …" dialog, which is the absence of
+# notarization and can only be removed by paying Apple. A self-installing app still shows it once.
+dmg:
+  title: Vorratsdatenspeicher ${version}
+  iconSize: 128
+  contents:
+    - x: 180
+      y: 170
+      type: file
+  window:
+    width: 360
+    height: 300
 linux:
   target: AppImage
   category: Utility
