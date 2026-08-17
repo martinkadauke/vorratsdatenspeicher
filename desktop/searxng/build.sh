@@ -118,7 +118,23 @@ cp "$SRC_DIR/settings.yml" settings.yml
 # importing against the template only ever proves that check works.
 echo "== verifying =="
 sed -e "s/__SECRET_KEY__/verify-only-never-shipped/" -e "s/__PORT__/18099/" settings.yml > .verify.yml
-SEARXNG_SETTINGS_PATH="$PWD/.verify.yml" PYTHONPATH="$PWD/lib:$PWD"   "$PYBIN" -c "import searx.webapp; print('   searx.webapp imports OK')"
-rm -f .verify.yml
+# PYTHONPYCACHEPREFIX exactly as searxng.mjs sets it at runtime — this import IS the rehearsal.
+SEARXNG_SETTINGS_PATH="$PWD/.verify.yml" PYTHONPATH="$PWD/lib:$PWD" PYTHONPYCACHEPREFIX="$PWD/.verify-cache" \
+  "$PYBIN" -c "import searx.webapp; print('   searx.webapp imports OK')"
+rm -rf .verify.yml .verify-cache
+
+# ⚠️ THE BUNDLE MUST STAY EXACTLY AS SIGNED. Python's default is a __pycache__ directory next to
+# every module it imports, and PYTHONPATH points into the app bundle — so on macOS the app broke
+# its OWN code signature by starting, and the second launch was refused by Gatekeeper with "is
+# damaged and can't be opened. You should move it to the Trash." It worked once, then told the
+# user to delete it. The import above proves the redirect works on this interpreter; this proves
+# nothing slipped past it. A build that would ship a self-destructing app fails here instead.
+STRAY=$(find . -name '__pycache__' -o -name '*.pyc' | head -5)
+if [ -n "$STRAY" ]; then
+  echo "::error::bytecode caches inside the bundle — the app would break its own signature on macOS:"
+  echo "$STRAY"
+  exit 1
+fi
+echo "   bundle is free of bytecode caches"
 
 echo "== done: $(du -sh . | cut -f1) =="

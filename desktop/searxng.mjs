@@ -87,6 +87,14 @@ export function startSearxng({ stateDir, bundleDir, port, log = () => {} }) {
       PYTHONPATH: `${path.join(bundleDir, 'lib')}${path.delimiter}${bundleDir}`,
       SEARXNG_SETTINGS_PATH: settings,
       PYTHONUNBUFFERED: '1',
+      // ⚠️ THE APP MUST NEVER WRITE INSIDE ITS OWN BUNDLE. Python's default is to drop a
+      // __pycache__ directory NEXT TO every module it imports — and PYTHONPATH above points
+      // straight into the .app. On macOS the bundle is sealed by its code signature, so those
+      // files break the seal, and the SECOND launch is refused by Gatekeeper with "is damaged
+      // and can't be opened. You should move it to the Trash." An app that works once and then
+      // tells the user to delete it. The prefix keeps the caches (and the startup speed they
+      // buy) but puts the whole mirrored tree in our writable state directory instead.
+      PYTHONPYCACHEPREFIX: path.join(stateDir, 'pycache'),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
