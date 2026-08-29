@@ -85,8 +85,16 @@ jobs:
     environment: ${{ needs.meta.outputs.env }}
     steps:
       - uses: actions/checkout@v4
-      - name: Login to GHCR
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      # ⚠️ DELIBERATELY NOT logging in, and deliberately CLEARING any stored login. The package is
+      # public, so nodes can pull anonymously — but `docker login` + `--with-registry-auth` handed
+      # the swarm the job's GITHUB_TOKEN, which dies when the job ends. Every later reschedule then
+      # presented a corpse and GHCR answered "denied", which reads exactly like a missing image:
+      # vds-1 could not run prod or stage at all after the 2026-08-26 reboot. Measured on the node:
+      #   with the stored credential  -> denied: denied
+      #   with an empty docker config -> works
+      # A credential that expires is worse than no credential when the thing it guards is public.
+      - name: Ensure no expiring GHCR credential is stored
+        run: docker logout ghcr.io || true
       # Every deploy pulls a fresh <sha>-tagged image; old ones pile up and eventually
       # fill the runner's small disk (No space left on device → deploy fails). Prune
       # BEFORE the pull. `-a` keeps images still in use by a running service (all 3 envs
@@ -106,10 +114,12 @@ jobs:
           PORT: ${{ needs.meta.outputs.port }}
           STACK: ${{ needs.meta.outputs.stack }}
           VDS_ENV: ${{ needs.meta.outputs.env == 'production' && 'prod' || needs.meta.outputs.env == 'staging' && 'stage' || 'dev' }}
-          # Optional host path for receipt photos. If unset, stack.yml falls back
-          # to a named volume (vds-receipts) so deploys never break.
-          RECEIPTS_VOLUME: ${{ vars.RECEIPTS_VOLUME }}
-        run: docker stack deploy --with-registry-auth --detach=false -c deploy/stack.yml "$STACK"
+          # Receipts NAS. Required — stack.yml refuses to deploy without them rather than
+          # silently parking the household's receipts on a node's unprotected local disk.
+          RECEIPTS_NFS_ADDR: ${{ vars.RECEIPTS_NFS_ADDR }}
+          RECEIPTS_NFS_PATH: ${{ vars.RECEIPTS_NFS_PATH }}
+          RECEIPTS_NFS_VERS: ${{ vars.RECEIPTS_NFS_VERS }}
+        run: docker stack deploy --detach=false -c deploy/stack.yml "$STACK"
       # Gate the build on the running SHA, NOT just on "docker stack deploy exited 0".
       # A boot/migration crash or a node out of disk makes Swarm silently roll back to
       # the previous image (service stays 2/2 on the OLD sha) while CI stays green — the

@@ -13,15 +13,10 @@ services:
       RECEIPTS_LOCAL_PATH: "${RECEIPTS_LOCAL_PATH:-/receipts}"
     ports:
       - "${PORT:-8766}:80"   # 8766 = prod, 8767 = staging — gesetzt von cicd.yml
-    # Belege werden unter /receipts persistiert. Default: named volume
-    # (Docker verwaltet → keine Pfad-Annahmen, Deploy klappt immer).
-    # Override für Bind-Mount auf einen bestehenden Host-Ordner:
-    #   docker stack deploy ... # mit RECEIPTS_VOLUME=/mnt/user/Aufnahmen/receipts
-    # Single-Machine-User (Unraid Template / docker-compose) setzen
-    # RECEIPTS_VOLUME einfach auf ihren bevorzugten Pfad — die App serviert
-    # die Bilder dann direkt unter /receipts/* (kein NPM nötig).
+    # Receipts live on the NAS, mounted per task as an NFS volume — see the volumes
+    # block at the bottom for why it must not be a host bind mount.
     volumes:
-      - "${RECEIPTS_VOLUME:-vds-receipts}:/receipts"
+      - "receipts:/receipts"
     healthcheck:
       # Node statt wget — garantiert im Image vorhanden, deutlich robuster
       test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:80/api/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
@@ -31,6 +26,20 @@ services:
       start_period: 45s
     deploy:
       replicas: 2
+      # ⚠️ "2/2 replicas" is not redundancy if both sit on one machine. On 2026-08-26 BOTH
+      # replicas of prod AND of stage were running on vds-2, and both dev replicas on vds-3 —
+      # every stack a single point of failure while the dashboard read healthy. spread is only
+      # a preference (it loses when a node looks ineligible, e.g. it cannot pull the image),
+      # so the hard cap is what actually guarantees it.
+      #
+      # ⚠️ With order: start-first below, an update needs a node WITHOUT a running replica to
+      # start the new task on: 3 nodes and 2 replicas is exactly enough. Deploying while a node
+      # is down will therefore stall and roll back — which is the honest outcome, but know it
+      # before blaming the release.
+      placement:
+        max_replicas_per_node: 1
+        preferences:
+          - spread: node.id
       update_config:
         order: start-first       # neue Instanz hochfahren BEVOR alte stoppt → zero downtime
         parallelism: 1
@@ -43,5 +52,31 @@ services:
         condition: any
         delay: 5s
 
+# ── receipts: an NFS VOLUME, deliberately not a bind mount ────────────────────────────────────
+# Unraid user shares are FUSE (shfs), so inode numbers change on reboot and NFS file handles into
+# them go stale — while the export and its fsid look untouched. With the old
+#   type=bind /mnt/user/Aufnahmen/receipts -> /receipts
+# every surviving swarm node then REFUSED NEW TASKS with
+#   "invalid mount config for type bind: stat /mnt/user/Aufnahmen/receipts: stale file handle"
+# so vds-dev went down and could not be rescheduled anywhere. Prod and stage survived only because
+# their containers happened not to restart: a running container keeps a working mount, and only a
+# restart trips the trap. A cluster that cannot place a task is worse than one that cannot read a
+# file, so Docker mounts NFS PER TASK now — a stale mount can no longer block scheduling.
+#
+# Per-environment subfolders (prod/stage/dev): all three environments previously wrote into ONE
+# shared folder, so any environment could overwrite another's receipt.
+#
+# ⚠️ Required, with no fallback on purpose. An unset address used to fall back to a node-local
+# named volume, which deploys fine and then quietly writes the household's receipts onto a single
+# unprotected NVMe that nothing backs up. Failing the deploy is the kinder outcome.
+#
+# ⚠️ driver_opts are frozen when the volume is CREATED. Changing anything here (address, version,
+# path) does nothing on a node that already has the volume — delete it there first:
+#   docker volume rm <stack>_receipts
 volumes:
-  vds-receipts:
+  receipts:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: "addr=${RECEIPTS_NFS_ADDR:?receipts NFS server address is required},nfsvers=${RECEIPTS_NFS_VERS:-4},rw,soft,timeo=600"
+      device: ":${RECEIPTS_NFS_PATH:?receipts NFS export path is required}/${VDS_ENV:-prod}"
