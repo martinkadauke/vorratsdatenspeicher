@@ -80,3 +80,15 @@ volumes:
       type: nfs
       o: "addr=${RECEIPTS_NFS_ADDR:?receipts NFS server address is required},nfsvers=${RECEIPTS_NFS_VERS:-4},rw,soft,timeo=600"
       device: ":${RECEIPTS_NFS_PATH:?receipts NFS export path is required}/${VDS_ENV:-prod}"
+
+# ── Operating this, learned the hard way on 2026-08-29 ───────────────────────────────────────
+# ⚠️ Volumes must be created ON EACH NODE. `docker -H ssh://<other-node>` does not work here, and
+#    a swallowed failure is invisible: Docker then auto-creates an EMPTY local volume of the same
+#    name, the service starts happily, and the app sees zero receipts.
+# ⚠️ `docker service update --mount-rm X --mount-add …X` in ONE command cancels out — the removal
+#    wins and the service ends up with no mount at all. Two separate updates.
+# ⚠️ A service pins its image BY DIGEST. Pre-seeding a node with `docker pull <tag>` is not enough
+#    if the digest differs; pull the exact `<tag>@sha256:…` from
+#    `docker service inspect <svc> --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}'`.
+# ⚠️ A rollback restores the OLD spec — including a bind mount to a path that is already stale.
+#    So a failed update cannot recover itself while the broken path is still in the spec.
