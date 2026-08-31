@@ -31,6 +31,17 @@ if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(() => { /* ignore */ });
   });
+  // The worker precaches the app so it OPENS without a network. When that fails it must not throw
+  // — being offline during install is legitimate — but it must not be silent either: a cache that
+  // is quietly empty looks identical to a working install until someone is standing in a shop.
+  // The desktop shell already writes renderer console output into vds-desktop.log, so this lands
+  // in the same file as everything else.
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    const d = e.data;
+    if (!d || d.type !== 'vds:precache') return;
+    if (d.ok) console.info(`[vds] offline-ready: ${d.files} files cached (build ${d.buildId})`);
+    else console.warn(`[vds] offline cache NOT ready: ${d.error}`);
+  });
 }
 
 const queryClient = new QueryClient({
