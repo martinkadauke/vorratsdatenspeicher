@@ -14,5 +14,13 @@ services:
       # shared secret guarding the internal API (/api/internal/*)
       INTERNAL_SECRET: ${INTERNAL_SECRET}
       PORT: 80
+    # ⚠️ Was a bind mount to the AUTHOR'S OWN NAS path, mounted read-only at
+    # /app/public/receipts — a location the app stopped reading years ago (it serves from
+    # RECEIPTS_LOCAL_PATH, default /receipts). So this file gave anyone who ran it an app with
+    # no receipt photos, and gave the author an app that could not save one. A named volume is
+    # what the README hands self-hosters, and it works on every machine.
     volumes:
-      - /mnt/user/Aufnahmen/receipts:/app/public/receipts:ro
+      - vds-receipts:/receipts
+
+volumes:
+  vds-receipts: {}
