@@ -1,4 +1,5 @@
 import './env.js';
+import { startReceiptsWatch, receiptsHealth } from './receiptsHealth.js';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import path from 'node:path';
@@ -10,7 +11,7 @@ import { checkSecrets } from './lib/checkSecrets.js';
 import { backfillAliases, backfillArtikelOcrKey } from './lib/canonicalAlias.js';
 import { PORT, getConfig, effectiveBaseUrl } from './config.js';
 import { setEmailBaseUrl } from './email/templates.js';
-import { registerAuth } from './auth/plugin.js';
+import { registerAuth, requireAdmin } from './auth/plugin.js';
 import { authRoutes } from './auth/routes.js';
 import { webauthnRoutes } from './auth/webauthn.js';
 import { receiptRoutes } from './routes/receipts.js';
@@ -125,7 +126,13 @@ async function main(): Promise<void> {
 
   // Liveness only — process responds. DB-Verbindung wird beim Start migrate() validiert,
   // wenn die DB später langsam ist sollen NICHT alle Replicas gleichzeitig sterben.
+  // ⚠️ Stays `ok: true` even when the receipts share is broken, and that is the whole point: this
+  // endpoint drives the container healthcheck, and an unhealthy container gets restarted. A stale
+  // mount that a restart cannot fix would turn "no photos" into "no app" (2026-09-14: the Docker
+  // daemon held the dead reference and every restart failed identically). The receipts state is
+  // reported through /api/admin/receipts-health and a push to the admins instead.
   app.get('/api/health', async () => ({ ok: true }));
+  app.get('/api/admin/receipts-health', { preHandler: requireAdmin }, async () => receiptsHealth());
   app.get('/api/ready', async () => {
     const [row] = await sql`SELECT 1 AS ok`;
     return { ok: row.ok === 1 };
@@ -194,6 +201,12 @@ async function main(): Promise<void> {
   if (DEMO_MODE) demoRoutes(app);
 
   const receiptsDir = process.env.RECEIPTS_LOCAL_PATH ?? '/receipts';
+  // Say it out loud when the receipts share dies. Twice now it went unnoticed for days behind a
+  // green healthcheck — see receiptsHealth.ts for why this reports rather than restarts.
+  startReceiptsWatch(receiptsDir, {
+    warn: (m) => app.log.warn(m),
+    info: (m) => app.log.info(m),
+  });
 
   // Static SPA. Vite emits content-hashed assets under /assets/* (safe to cache
   // forever), but index.html points at the current hashes and MUST always be

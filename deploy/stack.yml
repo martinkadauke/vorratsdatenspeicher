@@ -16,7 +16,7 @@ services:
     # Receipts live on the NAS, mounted per task as an NFS volume — see the volumes
     # block at the bottom for why it must not be a host bind mount.
     volumes:
-      - "receipts:/receipts"
+      - "receipts_v2:/receipts"
     healthcheck:
       # Node statt wget — garantiert im Image vorhanden, deutlich robuster
       test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:80/api/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
@@ -66,6 +66,15 @@ services:
 # Per-environment subfolders (prod/stage/dev): all three environments previously wrote into ONE
 # shared folder, so any environment could overwrite another's receipt.
 #
+# ⚠️ RECEIPTS_NFS_PATH must point at a REAL filesystem (/mnt/diskN/...), never at /mnt/user/...
+# The latter is FUSE (shfs): its inode numbers are handed out at runtime and change on every
+# Unraid reboot, and NFS file handles encode inode numbers — so every client handle into that
+# share dies the moment the NAS restarts, while the server stays perfectly healthy. That cost
+# prod three days of missing receipt photos in August and four days in September, both times
+# behind a green healthcheck. /mnt/diskN is XFS and its inodes live on the platter.
+# The export itself is (re)created by the Unraid User Script `vds-receipts-export`, because
+# Unraid regenerates /etc/exports and would otherwise drop a hand-made line on the next boot.
+#
 # ⚠️ Required, with no fallback on purpose. An unset address used to fall back to a node-local
 # named volume, which deploys fine and then quietly writes the household's receipts onto a single
 # unprotected NVMe that nothing backs up. Failing the deploy is the kinder outcome.
@@ -73,8 +82,12 @@ services:
 # ⚠️ driver_opts are frozen when the volume is CREATED. Changing anything here (address, version,
 # path) does nothing on a node that already has the volume — delete it there first:
 #   docker volume rm <stack>_receipts
+# ⚠️ The NAME carries a version, and that is load-bearing. driver_opts are frozen when a volume is
+# CREATED, so changing the path here does nothing on any node that already has the old volume — it
+# silently keeps mounting the old export and everything looks fine. Bump the suffix whenever
+# anything in driver_opts changes; the old volume can be removed afterwards at leisure.
 volumes:
-  receipts:
+  receipts_v2:
     driver: local
     driver_opts:
       type: nfs
