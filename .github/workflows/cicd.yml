@@ -100,10 +100,29 @@ jobs:
       # BEFORE the pull. `-a` keeps images still in use by a running service (all 3 envs
       # + the image we're about to replace, so a rollback stays local), and only clears
       # the orphaned older tags. `|| true` so a prune hiccup never blocks a deploy.
-      - name: Free disk (prune unused docker images/containers)
+      # ⚠️ Prune ONLY under real disk pressure, and then only genuinely old images.
+      #
+      # This used to run `docker image prune -af` on every deploy, which deletes every image no
+      # container on THIS node is running — including the other two stacks' images. That is
+      # precisely what the swarm needs in order to move a task here, so the next reschedule died
+      # with "No such image", which reads exactly like a deleted registry version and cost hours
+      # three times in two weeks.
+      #
+      # The measurement that settles it: one image is 387 MB, all seven together are 945 MB
+      # (heavy layer sharing), reclaimable 0%, and the tightest node has 15 GB free of 24 GB.
+      # The original "No space left on device" was real, but a sledgehammer on every deploy is
+      # not the answer to it — a threshold is.
+      - name: Free disk only if it is actually tight
         run: |
           docker container prune -f || true
-          docker image prune -af || true
+          FREE=$(df --output=pcent / | tail -1 | tr -dc '0-9')
+          echo "disk used: ${FREE}%"
+          if [ "${FREE:-0}" -ge 80 ]; then
+            echo "above 80% — pruning images older than 14 days"
+            docker image prune -af --filter "until=336h" || true
+          else
+            echo "plenty of room — keeping images so other stacks can be rescheduled here"
+          fi
           df -h / | tail -1 || true
       - name: Deploy stack (rolling update)
         env:
