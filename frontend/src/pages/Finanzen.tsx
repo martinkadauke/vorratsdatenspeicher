@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -21,7 +21,11 @@ import { confirm } from '../components/Confirm';
 import { useAuth } from '../context/auth';
 import { cn, eur, fmtDate, monthLabel as monthNameOf, todayLocal } from '../lib/utils';
 import { useUrlState } from '../hooks/useUrlState';
-import KontenTab from './KontenTab';
+// ⚠️ LAZY on purpose, and it is not about bundle size. KontenTab imports the link dialogs from
+// this file, so a static import here would make the two modules a cycle — bundlers accept that
+// and then one side can be `undefined` at first render, which fails in production and nowhere
+// else. Loading it through a dynamic import leaves the module graph pointing one way only.
+const KontenTab = lazy(() => import('./KontenTab'));
 
 // ── shared types ────────────────────────────────────────────────────────────
 
@@ -215,7 +219,7 @@ export function Finanzen() {
           ))}
         </div>
       </div>
-      {activeTab === 'verwaltung' ? <ManageTab /> : activeTab === 'konten' ? <KontenTab /> : activeTab === 'bank' ? <BankTab /> : <MonthTab />}
+      {activeTab === 'verwaltung' ? <ManageTab /> : activeTab === 'konten' ? <Suspense fallback={<Spinner />}><KontenTab /></Suspense> : activeTab === 'bank' ? <BankTab /> : <MonthTab />}
     </div>
   );
 }
@@ -2690,7 +2694,7 @@ function IncomeList({ onUpload }: { onUpload: () => void }) {
 }
 
 // ── Kontobewegungen (bank CSV import + matched-status list) ──────────────────
-interface BankTx {
+export interface BankTx {
   id: number; konto_id: number | null; konto_name: string | null;
   booking_date: string; purchase_date: string | null; amount: number;
   counterparty: string | null; description: string | null; private: boolean;
@@ -2940,7 +2944,7 @@ function BankRow({ tx, t, highlight, onOpen, onOpenFixed, onLink, onUnlink, onFl
 
 /** Pick a receipt (debit) or income row (credit) to link to a bank transaction.
  *  Candidates come pre-filtered by amount + date window from the backend. */
-function BankLinkPicker({ tx, t, onClose, onPick, onPickFixed, onApprove }: {
+export function BankLinkPicker({ tx, t, onClose, onPick, onPickFixed, onApprove }: {
   tx: BankTx; t: (k: string, o?: Record<string, unknown>) => string; onClose: () => void;
   onPick: (id: number) => void; onPickFixed: (id: number) => void; onApprove: (id: number) => void;
 }) {
@@ -3140,7 +3144,7 @@ function BankLinkPicker({ tx, t, onClose, onPick, onPickFixed, onApprove }: {
 
 /** Give an open bank line a home when no scan exists: generate a stand-in receipt
  *  (forgotten purchase) or a fixed-cost entry (one-off transfer/top-up). */
-function BankGenerateModal({ tx, t, onClose, onDone }: {
+export function BankGenerateModal({ tx, t, onClose, onDone }: {
   tx: BankTx; t: (k: string, o?: Record<string, unknown>) => string; onClose: () => void; onDone: () => void;
 }) {
   const navigate = useNavigate();

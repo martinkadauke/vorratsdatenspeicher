@@ -4,8 +4,13 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import { useAuth } from '../context/auth';
 import { Card, Button } from '../components/ui';
-import { Settings } from 'lucide-react';
+import { Settings, Link2, FilePlus2 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { useTranslation } from 'react-i18next';
+// ⚠️ The SAME dialogs Auszüge uses, not a second pair. A booking is one thing; two screens
+// that each grew their own way to attach a receipt to it would drift apart, and the one
+// people used less would rot. Exported from Finanzen rather than copied.
+import { BankLinkPicker, BankGenerateModal, type BankTx } from './Finanzen';
 
 /**
  * Finanzen → Konten: what each account holds, and every movement that got it there.
@@ -69,6 +74,32 @@ export default function KontenTab() {
   const [hoverMove, setHoverMove] = useState<number | null>(null);
   const [q, setQ] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [dialog, setDialog] = useState<{ tx: BankTx; mode: 'link' | 'create' } | null>(null);
+  const { t } = useTranslation();
+
+  /** Pull one booking in the full shape the dialogs expect, then open the requested one. */
+  const openFor = async (bankTxId: number, mode: 'link' | 'create') => {
+    const rows = await api<BankTx[]>(`/api/finances/bank?id=${bankTxId}`);
+    if (rows[0]) setDialog({ tx: rows[0], mode });
+  };
+
+  const afterLink = () => {
+    setDialog(null);
+    void qc.invalidateQueries({ queryKey: ['finance-accounts'] });
+    void qc.invalidateQueries({ queryKey: ['finance-account-movements'] });
+  };
+  const linkReceipt = useMutation({
+    mutationFn: (rid: number) => api(`/api/finances/bank/${dialog!.tx.id}/link`, { method: 'POST', body: dialog!.tx.amount > 0 ? { income_id: rid } : { einkauf_id: rid } }),
+    onSuccess: afterLink,
+  });
+  const linkFixed = useMutation({
+    mutationFn: (fid: number) => api(`/api/finances/bank/${dialog!.tx.id}/link`, { method: 'POST', body: { fixed_cost_id: fid } }),
+    onSuccess: afterLink,
+  });
+  const approve = useMutation({
+    mutationFn: (txId: number) => api(`/api/finances/bank/${txId}/approve`, { method: 'POST' }),
+    onSuccess: afterLink,
+  });
 
   const { data: accounts } = useQuery<Account[]>({
     queryKey: ['finance-accounts'],
@@ -189,7 +220,7 @@ export default function KontenTab() {
                 onFocus={() => setHoverMove(m.id)}
                 tabIndex={0}
                 onClick={() => { if (m.receipt_id) navigate(m.kind === 'beleg' ? `/receipts/${m.receipt_id}` : `/finanzen?tab=bank&tx=${m.id}`); }}
-                className={cn('flex h-12 w-full items-center gap-3 border-b border-l-[3px] border-zinc-100 px-3 text-left last:border-b-0 dark:border-zinc-800',
+                className={cn('group flex h-12 w-full items-center gap-3 border-b border-l-[3px] border-zinc-100 px-3 text-left last:border-b-0 dark:border-zinc-800',
                   m.receipt_id && 'cursor-pointer',
                   hoverMove === m.id ? 'border-l-emerald-500 bg-emerald-50 dark:bg-emerald-950/30' : 'border-l-transparent')}>
                 <span className="w-12 shrink-0 text-[11px] tabular-nums text-zinc-400">{day(m.date)}</span>
@@ -203,7 +234,23 @@ export default function KontenTab() {
                     <span className="shrink-0 rounded-full border border-emerald-400 bg-emerald-50 px-1.5 text-[10px] text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
                       Beleg →
                     </span>
-                  ) : null}
+                  ) : (
+                    /* Nothing attached yet. Two ways out, and the second one matters: plenty of
+                       purchases were never scanned at all, so "find the receipt" would be a dead
+                       end without "make one". */
+                    <span className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                      <button type="button" title="Beleg oder Fixkosten zuordnen"
+                        onClick={e => { e.stopPropagation(); void openFor(m.id, 'link'); }}
+                        className="rounded-full border border-zinc-300 p-1 text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700">
+                        <Link2 size={12} />
+                      </button>
+                      <button type="button" title="Beleg erstellen"
+                        onClick={e => { e.stopPropagation(); void openFor(m.id, 'create'); }}
+                        className="rounded-full border border-zinc-300 p-1 text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700">
+                        <FilePlus2 size={12} />
+                      </button>
+                    </span>
+                  )}
                 </span>
                 <span className={cn('shrink-0 font-semibold tabular-nums',
                   m.amount < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400')}>
@@ -259,6 +306,14 @@ export default function KontenTab() {
           )}
         </Card>
       </div>
+
+      {dialog?.mode === 'link' && (
+        <BankLinkPicker tx={dialog.tx} t={t} onClose={() => setDialog(null)}
+          onPick={linkReceipt.mutate} onPickFixed={linkFixed.mutate} onApprove={approve.mutate} />
+      )}
+      {dialog?.mode === 'create' && (
+        <BankGenerateModal tx={dialog.tx} t={t} onClose={() => setDialog(null)} onDone={afterLink} />
+      )}
     </div>
   );
 }

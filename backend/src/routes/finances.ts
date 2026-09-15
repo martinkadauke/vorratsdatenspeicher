@@ -1975,8 +1975,12 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
    *  A linked receipt that is private to someone else is masked (no id/store) for
    *  non-owners; the match status itself still shows. */
   app.get('/api/finances/bank', async (req, reply) => {
-    const q = (req.query ?? {}) as { konto?: string; month?: string; status?: string; q?: string };
+    const q = (req.query ?? {}) as { konto?: string; month?: string; status?: string; q?: string; id?: string };
     const kontoId = q.konto ? parseInt(q.konto, 10) : null;
+    // Fetch exactly one booking, in the SAME shape the list produces. Finanzen → Konten needs the
+    // full row (suggestion, existing link, account) to open the very dialogs Auszüge opens, and
+    // rebuilding that shape a second time is how two screens start disagreeing about one booking.
+    const onlyId = q.id ? parseInt(q.id, 10) : null;
     const b = q.month?.trim() ? monthBounds(q.month.trim()) : null;
     if (q.month?.trim() && !b) return reply.code(400).send({ error: 'month must be YYYY-MM' });
     const search = (q.q ?? '').trim().toLowerCase();
@@ -2015,6 +2019,7 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
         LEFT JOIN fixed_cost sf ON sf.id = s.fixed_cost_id
         WHERE s.bank_tx_id = bt.id LIMIT 1) sg ON TRUE
       WHERE TRUE
+        ${onlyId ? sql`AND bt.id = ${onlyId}` : sql``}
         ${kontoId ? sql`AND bt.konto_id = ${kontoId}` : sql``}
         ${b ? sql`AND bt.booking_date BETWEEN ${b.first} AND ${b.last}` : sql``}
       ORDER BY bt.booking_date DESC, bt.id DESC
