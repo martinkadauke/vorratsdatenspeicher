@@ -1,5 +1,6 @@
 import './env.js';
 import { startReceiptsWatch, receiptsHealth } from './receiptsHealth.js';
+import { accountBalanceRoutes } from './routes/accountBalances.js';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import path from 'node:path';
@@ -162,6 +163,7 @@ async function main(): Promise<void> {
   authRoutes(app);
   webauthnRoutes(app);
   receiptRoutes(app);
+  accountBalanceRoutes(app);   // Finanzen → Konten: Stände, Bewegungen, Schwelle
   articleRoutes(app);
   categoryRoutes(app);
   familyRoutes(app);

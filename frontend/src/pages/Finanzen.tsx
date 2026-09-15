@@ -21,6 +21,7 @@ import { confirm } from '../components/Confirm';
 import { useAuth } from '../context/auth';
 import { cn, eur, fmtDate, monthLabel as monthNameOf, todayLocal } from '../lib/utils';
 import { useUrlState } from '../hooks/useUrlState';
+import KontenTab from './KontenTab';
 
 // ── shared types ────────────────────────────────────────────────────────────
 
@@ -203,7 +204,7 @@ export function Finanzen() {
               button, all equally inert for the same reason. */}
           {(demoUser
             ? ([['monat', 'finances.monthTab'], ['verwaltung', 'finances.manageTab']] as const)
-            : ([['monat', 'finances.monthTab'], ['bank', 'finances.bankTab'], ['verwaltung', 'finances.manageTab']] as const)
+            : ([['monat', 'finances.monthTab'], ['konten', 'finances.accountsTab'], ['bank', 'finances.bankTab'], ['verwaltung', 'finances.manageTab']] as const)
           ).map(([tb, key]) => (
             <button key={tb} onClick={() => setTab(tb)}
               className={cn('rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
@@ -214,7 +215,7 @@ export function Finanzen() {
           ))}
         </div>
       </div>
-      {activeTab === 'verwaltung' ? <ManageTab /> : activeTab === 'bank' ? <BankTab /> : <MonthTab />}
+      {activeTab === 'verwaltung' ? <ManageTab /> : activeTab === 'konten' ? <KontenTab /> : activeTab === 'bank' ? <BankTab /> : <MonthTab />}
     </div>
   );
 }

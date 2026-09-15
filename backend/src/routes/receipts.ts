@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import Jimp from 'jimp';
 import sql, { DEMO_MODE, withHousehold } from '../db.js';
+import { checkLowBalance } from '../lowBalanceWatch.js';
 import { requireAdmin } from '../auth/plugin.js';
 import { kontoScope, canSeeKonto } from '../auth/konto.js';
 import { accountHasStatements } from './konten.js';
@@ -125,6 +126,11 @@ export async function storeOcrResult(id: number, parsed: OcrResult): Promise<{ i
   // Kick a (debounced, config-gated) churn pass so the raw OCR items get canonicalized
   // /categorized/deduped right away instead of waiting for the nightly run. Fire-and-forget.
   void triggerChurnAfterOcr().catch(err => console.error('[churner] post-OCR trigger failed:', (err as Error).message));
+  // OCR is the moment the amount becomes known, so it is the moment the projected balance can
+  // fall through the household's line — Martin's case exactly: scan a 6 € receipt on an account
+  // holding 2005 €, hear about it now rather than when the bank reports it days later.
+  const [ownK] = await sql`SELECT konto_id FROM einkauf WHERE id = ${id}`;
+  void checkLowBalance(ownK?.konto_id as number | null);
   return { items: parsed.artikel?.length ?? 0, confidence: parsed.confidence };
 }
 
@@ -346,6 +352,7 @@ export function receiptRoutes(app: FastifyInstance): void {
       VALUES (${datum}, ${laden}, ${gesamt}, ${quelle}, ${kontoId}, ${bildPfad}, ${privateFor}, ${snappedBy})
       RETURNING id
     `;
+    void checkLowBalance(kontoId);            // a hand-entered receipt already carries its total
 
     // If a photo was uploaded, run the same Claude-vision extraction n8n uses,
     // but in the BACKGROUND so the caller gets an instant response (snap a photo
@@ -515,6 +522,10 @@ export function receiptRoutes(app: FastifyInstance): void {
     if (!Object.keys(updates).length) return reply.code(400).send({ error: 'no patchable fields' });
     const rows = await sql`UPDATE einkauf SET ${sql(updates)} WHERE id = ${id} RETURNING id`;
     if (!rows.length) return reply.code(404).send({ error: 'not found' });
+    // Editing a total, or moving a receipt to another account, moves two balances.
+    const [after] = await sql`SELECT konto_id FROM einkauf WHERE id = ${id}`;
+    void checkLowBalance(after?.konto_id as number | null);
+    if ('konto_id' in updates) void checkLowBalance(updates.konto_id as number | null);
     return { ok: true };
   });
 

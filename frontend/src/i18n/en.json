@@ -111,6 +111,7 @@
     "monthTab": "Month",
     "manageTab": "Manage",
     "bankTab": "Statements",
+    "accountsTab": "Accounts",
     "bank": {
       "heading": "Import bank statement (CSV)",
       "intro": "Upload a bank-statement CSV — any bank. A new format is read by the AI automatically and remembered for next time. Multiple files; re-importing never duplicates.",

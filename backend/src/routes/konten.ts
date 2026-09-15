@@ -6,7 +6,7 @@ import { kontoScope } from '../auth/konto.js';
 // The nature of a payment account. Only 'giro' & 'kreditkarte' have importable bank
 // statements → a receipt on those needs a linked bank booking to be complete; the rest
 // (cash / crypto / securities / PayPal) never do. Keep in sync with the frontend list.
-export const ACCOUNT_TYPES = ['giro', 'kreditkarte', 'paypal', 'bargeld', 'krypto', 'depot'] as const;
+export const ACCOUNT_TYPES = ['giro', 'tagesgeld', 'kreditkarte', 'paypal', 'bargeld', 'krypto', 'depot'] as const;
 type AccountType = typeof ACCOUNT_TYPES[number];
 const normType = (v: unknown): AccountType => (ACCOUNT_TYPES as readonly string[]).includes(String(v)) ? String(v) as AccountType : 'giro';
 

@@ -111,6 +111,7 @@
     "monthTab": "Monat",
     "manageTab": "Verwaltung",
     "bankTab": "Auszüge",
+    "accountsTab": "Konten",
     "bank": {
       "heading": "Kontoauszug importieren (CSV)",
       "intro": "Kontoauszug-CSV hochladen — beliebige Bank. Ein neues Format deutet die KI automatisch und merkt es sich fürs nächste Mal. Mehrere Dateien möglich; ein erneuter Import zieht nichts doppelt.",

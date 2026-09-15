@@ -31,7 +31,7 @@ export interface User {
 // Account nature. Only these two have importable bank statements → a receipt on such
 // an account needs a linked bank booking to count as complete. Keep in sync with the
 // backend ACCOUNT_TYPES (backend/src/routes/konten.ts).
-export const ACCOUNT_TYPES = ['giro', 'kreditkarte', 'paypal', 'bargeld', 'krypto', 'depot'] as const;
+export const ACCOUNT_TYPES = ['giro', 'tagesgeld', 'kreditkarte', 'paypal', 'bargeld', 'krypto', 'depot'] as const;
 export type AccountType = typeof ACCOUNT_TYPES[number];
 export const STATEMENT_TYPES: readonly AccountType[] = ['giro', 'kreditkarte'];
 export const accountHasStatements = (t: string | null | undefined): boolean => STATEMENT_TYPES.includes((t ?? '') as AccountType);
