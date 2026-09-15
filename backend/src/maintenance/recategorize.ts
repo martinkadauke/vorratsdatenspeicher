@@ -107,9 +107,22 @@ export async function processRecategorizeBatch(
   const validPaths = (await sql`SELECT path FROM category ORDER BY path`).map(r => r.path as string);
   // "missing" also retries items previously dumped into the fallback bucket,
   // so a stronger model on the next run can rescue them.
+  //
+  // ⚠️ And rows whose path no longer EXISTS. Restructuring the tree — renaming a category,
+  // splitting one in two — leaves every article still pointing at the old path, and none of them
+  // were ever picked up here: the path is neither NULL nor the fallback bucket, so the batch
+  // walked straight past them. The month view rolls such a row up into its surviving ancestor
+  // rather than losing it, which is why the damage is quiet: the parent keeps showing money while
+  // every child below it reads zero. Exactly what happened when "Hobby & Freizeit/Spiele & Sport"
+  // became Sport + Videospiele — 35 articles stranded, and 54 in total across three renames.
+  //
+  // Includes user-corrected rows on purpose. A correction that points at a category which no
+  // longer exists preserves nothing; there is no intent left to protect.
   const items = onlyMissing
-    ? await sql`SELECT id, name, ai_guess, canonical_name FROM artikel
-                WHERE category_path IS NULL OR category_path = 'Sonstiges/Unkategorisiert'
+    ? await sql`SELECT id, name, ai_guess, canonical_name FROM artikel a
+                WHERE category_path IS NULL
+                   OR category_path = 'Sonstiges/Unkategorisiert'
+                   OR NOT EXISTS (SELECT 1 FROM category c WHERE c.path = a.category_path)
                 ORDER BY id`
     : await sql`SELECT id, name, ai_guess, canonical_name FROM artikel ORDER BY id`;
 
