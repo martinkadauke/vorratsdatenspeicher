@@ -10,6 +10,7 @@ import {
 import { api } from '../api/client';
 import { Card, Button, Input, Spinner, ProgressBar } from '../components/ui';
 import { confirm } from '../components/Confirm';
+import { toast } from '../components/Toast';
 
 interface JobProgress { phase: string; current: number; total: number }
 interface MaintenanceStatus { recategorize: { running: boolean; progress: JobProgress | null } }
@@ -195,7 +196,12 @@ export function CategoriesAdmin() {
   const recategorize = useMutation({
     mutationFn: (onlyMissing: boolean) =>
       api('/api/maintenance/recategorize', { method: 'POST', body: { only_missing: onlyMissing } }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['maintenance-status'] }),
+    // ⚠️ A refused start used to be completely silent — the endpoint answers 409 when a run is
+    // already going and 429 on the demo cap, and neither reached the screen. Pressing the button
+    // and watching nothing happen is indistinguishable from a broken button, and that is exactly
+    // how it was reported: "ich sehe nicht, ob es läuft".
+    onSuccess: () => { toast(t('categoriesAdmin.resortStarted'), 'success'); void qc.invalidateQueries({ queryKey: ['maintenance-status'] }); },
+    onError: (e: Error) => toast(e.message, 'error'),
   });
 
   // tree handlers

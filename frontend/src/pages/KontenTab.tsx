@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import { useAuth } from '../context/auth';
 import { Card, Button } from '../components/ui';
+import { Settings } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 /**
@@ -62,8 +63,12 @@ export default function KontenTab() {
   const qc = useQueryClient();
   const [types, setTypes] = useState<string[]>(DEFAULT_TYPES);
   const [sel, setSel] = useState<number | null>(null);
-  const [selMove, setSelMove] = useState<number | null>(null);
+  // ⚠️ HOVER, not click. Clicking to see a balance meant committing to a row and then undoing it
+  // again; reading a series is a scanning motion, not a selecting one. Click is left for the one
+  // thing a click should do here: open whatever the row points at.
+  const [hoverMove, setHoverMove] = useState<number | null>(null);
   const [q, setQ] = useState('');
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const { data: accounts } = useQuery<Account[]>({
     queryKey: ['finance-accounts'],
@@ -99,7 +104,7 @@ export default function KontenTab() {
     return all.filter(m => (m.who ?? '').toLowerCase().includes(q.toLowerCase()));
   }, [detail, q]);
 
-  const picked = selMove !== null ? moves.find(m => m.id === selMove && true) : undefined;
+  const picked = hoverMove !== null ? moves.find(m => m.id === hoverMove) : undefined;
   const shownBalance = picked ? picked.balance : current?.balance ?? null;
   const under = current?.low_threshold != null && shownBalance != null && shownBalance < current.low_threshold;
 
@@ -110,7 +115,7 @@ export default function KontenTab() {
         <input
           id="konten-search"
           value={q}
-          onChange={e => { setQ(e.target.value); setSelMove(null); }}
+          onChange={e => { setQ(e.target.value); setHoverMove(null); }}
           placeholder="Suchen: Lidl, Miete, Amazon …"
           className="min-w-0 flex-1 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-900"
         />
@@ -146,7 +151,7 @@ export default function KontenTab() {
               <div className="p-4 text-center text-sm text-zinc-400">Kein Konto in den gewählten Typen.</div>
             )}
             {visible.map(a => (
-              <button key={a.id} type="button" onClick={() => { setSel(a.id); setSelMove(null); }}
+              <button key={a.id} type="button" onClick={() => { setSel(a.id); setHoverMove(null); }}
                 className={cn('flex w-full items-center justify-between gap-3 border-b border-zinc-100 px-3 py-2.5 text-left last:border-b-0 dark:border-zinc-800',
                   current?.id === a.id && 'bg-emerald-50 dark:bg-emerald-950/30')}>
                 <span className="min-w-0">
@@ -174,22 +179,29 @@ export default function KontenTab() {
                 {q ? `Kein Treffer für „${q}".` : 'Noch keine Bewegungen.'}
               </div>
             )}
+            {/* ⚠️ Every row the same height. The badge used to sit on a second line, so a row with a
+                linked receipt was taller than one without — and a column of money you are trying to
+                read down turns into a staircase. The chip now rides on the name's line and the row
+                height is fixed, so the eye can travel straight down the amounts. */}
             {moves.map(m => (
-              <button key={`${m.kind}-${m.id}`} type="button"
-                onClick={() => setSelMove(s => s === m.id ? null : m.id)}
-                className={cn('flex w-full items-center gap-3 border-b border-l-[3px] border-zinc-100 px-3 py-2 text-left last:border-b-0 dark:border-zinc-800',
-                  selMove === m.id ? 'border-l-emerald-500 bg-emerald-50 dark:bg-emerald-950/30' : 'border-l-transparent')}>
+              <div key={`${m.kind}-${m.id}`}
+                onMouseEnter={() => setHoverMove(m.id)}
+                onFocus={() => setHoverMove(m.id)}
+                tabIndex={0}
+                onClick={() => { if (m.receipt_id) navigate(m.kind === 'beleg' ? `/receipts/${m.receipt_id}` : `/finanzen?tab=bank&tx=${m.id}`); }}
+                className={cn('flex h-12 w-full items-center gap-3 border-b border-l-[3px] border-zinc-100 px-3 text-left last:border-b-0 dark:border-zinc-800',
+                  m.receipt_id && 'cursor-pointer',
+                  hoverMove === m.id ? 'border-l-emerald-500 bg-emerald-50 dark:bg-emerald-950/30' : 'border-l-transparent')}>
                 <span className="w-12 shrink-0 text-[11px] tabular-nums text-zinc-400">{day(m.date)}</span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate"><Hit text={m.who ?? '—'} q={q} /></span>
+                <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                  <span className="truncate"><Hit text={m.who ?? '—'} q={q} /></span>
                   {m.kind === 'beleg' ? (
-                    <span className="mt-0.5 inline-block rounded-full border border-amber-400 bg-amber-50 px-1.5 text-[10px] text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
-                      Beleg · noch nicht gebucht
+                    <span className="shrink-0 rounded-full border border-amber-400 bg-amber-50 px-1.5 text-[10px] text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                      nicht gebucht
                     </span>
                   ) : m.receipt_id ? (
-                    <span onClick={e => { e.stopPropagation(); navigate(`/finanzen?tab=bank&tx=${m.id}`); }}
-                      className="mt-0.5 inline-block cursor-pointer rounded-full border border-emerald-400 bg-emerald-50 px-1.5 text-[10px] text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
-                      Beleg zugeordnet →
+                    <span className="shrink-0 rounded-full border border-emerald-400 bg-emerald-50 px-1.5 text-[10px] text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+                      Beleg →
                     </span>
                   ) : null}
                 </span>
@@ -197,43 +209,39 @@ export default function KontenTab() {
                   m.amount < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400')}>
                   {m.amount > 0 ? '+' : ''}{eur(m.amount)}
                 </span>
-              </button>
+              </div>
             ))}
           </Card>
         </div>
 
-        {/* Balance panel */}
-        <Card className="h-fit overflow-hidden p-0 lg:sticky lg:top-3">
-          <div className="border-b border-zinc-100 px-3 py-4 text-center dark:border-zinc-800">
+        {/* ⚠️ The panel says ONE thing: what the account held at the moment you are pointing at.
+            It used to carry the anchor ("Startwert 1.697,68 € am 15.09."), the movement's own
+            figures and two forms underneath — so the number people came for competed with
+            settings nobody reads twice. Everything that is configuration now lives behind the
+            gear; the number stands alone. */}
+        {/* ⚠️ top-[61px], not top-3. The app header is sticky at top-0 and ~57px tall, so a panel
+            pinned 12px from the viewport slid underneath it and got its number clipped the moment
+            you scrolled. Same offset the sidebar uses, plus a cap so a tall panel scrolls inside
+            itself instead of growing past the screen. */}
+          <Card className="h-fit overflow-y-auto p-0 lg:sticky lg:top-[61px] lg:max-h-[calc(100dvh-69px)]">
+          <div className="relative px-3 py-5 text-center">
+            <button type="button" onClick={() => setSettingsOpen(o => !o)}
+              aria-expanded={settingsOpen} aria-label="Konto-Einstellungen"
+              className="absolute right-2 top-2 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800">
+              <Settings size={15} />
+            </button>
             <div className="text-[11px] text-zinc-400">
-              {picked ? `Stand am ${day(picked.date)} nach dieser Bewegung` : 'Stand heute'}
+              {picked ? `Stand ${day(picked.date)}` : 'Stand heute'}
             </div>
             <div className={cn('mt-0.5 text-3xl font-bold tabular-nums tracking-tight',
               shownBalance === null ? 'text-zinc-400'
                 : shownBalance < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400')}>
               {shownBalance === null ? '—' : eur(shownBalance)}
             </div>
-            <div className="mt-0.5 text-[11px] text-zinc-400">
-              {current?.balance_start_date
-                ? `Startwert ${eur(current.balance_start ?? 0)} am ${day(current.balance_start_date)}`
-                : 'Kein Startwert hinterlegt — ohne ihn kennt VDS nur die Veränderung.'}
-            </div>
           </div>
 
-          {picked ? (
-            <div className="px-3 py-2 text-sm">
-              <Row k="Betrag" v={`${picked.amount > 0 ? '+' : ''}${eur(picked.amount)}`} />
-              <Row k="Herkunft" v={picked.kind === 'beleg' ? 'Beleg (noch nicht gebucht)' : 'Kontobuchung'} />
-              <Row k="Beleg" v={
-                picked.receipt_id
-                  ? <button className="font-medium text-emerald-600 hover:underline dark:text-emerald-400"
-                      onClick={() => navigate(picked.kind === 'beleg' ? `/receipts/${picked.receipt_id}` : `/finanzen?tab=bank&tx=${picked.id}`)}>
-                      {picked.kind === 'beleg' ? 'Beleg öffnen' : '→ Auszüge'}
-                    </button>
-                  : 'keiner zugeordnet'} />
-            </div>
-          ) : current ? (
-            <div className="flex flex-col gap-2 px-3 py-3 text-sm">
+          {settingsOpen && current && (
+            <div className="flex flex-col gap-2 border-t border-zinc-100 px-3 py-3 text-sm dark:border-zinc-800">
               {current.assumed_booked > 0 && (
                 <p className="rounded-lg border border-zinc-200 px-2 py-1.5 text-[11px] leading-snug text-zinc-500 dark:border-zinc-800">
                   <b>{current.assumed_booked} Belege</b> liegen vor der letzten Buchung ohne zugeordnete
@@ -248,7 +256,7 @@ export default function KontenTab() {
                 <Row k="Schwelle" v={current.low_threshold != null ? `${eur(current.low_threshold)} (nur Admin)` : 'keine'} />
               )}
             </div>
-          ) : null}
+          )}
         </Card>
       </div>
     </div>
