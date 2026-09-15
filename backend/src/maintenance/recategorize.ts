@@ -124,7 +124,18 @@ export async function processRecategorizeBatch(
                    OR category_path = 'Sonstiges/Unkategorisiert'
                    OR NOT EXISTS (SELECT 1 FROM category c WHERE c.path = a.category_path)
                 ORDER BY id`
-    : await sql`SELECT id, name, ai_guess, canonical_name FROM artikel ORDER BY id`;
+    // ⚠️ The FULL run re-sorts everything EXCEPT what a person decided. `category_user_set` is a
+    // flag of its own precisely because `user_corrected` means "a human fixed the NAME" — building
+    // this on that would have frozen 1109 of 2810 rows whose category no human ever touched.
+    //
+    // The exception to the exception: a human decision pointing at a category that no longer
+    // exists protects nothing, so those are re-sorted like anything else. Which is also what
+    // makes a tree restructure survivable — rename a category and the articles follow, except
+    // where somebody actually chose a destination that is still there.
+    : await sql`SELECT id, name, ai_guess, canonical_name FROM artikel a
+                WHERE NOT (a.category_user_set
+                           AND EXISTS (SELECT 1 FROM category c WHERE c.path = a.category_path))
+                ORDER BY id`;
 
   let updated = 0;
   let fallback = 0;

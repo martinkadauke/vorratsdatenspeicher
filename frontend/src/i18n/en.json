@@ -1507,6 +1507,8 @@
     "newCategory": "New category",
     "apply": "Apply categories",
     "applyConfirm": "The entire category catalog will be replaced (Meta categories are kept). Items keep their old paths until they're recategorized. Continue?",
+    "resortNow": "Re-sort now",
+    "resortHint": "Categories you set by hand are left alone.",
     "applyHint": "\"Apply categories\" replaces the catalog. Then click \"Recategorize all items\" so the AI sorts every item into the new structure.",
     "applied": "{{count}} categories saved. {{orphans}} items now have stale paths — please recategorize."
   },

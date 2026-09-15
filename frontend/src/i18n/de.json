@@ -1509,6 +1509,8 @@
     "newCategory": "Neue Kategorie",
     "apply": "Kategorien anwenden",
     "applyConfirm": "Der komplette Kategorien-Katalog wird ersetzt (Meta-Kategorien bleiben). Artikel behalten ihre alten Pfade, bis sie neu kategorisiert werden. Fortfahren?",
+    "resortNow": "Jetzt neu einsortieren",
+    "resortHint": "Deine von Hand gesetzten Kategorien bleiben unangetastet.",
     "applyHint": "»Kategorien anwenden« ersetzt den Katalog. Danach »Alle Artikel neu kategorisieren« klicken, damit die KI jeden Artikel in die neue Struktur einsortiert.",
     "applied": "{{count}} Kategorien gespeichert. {{orphans}} Artikel haben jetzt veraltete Pfade — bitte neu kategorisieren."
   },

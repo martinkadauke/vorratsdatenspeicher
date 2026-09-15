@@ -375,7 +375,7 @@ export function nameRoutes(app: FastifyInstance): void {
     if (!category_path) return reply.code(400).send({ error: 'category_path required' });
     if (!Array.isArray(artikel_ids) || !artikel_ids.length) return reply.code(400).send({ error: 'artikel_ids required' });
     const rows = await sql`
-      UPDATE artikel a SET category_path = ${category_path}
+      UPDATE artikel a SET category_path = ${category_path}, category_user_set = TRUE
       FROM einkauf e
       WHERE a.einkauf_id = e.id AND a.id IN ${sql(artikel_ids)}
         ${kontoScope(req.user, sql`e`)}

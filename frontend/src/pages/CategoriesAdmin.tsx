@@ -374,9 +374,22 @@ export function CategoriesAdmin() {
           <p className="text-sm text-red-500">{(applyCategories.error as Error).message}</p>
         )}
         {applyResult && (
-          <div className="flex items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-700/50 dark:bg-emerald-950/40 dark:text-emerald-300">
-            <AlertTriangle size={15} className="shrink-0" />
-            {t('categoriesAdmin.applied', { count: applyResult.categories, orphans: applyResult.orphaned_artikel })}
+          /* ⚠️ Applying a catalogue leaves every article on its OLD path — which is quiet and
+             looks fine: the month view rolls a dangling row up into its surviving parent, so the
+             parent keeps showing money while every child below it reads zero. The re-sort was a
+             separate button and one line of small print, and it got missed. Offer it here, where
+             the consequence just happened. */
+          <div className="flex flex-col gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-700/50 dark:bg-emerald-950/40 dark:text-emerald-300">
+            <div className="flex items-center gap-2">
+              <AlertTriangle size={15} className="shrink-0" />
+              {t('categoriesAdmin.applied', { count: applyResult.categories, orphans: applyResult.orphaned_artikel })}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button onClick={() => { recategorize.mutate(false); setApplyResult(null); }} disabled={recatRunning}>
+                <RefreshCw size={15} /> {recatRunning ? t('admin.running') : t('categoriesAdmin.resortNow')}
+              </Button>
+              <span className="text-xs opacity-80">{t('categoriesAdmin.resortHint')}</span>
+            </div>
           </div>
         )}
       </Card>

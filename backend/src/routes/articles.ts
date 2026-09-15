@@ -90,6 +90,9 @@ export function articleRoutes(app: FastifyInstance): void {
     }
     // A manual canonical edit flags the item as user-corrected (everyone sees it).
     if ('canonical_name' in updates && updates.canonical_name) updates.user_corrected = true;
+    // A manual CATEGORY edit is a different statement, and needs its own flag: it is what tells
+    // the full recategorisation run to keep its hands off this row.
+    if ('category_path' in updates) updates.category_user_set = true;
     if (!Object.keys(updates).length) return reply.code(400).send({ error: 'no patchable fields' });
 
     const rows = await sql`UPDATE artikel SET ${sql(updates)} WHERE id = ${id} RETURNING id, original_text, name`;
@@ -167,7 +170,11 @@ export function articleRoutes(app: FastifyInstance): void {
       OR ${ag ? sql`a.ai_guess = ${ag}` : sql`FALSE`}
       OR ${nm ? sql`a.name = ${nm}` : sql`FALSE`}
     )`;
-    const setCat = category_path !== undefined ? sql`, category_path = ${category_path}` : sql``;
+    // ⚠️ category_user_set nur, wenn wirklich eine Kategorie mitkommt — sonst würde jede
+    // Namenskorrektur nebenbei die KI-Zuordnung einfrieren, und genau diese Vermengung war der
+    // Grund, warum "Handkorrekturen schonen" vorher nicht baubar war.
+    const setCat = category_path !== undefined
+      ? sql`, category_path = ${category_path}, category_user_set = TRUE` : sql``;
     const rows = await sql`
       UPDATE artikel a SET canonical_name = ${canonical_name}, user_corrected = TRUE ${setCat}
       FROM einkauf e
@@ -244,7 +251,8 @@ export function articleRoutes(app: FastifyInstance): void {
         current = new_name;
       }
       if (category_path !== undefined) {
-        await tx`UPDATE artikel SET category_path = ${category_path || null} WHERE canonical_name = ${current}`;
+        await tx`UPDATE artikel SET category_path = ${category_path || null}, category_user_set = TRUE
+                 WHERE canonical_name = ${current}`;
       }
       if (einheit !== undefined) {
         await tx`UPDATE artikel SET einheit = ${einheit || null} WHERE canonical_name = ${current}`;
