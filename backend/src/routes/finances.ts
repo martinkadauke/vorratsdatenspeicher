@@ -2353,7 +2353,30 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
           ${kontoScope(req.user, sql`e`)}
         ORDER BY ABS((e.gesamt_betrag - COALESCE((SELECT SUM(ABS(bt2.amount)) FROM bank_tx bt2 WHERE (bt2.einkauf_id = e.id OR bt2.id = e.bank_tx_id) AND bt2.amount < 0), 0)) - ${target}), e.datum DESC
         LIMIT 40`;
-      return { kind: 'receipt', candidates: rows };
+      // …and the recurring bills, which until now could only be ticked off from the month view.
+      // Martin's case: "Gemeinde Kusterdingen 154,95" in the statement IS the Kindergarten fixed
+      // cost, and there was no way to say so from here.
+      //
+      // ⚠️ Deliberately NOT filtered by amount, only ranked by it. A monthly bill whose amount
+      // changed — a fee going up, a meter reading — is exactly the one a human needs to attach by
+      // hand, and an amount filter would hide it precisely then. Every open commitment for that
+      // month is offered, nearest figure first.
+      const month = String(bt.booking).slice(0, 7) + '-01';
+      const fixed = await sql`
+        SELECT f.id, f.label, f.monthly_eur::float8 AS betrag, ${month} AS datum,
+               f.category_path
+        FROM fixed_cost f
+        WHERE f.active
+          AND f.start_date <= ${String(bt.booking)}::date
+          AND (f.end_date IS NULL OR f.end_date >= ${String(bt.booking)}::date)
+          AND (f.konto_id IS NULL OR f.konto_id = (SELECT konto_id FROM bank_tx WHERE id = ${id}))
+          -- already settled for this month → nothing left to attach
+          AND NOT EXISTS (
+            SELECT 1 FROM fixed_cost_check c
+            WHERE c.fixed_cost_id = f.id AND c.month = ${month}::date AND c.status = 'confirmed')
+        ORDER BY ABS(f.monthly_eur - ${target}), f.label
+        LIMIT 20`;
+      return { kind: 'receipt', candidates: rows, fixed };
     }
     const hi = isoPlusDays(String(bt.booking), 10);
     const lo = isoMinusDays(String(bt.booking), 45);
@@ -2516,12 +2539,30 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
    *  held by another user's PRIVATE receipt can't be hijacked. */
   app.post('/api/finances/bank/:id/link', async (req, reply) => {
     const id = parseInt(String((req.params as { id: string }).id), 10);
-    const body = (req.body ?? {}) as { einkauf_id?: number; income_id?: number };
+    const body = (req.body ?? {}) as { einkauf_id?: number; income_id?: number; fixed_cost_id?: number };
     if (!id) return reply.code(400).send({ error: 'bad id' });
-    const [bt] = await sql`SELECT id, amount::float8 AS amount, konto_id FROM bank_tx WHERE id = ${id}`;
+    const [bt] = await sql`SELECT id, amount::float8 AS amount, konto_id, booking_date::text AS booking FROM bank_tx WHERE id = ${id}`;
     if (!bt) return reply.code(404).send({ error: 'bank tx not found' });
     const uid = req.user?.id ?? -1;
     const seesAll = !!req.user?.sees_all_konten;
+
+    // A recurring bill, attached from the statement side. The month view could already tick one
+    // off and name the booking as its evidence; this is the same act from the other direction —
+    // you are looking at "Gemeinde Kusterdingen 154,95" and you know what it is.
+    const fixedId = parseInt(String(body.fixed_cost_id ?? ''), 10);
+    if (fixedId) {
+      const [f] = await sql`SELECT id, label FROM fixed_cost WHERE id = ${fixedId} AND active`;
+      if (!f) return reply.code(404).send({ error: 'fixed cost not found' });
+      const month = String(bt.booking).slice(0, 7) + '-01';
+      await sql`
+        INSERT INTO fixed_cost_check (fixed_cost_id, month, status, bank_tx_id, amount, decided_by)
+        VALUES (${fixedId}, ${month}::date, 'confirmed', ${id}, ${Math.abs(bt.amount as number)}, ${req.user?.id ?? null})
+        ON CONFLICT (fixed_cost_id, month) DO UPDATE SET
+          status = 'confirmed', bank_tx_id = EXCLUDED.bank_tx_id, amount = EXCLUDED.amount,
+          decided_by = EXCLUDED.decided_by, decided_at = NOW()`;
+      return { ok: true, fixed_cost_id: fixedId, month };
+    }
+
     if ((bt.amount as number) < 0) {
       const eid = parseInt(String(body.einkauf_id ?? ''), 10);
       if (!eid) return reply.code(400).send({ error: 'einkauf_id required' });

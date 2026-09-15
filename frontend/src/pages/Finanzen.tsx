@@ -2940,15 +2940,21 @@ function BankRow({ tx, t, highlight, onOpen, onOpenFixed, onLink, onUnlink, onFl
 
 /** Pick a receipt (debit) or income row (credit) to link to a bank transaction.
  *  Candidates come pre-filtered by amount + date window from the backend. */
-function BankLinkPicker({ tx, t, onClose, onPick, onApprove }: {
-  tx: BankTx; t: (k: string, o?: Record<string, unknown>) => string; onClose: () => void; onPick: (id: number) => void; onApprove: (id: number) => void;
+function BankLinkPicker({ tx, t, onClose, onPick, onPickFixed, onApprove }: {
+  tx: BankTx; t: (k: string, o?: Record<string, unknown>) => string; onClose: () => void;
+  onPick: (id: number) => void; onPickFixed: (id: number) => void; onApprove: (id: number) => void;
 }) {
   const navigate = useNavigate();
   const { data, isLoading } = useQuery({
     queryKey: ['bank-candidates', tx.id],
-    queryFn: () => api<{ kind: 'receipt' | 'income'; candidates: { id: number; label: string | null; betrag: number; datum: string }[] }>(`/api/finances/bank/${tx.id}/candidates`),
+    queryFn: () => api<{
+      kind: 'receipt' | 'income';
+      candidates: { id: number; label: string | null; betrag: number; datum: string }[];
+      fixed?: { id: number; label: string; betrag: number; category_path: string | null }[];
+    }>(`/api/finances/bank/${tx.id}/candidates`),
   });
   const cands = data?.candidates ?? [];
+  const fixedCands = data?.fixed ?? [];
   const sug = tx.suggestion;
   // Free-text search across ALL still-unlinked receipts (merchant / item / amount /
   // date), so the user can allocate one they know is right even when it falls outside
@@ -3087,12 +3093,44 @@ function BankLinkPicker({ tx, t, onClose, onPick, onApprove }: {
               <ul className="-mx-1 flex max-h-[55vh] flex-col divide-y divide-zinc-100 overflow-y-auto dark:divide-zinc-800">{results.map(row)}</ul>
             </>
           )
-        ) : isLoading ? <Spinner /> : !cands.length ? (
+        ) : isLoading ? <Spinner /> : (!cands.length && !fixedCands.length) ? (
           !sug && <p className="py-4 text-center text-xs text-zinc-400">{t('finances.bank.noCandidatesHint')}</p>
         ) : (
           <>
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">{t(sug ? 'finances.bank.otherCandidates' : 'finances.bank.suggestedMatches')}</div>
-            <ul className="-mx-1 flex max-h-[55vh] flex-col divide-y divide-zinc-100 overflow-y-auto dark:divide-zinc-800">{cands.map(row)}</ul>
+            {!!cands.length && (
+              <>
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">{t(sug ? 'finances.bank.otherCandidates' : 'finances.bank.suggestedMatches')}</div>
+                <ul className="-mx-1 flex max-h-[40vh] flex-col divide-y divide-zinc-100 overflow-y-auto dark:divide-zinc-800">{cands.map(row)}</ul>
+              </>
+            )}
+            {/* A statement line is not always a shopping trip. A recurring bill could only be
+                ticked off from the month view — so looking at "Gemeinde Kusterdingen 154,95"
+                there was no way to say "that is the Kindergarten". Now there is. */}
+            {!!fixedCands.length && (
+              <>
+                <div className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-400">{t('finances.bank.fixedCandidates')}</div>
+                <ul className="-mx-1 flex max-h-[30vh] flex-col divide-y divide-zinc-100 overflow-y-auto dark:divide-zinc-800">
+                  {fixedCands.map(f => {
+                    const delta = Math.abs(f.betrag) - Math.abs(tx.amount);
+                    return (
+                      <li key={`fx-${f.id}`}>
+                        <button onClick={() => onPickFixed(f.id)}
+                          className="flex w-full items-center justify-between gap-2 px-1 py-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
+                          <span className="min-w-0">
+                            <span className="block truncate text-sm">{f.label}</span>
+                            <span className="block text-[11px] text-zinc-400">
+                              {t('finances.bank.monthlyAmount', { amount: eur(f.betrag) })}
+                              {Math.abs(delta) > 0.005 && ` · ${delta > 0 ? '−' : '+'}${eur(Math.abs(delta))} ${t('finances.bank.vsBooking')}`}
+                            </span>
+                          </span>
+                          <Badge>{t('finances.bank.fixedBadge')}</Badge>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
+            )}
           </>
         )}
       </div>
@@ -3299,6 +3337,13 @@ function BankTab() {
     onSuccess: () => { invalidate(); setLinkTx(null); toast(t('finances.bank.linkedToast'), 'success'); },
     onError: (e: Error) => toast(e.message, 'error'),
   });
+  /** Attach this booking to a recurring bill — the month's checkbox gets ticked with this
+   *  statement line as its evidence, which is the same thing the month view does from its side. */
+  const linkFixed = useMutation({
+    mutationFn: (fixedId: number) => api(`/api/finances/bank/${linkTx!.id}/link`, { method: 'POST', body: { fixed_cost_id: fixedId } }),
+    onSuccess: () => { invalidate(); setLinkTx(null); toast(t('finances.bank.linkedFixedToast'), 'success'); },
+    onError: (e: Error) => toast(e.message, 'error'),
+  });
   const unlink = useMutation({
     mutationFn: (id: number) => api(`/api/finances/bank/${id}/unlink`, { method: 'POST' }),
     onSuccess: invalidate,
@@ -3394,7 +3439,7 @@ function BankTab() {
           </div>
         </>
       )}
-      {linkTx && <BankLinkPicker tx={linkTx} t={t} onClose={() => setLinkTx(null)} onPick={link.mutate} onApprove={approve.mutate} />}
+      {linkTx && <BankLinkPicker tx={linkTx} t={t} onClose={() => setLinkTx(null)} onPick={link.mutate} onPickFixed={linkFixed.mutate} onApprove={approve.mutate} />}
       {genTx && <BankGenerateModal tx={genTx} t={t} onClose={() => setGenTx(null)}
         onDone={() => {
           setGenTx(null);
