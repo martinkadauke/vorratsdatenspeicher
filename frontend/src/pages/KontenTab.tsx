@@ -21,6 +21,8 @@ type Account = {
   balance_start: number | null; balance_start_date: string | null;
   low_threshold: number | null; low_notified: boolean;
   watermark: string | null;
+  /** Receipts before the watermark with no booking attached — assumed already at the bank. */
+  assumed_booked: number;
 };
 type Movement = {
   kind: 'buchung' | 'beleg'; id: number; date: string;
@@ -232,6 +234,13 @@ export default function KontenTab() {
             </div>
           ) : current ? (
             <div className="flex flex-col gap-2 px-3 py-3 text-sm">
+              {current.assumed_booked > 0 && (
+                <p className="rounded-lg border border-zinc-200 px-2 py-1.5 text-[11px] leading-snug text-zinc-500 dark:border-zinc-800">
+                  <b>{current.assumed_booked} Belege</b> liegen vor der letzten Buchung ohne zugeordnete
+                  Buchung — sie gelten als von der Bank bereits gemeldet und zählen deshalb nicht noch
+                  einmal. Fehlt einer davon wirklich in den Bankdaten, weicht der Stand ab.
+                </p>
+              )}
               <BalanceForm current={current} onSave={(b, d) => setBalance.mutate({ balance: b, date: d })} busy={setBalance.isPending} />
               {user?.is_admin ? (
                 <ThresholdForm current={current} onSave={v => setThreshold.mutate(v)} busy={setThreshold.isPending} />

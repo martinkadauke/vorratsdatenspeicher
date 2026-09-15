@@ -3,6 +3,7 @@ import sql from '../db.js';
 import { requireAdmin } from '../auth/plugin.js';
 import { kontoScope } from '../auth/konto.js';
 import type { User } from '../types.js';
+import { checkLowBalance } from '../lowBalanceWatch.js';
 
 /**
  * Finanzen → Konten: what an account holds, and how it got there.
@@ -60,14 +61,18 @@ export async function movementsOf(kontoId: number, user?: User): Promise<{
   if (!k) return { start: null, start_date: null, water: null, movements: [] };
 
   const water = await watermark(kontoId);
-  const from = (k.start_date as string | null) ?? '1900-01-01';
 
+  // ⚠️ NO date floor. The anchor is a known point in the middle of the story, not its beginning —
+  // and in practice it sits at the END, because what a person can read off their banking app is
+  // TODAY's balance. Filtering movements to "on or after the anchor" therefore hid 658 of 659
+  // bookings the first time this shipped: two accounts showed an empty list and the third showed
+  // one line. History is the whole point of the page — scrolling down is walking backwards.
   const bookings = await sql`
     SELECT b.id, b.booking_date::text AS date, b.amount::float8 AS amount,
            COALESCE(b.counterparty, left(b.description, 40)) AS who,
            (SELECT e.id FROM einkauf e WHERE e.bank_tx_id = b.id LIMIT 1) AS receipt_id
     FROM bank_tx b
-    WHERE b.konto_id = ${kontoId} AND b.booking_date >= ${from}
+    WHERE b.konto_id = ${kontoId}
     ORDER BY b.booking_date, b.id`;
 
   // Receipts the bank has not reported yet. Without a watermark (no bookings at all) every
@@ -79,7 +84,6 @@ export async function movementsOf(kontoId: number, user?: User): Promise<{
     WHERE e.konto_id = ${kontoId}
       AND e.bank_tx_id IS NULL
       AND e.gesamt_betrag IS NOT NULL
-      AND e.datum >= ${from}
       AND (${water}::date IS NULL OR e.datum > ${water}::date)
       ${kontoScope(user, sql`e`)}
     ORDER BY e.datum, e.id`;
@@ -98,9 +102,26 @@ export async function movementsOf(kontoId: number, user?: User): Promise<{
     })),
   ].sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
 
-  let run = (k.start as number | null) ?? 0;
-  const movements: Movement[] = merged.map(m => { run += m.amount; return { ...m, balance: run }; });
-  return { start: (k.start as number | null), start_date: (k.start_date as string | null), water, movements };
+  // Running total over EVERY movement, then shifted so the total on the anchor's date equals the
+  // figure the user typed in. That one offset makes the series correct in both directions at once:
+  // forwards it adds what has happened since, backwards it subtracts what happened before, so each
+  // row can answer "and what did the account hold right after this?".
+  const start = k.start as number | null;
+  const anchor = k.start_date as string | null;
+  let run = 0;
+  const cumulative = merged.map(m => { run += m.amount; return run; });
+  let offset = 0;
+  if (start !== null) {
+    // Cumulative value AS OF the anchor date: the last movement on or before it, else zero.
+    let atAnchor = 0;
+    for (let i = 0; i < merged.length; i++) {
+      if (anchor && merged[i].date > anchor) break;
+      atAnchor = cumulative[i];
+    }
+    offset = start - atAnchor;
+  }
+  const movements: Movement[] = merged.map((m, i) => ({ ...m, balance: cumulative[i] + offset }));
+  return { start, start_date: anchor, water, movements };
 }
 
 /**
@@ -114,6 +135,8 @@ export async function movementsOf(kontoId: number, user?: User): Promise<{
 export async function balanceOf(kontoId: number, user?: User): Promise<number | null> {
   const { start, movements } = await movementsOf(kontoId, user);
   if (start === null) return null;
+  // The balance after the LAST movement of all — which equals the anchor itself when nothing has
+  // happened since, i.e. when the figure the user typed in is still the freshest thing we know.
   return movements.length ? movements[movements.length - 1].balance : start;
 }
 
@@ -126,7 +149,16 @@ export function accountBalanceRoutes(app: FastifyInstance): void {
              k.balance_start_date::text   AS balance_start_date,
              k.low_threshold::float8      AS low_threshold,
              k.low_notified_at IS NOT NULL AS low_notified,
-             (SELECT max(b.booking_date)::text FROM bank_tx b WHERE b.konto_id = k.id) AS watermark
+             (SELECT max(b.booking_date)::text FROM bank_tx b WHERE b.konto_id = k.id) AS watermark,
+             -- Receipts sitting BEFORE the watermark with no booking attached. The rule treats
+             -- them as "the bank has already reported this", which is usually right — the link is
+             -- only made when somebody reconciles. But if one of them is genuinely absent from the
+             -- bank data the balance drifts, silently and for good. 27 of them on one account here,
+             -- so the number is shown rather than swallowed.
+             (SELECT count(*) FROM einkauf e
+              WHERE e.konto_id = k.id AND e.bank_tx_id IS NULL AND e.gesamt_betrag IS NOT NULL
+                AND e.datum <= (SELECT max(b.booking_date) FROM bank_tx b WHERE b.konto_id = k.id)
+             )::int AS assumed_booked
       FROM konto k
       WHERE k.account_type = ANY(${BALANCE_TYPES as unknown as string[]})
       ORDER BY k.sort_order, k.name`;
@@ -163,6 +195,7 @@ export function accountBalanceRoutes(app: FastifyInstance): void {
       await sql`UPDATE konto SET balance_start = ${value}, balance_start_date = ${date} WHERE id = ${id}`;
       // A new anchor changes the balance, so a standing "already warned" state is stale.
       await sql`UPDATE konto SET low_notified_at = NULL WHERE id = ${id}`;
+      void checkLowBalance(id);                 // a new anchor can put the account under its line
       return { ok: true, balance: await balanceOf(id, req.user) };
     });
 
@@ -179,6 +212,9 @@ export function accountBalanceRoutes(app: FastifyInstance): void {
       const value = raw === null || raw === undefined ? null : Number(raw);
       if (value !== null && !Number.isFinite(value)) return reply.code(400).send({ error: 'bad_threshold' });
       await sql`UPDATE konto SET low_threshold = ${value}, low_notified_at = NULL WHERE id = ${id}`;
+      // Evaluate at once. Setting a line on an account that is ALREADY under it and hearing
+      // nothing until the next receipt is scanned would be the wrong kind of quiet.
+      void checkLowBalance(id);
       return { ok: true };
     });
 }
