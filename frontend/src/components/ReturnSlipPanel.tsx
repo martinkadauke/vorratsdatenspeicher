@@ -83,6 +83,19 @@ export function ReturnSlipPanel({ receiptId, info, canWrite }: { receiptId: numb
         </ul>
       )}
 
+      {!!info.partners?.length && (
+        <div className={cn('text-xs', muted)}>
+          {t('retoure.togetherWith')}{' '}
+          {info.partners.map((id, i) => (
+            <span key={id}>
+              {i > 0 && ', '}
+              <Link to={`/receipts/${id}`} className="font-medium text-sky-700 hover:underline dark:text-sky-400">#{id}</Link>
+            </span>
+          ))}
+          . {t('retoure.togetherHint')}
+        </div>
+      )}
+
       {info.pending && info.pending.length > 0 && (
         <div className="flex flex-col gap-1.5 border-t border-sky-200 pt-2 dark:border-sky-800/60">
           <div className="font-medium text-amber-700 dark:text-amber-400">{t('retoure.choose', { count: info.pendingCount })}</div>

@@ -17,7 +17,7 @@
  * "Komplett abgeschlossen" comes later and is not this module's job: the bank credit in the CSV, or
  * for Amazon store credit the refund mail (refund_email.confirmed_at / confirmed_by).
  */
-import sql from '../db.js';
+import sql, { adminSql } from '../db.js';
 import type { ReturnSlipResult } from '../llm/ocr.js';
 import { detectReturnAnnouncement, isStoreCreditRefund, sameReturnItem } from './refundHeuristic.js';
 import { bookRefundReconciliation, findRefundCandidates, RefundError } from './refundReconcile.js';
@@ -43,10 +43,34 @@ export interface RetoureInfo {
   pending: { ledgerId: number; item: string | null; amount: number | null; orderRef: string | null }[] | null;
   pendingCount: number;
   note: string | null;
+  /** Other slip receipts of the same drop-off that closed returns together with this one. */
+  partners?: number[];
 }
 
 const RETURN_FROM = /rueckgabe@amazon\.|return@amazon\./i;
 const DAY_MS = 86_400_000;
+/** pg advisory lock serialising slip handling across Swarm replicas (mail 825041, drop folder 825042). */
+const SLIP_LOCK = 825043;
+
+/** Two slips photographed one after the other are OCR'd in parallel; each must see the other's
+ *  outcome, or both stay undecided. The lock lives on an owner-lane connection: in the demo the
+ *  request's household connection cannot reserve another, and advisory locks are database-wide. */
+async function withSlipLock<T>(fn: () => Promise<T>): Promise<T> {
+  const conn = await adminSql.reserve();
+  try {
+    await conn`SELECT pg_advisory_lock(${SLIP_LOCK})`;
+    try {
+      return await fn();
+    } finally {
+      await conn`SELECT pg_advisory_unlock(${SLIP_LOCK})`;
+    }
+  } finally {
+    conn.release();
+  }
+}
+
+const chooseNote = (returns: number, slips: number) =>
+  `${returns} offene Amazon-Rücksendungen, ${slips} Zettel — bitte wählen, welche abgegeben wurde`;
 /** Amazon's return windows are 14–30 days; an announcement older than this is not what a slip
  *  handed in today belongs to (it was dropped off long ago, or never). */
 const ANNOUNCE_MAX_AGE_DAYS = 35;
@@ -180,6 +204,10 @@ function slipInstant(slip: ReturnSlipResult['slips'][number] | undefined): strin
  * OCR, so it must never throw into it.
  */
 export async function handleReturnSlip(einkaufId: number, slip: ReturnSlipResult): Promise<RetoureInfo> {
+  return withSlipLock(() => handleReturnSlipLocked(einkaufId, slip));
+}
+
+async function handleReturnSlipLocked(einkaufId: number, slip: ReturnSlipResult): Promise<RetoureInfo> {
   const first = slip.slips[0];
   const slipAt = slipInstant(first);
   const slipDay = first?.datum ?? slipAt.slice(0, 10);
@@ -192,21 +220,30 @@ export async function handleReturnSlip(einkaufId: number, slip: ReturnSlipResult
     FROM einkauf e LEFT JOIN family_member fm ON fm.id = e.snapped_by_member_id WHERE e.id = ${einkaufId}`;
   const scanner = (who?.user_id as number | null) ?? null;
 
-  const info: RetoureInfo = { slips: slip.slips, closed: [], pending: null, pendingCount: 0, note: null };
+  // Recognised again (OCR re-run): what this slip already closed stays closed and uses up its slips.
+  const prev = await currentInfo(einkaufId);
+  const mine = new Set((await sql`
+    SELECT imported_email_id AS id FROM refund_email WHERE dropoff_einkauf_id = ${einkaufId}`).map(r => r.id as number));
+  const kept = (prev?.closed ?? []).filter(c => mine.has(c.ledgerId));
+  const info: RetoureInfo = { slips: slip.slips, closed: kept, pending: null, pendingCount: 0, note: null };
+  if (kept.length && prev?.partners?.length) info.partners = prev.partners;
+  const slipsLeft = slip.slips.length - kept.length;
   if (!toAmazon) {
     info.note = 'Rücksendezettel erkannt, aber nicht an Amazon — nichts zugeordnet';
-  } else {
+  } else if (slipsLeft > 0) {
     let open = await loadOpenReturns(scanner ? [scanner] : null, slipAt);
     if (!open.length && scanner) open = await loadOpenReturns(null, slipAt);
-    const { close, pending } = pairSlipsWithReturns(slip.slips.length, open, slipDay);
+    const { close, pending } = pairSlipsWithReturns(slipsLeft, open, slipDay);
     for (const r of close) {
       const res = await closeReturnWithSlip(r, einkaufId, slipAt);
       info.closed.push({ ledgerId: r.ledgerId, item: r.item, amount: r.amount, einkaufId: res.einkaufId, note: res.note });
     }
     if (pending.length) {
       info.pending = pending.map(p => ({ ledgerId: p.ledgerId, item: p.item, amount: p.amount, orderRef: p.orderRef }));
-      info.pendingCount = slip.slips.length;
-      info.note = `${pending.length} offene Amazon-Rücksendungen, ${slip.slips.length} Zettel — bitte wählen, welche abgegeben wurde`;
+      info.pendingCount = slipsLeft;
+      info.note = chooseNote(pending.length, slipsLeft);
+    } else if (kept.length) {
+      if (close.length < slipsLeft) info.note = `${slipsLeft - close.length} Zettel ohne angemeldete Rücksendung`;
     } else if (!open.length) {
       // Scanned twice, or the returns were closed by another photo of the same slips?
       const [prev] = await sql`
@@ -216,12 +253,11 @@ export async function handleReturnSlip(einkaufId: number, slip: ReturnSlipResult
       info.note = prev
         ? `Die Rücksendungen dieses Tages sind schon mit Zettel #${prev.id as number} abgeschlossen`
         : 'Keine angemeldete Amazon-Rücksendung gefunden — Rücksende-Mail schon gelabelt?';
-    } else if (close.length < slip.slips.length) {
-      info.note = `${slip.slips.length - close.length} Zettel ohne angemeldete Rücksendung`;
+    } else if (close.length < slipsLeft) {
+      info.note = `${slipsLeft - close.length} Zettel ohne angemeldete Rücksendung`;
     }
   }
 
-  await confirmStoreCreditReturns();
   const done = info.pending == null && info.closed.length > 0 && info.closed.every(c => !c.note);
   await sql`
     UPDATE einkauf SET
@@ -232,7 +268,92 @@ export async function handleReturnSlip(einkaufId: number, slip: ReturnSlipResult
       konto_id = NULL,
       retoure_info = ${sql.json(info as never)}, geprueft = ${done}
     WHERE id = ${einkaufId}`;
-  return info;
+  // Undecided alone may be exact together with the drop-off's other slips (stored above first,
+  // so this slip is one of the day's undecided ones).
+  if (info.pending) await settlePendingSlips(slipDay);
+  await confirmStoreCreditReturns();
+  return (await currentInfo(einkaufId)) ?? info;
+}
+
+async function currentInfo(einkaufId: number): Promise<RetoureInfo | null> {
+  const [row] = await sql`SELECT retoure_info FROM einkauf WHERE id = ${einkaufId}`;
+  return (row?.retoure_info as RetoureInfo | null) ?? null;
+}
+
+/**
+ * Undecided slips of one day settle together. A drop-off's slips are usually photographed one by
+ * one (10.11.: two DHL slips, two photos) — each photo alone is "1 slip, 2 open returns", both
+ * together are exact. Per household, as long as something moves:
+ *   • a slip whose remaining candidates fit its count takes them (also the one left after a pick);
+ *   • if all remaining candidates fit the remaining slips, they are dealt out in scan order. Which
+ *     slip carried which parcel is printed nowhere, so those slips name each other as partners.
+ * Runs under the slip lock.
+ */
+async function settlePendingSlips(slipDay: string): Promise<void> {
+  const rows = await sql`
+    SELECT id, retoure_info FROM einkauf
+    WHERE datum = ${slipDay}::date AND jsonb_typeof(retoure_info->'pending') = 'array'
+    ORDER BY id`;
+  if (!rows.length) return;
+  const open = new Map((await loadOpenReturns(null, null)).map(o => [o.ledgerId, o]));
+  const slips = rows.map(r => {
+    const info = r.retoure_info as RetoureInfo;
+    return {
+      id: r.id as number, info, take: [] as number[],
+      cands: (info.pending ?? []).map(p => p.ledgerId).filter(id => open.has(id)),
+    };
+  });
+  type Slip = (typeof slips)[number];
+  const used = new Set<number>();
+  const left = (s: Slip) => s.info.pendingCount - s.take.length;
+  const free = (s: Slip) => s.cands.filter(id => !used.has(id));
+  const give = (s: Slip, id: number) => { used.add(id); s.take.push(id); };
+
+  for (let moved = true; moved;) {
+    moved = false;
+    for (const s of slips) {
+      const f = free(s);
+      if (left(s) > 0 && f.length > 0 && f.length <= left(s)) { f.forEach(id => give(s, id)); moved = true; }
+    }
+  }
+
+  const byUser = new Map<number, Slip[]>();
+  for (const s of slips) {
+    const f = free(s);
+    if (left(s) <= 0 || !f.length) continue;
+    const uid = open.get(f[0])!.userId;
+    byUser.set(uid, [...(byUser.get(uid) ?? []), s]);
+  }
+  const partners = new Map<number, number[]>();
+  for (const group of byUser.values()) {
+    const pool = new Set(group.flatMap(free));
+    if (group.length < 2 || pool.size > group.reduce((n, s) => n + left(s), 0)) continue;
+    for (const s of group) for (const id of free(s)) { if (left(s) <= 0) break; give(s, id); }
+    const ids = group.filter(s => s.take.length).map(s => s.id);
+    for (const id of ids) partners.set(id, ids.filter(o => o !== id));
+  }
+
+  for (const s of slips) {
+    const before = s.info.pending ?? [];
+    const pruned = before.filter(p => s.cands.includes(p.ledgerId) && !used.has(p.ledgerId));
+    if (!s.take.length && pruned.length === before.length) continue;      // nothing changed for it
+    const at = slipInstant(s.info.slips[0]);
+    for (const id of s.take) {
+      const r = open.get(id)!;
+      const res = await closeReturnWithSlip(r, s.id, at);
+      s.info.closed.push({ ledgerId: id, item: r.item, amount: r.amount, einkaufId: res.einkaufId, note: res.note });
+    }
+    s.info.pendingCount = Math.max(0, left(s));
+    s.info.pending = s.info.pendingCount > 0 && pruned.length ? pruned : null;
+    const p = partners.get(s.id);
+    if (p?.length) s.info.partners = p;
+    s.info.note = s.info.pending ? chooseNote(pruned.length, s.info.pendingCount)
+      : !s.info.closed.length ? 'Die angebotenen Rücksendungen sind schon mit anderen Zetteln abgeschlossen'
+      : s.info.pendingCount > 0 ? `${s.info.pendingCount} Zettel ohne offene Rücksendung`
+      : null;
+    const done = s.info.pending == null && s.info.closed.length > 0 && s.info.closed.every(c => !c.note);
+    await sql`UPDATE einkauf SET retoure_info = ${sql.json(s.info as never)}, geprueft = ${done} WHERE id = ${s.id}`;
+  }
 }
 
 /**
@@ -315,6 +436,10 @@ export async function confirmReturnByBankTx(bankTxId: number): Promise<void> {
 
 /** The user picked which open return a still-ambiguous slip belongs to. */
 export async function resolveSlipChoice(einkaufId: number, ledgerId: number): Promise<RetoureInfo | { error: string }> {
+  return withSlipLock(() => resolveSlipChoiceLocked(einkaufId, ledgerId));
+}
+
+async function resolveSlipChoiceLocked(einkaufId: number, ledgerId: number): Promise<RetoureInfo | { error: string }> {
   const [row] = await sql`SELECT retoure_info, datum::text AS datum FROM einkauf WHERE id = ${einkaufId}`;
   const info = row?.retoure_info as RetoureInfo | null;
   if (!info?.pending?.some(p => p.ledgerId === ledgerId)) return { error: 'Diese Rücksendung steht für diesen Zettel nicht zur Wahl.' };
@@ -326,9 +451,12 @@ export async function resolveSlipChoice(einkaufId: number, ledgerId: number): Pr
   const rest = info.pending.filter(p => p.ledgerId !== ledgerId);
   info.pendingCount = Math.max(0, info.pendingCount - 1);
   info.pending = info.pendingCount > 0 && rest.length ? rest : null;
-  info.note = info.pending ? info.note : null;
-  await confirmStoreCreditReturns();
+  info.note = info.pending ? chooseNote(rest.length, info.pendingCount) : null;
   const done = info.pending == null && info.closed.every(c => !c.note);
   await sql`UPDATE einkauf SET retoure_info = ${sql.json(info as never)}, geprueft = ${done} WHERE id = ${einkaufId}`;
-  return info;
+  // One pick can decide the rest: the return left over for this slip, or for the other slips of
+  // the drop-off — two slips photographed one by one need a single tap, not two.
+  if (row?.datum) await settlePendingSlips(String(row.datum).slice(0, 10));
+  await confirmStoreCreditReturns();
+  return (await currentInfo(einkaufId)) ?? info;
 }

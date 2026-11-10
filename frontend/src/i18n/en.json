@@ -1323,6 +1323,8 @@
     "choose_other": "Which returns do the {{count}} slips belong to? Tap them one by one.",
     "chosen": "Return closed",
     "chosenOpen": "Marked as handed in — original receipt still to assign",
+    "togetherWith": "Handed in together with",
+    "togetherHint": "Which slip belongs to which return is printed on none of them.",
     "returnOf": "Return: {{item}}",
     "droppedSlip": "handed in {{date}} · slip #{{id}}",
     "droppedMail": "handed in {{date}} · per Amazon",

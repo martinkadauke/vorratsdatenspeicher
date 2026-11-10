@@ -132,6 +132,8 @@ export interface RetoureInfo {
   pending: { ledgerId: number; item: string | null; amount: number | null; orderRef: string | null }[] | null;
   pendingCount: number;
   note: string | null;
+  /** Other slips of the same drop-off that closed returns together with this one. */
+  partners?: number[];
 }
 export interface ReceiptReturn {
   refund_artikel_id: number | null;

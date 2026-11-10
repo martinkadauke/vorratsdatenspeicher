@@ -1325,6 +1325,8 @@
     "choose_other": "Zu welchen Rücksendungen gehören die {{count}} Zettel? Nacheinander antippen.",
     "chosen": "Rücksendung abgeschlossen",
     "chosenOpen": "Als abgegeben vermerkt — Originalbeleg noch zuordnen",
+    "togetherWith": "Zusammen abgegeben mit",
+    "togetherHint": "Welcher Zettel zu welcher Rücksendung gehört, steht auf keinem der Zettel.",
     "returnOf": "Rücksendung: {{item}}",
     "droppedSlip": "abgegeben {{date}} · Zettel #{{id}}",
     "droppedMail": "abgegeben {{date}} · laut Amazon",
