@@ -16,6 +16,7 @@ import { sniffCsv, fingerprintHeader, applyCsvMapping, generateCsvMapping, type 
 import { normMerchant, alignInvoiceToBank } from '../lib/merchant.js';
 import { todayLocal } from '../lib/localDate.js';
 import { bookRefundReconciliation, findRefundCandidates, RefundError, type RefundReturnLine } from '../lib/refundReconcile.js';
+import { confirmReturnsFromBank, confirmReturnByBankTx } from '../lib/returnSlip.js';
 
 /** Pay-slip files live in a NON-static subdir of the receipts volume (the static
  *  /receipts/:file route rejects any name containing '/'), so they're reachable
@@ -1963,7 +1964,7 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
         ON CONFLICT DO NOTHING RETURNING id`;
       if (ins.length) imported++; else skipped++;
     }
-    const matched = imported ? (await autoMatchBankByOrder(kontoId)) + (await autoMatchBankByOrderSum(kontoId)) + (await autoMatchBankByOrderSibling(kontoId)) + (await autoMatchBank(kontoId)) + (await autoMatchBankCredits(kontoId)) : 0;
+    const matched = imported ? (await autoMatchBankByOrder(kontoId)) + (await autoMatchBankByOrderSum(kontoId)) + (await autoMatchBankByOrderSibling(kontoId)) + (await autoMatchBank(kontoId)) + (await autoMatchBankCredits(kontoId)) + (await confirmReturnsFromBank(kontoId)) : 0;
     return { ok: true, filename: bdy.filename ?? null, account: parsed.account, period: parsed.period, imported, skipped, matched, total: parsed.rows.length };
   });
 
@@ -2256,7 +2257,7 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
         return claim.ok ? null : aiLimitMessage(claim.max);
       }
       : undefined;
-    const linked = (await autoMatchBankByOrder(kontoId)) + (await autoMatchBankByOrderSum(kontoId)) + (await autoMatchBankByOrderSibling(kontoId)) + (await autoMatchBank(kontoId)) + (await autoMatchBankCredits(kontoId));
+    const linked = (await autoMatchBankByOrder(kontoId)) + (await autoMatchBankByOrderSum(kontoId)) + (await autoMatchBankByOrderSibling(kontoId)) + (await autoMatchBank(kontoId)) + (await autoMatchBankCredits(kontoId)) + (await confirmReturnsFromBank(kontoId));
     let suggested = 0;
     let limit: string | null = null;
     if (body.ai !== false) {
@@ -2505,6 +2506,7 @@ Antworte NUR mit JSON: {"matches":[{"bank_tx_id":N,"kind":"receipt|income|fixed"
           AND NOT EXISTS (SELECT 1 FROM fixed_cost_check fc WHERE fc.bank_tx_id = bank_tx.id)
         RETURNING id`;
       if (!linked.length) return reply.code(400).send({ error: 'Bankbuchung ist bereits zugeordnet.' });
+      await confirmReturnByBankTx(id);   // a returned Amazon item is now confirmed by its credit
       return { ok: true, einkauf_id: einkaufId, linked: true };
     }
     // Backstop against a DOUBLE refund: if the target receipt already carries a refund for ~this

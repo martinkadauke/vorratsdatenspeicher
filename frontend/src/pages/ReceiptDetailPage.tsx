@@ -9,6 +9,7 @@ import { api } from '../api/client';
 import type { Artikel, Receipt, ReceiptDetail, RefundBookPayload } from '../api/types';
 import { RefundReconcileDialog } from '../components/RefundReconcileDialog';
 import { RefundMailModal, type RefundMailItem } from '../components/RefundMailModal';
+import { ReturnSlipPanel, ReturnStatusPanel } from '../components/ReturnSlipPanel';
 import { Spinner, Modal, Input, Label, Button, ProgressBar, Select } from '../components/ui';
 import { ArticleEditModal } from '../components/ArticleEditModal';
 import { FirstVisitHint } from '../components/FirstVisitHint';
@@ -355,7 +356,8 @@ export function ReceiptDetailPage() {
   // The photo is being OCR'd server-side right now (authoritative flag).
   const ocrPending = !!data.ocr_pending;
   // OCR finished but found no line items (e.g. a screenshot with only a total).
-  const ocrEmpty = !!data.bild_pfad && !data.ocr_pending && data.artikel.length === 0;
+  // (A return slip has no positions by design — it is a 0-€ proof of hand-in, not a purchase.)
+  const ocrEmpty = !!data.bild_pfad && !data.ocr_pending && data.artikel.length === 0 && !data.retoure_info;
 
   // Onboarding coach — Stage A: this receipt is recognized (positions visible) and not yet
   // reviewed → explain what happened and point to Prüfen. Repeats on every receipt until
@@ -704,6 +706,8 @@ export function ReceiptDetailPage() {
 
         {/* Line items — drag the grip handle to reorder */}
         <div className="flex min-w-0 flex-col gap-1.5">
+          {data.retoure_info && <ReturnSlipPanel receiptId={data.id} info={data.retoure_info} canWrite={canWrite} />}
+          {!!data.returns?.length && <ReturnStatusPanel returns={data.returns} />}
           {data.artikel.length > 1 && (
             <div className="relative">
               <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
@@ -755,8 +759,9 @@ export function ReceiptDetailPage() {
           )}
 
           {/* Global add-position button — the reliable way to add an item (esp. on a
-              fresh cash receipt with no rows yet, where there are no dividers to tap). */}
-          {editable && (
+              fresh cash receipt with no rows yet, where there are no dividers to tap).
+              Not on a return slip: it is a 0-€ proof of hand-in and never carries positions. */}
+          {editable && !data.retoure_info && (
             <button
               type="button"
               onClick={() => openAdd(null)}

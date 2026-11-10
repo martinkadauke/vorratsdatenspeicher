@@ -1312,6 +1312,25 @@
       }
     }
   },
+  "retoure": {
+    "title_one": "Return slip",
+    "title_other": "Return slip · {{count}} parcels",
+    "handedIn": "Handed in {{when}}",
+    "noTracking": "tracking number unreadable",
+    "unknownItem": "unknown item",
+    "onReceipt": "item on receipt #{{id}} set to 0",
+    "choose_one": "Which return does this slip belong to?",
+    "choose_other": "Which returns do the {{count}} slips belong to? Tap them one by one.",
+    "chosen": "Return closed",
+    "chosenOpen": "Marked as handed in — original receipt still to assign",
+    "returnOf": "Return: {{item}}",
+    "droppedSlip": "handed in {{date}} · slip #{{id}}",
+    "droppedMail": "handed in {{date}} · per Amazon",
+    "notDropped": "not handed in yet",
+    "confirmedBank": "credited to the account ({{date}})",
+    "confirmedCredit": "refunded as Amazon balance ({{date}})",
+    "awaitingRefund": "refund still pending"
+  },
   "refund": {
     "title": "Assign refund",
     "amountLabel": "Refund amount",

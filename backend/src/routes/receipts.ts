@@ -8,7 +8,8 @@ import { checkLowBalance } from '../lowBalanceWatch.js';
 import { requireAdmin } from '../auth/plugin.js';
 import { kontoScope, canSeeKonto } from '../auth/konto.js';
 import { accountHasStatements } from './konten.js';
-import { ocrFromImage, type OcrResult } from '../llm/ocr.js';
+import { ocrFromImage, detectReturnSlip, type OcrResult } from '../llm/ocr.js';
+import { handleReturnSlip, resolveSlipChoice } from '../lib/returnSlip.js';
 import { searchFilter, col, numCol, lk, type Frag } from '../lib/search.js';
 import { cleanMatch } from '../lib/canonicalMatch.js';
 import { bookRefundReconciliation, RefundError, type RefundReturnLine } from '../lib/refundReconcile.js';
@@ -141,6 +142,16 @@ export async function ocrAndStore(id: number, bildPfad: string, hint?: string | 
   const filename = bildPfad.split('/').pop();
   const source = filename ? path.join(RECEIPTS_LOCAL_PATH, filename) : bildPfad;
   const parsed = await ocrFromImage(source, hint);
+  // A parcel drop-off slip has no line items for the receipt OCR to find. Only then is the second,
+  // narrow question asked — so a normal receipt never pays for it, and a receipt the OCR merely
+  // misread (items found) can never be turned into a return by accident.
+  if (!(parsed.artikel?.length)) {
+    const slip = await detectReturnSlip(source).catch(() => null);
+    if (slip?.isReturnSlip) {
+      await handleReturnSlip(id, slip);
+      return { items: 0, confidence: Number(parsed.confidence) || 0 };
+    }
+  }
   return storeOcrResult(id, parsed);
 }
 
@@ -695,7 +706,8 @@ export function receiptRoutes(app: FastifyInstance): void {
              bt.booking_date::text AS bank_booking, bt.amount::float8 AS bank_amount, bt.counterparty AS bank_counterparty,
              (e.private_for_user_id IS NOT NULL) AS private,
              EXISTS(SELECT 1 FROM email_message em WHERE em.einkauf_id = e.id) AS has_email,
-             EXISTS(SELECT 1 FROM refund_email re WHERE re.einkauf_id = e.id) AS has_refund_email
+             EXISTS(SELECT 1 FROM refund_email re WHERE re.einkauf_id = e.id) AS has_refund_email,
+             e.retoure_info
       FROM einkauf e LEFT JOIN konto k ON k.id = e.konto_id
       LEFT JOIN bank_tx bt ON bt.id = e.bank_tx_id
       WHERE e.id = ${id}
@@ -751,8 +763,17 @@ export function receiptRoutes(app: FastifyInstance): void {
       WHERE bt.einkauf_id = ${id} OR bt.id = ${(r0.bank_tx_id as number | null) ?? -1}
       ORDER BY bt.booking_date, bt.id`;
     const banks = bankRows.map(b => ({ id: b.id as number, booking_date: b.booking_date as string, amount: b.amount as number, counterparty: b.counterparty as string | null }));
+    // Returns booked against this receipt and how far each has come: handed in (slip / Amazon's
+    // drop-off mail) and confirmed (bank credit, or the refund mail for Amazon store credit).
+    const returns = (await sql`
+      SELECT re.refund_artikel_id, re.item, re.amount::float8 AS amount, re.dropoff_at::text AS dropoff_at,
+             re.dropoff_einkauf_id, re.confirmed_at::text AS confirmed_at, re.confirmed_by
+      FROM refund_email re WHERE re.einkauf_id = ${id}
+        AND (re.dropoff_at IS NOT NULL OR re.confirmed_at IS NOT NULL)
+      ORDER BY re.id`).map(r => ({ ...r }));
     return {
       ...r0,
+      returns,
       // All matched bank bookings; `bank` stays the primary for existing callers.
       banks,
       bank: banks.find(b => b.id === r0.bank_tx_id) ?? banks[0] ?? null,
@@ -820,6 +841,20 @@ export function receiptRoutes(app: FastifyInstance): void {
       html: em.html ? sanitizeEmailHtml(em.html as string) : null,
       text: em.body_text,
     };
+  });
+
+  /** A scanned return slip could not be paired on its own (more open Amazon returns than slips):
+   *  the user names the return it belongs to, and it is closed exactly as an unambiguous scan would. */
+  app.post('/api/receipts/:id/retoure', async (req, reply) => {
+    const id = parseInt((req.params as { id: string }).id, 10);
+    if (!id) return reply.code(400).send({ error: 'invalid id' });
+    if (!await guardReceipt(req, reply, id)) return;
+    if (req.user && req.user.can_write === false) return reply.code(403).send({ error: 'read_only' });
+    const ledgerId = Number((req.body as { ledger_id?: unknown } | undefined)?.ledger_id);
+    if (!Number.isInteger(ledgerId)) return reply.code(400).send({ error: 'ledger_id required' });
+    const res = await resolveSlipChoice(id, ledgerId);
+    if ('error' in res) return reply.code(409).send(res);
+    return res;
   });
 
   /** Book a refund/return on THIS receipt manually (no bank credit, no mail) — the reconciliation

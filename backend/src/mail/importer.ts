@@ -8,7 +8,7 @@ import { decryptSecret } from '../lib/crypto.js';
 import { ocrFromText, reinterpretMail, INCOME_CATEGORIES, type OcrResult, type IncomeCategory } from '../llm/ocr.js';
 import { ocrAndStore, storeOcrResult } from '../routes/receipts.js';
 import { applyLearnedKonto } from '../lib/merchant.js';
-import { detectRefundMail, detectReturnAnnouncement, decideReturnLink, type ReturnLinkCandidate } from '../lib/refundHeuristic.js';
+import { detectRefundMail, detectReturnAnnouncement, decideReturnLink, isStoreCreditRefund, type ReturnLinkCandidate } from '../lib/refundHeuristic.js';
 import { findRefundCandidates, type RefundCandidate } from '../lib/refundReconcile.js';
 import { todayLocal, localDay } from '../lib/localDate.js';
 import { getConfig } from '../config.js';
@@ -208,7 +208,10 @@ async function storeRefundSuggestion(
   parsed: ParsedMail,
   r: { amount: number; merchant: string; item: string; order_ref: string; description: string },
   pdf: { content?: Buffer } | null,
-  opts: { announcement: { deadline: string | null } | null; supersede: { ledgerId: number; reason: string } | null } = { announcement: null, supersede: null },
+  opts: {
+    announcement: { deadline: string | null; droppedOff: boolean } | null;
+    supersede: { ledgerId: number; reason: string } | null;
+  } = { announcement: null, supersede: null },
 ): Promise<void> {
   let pdfPfad: string | null = null;
   if (pdf?.content) {
@@ -231,6 +234,8 @@ async function storeRefundSuggestion(
       + (opts.announcement.deadline ? ' · abgeben bis ' + opts.announcement.deadline : '')
       + ' · Geld noch nicht erstattet'
     : 'Mögliche Erstattung' + amountTxt + merchantTxt;
+  // A refund paid as Amazon store credit never reaches a bank CSV, so its mail IS the confirmation.
+  const storeCredit = !opts.announcement && isStoreCreditRefund(bodyTextRaw);
   await sql.begin(async (tx) => {
     if (opts.supersede) {
       // Only while still open: an announcement the user already booked is never silently undone.
@@ -243,10 +248,49 @@ async function storeRefundSuggestion(
       VALUES
         (${ledgerId}, NULL, NULL, ${r.amount || null}, ${(r.merchant || null)?.slice(0, 200) ?? null}, ${(r.item || null)?.slice(0, 200) ?? null},
          ${(r.order_ref || null)?.slice(0, 60) ?? null}, ${from}, ${subj}, ${sentAt}, ${html}, ${bodyTextRaw}, ${pdfPfad})`;
+    if (opts.announcement?.droppedOff) {
+      // The first mail VDS sees for this return may already be Amazon's drop-off confirmation.
+      await tx`UPDATE refund_email SET dropoff_at = COALESCE(${sentAt}::timestamptz, NOW()) WHERE imported_email_id = ${ledgerId}`;
+    }
+    if (opts.supersede) {
+      // The superseded announcement may already know the drop-off (scan or Amazon's mail) — keep it.
+      await tx`
+        UPDATE refund_email n SET dropoff_at = o.dropoff_at, dropoff_einkauf_id = o.dropoff_einkauf_id
+        FROM refund_email o
+        WHERE n.imported_email_id = ${ledgerId} AND o.imported_email_id = ${opts.supersede.ledgerId}
+          AND o.dropoff_at IS NOT NULL`;
+    }
+    if (storeCredit) {
+      await tx`UPDATE refund_email SET confirmed_at = COALESCE(${sentAt}::timestamptz, NOW()), confirmed_by = 'mail'
+               WHERE imported_email_id = ${ledgerId}`;
+    }
     await tx`
       UPDATE imported_email SET status = 'refund_suggested', reason = ${reason}
       WHERE id = ${ledgerId}`;
   });
+}
+
+/** Apply the side notes of a skipped return mail to the earlier announcement it belongs to:
+ *  Amazon's drop-off confirmation sets "abgegeben", a store-credit refund mail sets "bestätigt". */
+export async function noteReturnProgress(
+  d: { dropoffLedgerId?: number; confirmLedgerId?: number },
+  parsed: ParsedMail,
+  bodyText: string,
+): Promise<string> {
+  const at = parsed.date ? parsed.date.toISOString() : null;
+  if (d.dropoffLedgerId != null) {
+    await sql`UPDATE refund_email SET dropoff_at = COALESCE(dropoff_at, ${at}::timestamptz, NOW())
+              WHERE imported_email_id = ${d.dropoffLedgerId}`;
+  }
+  if (d.confirmLedgerId != null) {
+    if (isStoreCreditRefund(bodyText)) {
+      await sql`UPDATE refund_email SET confirmed_at = COALESCE(${at}::timestamptz, NOW()), confirmed_by = 'mail'
+                WHERE imported_email_id = ${d.confirmLedgerId} AND confirmed_at IS NULL`;
+      return ' Als Amazon-Guthaben erstattet — Rücksendung abgeschlossen.';
+    }
+    return ' Abgeschlossen wird sie, sobald die Gutschrift im Bank-CSV auftaucht.';
+  }
+  return '';
 }
 
 /** Parse one raw message and, if new, file it as a receipt for this user.
@@ -329,11 +373,11 @@ async function processMessage(mb: MailboxRow, kontoId: number | null, raw: Buffe
           // Pair an announcement with the later refund mail of the same return, so the user is
           // offered ONE booking per return, not two.
           const link = decideReturnLink(
-            { isAnnouncement: announce.isAnnouncement, item: r.item || null, amount: r.amount || null },
+            { isAnnouncement: announce.isAnnouncement, droppedOff: announce.droppedOff, item: r.item || null, amount: r.amount || null },
             await loadReturnCandidates(mb.user_id, r.order_ref));
-          if (link.action === 'skip') return await skip(link.reason);
+          if (link.action === 'skip') return await skip(link.reason + await noteReturnProgress(link, parsed, bodyText));
           await storeRefundSuggestion(ledgerId, parsed, r, pdf ?? null, {
-            announcement: announce.isAnnouncement ? { deadline: announce.deadline } : null,
+            announcement: announce.isAnnouncement ? { deadline: announce.deadline, droppedOff: announce.droppedOff } : null,
             supersede: link.action === 'store_and_supersede' ? { ledgerId: link.supersedeLedgerId, reason: link.reason } : null,
           });
           return false; // surfaced for review; no receipt, no money

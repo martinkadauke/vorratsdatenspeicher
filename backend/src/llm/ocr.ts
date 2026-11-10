@@ -1,5 +1,6 @@
 import { todayLocal } from '../lib/localDate.js';
 import { readFile } from 'node:fs/promises';
+import Jimp from 'jimp';
 import { getConfig } from '../config.js';
 import { parseLlmJson } from './ollama.js';
 import { recordUsage, providerForTask } from './provider.js';
@@ -131,11 +132,27 @@ async function openaiOcrChat(model: string, system: string, content: string | un
  *  and model are taken from the `ai.ocr.*` config — Anthropic (images + PDF),
  *  OpenAI (images only) or Ollama (self-hosted, images only). */
 export async function ocrFromImage(source: string, hint?: string | null): Promise<OcrResult> {
+  const userHint = hint && hint.trim() ? `\n\nWICHTIGER HINWEIS DES NUTZERS zu diesem Beleg — bitte unbedingt berücksichtigen: ${hint.trim().slice(0, 500)}` : '';
+  const { text, usage } = await visionCall(source, VISION_SYSTEM, 'Extrahiere die Bon-Daten als JSON.' + userHint, ollamaOcrHints());
+  const parsed = parseLlmJson<OcrResult>(text);
+  parsed.usage = usage;
+  return parsed;
+}
+
+/** One vision request on the configured OCR provider/model (`ai.ocr.*`), returning the raw text the
+ *  model produced. Shared by the receipt OCR and the return-slip check, so a provider switch in the
+ *  settings moves both. `ollamaExtra` is appended to the system prompt on the Ollama path only. */
+async function visionCall(
+  source: string | Buffer, system: string, instruction: string, ollamaExtra = '',
+): Promise<{ text: string; usage: { input_tokens: number; output_tokens: number } | undefined }> {
   const provider = await getConfig('ai.ocr.provider');
   const model = await getConfig('ai.ocr.model');
 
   let buf: Buffer;
-  if (/^https?:\/\//i.test(source)) {
+  if (Buffer.isBuffer(source)) {
+    buf = source;
+    source = '';            // no name to sniff an extension from — the bytes decide below
+  } else if (/^https?:\/\//i.test(source)) {
     const imgRes = await fetch(source, { signal: AbortSignal.timeout(60_000) });
     if (!imgRes.ok) throw new Error(`image fetch failed: HTTP ${imgRes.status}`);
     buf = Buffer.from(await imgRes.arrayBuffer());
@@ -148,30 +165,24 @@ export async function ocrFromImage(source: string, hint?: string | null): Promis
   if (!isPdf && isHeic(buf)) {
     throw new Error('HEIC/HEIF-Fotos werden vom Vision-Modell nicht unterstützt — bitte als JPEG oder PNG hochladen (iPhone: Einstellungen → Kamera → Formate → "Maximale Kompatibilität").');
   }
-  const userHint = hint && hint.trim() ? `\n\nWICHTIGER HINWEIS DES NUTZERS zu diesem Beleg — bitte unbedingt berücksichtigen: ${hint.trim().slice(0, 500)}` : '';
-
   // Self-hosted Ollama vision (images only — Ollama can't read PDFs).
   if (provider === 'ollama') {
     if (isPdf) throw new Error('Ollama-OCR unterstützt nur Bilder (JPEG/PNG), keine PDFs — für PDF-Rechnungen bitte Anthropic (Vision) als OCR-Provider wählen.');
-    const { text, input, output } = await ollamaOcrChat(model, VISION_SYSTEM + ollamaOcrHints(), 'Extrahiere die Bon-Daten als JSON.' + userHint, [b64]);
-    const parsed = parseLlmJson<OcrResult>(text);
-    parsed.usage = { input_tokens: input, output_tokens: output };
+    const { text, input, output } = await ollamaOcrChat(model, system + ollamaExtra, instruction, [b64]);
     await recordUsage('ocr', 'ollama', model, input, output);
-    return parsed;
+    return { text, usage: { input_tokens: input, output_tokens: output } };
   }
 
   // OpenAI vision (images only — the Chat Completions API can't read PDFs natively).
   if (provider === 'openai') {
     if (isPdf) throw new Error('OpenAI-OCR unterstützt nur Bilder (JPEG/PNG), keine PDFs — für PDF-Rechnungen bitte Anthropic (Vision) als OCR-Provider wählen.');
     const mt = sniffMediaType(buf) ?? (/\.png$/i.test(source) ? 'image/png' : 'image/jpeg');
-    const { text, input, output } = await openaiOcrChat(model, VISION_SYSTEM, [
-      { type: 'text', text: 'Extrahiere die Bon-Daten als JSON.' + userHint },
+    const { text, input, output } = await openaiOcrChat(model, system, [
+      { type: 'text', text: instruction },
       { type: 'image_url', image_url: { url: `data:${mt};base64,${b64}` } },
     ]);
-    const parsed = parseLlmJson<OcrResult>(text);
-    parsed.usage = { input_tokens: input, output_tokens: output };
     await recordUsage('ocr', 'openai', model, input, output);
-    return parsed;
+    return { text, usage: { input_tokens: input, output_tokens: output } };
   }
 
   if (provider !== 'anthropic') {
@@ -204,12 +215,12 @@ export async function ocrFromImage(source: string, hint?: string | null): Promis
       // BEFORE the JSON text block (→ empty → zero line items). We want extraction, not
       // reasoning. (parseLlmJson still repairs stray quotes; Ollama uses think:false above.)
       thinking: { type: 'disabled' },
-      system: VISION_SYSTEM,
+      system,
       messages: [{
         role: 'user',
         content: [
           docBlock,
-          { type: 'text', text: 'Extrahiere die Bon-Daten als JSON.' + userHint },
+          { type: 'text', text: instruction },
         ],
       }],
     }),
@@ -222,10 +233,116 @@ export async function ocrFromImage(source: string, hint?: string | null): Promis
   const data = await res.json() as { content?: { type?: string; text?: string }[]; usage?: { input_tokens: number; output_tokens: number } };
   // Thinking models (Sonnet 5) return [thinking, text]; the JSON is the first TEXT block, not content[0].
   const text = (data.content ?? []).find(c => c.type === 'text')?.text ?? '';
-  const parsed = parseLlmJson<OcrResult>(text);
-  parsed.usage = data.usage;
   await recordUsage('ocr', 'anthropic', model, data.usage?.input_tokens ?? 0, data.usage?.output_tokens ?? 0);
-  return parsed;
+  return { text, usage: data.usage };
+}
+
+/** One parcel drop-off slip ("Einlieferungsbeleg") as printed by the post office. */
+export interface ReturnSlipEntry {
+  carrier: string;            // "DHL"
+  recipient: string;          // "Amazon - Customer Returns"
+  tracking: string;           // "233910510841"
+  datum: string | null;       // YYYY-MM-DD
+  uhrzeit: string | null;     // HH:MM
+  filiale: string | null;     // "Deutsche Post AG, Ohmenhäuser Str. 15, 72810 Gomaringen"
+}
+export interface ReturnSlipResult { isReturnSlip: boolean; slips: ReturnSlipEntry[] }
+
+const RETURN_SLIP_SYSTEM = `Du prüfst ein Foto. Darauf können EINLIEFERUNGSBELEGE von Paket-Rücksendungen liegen: kleine
+Thermozettel der Post/DHL (oder Hermes, DPD, GLS), z.B. mit "DHL Retoure Unverpackt", einer Sendungsnummer unter
+"Sendungsinformationen" und einem Empfänger wie "Amazon - Customer Returns". Die Zettel können gedreht oder quer liegen,
+und es können mehrere auf einem Foto sein.
+Antworte AUSSCHLIESSLICH mit gültigem JSON, ohne Markdown-Fence:
+{"ist_retoure":true|false,"zettel":[{"traeger":"DHL","empfaenger":"Amazon - Customer Returns","sendungsnummer":"…","datum":"YYYY-MM-DD","uhrzeit":"HH:MM","filiale":"Name und Adresse der Annahmestelle"}]}
+Pro Sendungsnummer genau EIN Eintrag in "zettel". Ein normaler Kassenbon, eine Rechnung oder ein Paketschein ohne
+Rücksendung ist KEINE Retoure: dann {"ist_retoure":false,"zettel":[]}. Erfinde nichts — unlesbare Felder als null.`;
+
+/** Cut a photo down to the bright paper on it. Slips are small and the API shrinks a 4000-px phone
+ *  photo to ~1568 px, at which the thermo print is unreadable — on Martin's example (two slips lying
+ *  sideways on a carpet) the model then INVENTED a café receipt. Rows/columns are kept where enough
+ *  samples are bright; a single fluff speck on the carpet is not enough. Null when nothing stands out. */
+async function cropToPaper(buf: Buffer): Promise<Jimp | null> {
+  const img = await Jimp.read(buf);
+  const { width: W, height: H } = img.bitmap;
+  const step = Math.max(2, Math.round(Math.max(W, H) / 700));
+  const bright = (x: number, y: number) => { const c = Jimp.intToRGBA(img.getPixelColor(x, y)); return (c.r + c.g + c.b) / 3 > 170; };
+  const rows: number[] = [], cols: number[] = [];
+  for (let y = 0; y < H; y += step) { let n = 0, t = 0; for (let x = 0; x < W; x += step) { t++; if (bright(x, y)) n++; } rows.push(n / t); }
+  for (let x = 0; x < W; x += step) { let n = 0, t = 0; for (let y = 0; y < H; y += step) { t++; if (bright(x, y)) n++; } cols.push(n / t); }
+  const span = (a: number[], thr: number): [number, number] | null => {
+    const i = a.findIndex(v => v > thr);
+    if (i < 0) return null;
+    return [i * step, (a.length - 1 - [...a].reverse().findIndex(v => v > thr)) * step];
+  };
+  const ys = span(rows, 0.10), xs = span(cols, 0.05);
+  if (!ys || !xs) return null;
+  const pad = Math.round(Math.max(W, H) / 100);
+  const x0 = Math.max(0, xs[0] - pad), y0 = Math.max(0, ys[0] - pad);
+  const x1 = Math.min(W, xs[1] + pad), y1 = Math.min(H, ys[1] + pad);
+  // Nothing to gain when the paper already fills the frame (a normal close-up scan).
+  if ((x1 - x0) * (y1 - y0) > 0.8 * W * H) return null;
+  return img.crop(x0, y0, x1 - x0, y1 - y0);
+}
+
+/** Is this photo a parcel drop-off slip for a RETURN? Asked only after the receipt OCR found no line
+ *  items (a slip has none), so a normal receipt never pays for this second request.
+ *  Slips are often photographed sideways; the model reads rotated thermo print poorly. On the
+ *  example it read ONE slip dated 2022 sideways, and both slips with the exact numbers upright. A
+ *  wrong reading still LOOKS plausible, so all three orientations are asked and the most believable
+ *  reading wins (three cheap calls, and only for photos the receipt OCR found nothing on). */
+export async function detectReturnSlip(source: string, today: string = todayLocal()): Promise<ReturnSlipResult> {
+  const buf = /^https?:\/\//i.test(source) ? null : await readFile(source).catch(() => null);
+  const isPdf = !!buf && buf.length >= 4 && buf.toString('ascii', 0, 4) === '%PDF';
+  const crop = buf && !isPdf ? await cropToPaper(buf).catch(() => null) : null;
+  if (!crop) return askReturnSlip(source);
+  let best: ReturnSlipResult = { isReturnSlip: false, slips: [] }, bestScore = 0;
+  for (const deg of [0, 90, -90]) {
+    const im = deg ? crop.clone().rotate(deg) : crop;
+    const r = await askReturnSlip(await im.getBufferAsync(Jimp.MIME_JPEG)).catch(() => null);
+    if (!r?.isReturnSlip) continue;
+    const s = slipReadingScore(r, today);
+    if (s > bestScore) { best = r; bestScore = s; }
+  }
+  return best;
+}
+
+/** How believable a reading is: per slip, a date near today, an Amazon/returns recipient and a
+ *  tracking number shaped like a real one each count. More believable slips beat fewer. */
+export function slipReadingScore(r: ReturnSlipResult, today: string): number {
+  const t = Date.parse(today);
+  let score = 0;
+  for (const s of r.slips) {
+    score += 1;
+    const d = s.datum ? Date.parse(s.datum) : NaN;
+    if (Number.isFinite(d) && d <= t + 86_400_000 && d >= t - 90 * 86_400_000) score += 3;
+    if (/amazon|return|retour/i.test(s.recipient)) score += 2;
+    if (/^\d{12}$|^\d{20}$|^JJD\d{18}$|^[A-Z]{2}\d{9}[A-Z]{2}$/.test(s.tracking)) score += 2;
+    else if (/^\d{10,22}$/.test(s.tracking)) score += 1;
+  }
+  return score;
+}
+
+async function askReturnSlip(source: string | Buffer): Promise<ReturnSlipResult> {
+  const { text } = await visionCall(source, RETURN_SLIP_SYSTEM, 'Sind auf dem Foto Einlieferungsbelege einer Rücksendung? Antworte als JSON.');
+  const p = parseLlmJson<{ ist_retoure?: unknown; zettel?: unknown }>(text);
+  const raw = Array.isArray(p.zettel) ? p.zettel as Record<string, unknown>[] : [];
+  const seen = new Set<string>();
+  const slips: ReturnSlipEntry[] = [];
+  for (const z of raw) {
+    const tracking = String(z.sendungsnummer ?? '').replace(/\s+/g, '');
+    if (!tracking || seen.has(tracking)) continue;   // one slip per tracking number, even if the model repeats it
+    seen.add(tracking);
+    const datum = /^\d{4}-\d{2}-\d{2}$/.test(String(z.datum ?? '')) ? String(z.datum) : null;
+    const uhrzeit = /^\d{1,2}:\d{2}$/.test(String(z.uhrzeit ?? '')) ? String(z.uhrzeit) : null;
+    slips.push({
+      carrier: String(z.traeger ?? '').slice(0, 40) || 'Paketdienst',
+      recipient: String(z.empfaenger ?? '').slice(0, 120),
+      tracking: tracking.slice(0, 40),
+      datum, uhrzeit,
+      filiale: z.filiale != null ? String(z.filiale).slice(0, 200) : null,
+    });
+  }
+  return { isReturnSlip: p.ist_retoure === true && slips.length > 0, slips };
 }
 
 const TEXT_SYSTEM = `Du bist ein Datenextraktions-Assistent für Rechnungen und Bestellbestätigungen aus E-Mails (Online-Shops, Lieferdienste, Versorger).

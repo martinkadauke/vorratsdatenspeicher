@@ -1314,6 +1314,25 @@
       }
     }
   },
+  "retoure": {
+    "title_one": "Rücksendezettel",
+    "title_other": "Rücksendezettel · {{count}} Pakete",
+    "handedIn": "Abgegeben {{when}}",
+    "noTracking": "Sendungsnummer unleserlich",
+    "unknownItem": "Artikel unbekannt",
+    "onReceipt": "Position auf Beleg #{{id}} auf 0 €",
+    "choose_one": "Zu welcher Rücksendung gehört der Zettel?",
+    "choose_other": "Zu welchen Rücksendungen gehören die {{count}} Zettel? Nacheinander antippen.",
+    "chosen": "Rücksendung abgeschlossen",
+    "chosenOpen": "Als abgegeben vermerkt — Originalbeleg noch zuordnen",
+    "returnOf": "Rücksendung: {{item}}",
+    "droppedSlip": "abgegeben {{date}} · Zettel #{{id}}",
+    "droppedMail": "abgegeben {{date}} · laut Amazon",
+    "notDropped": "noch nicht abgegeben",
+    "confirmedBank": "Gutschrift auf dem Konto ({{date}})",
+    "confirmedCredit": "als Amazon-Guthaben erstattet ({{date}})",
+    "awaitingRefund": "Gutschrift steht noch aus"
+  },
   "refund": {
     "title": "Rückerstattung zuordnen",
     "amountLabel": "Erstattungsbetrag",

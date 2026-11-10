@@ -115,6 +115,32 @@ export interface ReceiptDetail extends Receipt {
   /** True when this receipt's account has bank statements (Giro/Kreditkarte) AND some are
    *  imported — i.e. a bank booking must be linked before it can be marked complete. */
   bank_expected?: boolean;
+  /** Set on a scanned return slip (DHL/Hermes receipt for a parcel sent back): what it closed. */
+  retoure_info?: RetoureInfo | null;
+  /** Returns booked against THIS receipt that have been handed in or confirmed. */
+  returns?: ReceiptReturn[];
+}
+
+export interface RetoureSlip {
+  carrier: string | null; recipient: string | null; tracking: string | null;
+  datum: string | null; uhrzeit: string | null; filiale: string | null;
+}
+export interface RetoureInfo {
+  slips: RetoureSlip[];
+  closed: { ledgerId: number; item: string | null; amount: number | null; einkaufId: number | null; note: string | null }[];
+  /** Only while ambiguous: the open returns to choose from. */
+  pending: { ledgerId: number; item: string | null; amount: number | null; orderRef: string | null }[] | null;
+  pendingCount: number;
+  note: string | null;
+}
+export interface ReceiptReturn {
+  refund_artikel_id: number | null;
+  item: string | null;
+  amount: number | null;
+  dropoff_at: string | null;
+  dropoff_einkauf_id: number | null;
+  confirmed_at: string | null;
+  confirmed_by: 'bank' | 'mail' | null;
 }
 
 /** A single line item ("Position") — one artikel row joined with its receipt's

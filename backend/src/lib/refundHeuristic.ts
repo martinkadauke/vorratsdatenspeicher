@@ -184,6 +184,8 @@ export interface ReturnAnnouncement {
   isAnnouncement: boolean;
   /** Drop-off deadline exactly as the mail words it ("10. November 2026"), when it names one. */
   deadline: string | null;
+  /** Amazon's "Abgabebestätigung": the parcel is already handed in, not merely announced. */
+  droppedOff: boolean;
 }
 
 // The money has actually moved — such a mail is a refund, whatever else it also says. Checked FIRST:
@@ -206,13 +208,21 @@ const ANNOUNCED: RegExp[] = [
 export function detectReturnAnnouncement(subject: string | null | undefined, body: string | null | undefined): ReturnAnnouncement {
   const subj = (subject ?? '').slice(0, 400);
   const text = (subj + '\n' + (body ?? '')).slice(0, 20000);
-  if (REFUND_DONE.some(re => re.test(subj) || re.test(text))) return { isAnnouncement: false, deadline: null };
-  if (!ANNOUNCED.some(re => re.test(subj) || re.test(text))) return { isAnnouncement: false, deadline: null };
+  const none: ReturnAnnouncement = { isAnnouncement: false, deadline: null, droppedOff: false };
+  if (REFUND_DONE.some(re => re.test(subj) || re.test(text))) return none;
+  if (!ANNOUNCED.some(re => re.test(subj) || re.test(text))) return none;
+  const droppedOff = /^\s*abgabebest[äa]tigung\b/i.test(subj) || /\br[üu]cksendung\s+wurde\s+abgelegt\b/i.test(text);
   const m = text.match(/\br[üu]ckgabe\s+bis:?\s*(\d{1,2}\.\s*[A-Za-zÄÖÜäöü]+\.?\s*\d{4})/i)
     ?? text.match(/\b(?:ablegen|abgeben|drop\s+off)[^.\n]{0,40}?\bbis\s+zum\s+([A-Za-z]{3,9}\.?\s*\d{1,2})\b/i)
     ?? text.match(/\bbis\s+zum\s+([A-Za-z]{3,9}\.?\s*\d{1,2})\s+ablegen\b/i)
     ?? text.match(/\bdrop\s+off\b[^.\n]{0,30}?\bby\s+([A-Za-z]{3,9}\.?\s*\d{1,2})\b/i);
-  return { isAnnouncement: true, deadline: m ? m[1].replace(/\s+/g, ' ').trim() : null };
+  return { isAnnouncement: true, deadline: m ? m[1].replace(/\s+/g, ' ').trim() : null, droppedOff };
+}
+
+/** The refund went to the Amazon account as store credit, so it will NEVER show up in a bank CSV —
+ *  for such a return the refund mail itself is the confirmation (Martin, 2026-11-10). */
+export function isStoreCreditRefund(body: string | null | undefined): boolean {
+  return /\bamazon-konto\b[^.\n]{0,40}\bguthaben\b|\bals\s+guthaben\s+gutgeschrieben\b|\bto\s+your\s+amazon\s+(account\s+)?balance\b/i.test(body ?? '');
 }
 
 /** One earlier refund mail of the same user and the same order number. */
@@ -228,7 +238,11 @@ export interface ReturnLinkCandidate {
 export type ReturnLinkDecision =
   | { action: 'store' }
   | { action: 'store_and_supersede'; supersedeLedgerId: number; reason: string }
-  | { action: 'skip'; reason: string };
+  | { action: 'skip'; reason: string;
+      /** The parcel was handed in — note it on this earlier announcement. */
+      dropoffLedgerId?: number;
+      /** The refund for this already-booked return has arrived — note it on this announcement. */
+      confirmLedgerId?: number };
 
 const normItem = (s: string | null | undefined): string =>
   (s ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
@@ -254,7 +268,7 @@ const euro = (n: number | null) => (n != null && n > 0 ? n.toFixed(2).replace('.
  * exactly as before this existed.
  */
 export function decideReturnLink(
-  incoming: { isAnnouncement: boolean; item: string | null; amount: number | null },
+  incoming: { isAnnouncement: boolean; droppedOff?: boolean; item: string | null; amount: number | null },
   candidates: ReturnLinkCandidate[],
 ): ReturnLinkDecision {
   const pool = candidates.filter(c => c.status === 'refund_suggested' || c.status === 'refund');
@@ -266,7 +280,12 @@ export function decideReturnLink(
     if (refund) return { action: 'skip', reason: 'Rücksende-Anmeldung zu einer Erstattung, die schon vorliegt' + (refund.einkaufId ? ` (Beleg #${refund.einkaufId})` : '') };
     // Amazon re-sends the announcement when the return method changes → keep the first one.
     const twin = pool.find(c => c.isAnnouncement && match(c));
-    if (twin) return { action: 'skip', reason: 'Rücksendung schon angemeldet' + (twin.einkaufId ? ` und verbucht (Beleg #${twin.einkaufId})` : '') };
+    if (twin) {
+      // Amazon's drop-off confirmation adds no news about WHAT goes back, only THAT it went —
+      // which is exactly what decides a scanned slip that alone would be ambiguous.
+      if (incoming.droppedOff) return { action: 'skip', reason: 'Abgabe der Rücksendung bestätigt', dropoffLedgerId: twin.ledgerId };
+      return { action: 'skip', reason: 'Rücksendung schon angemeldet' + (twin.einkaufId ? ` und verbucht (Beleg #${twin.einkaufId})` : '') };
+    }
     return { action: 'store' };
   }
 
@@ -275,7 +294,7 @@ export function decideReturnLink(
   if (ann.status === 'refund') {
     const now = euro(incoming.amount), then = euro(ann.amount);
     const diff = now && then && now !== then ? ` Laut Erstattungsmail ${now} statt ${then} — bitte den Betrag am Beleg prüfen.` : '';
-    return { action: 'skip', reason: `Rücksendung wurde schon über die Anmeldung verbucht${ann.einkaufId ? ` (Beleg #${ann.einkaufId})` : ''}.${diff}` };
+    return { action: 'skip', reason: `Rücksendung wurde schon über die Anmeldung verbucht${ann.einkaufId ? ` (Beleg #${ann.einkaufId})` : ''}.${diff}`, confirmLedgerId: ann.ledgerId };
   }
   // Still open: the refund mail carries the real amount, so it replaces the announcement.
   return { action: 'store_and_supersede', supersedeLedgerId: ann.ledgerId, reason: 'Abgelöst durch die Erstattungsmail' + (euro(incoming.amount) ? ` (${euro(incoming.amount)})` : '') };
