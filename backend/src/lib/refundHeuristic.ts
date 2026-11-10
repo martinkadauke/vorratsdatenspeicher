@@ -220,9 +220,12 @@ export function detectReturnAnnouncement(subject: string | null | undefined, bod
 }
 
 /** The refund went to the Amazon account as store credit, so it will NEVER show up in a bank CSV —
- *  for such a return the refund mail itself is the confirmation (Martin, 2026-11-10). */
+ *  for such a return the refund mail itself is the confirmation (Martin, 2026-11-10). Amazon words it
+ *  three ways — "wird Ihrem Amazon-Konto als Guthaben gutgeschrieben" (announcement), "wird dem
+ *  Guthaben auf deinem Amazon-Konto … gutgeschrieben" and "auf dein Amazon-Kontoguthaben" (refund
+ *  mail); a bank refund reads "wird deinem COMDIRECT BANK AG-Konto … gutgeschrieben". */
 export function isStoreCreditRefund(body: string | null | undefined): boolean {
-  return /\bamazon-konto\b[^.\n]{0,40}\bguthaben\b|\bals\s+guthaben\s+gutgeschrieben\b|\bto\s+your\s+amazon\s+(account\s+)?balance\b/i.test(body ?? '');
+  return /\bamazon-konto\b[^.\n]{0,40}\bguthaben\b|\bamazon-kontoguthaben\b|\bguthaben\s+auf\s+(?:deinem|ihrem|dem)\s+amazon-konto\b|\bals\s+guthaben\s+gutgeschrieben\b|\bto\s+your\s+amazon\s+(account\s+)?balance\b/i.test(body ?? '');
 }
 
 /** One earlier refund mail of the same user and the same order number. */

@@ -19,7 +19,7 @@
  */
 import sql from '../db.js';
 import type { ReturnSlipResult } from '../llm/ocr.js';
-import { detectReturnAnnouncement, sameReturnItem } from './refundHeuristic.js';
+import { detectReturnAnnouncement, isStoreCreditRefund, sameReturnItem } from './refundHeuristic.js';
 import { bookRefundReconciliation, findRefundCandidates, RefundError } from './refundReconcile.js';
 
 /** An Amazon return VDS knows from the mails and that no slip has closed yet. */
@@ -221,6 +221,7 @@ export async function handleReturnSlip(einkaufId: number, slip: ReturnSlipResult
     }
   }
 
+  await confirmStoreCreditReturns();
   const done = info.pending == null && info.closed.length > 0 && info.closed.every(c => !c.note);
   await sql`
     UPDATE einkauf SET
@@ -242,6 +243,7 @@ export async function handleReturnSlip(einkaufId: number, slip: ReturnSlipResult
  * open return or credit competing for it. Returns how many were confirmed.
  */
 export async function confirmReturnsFromBank(kontoId?: number | null): Promise<number> {
+  await confirmStoreCreditReturns();   // not a bank match, so not counted — but never left waiting for one
   const open = await sql`
     SELECT re.id, re.einkauf_id, re.dropoff_at::date::text AS dropoff,
            COALESCE((SELECT -a.preis FROM artikel a WHERE a.id = re.refund_artikel_id), re.amount)::float8 AS amount
@@ -278,6 +280,28 @@ export async function confirmReturnsFromBank(kontoId?: number | null): Promise<n
   return confirmed;
 }
 
+/** "Komplett abgeschlossen" for Amazon store credit: the refund mail itself says the money went to the
+ *  Amazon balance, and no bank booking will ever follow. Sweeps handed-in returns whose refund mail
+ *  says so, whichever came first — on 10.11. Amazon refunded both returns an hour BEFORE the slips
+ *  were scanned, so the slip's close is what has to notice. An announcement's "wird als Guthaben
+ *  gutgeschrieben" is a forecast and never counts. Returns how many were confirmed. */
+export async function confirmStoreCreditReturns(): Promise<number> {
+  const rows = await sql`
+    SELECT re.id, re.subject, re.body_text
+    FROM refund_email re
+    WHERE re.dropoff_at IS NOT NULL AND re.confirmed_at IS NULL
+      AND (re.merchant ILIKE '%amazon%' OR re.from_addr ILIKE '%amazon%')`;
+  const ids = rows
+    .filter(r => !detectReturnAnnouncement(r.subject as string | null, r.body_text as string | null).isAnnouncement
+      && isStoreCreditRefund(r.body_text as string | null))
+    .map(r => r.id as number);
+  if (!ids.length) return 0;
+  await sql`
+    UPDATE refund_email SET confirmed_at = COALESCE(sent_at, NOW()), confirmed_by = 'mail'
+    WHERE id = ANY(${ids}) AND confirmed_at IS NULL`;
+  return ids.length;
+}
+
 /** A credit was linked to a receipt by hand ("Gutschrift zuordnen"): if that receipt has a returned,
  *  not yet confirmed Amazon return of exactly this amount, the credit confirms it. */
 export async function confirmReturnByBankTx(bankTxId: number): Promise<void> {
@@ -303,6 +327,7 @@ export async function resolveSlipChoice(einkaufId: number, ledgerId: number): Pr
   info.pendingCount = Math.max(0, info.pendingCount - 1);
   info.pending = info.pendingCount > 0 && rest.length ? rest : null;
   info.note = info.pending ? info.note : null;
+  await confirmStoreCreditReturns();
   const done = info.pending == null && info.closed.every(c => !c.note);
   await sql`UPDATE einkauf SET retoure_info = ${sql.json(info as never)}, geprueft = ${done} WHERE id = ${einkaufId}`;
   return info;
