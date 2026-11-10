@@ -8,7 +8,7 @@ import { decryptSecret } from '../lib/crypto.js';
 import { ocrFromText, reinterpretMail, INCOME_CATEGORIES, type OcrResult, type IncomeCategory } from '../llm/ocr.js';
 import { ocrAndStore, storeOcrResult } from '../routes/receipts.js';
 import { applyLearnedKonto } from '../lib/merchant.js';
-import { detectRefundMail } from '../lib/refundHeuristic.js';
+import { detectRefundMail, detectReturnAnnouncement, decideReturnLink, type ReturnLinkCandidate } from '../lib/refundHeuristic.js';
 import { findRefundCandidates, type RefundCandidate } from '../lib/refundReconcile.js';
 import { todayLocal, localDay } from '../lib/localDate.js';
 import { getConfig } from '../config.js';
@@ -171,6 +171,35 @@ const REFUND_AUTODETECT_INSTRUCTION =
   + 'Wenn das zutrifft, gib kind="refund" mit Betrag, Händler, erstattetem Artikel und Bestell-/Referenznummer zurück. '
   + 'Wenn es KEINE Erstattung ist (normaler Kaufbeleg, Versandbestätigung, Werbung, Widerrufsbelehrung, Gutschein), gib kind="none".';
 
+/** For a return ANNOUNCEMENT ("Rückgabeanfrage bestätigt"): no money has moved yet, which the general
+ *  instruction would read as "none". Here the code already knows what the mail is, so the model only
+ *  extracts the facts — the estimated amount becomes the pre-filled refund the user confirms later. */
+const RETURN_ANNOUNCE_INSTRUCTION =
+  'Diese E-Mail bestätigt eine ANGEMELDETE RÜCKSENDUNG für einen früheren Kauf. Das Geld ist noch nicht erstattet, '
+  + 'die Erstattung folgt nach der Abgabe. Gib trotzdem kind="refund" zurück: amount = voraussichtlicher Erstattungsbetrag '
+  + '(z.B. "Geschätzte Gesamtsumme der Rückerstattung"), merchant = Händler, item = zurückgeschickter Artikel, '
+  + 'order_ref = Bestellnummer der Original-Bestellung. Ist kein Betrag genannt, amount 0.';
+
+/** Earlier refund mails of this user for the same order number — what `decideReturnLink` pairs with. */
+export async function loadReturnCandidates(userId: number, orderRef: string): Promise<ReturnLinkCandidate[]> {
+  if (!orderRef) return [];
+  const rows = await sql`
+    SELECT i.id AS ledger_id, i.status, COALESCE(i.einkauf_id, re.einkauf_id) AS einkauf_id,
+           re.item, re.amount::float8 AS amount, re.subject, re.body_text
+    FROM refund_email re JOIN imported_email i ON i.id = re.imported_email_id
+    WHERE i.user_id = ${userId} AND re.order_ref = ${orderRef}
+      AND i.status IN ('refund_suggested', 'refund')
+    ORDER BY i.id`;
+  return rows.map(r => ({
+    ledgerId: r.ledger_id as number,
+    status: r.status as string,
+    einkaufId: (r.einkauf_id as number | null) ?? null,
+    isAnnouncement: detectReturnAnnouncement(r.subject as string | null, r.body_text as string | null).isAnnouncement,
+    item: (r.item as string | null) ?? null,
+    amount: (r.amount as number | null) ?? null,
+  }));
+}
+
 /** Persist an auto-detected refund mail as a 'refund_suggested' ledger entry (no money booked):
  *  store the mail body + any PDF + the parsed refund fields so the user can reconcile it from the
  *  import log with one click. Runs in its own tx so a failure leaves the ledger row untouched. */
@@ -179,6 +208,7 @@ async function storeRefundSuggestion(
   parsed: ParsedMail,
   r: { amount: number; merchant: string; item: string; order_ref: string; description: string },
   pdf: { content?: Buffer } | null,
+  opts: { announcement: { deadline: string | null } | null; supersede: { ledgerId: number; reason: string } | null } = { announcement: null, supersede: null },
 ): Promise<void> {
   let pdfPfad: string | null = null;
   if (pdf?.content) {
@@ -193,7 +223,20 @@ async function storeRefundSuggestion(
   const from = parsed.from?.text ?? null;
   const subj = (parsed.subject ?? '').slice(0, 500) || null;
   const sentAt = parsed.date ? parsed.date.toISOString() : null;
+  const amountTxt = r.amount ? ': ' + r.amount.toFixed(2) + ' €' : '';
+  const merchantTxt = r.merchant ? ' · ' + r.merchant : '';
+  // An announcement says so in the import log, so nobody books it believing the money is already there.
+  const reason = opts.announcement
+    ? 'Rücksendung angemeldet' + amountTxt + merchantTxt
+      + (opts.announcement.deadline ? ' · abgeben bis ' + opts.announcement.deadline : '')
+      + ' · Geld noch nicht erstattet'
+    : 'Mögliche Erstattung' + amountTxt + merchantTxt;
   await sql.begin(async (tx) => {
+    if (opts.supersede) {
+      // Only while still open: an announcement the user already booked is never silently undone.
+      await tx`UPDATE imported_email SET status = 'skipped', reason = ${opts.supersede.reason}
+               WHERE id = ${opts.supersede.ledgerId} AND status = 'refund_suggested'`;
+    }
     await tx`
       INSERT INTO refund_email
         (imported_email_id, einkauf_id, refund_artikel_id, amount, merchant, item, order_ref, from_addr, subject, sent_at, html, body_text, pdf_pfad)
@@ -201,8 +244,7 @@ async function storeRefundSuggestion(
         (${ledgerId}, NULL, NULL, ${r.amount || null}, ${(r.merchant || null)?.slice(0, 200) ?? null}, ${(r.item || null)?.slice(0, 200) ?? null},
          ${(r.order_ref || null)?.slice(0, 60) ?? null}, ${from}, ${subj}, ${sentAt}, ${html}, ${bodyTextRaw}, ${pdfPfad})`;
     await tx`
-      UPDATE imported_email SET status = 'refund_suggested',
-        reason = ${'Mögliche Erstattung' + (r.amount ? ': ' + r.amount.toFixed(2) + ' €' : '') + (r.merchant ? ' · ' + r.merchant : '')}
+      UPDATE imported_email SET status = 'refund_suggested', reason = ${reason}
       WHERE id = ${ledgerId}`;
   });
 }
@@ -270,16 +312,37 @@ async function processMessage(mb: MailboxRow, kontoId: number | null, raw: Buffe
   // (that would inflate spend) — nor be silently skipped. A cheap keyword gate → LLM confirm →
   // store a 'refund_suggested' entry the user reconciles from the import log. NEVER books money.
   if (bodyText || subject) {
-    if (detectRefundMail(subject, bodyText).isRefund) {
+    // A return ANNOUNCEMENT ("Rückgabeanfrage bestätigt") is decided by the code, not the model, and
+    // it NEVER falls through to the receipt parser below: it carries a total, and a "none" from the
+    // model would otherwise turn the announced refund into a POSITIVE purchase.
+    const announce = detectReturnAnnouncement(subject, bodyText);
+    if (announce.isAnnouncement || detectRefundMail(subject, bodyText).isRefund) {
+      const skip = async (why: string) => {
+        await sql`UPDATE imported_email SET status = 'skipped', reason = ${why.slice(0, 300)} WHERE id = ${ledgerId}`;
+        return false;
+      };
       try {
         const header = `Betreff: ${parsed.subject ?? ''}\nVon: ${parsed.from?.text ?? ''}\n\n`;
-        const r = await reinterpretMail(header + bodyText, REFUND_AUTODETECT_INSTRUCTION);
+        const r = await reinterpretMail(header + bodyText,
+          announce.isAnnouncement ? RETURN_ANNOUNCE_INSTRUCTION : REFUND_AUTODETECT_INSTRUCTION);
         if (r.kind === 'refund') {
-          await storeRefundSuggestion(ledgerId, parsed, r, pdf ?? null);
+          // Pair an announcement with the later refund mail of the same return, so the user is
+          // offered ONE booking per return, not two.
+          const link = decideReturnLink(
+            { isAnnouncement: announce.isAnnouncement, item: r.item || null, amount: r.amount || null },
+            await loadReturnCandidates(mb.user_id, r.order_ref));
+          if (link.action === 'skip') return await skip(link.reason);
+          await storeRefundSuggestion(ledgerId, parsed, r, pdf ?? null, {
+            announcement: announce.isAnnouncement ? { deadline: announce.deadline } : null,
+            supersede: link.action === 'store_and_supersede' ? { ledgerId: link.supersedeLedgerId, reason: link.reason } : null,
+          });
           return false; // surfaced for review; no receipt, no money
         }
+        if (announce.isAnnouncement) return await skip('Rücksendung angemeldet – Betrag/Artikel nicht erkannt, bitte von Hand erfassen');
       } catch (e) {
         console.error(`[mailimport] refund pre-check failed for ledger ${ledgerId}:`, (e as Error).message);
+        // An announcement stays out of the receipt path even when the model is unreachable.
+        if (announce.isAnnouncement) return await skip('Rücksendung angemeldet – Prüfung fehlgeschlagen; Label entfernen und neu setzen wiederholt sie');
         // fall through to normal processing
       }
     }
